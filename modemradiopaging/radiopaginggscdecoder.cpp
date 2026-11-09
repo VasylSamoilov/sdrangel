@@ -763,6 +763,8 @@ bool RadioPagingGscDecoder::processData()
         }
         if ((sum & 0x7f) != words[7]) {
             m_current.m_checksumErrors++;
+        } else {
+            m_current.m_checksumPassed++;
         }
     }
 

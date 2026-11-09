@@ -19,6 +19,7 @@
 #define MODEMRADIOPAGING_RADIOPAGINGGSCRECEIVER_H
 
 #include <deque>
+#include <vector>
 
 #include "export.h"
 #include "radiopagingfskdemod.h"
@@ -31,6 +32,16 @@
 // symbols. The demodulator starts with acquisition loop gains and is locked (tracking
 // gains) while a decoder is synchronised, that is from the confirmation of the preamble
 // (three preamble words) to the end of the transmission.
+//
+// The polarity of a battery saver transmission is given by its preamble and start code,
+// only the decoder of the right polarity decodes it. A non battery saver transmission
+// (Rep. 900-2 Annex I 2.5) has neither, so both decoders decode it. The polarity is the
+// same for the whole transmission and is decided by what in it tells the polarities
+// apart: a data block whose check character (Annex I 2.6.1) is right (every block fails
+// it in the wrong polarity), or the activation code of a voice page (seen before its
+// complement only in the right polarity). Without either, a positive frequency shift is
+// a binary 1 (Annex I 2): the normal decoder. The messages of a non battery saver
+// transmission are held until it is decided, at the latest until it ends.
 class MODEMRADIOPAGING_API RadioPagingGscReceiver
 {
 public:
@@ -69,8 +80,22 @@ private:
     RadioPagingGscDecoder m_inverted;
     std::deque<RadioPagingGscDecoder::Message> m_messages;
 
+    // Non battery saver transmission being received by both decoders
+    enum NbsPolarity {
+        NbsUndecided,
+        NbsNormal,
+        NbsInverted
+    };
+    NbsPolarity m_nbsPolarity;
+    std::vector<RadioPagingGscDecoder::Message> m_nbsPending[2];   //!< Held messages, by decoder polarity
+
     void collect();
+    void takeFrom(RadioPagingGscDecoder& decoder);
+    void nonBatterySaverMessage(const RadioPagingGscDecoder::Message& message);
+    void endNonBatterySaver();
     bool isLocked() const;
+    //!< +1 if the message shows its decoder has the right polarity, -1 the wrong one, 0 if it tells nothing
+    static int polarityEvidence(const RadioPagingGscDecoder::Message& message);
 };
 
 #endif // MODEMRADIOPAGING_RADIOPAGINGGSCRECEIVER_H

@@ -1082,8 +1082,55 @@ void receive(const std::vector<G::TxMessage>& sent, G::Mode mode, bool inverted,
     check(allMatch(d, sent) && polarityOk, (label + ": all messages, from the decoder of the right polarity").c_str());
 }
 
+// Non battery saver transmission through the receiver with both polarities enabled
+Decoded receiveNbs(const std::vector<G::TxMessage>& sent, bool inverted)
+{
+    G::EncodeOptions options;
+    options.m_mode = G::NonBatterySaver;
+    std::vector<float> samples = makeWaveform(G::encode(sent, options).m_bits, 38400.0, inverted, 0.06f, 0.15f, 300, 300, 29);
+    RadioPagingGscReceiver receiver;
+    Decoded d;
+
+    receiver.create(38400.0);
+    receiver.setNonBatterySaver(true);
+    for (float s : samples) {
+        receiver.process(s);
+    }
+    receiver.flush();
+    while (receiver.hasMessage()) {
+        d.m_messages.push_back(receiver.takeMessage());
+    }
+
+    return d;
+}
+
+void testReceiverNonBatterySaver()
+{
+    // Consecutive calls: the data page tells the polarity of the whole transmission
+    std::vector<G::TxMessage> calls = { tx("500123", 2, G::Tone), tx("500456", 3, G::Tone), tx("500789", 1, G::Alphanumeric, "POLARITY") };
+    Decoded n = receiveNbs(calls, false);
+    Decoded i = receiveNbs(calls, true);
+    check(allMatch(n, calls) && (n.m_messages[0].m_polarity == D::Normal), "Receiver, non battery saver: tone, tone, data, once each, normal polarity");
+    check(allMatch(i, calls) && (i.m_messages[0].m_polarity == D::Inverted),
+        "Receiver, non battery saver inverted: the block check of the data page decides, tone pages get their right address numbers");
+
+    // Voice: the activation code decides
+    std::vector<G::TxMessage> voice = { tx("500123", 3, G::Voice) };
+    Decoded vi = receiveNbs(voice, true);
+    check(allMatch(vi, voice) && (vi.m_messages[0].m_polarity == D::Inverted), "Receiver, non battery saver inverted voice: the activation code decides");
+
+    // Tone only: nothing tells the polarity, a positive shift is a binary 1 (normal)
+    std::vector<G::TxMessage> tone = { tx("500123", 2, G::Tone) };
+    Decoded tn = receiveNbs(tone, false);
+    Decoded ti = receiveNbs(tone, true);
+    check(allMatch(tn, tone) && (ti.m_messages.size() == 1) && (ti.m_messages[0].m_polarity == D::Normal),
+        "Receiver, non battery saver tone only: one message, from the normal decoder");
+}
+
 void testReceiver()
 {
+    testReceiverNonBatterySaver();
+
     std::vector<G::TxMessage> single = { tx("100123", 3, G::Alphanumeric, "RECEIVED OVER THE AIR") };
     std::vector<G::TxMessage> batch = {
         tx("219789", 2, G::Numeric, "5551234"),

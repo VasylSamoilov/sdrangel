@@ -103,7 +103,7 @@ public:
         Auto,               //!< Single for one message, otherwise Batch
         Single,             //!< One message after its own preamble
         Batch,              //!< Complemented preamble, 16 slots after each start code, extended as needed
-        NonBatterySaver     //!< One message after a 1100 pattern, no codeword preamble or start code (Rep. 900-2 Annex I 2.5)
+        NonBatterySaver     //!< Consecutive messages after a 1100 pattern, no codeword preamble or start code (Rep. 900-2 Annex I 2.5)
     };
 
     struct TxMessage

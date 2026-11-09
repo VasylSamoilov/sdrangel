@@ -23,7 +23,8 @@ RadioPagingGscReceiver::RadioPagingGscReceiver() :
     m_normalEnabled(true),
     m_invertedEnabled(true),
     m_normal(RadioPagingGscDecoder::Normal),
-    m_inverted(RadioPagingGscDecoder::Inverted)
+    m_inverted(RadioPagingGscDecoder::Inverted),
+    m_nbsPolarity(NbsUndecided)
 {
     create(38400.0);
 }
@@ -40,6 +41,9 @@ void RadioPagingGscReceiver::reset()
     m_normal.reset();
     m_inverted.reset();
     m_messages.clear();
+    m_nbsPolarity = NbsUndecided;
+    m_nbsPending[0].clear();
+    m_nbsPending[1].clear();
 }
 
 void RadioPagingGscReceiver::setNonBatterySaver(bool enable)
@@ -82,12 +86,82 @@ void RadioPagingGscReceiver::flush()
 
 void RadioPagingGscReceiver::collect()
 {
-    while (m_normal.hasMessage()) {
-        m_messages.push_back(m_normal.takeMessage());
+    takeFrom(m_normal);
+    takeFrom(m_inverted);
+
+    bool nbsActive = (m_normalEnabled && m_normal.inNonBatterySaver()) || (m_invertedEnabled && m_inverted.inNonBatterySaver());
+
+    if (!nbsActive) {
+        endNonBatterySaver();
     }
-    while (m_inverted.hasMessage()) {
-        m_messages.push_back(m_inverted.takeMessage());
+}
+
+void RadioPagingGscReceiver::takeFrom(RadioPagingGscDecoder& decoder)
+{
+    while (decoder.hasMessage())
+    {
+        RadioPagingGscDecoder::Message message = decoder.takeMessage();
+
+        // With one polarity only there is nothing to decide
+        if (message.m_nonBatterySaver && m_normalEnabled && m_invertedEnabled) {
+            nonBatterySaverMessage(message);
+        } else {
+            m_messages.push_back(message);
+        }
     }
+}
+
+int RadioPagingGscReceiver::polarityEvidence(const RadioPagingGscDecoder::Message& message)
+{
+    if (message.m_type == RadioPagingGsc::Voice) {
+        return 1;
+    }
+    if (message.m_checksumPassed > message.m_checksumErrors) {
+        return 1;
+    }
+    if (message.m_checksumErrors > message.m_checksumPassed) {
+        return -1;
+    }
+
+    return 0;
+}
+
+void RadioPagingGscReceiver::nonBatterySaverMessage(const RadioPagingGscDecoder::Message& message)
+{
+    int own = (message.m_polarity == RadioPagingGscDecoder::Inverted) ? 1 : 0;
+
+    if (m_nbsPolarity == NbsUndecided)
+    {
+        int evidence = polarityEvidence(message);
+
+        if (evidence != 0)
+        {
+            int right = (evidence > 0) ? own : 1 - own;
+
+            m_nbsPolarity = right ? NbsInverted : NbsNormal;
+            m_messages.insert(m_messages.end(), m_nbsPending[right].begin(), m_nbsPending[right].end());
+            m_nbsPending[0].clear();
+            m_nbsPending[1].clear();
+        }
+    }
+
+    if (m_nbsPolarity == NbsUndecided) {
+        m_nbsPending[own].push_back(message);
+    } else if ((m_nbsPolarity == NbsInverted) == (own == 1)) {
+        m_messages.push_back(message);
+    }
+}
+
+// The non battery saver transmission has ended: undecided, the normal polarity is taken
+void RadioPagingGscReceiver::endNonBatterySaver()
+{
+    if (m_nbsPolarity == NbsUndecided) {
+        m_messages.insert(m_messages.end(), m_nbsPending[0].begin(), m_nbsPending[0].end());
+    }
+
+    m_nbsPending[0].clear();
+    m_nbsPending[1].clear();
+    m_nbsPolarity = NbsUndecided;
 }
 
 RadioPagingGscDecoder::Message RadioPagingGscReceiver::takeMessage()

@@ -58,7 +58,7 @@
 //
 // The optional non battery saver mode (a 1100 pattern instead of the preamble, no start
 // code) has no such structure: both polarities decode it, the inverted one with the
-// address number bits flipped.
+// address number bits flipped. RadioPagingGscReceiver decides between them.
 class MODEMRADIOPAGING_API RadioPagingGscDecoder
 {
 public:
@@ -87,6 +87,7 @@ public:
         int m_errorsCorrected = 0;          //!< Bits corrected in the codewords of the address and message
         int m_errorsUncorrectable = 0;      //!< BCH codewords that could not be corrected
         int m_checksumErrors = 0;           //!< Blocks with a wrong checksum
+        int m_checksumPassed = 0;           //!< Blocks with a good checksum
         bool m_truncated = false;           //!< The transmission ended before the message did
         Polarity m_polarity = Normal;
     };
@@ -116,6 +117,8 @@ public:
     void flush();
 
     bool isSynced() const { return m_state != Hunting; }
+    //!< A transmission without preamble and start code (non battery saver) is being received
+    bool inNonBatterySaver() const { return (m_state != Hunting) && m_nbs; }
     Status getStatus() const;
     bool hasMessage() const { return !m_messages.empty(); }
     Message takeMessage();

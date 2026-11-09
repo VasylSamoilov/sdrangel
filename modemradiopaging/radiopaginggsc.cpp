@@ -688,7 +688,9 @@ RadioPagingGsc::EncodeResult RadioPagingGsc::encode(const std::vector<TxMessage>
     if (mode == Auto) {
         mode = (messages.size() == 1) ? Single : Batch;
     }
-    if ((mode != Batch) && (messages.size() != 1))
+    // Non battery saver: any number of consecutive paging calls after the pattern
+    // (Rep. 900-2 Annex I 2.5)
+    if ((mode == Single) && (messages.size() != 1))
     {
         result.m_error = "This mode takes exactly one message";
         return result;
@@ -726,7 +728,7 @@ RadioPagingGsc::EncodeResult RadioPagingGsc::encode(const std::vector<TxMessage>
             result.m_error = "Voice messages cannot be sent in a batch";
             return result;
         }
-        if ((i > 0) && (p != preamble))
+        if ((mode == Batch) && (i > 0) && (p != preamble))
         {
             result.m_error = "Messages of a batch must use the same preamble value";
             return result;
