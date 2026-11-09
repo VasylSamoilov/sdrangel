@@ -310,14 +310,24 @@ bool matches(const D::Message& rx, const G::TxMessage& m)
     }
 }
 
+// The pages of sent, in order. Updates of voice pages (end of the voice message) are not
+// pages and are checked by the voice tests
 bool allMatch(const Decoded& d, const std::vector<G::TxMessage>& sent)
 {
-    if (d.m_messages.size() != sent.size()) {
+    std::vector<D::Message> pages;
+
+    for (const D::Message& m : d.m_messages)
+    {
+        if (!m.m_update) {
+            pages.push_back(m);
+        }
+    }
+    if (pages.size() != sent.size()) {
         return false;
     }
     for (size_t i = 0; i < sent.size(); i++)
     {
-        if (!matches(d.m_messages[i], sent[i])) {
+        if (!matches(pages[i], sent[i])) {
             return false;
         }
     }
@@ -903,6 +913,155 @@ void testCharacterSets()
 // Preamble, start code and address of a page (all 300 bit/s words) received through
 // Gaussian noise, decided on the first symbol of each bit (hard) and on the sum of both
 // symbols (soft)
+// Voice audio as 600 baud symbols: the sign of three tones and noise
+void appendAudio(std::vector<uint8_t>& bits, int symbols, unsigned seed)
+{
+    std::mt19937 rng(seed);
+    std::normal_distribution<float> gauss(0.0f, 0.3f);
+    const double pi = 3.14159265358979;
+    double p1 = (rng() % 1000) * 0.006, p2 = (rng() % 1000) * 0.006, p3 = (rng() % 1000) * 0.006;
+
+    for (int i = 0; i < symbols; i++)
+    {
+        double t = i / 600.0;
+        double v = std::sin(2 * pi * 311 * t + p1) + 0.7 * std::sin(2 * pi * 527 * t + p2) + 0.5 * std::sin(2 * pi * 883 * t + p3) + gauss(rng);
+        bits.push_back(v > 0 ? 1 : 0);
+    }
+}
+
+Decoded decodeVoice(const std::vector<uint8_t>& bits, double timeout = 50.0)
+{
+    D decoder(D::Normal);
+    Decoded out;
+
+    decoder.setVoiceTimeout(timeout);
+    for (uint8_t b : bits) {
+        decoder.feed(b);
+    }
+    decoder.flush();
+    while (decoder.hasMessage()) {
+        out.m_messages.push_back(decoder.takeMessage());
+    }
+
+    return out;
+}
+
+bool voiceEnded(const Decoded& d, D::VoiceEnd end, float seconds, size_t total)
+{
+    if ((d.m_messages.size() != total) || (d.m_messages[0].m_type != G::Voice) || d.m_messages[0].m_update) {
+        return false;
+    }
+    for (const D::Message& m : d.m_messages)
+    {
+        if (m.m_update) {
+            return (m.m_type == G::Voice) && (m.m_voiceEnd == end) && (std::fabs(m.m_voiceSeconds - seconds) < 0.05f)
+                && (m.m_address == d.m_messages[0].m_address);
+        }
+    }
+    return false;
+}
+
+// Voice page: alert time, voice message, turn-off word (Motorola GSC manual, Figure 6-1)
+void testVoice()
+{
+    std::vector<G::TxMessage> voice = { tx("100123", 3, G::Voice) };
+    G::EncodeOptions single;
+    single.m_mode = G::Single;
+    std::vector<uint8_t> page = G::encode(voice, single).m_bits;
+
+    std::vector<uint8_t> turnOff(page);
+    appendAudio(turnOff, 1800, 1);
+    G::appendActivationCode(turnOff);
+    appendAudio(turnOff, 300, 2);
+    Decoded d = decodeVoice(turnOff);
+    check(voiceEnded(d, D::VoiceTurnOff, 3.0f, 2), "Voice: reported at once, ended by the turn-off word after 3 s");
+    for (const D::Message& m : d.m_messages) {
+        if (m.m_update) {
+            std::printf("      voice end %d after %.3f s\n", (int) m.m_voiceEnd, m.m_voiceSeconds);
+        }
+    }
+
+    // Turn-off word with Word 1 destroyed: Word 2 alone ends the voice message
+    std::vector<uint8_t> word2Only(page);
+    appendAudio(word2Only, 1200, 3);
+    size_t at = word2Only.size();
+    G::appendActivationCode(word2Only);
+    for (int k = 0; k < 8; k++)
+    {
+        int bit = (k * 3 + 1) % 23;
+        word2Only[at + 28 + 2 * bit] ^= 1;
+        word2Only[at + 28 + 2 * bit + 1] ^= 1;
+    }
+    appendAudio(word2Only, 300, 4);
+    check(voiceEnded(decodeVoice(word2Only), D::VoiceTurnOff, 2.0f, 2), "Voice: turn-off word found on Word 2 alone");
+
+    // Tone only addresses interleaved in the alert time
+    std::vector<uint8_t> interleaved(page);
+    std::vector<G::TxMessage> tones;
+    for (int i = 0; i < 8; i++)
+    {
+        char address[8];
+        std::snprintf(address, sizeof(address), "1006%02d", i);
+        tones.push_back(tx(address, 1 + (i & 3), G::Tone));
+        int p;
+        uint16_t w1, w2;
+        G::encodeAddress(address, p, w1, w2);
+        uint32_t first = G::golayEncode(w1);
+        uint32_t second = G::golayEncode(w2);
+        if (i & 2) {
+            first ^= 0x7fffff;
+        }
+        if (i & 1) {
+            second ^= 0x7fffff;
+        }
+        G::appendCodewordPair(interleaved, first, second);
+    }
+    appendAudio(interleaved, 1800, 5);
+    G::appendActivationCode(interleaved);
+    Decoded di = decodeVoice(interleaved);
+    bool tonesOk = (di.m_messages.size() == 10);
+    for (int i = 0; tonesOk && (i < 8); i++) {
+        tonesOk = matches(di.m_messages[1 + i], tones[i]) && di.m_messages[1 + i].m_interleaved;
+    }
+    check(tonesOk && voiceEnded(di, D::VoiceTurnOff, (8 * 121 + 1800) / 600.0f, 10), "Voice: 8 tone only addresses interleaved in the alert time, then the turn-off word");
+
+    // A new transmission ends the voice message
+    std::vector<uint8_t> next(page);
+    appendAudio(next, 2400, 6);
+    std::vector<G::TxMessage> tone = { tx("100456", 2, G::Tone) };
+    std::vector<uint8_t> second = G::encode(tone, single).m_bits;
+    next.insert(next.end(), second.begin(), second.end());
+    Decoded dn = decodeVoice(next);
+    check(voiceEnded(dn, D::VoiceNewTransmission, 4.0f, 3) && matches(dn.m_messages[2], tone[0]), "Voice: ended by a new preamble, the next page is decoded");
+
+    // Timeout and signal lost
+    std::vector<uint8_t> longAudio(page);
+    appendAudio(longAudio, 3000, 7);
+    check(voiceEnded(decodeVoice(longAudio, 3.0), D::VoiceTimeout, 3.0f, 2), "Voice: ended by the timeout");
+    std::vector<uint8_t> lost(page);
+    appendAudio(lost, 900, 8);
+    check(voiceEnded(decodeVoice(lost), D::VoiceSignalLost, 1.5f, 2), "Voice: signal lost (flush)");
+
+    // 60 s of audio and of random symbols: nothing but the voice page and its timeout
+    for (int kind = 0; kind < 2; kind++)
+    {
+        std::vector<uint8_t> quiet(page);
+        if (kind == 0)
+        {
+            appendAudio(quiet, 36000, 9);
+        }
+        else
+        {
+            std::mt19937 rng(10);
+            for (int i = 0; i < 36000; i++) {
+                quiet.push_back((uint8_t) (rng() & 1));
+            }
+        }
+        check(voiceEnded(decodeVoice(quiet), D::VoiceTimeout, 50.0f, 2),
+            kind ? "Voice: 60 s of random symbols give no word, ended by the 50 s timeout" : "Voice: 60 s of voice audio give no word, ended by the 50 s timeout");
+    }
+}
+
 // Pages decoded of trials, hard and soft, at a symbol noise level
 void softTrials(float sigma, int trials, int& hardOk, int& softOk)
 {
@@ -1127,9 +1286,40 @@ void testReceiverNonBatterySaver()
         "Receiver, non battery saver tone only: one message, from the normal decoder");
 }
 
+void testReceiverVoice()
+{
+    std::vector<G::TxMessage> voice = { tx("100123", 3, G::Voice) };
+    G::EncodeOptions single;
+    single.m_mode = G::Single;
+    std::vector<uint8_t> bits = G::encode(voice, single).m_bits;
+    appendAudio(bits, 3000, 11);
+    G::appendActivationCode(bits);
+    std::vector<G::TxMessage> tone = { tx("100456", 2, G::Tone) };
+    std::vector<uint8_t> second = G::encode(tone, single).m_bits;
+    bits.insert(bits.end(), second.begin(), second.end());
+
+    for (int inverted = 0; inverted < 2; inverted++)
+    {
+        std::vector<float> samples = makeWaveform(bits, 38400.0, inverted != 0, 0.06f, 0.15f, 300, 300, 31);
+        RadioPagingGscReceiver receiver;
+        Decoded d;
+        receiver.create(38400.0);
+        for (float s : samples) {
+            receiver.process(s);
+        }
+        receiver.flush();
+        while (receiver.hasMessage()) {
+            d.m_messages.push_back(receiver.takeMessage());
+        }
+        bool ok = (d.m_messages.size() == 3) && voiceEnded(d, D::VoiceTurnOff, 5.0f, 3) && matches(d.m_messages[2], tone[0]);
+        check(ok, inverted ? "Receiver, inverted: voice page, 5 s of audio, turn-off word, next page" : "Receiver: voice page, 5 s of audio, turn-off word, next page");
+    }
+}
+
 void testReceiver()
 {
     testReceiverNonBatterySaver();
+    testReceiverVoice();
 
     std::vector<G::TxMessage> single = { tx("100123", 3, G::Alphanumeric, "RECEIVED OVER THE AIR") };
     std::vector<G::TxMessage> batch = {
@@ -1152,6 +1342,7 @@ int main()
     testCodes();
     testStartCodeCopies();
     testCharacterSets();
+    testVoice();
     testSoftDecisions();
     testReceiver();
     testAddresses();

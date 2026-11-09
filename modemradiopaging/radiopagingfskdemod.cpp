@@ -38,6 +38,7 @@ RadioPagingFskDemod::RadioPagingFskDemod() :
     m_samplesPerSymbol(1.0),
     m_levels(2),
     m_locked(false),
+    m_holdLevels(false),
     m_matchedFilter(1)
 {
     reset();
@@ -64,6 +65,7 @@ void RadioPagingFskDemod::reset()
     m_dc = 0.0f;
     m_deviation = 1.0f;
     m_locked = false;
+    m_holdLevels = false;
 }
 
 void RadioPagingFskDemod::setLevels(float dc, float deviation)
@@ -145,10 +147,13 @@ bool RadioPagingFskDemod::process(float sample, Symbol& symbol)
             float level = levelValue(decided, m_levels);
             float levelGain = m_locked ? levelGainTrack : levelGainAcquire;
 
-            // Decision directed level tracking
-            m_dc += levelGain * (normalised - level) * m_deviation;
-            m_deviation += levelGain * (std::fabs(normalised) - std::fabs(level)) * m_deviation;
-            m_deviation = std::max(0.05f, std::min(20.0f, m_deviation));
+            // Decision directed level tracking, unless the levels are held
+            if (!m_holdLevels)
+            {
+                m_dc += levelGain * (normalised - level) * m_deviation;
+                m_deviation += levelGain * (std::fabs(normalised) - std::fabs(level)) * m_deviation;
+                m_deviation = std::max(0.05f, std::min(20.0f, m_deviation));
+            }
 
             m_timingPower += timingPowerAlpha * ((double) value * value - m_timingPower);
             m_prevSymbolValue = value;

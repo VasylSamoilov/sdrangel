@@ -26,6 +26,8 @@ const int RadioPagingGscDecoder::m_maxPreambleWordsAfterLock;
 const float RadioPagingGscDecoder::m_minPairAgreement = 0.5f;
 const int RadioPagingGscDecoder::m_minDamagedBlockCodewords;
 const int RadioPagingGscDecoder::m_maxCommaErrors;
+const int RadioPagingGscDecoder::m_alertSymbols;
+const int RadioPagingGscDecoder::m_defaultVoiceTimeoutSeconds;
 
 namespace {
 
@@ -57,9 +59,15 @@ bool isWord1(uint16_t data)
 
 RadioPagingGscDecoder::RadioPagingGscDecoder(Polarity polarity) :
     m_polarity(polarity),
-    m_nonBatterySaver(false)
+    m_nonBatterySaver(false),
+    m_voiceTimeoutSymbols(m_defaultVoiceTimeoutSeconds * RadioPagingGsc::m_dataBitRate)
 {
     reset();
+}
+
+void RadioPagingGscDecoder::setVoiceTimeout(double seconds)
+{
+    m_voiceTimeoutSymbols = std::max(1, (int) (seconds * RadioPagingGsc::m_dataBitRate));
 }
 
 void RadioPagingGscDecoder::reset()
@@ -88,6 +96,9 @@ void RadioPagingGscDecoder::reset()
     m_transmissions = 0;
     m_messageCount = 0;
     m_messages.clear();
+    m_voiceMessage = Message();
+    m_voiceSymbols = 0;
+    m_voiceHold = 0;
 }
 
 void RadioPagingGscDecoder::clearBuffer()
@@ -207,7 +218,7 @@ void RadioPagingGscDecoder::feedSoft(float soft)
     m_softPos = (m_softPos + 1) % codewordBits;
 
     // A new preamble is only looked for when no start code search is going on
-    bool enabled = (m_state == Hunting) || (m_state == InTransmission);
+    bool enabled = (m_state == Hunting) || (m_state == InTransmission) || (m_state == Voice);
     int hit = (m_regBits >= codewordBits) ? preambleHit() : -1;
 
     m_hitPos = (m_hitPos + 1) % hitRing;
@@ -220,7 +231,9 @@ void RadioPagingGscDecoder::feedSoft(float soft)
 
         if ((m_hits[p1] == hit) && (m_hits[p2] == hit))
         {
-            if (m_state == InTransmission) {
+            if (m_state == Voice) {
+                endVoice(VoiceNewTransmission, RadioPagingGsc::m_commaBits + m_syncHits * codewordBits);
+            } else if (m_state == InTransmission) {
                 endTransmission(true);
             }
             startTransmission(hit >> 1, (hit & 1) != 0);
@@ -245,7 +258,9 @@ void RadioPagingGscDecoder::feedSoft(float soft)
 
             if (m_nonBatterySaver && enabled && (run >= m_minNonBatterySaverBits))
             {
-                if (m_state == InTransmission) {
+                if (m_state == Voice) {
+                    endVoice(VoiceNewTransmission, run + 4);
+                } else if (m_state == InTransmission) {
                     endTransmission(true);
                 }
                 startNonBatterySaver();
@@ -259,17 +274,105 @@ void RadioPagingGscDecoder::feedSoft(float soft)
     {
         m_buf.push_back((uint8_t) bit);
         m_soft.push_back(s);
-        process();
+
+        if (m_state == Voice) {
+            processVoice();
+        } else {
+            process();
+        }
     }
 }
 
 void RadioPagingGscDecoder::flush()
 {
-    if (m_state == Hunting) {
+    if (m_state == Voice) {
+        endVoice(VoiceSignalLost, 0);
+    } else if (m_state != Hunting) {
+        endTransmission(true);
+    }
+}
+
+// The voice page has been reported: what follows is the alert time and the voice message
+void RadioPagingGscDecoder::startVoice()
+{
+    m_voiceMessage = m_messages.back();
+    m_voiceSymbols = 0;
+    m_voiceHold = 0;
+    m_state = Voice;
+    clearBuffer();
+}
+
+// One symbol of the voice state. The last 121 symbols are tested for a comma and a pair of
+// words: the turn-off word (activation code on Word 1 or Word 2) or, in the alert time, an
+// interleaved tone only address. The comma has to be there (at most m_maxCommaErrors), so
+// that voice audio is not taken for a word
+void RadioPagingGscDecoder::processVoice()
+{
+    m_voiceSymbols++;
+
+    if (m_voiceSymbols > m_voiceTimeoutSymbols)
+    {
+        endVoice(VoiceTimeout, 0);
         return;
     }
 
-    endTransmission(true);
+    int n = (int) m_buf.size();
+
+    if (n >= 4096)
+    {
+        m_buf.erase(m_buf.begin(), m_buf.end() - pairBits);
+        m_soft.erase(m_soft.begin(), m_soft.end() - pairBits);
+        n = pairBits;
+    }
+
+    if (m_voiceHold > 0)
+    {
+        m_voiceHold--;
+        return;
+    }
+    if ((n < pairBits) || (commaErrors(&m_buf[n - pairBits], RadioPagingGsc::m_commaBits) > m_maxCommaErrors)) {
+        return;
+    }
+
+    int p = n - pairBits;
+    RadioPagingGsc::GolayResult w1, w2;
+    bool word1 = decodeWord(p + RadioPagingGsc::m_commaBits, w1);
+    bool word2 = decodeWord(p + RadioPagingGsc::m_commaBits + codewordBits + 1, w2);
+
+    if ((word1 && (w1.m_data == RadioPagingGsc::m_activationCode))
+        || (word2 && (w2.m_data == (RadioPagingGsc::m_activationCode ^ 0xfff))))
+    {
+        endVoice(VoiceTurnOff, pairBits);
+        return;
+    }
+
+    Message message;
+    int e1, e2;
+
+    if ((m_voiceSymbols <= m_alertSymbols + pairBits) && parseAddress(p, message, e1, e2))
+    {
+        message.m_type = RadioPagingGsc::Tone;
+        message.m_interleaved = true;
+        message.m_errorsCorrected = e1 + e2;
+        m_codewords += 2;
+        m_codewordsCorrected += (e1 > 0 ? 1 : 0) + (e2 > 0 ? 1 : 0);
+        m_messages.push_back(message);
+        m_messageCount++;
+        m_voiceHold = pairBits - 1;
+    }
+}
+
+void RadioPagingGscDecoder::endVoice(VoiceEnd end, int before)
+{
+    Message update = m_voiceMessage;
+
+    update.m_update = true;
+    update.m_voiceEnd = end;
+    update.m_voiceSeconds = (float) std::max(0, m_voiceSymbols - before) / (float) RadioPagingGsc::m_dataBitRate;
+    m_messages.push_back(update);
+
+    m_state = Hunting;
+    clearBuffer();
 }
 
 void RadioPagingGscDecoder::startTransmission(int index, bool batch)
@@ -626,7 +729,7 @@ bool RadioPagingGscDecoder::processClassify()
     {
         m_current.m_type = RadioPagingGsc::Voice;
         finishMessage(false);
-        endTransmission(false);
+        startVoice();
         return false;
     }
 

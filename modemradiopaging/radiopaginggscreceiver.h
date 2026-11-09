@@ -31,7 +31,9 @@
 // are two symbols per bit and are decided by the decoders on the sum of the two soft
 // symbols. The demodulator starts with acquisition loop gains and is locked (tracking
 // gains) while a decoder is synchronised, that is from the confirmation of the preamble
-// (three preamble words) to the end of the transmission.
+// (three preamble words) to the end of the transmission. During the alert time and the
+// voice message of a voice page the timing goes back to acquisition gains and the levels
+// are held.
 //
 // The polarity of a battery saver transmission is given by its preamble and start code,
 // only the decoder of the right polarity decodes it. A non battery saver transmission
@@ -63,6 +65,8 @@ public:
     void setPolarities(bool normal, bool inverted) { m_normalEnabled = normal; m_invertedEnabled = inverted; }
     //!< Enable the detection of the non battery saver pattern. Off by default
     void setNonBatterySaver(bool enable);
+    //!< Longest voice message without a turn-off word, in seconds
+    void setVoiceTimeout(double seconds);
 
     void process(float sample);
     //!< The signal is gone: finish the transmissions in progress

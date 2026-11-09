@@ -35,6 +35,7 @@ const int RadioPagingGsc::m_maxMessageBits;
 const int RadioPagingGsc::m_batchSlots;
 const int RadioPagingGsc::m_maxBatchMessages;
 const int RadioPagingGsc::m_nonBatterySaverBits;
+const int RadioPagingGsc::m_dataBitRate;
 
 namespace {
 
@@ -376,16 +377,21 @@ bool appendBlocks(std::vector<uint8_t>& out, RadioPagingGsc::MessageType type, c
     return true;
 }
 
-// Comma, codeword, separator bit and complemented codeword
-void appendCodewordPair(std::vector<uint8_t>& bits, uint32_t first, uint32_t second)
+} // namespace
+
+void RadioPagingGsc::appendCodewordPair(std::vector<uint8_t>& bits, uint32_t first, uint32_t second)
 {
-    RadioPagingGsc::appendComma(bits, RadioPagingGsc::m_commaBits, first & 1);
-    RadioPagingGsc::appendDuplicated(bits, first);
+    appendComma(bits, m_commaBits, first & 1);
+    appendDuplicated(bits, first);
     bits.push_back((second & 1) ^ 1);
-    RadioPagingGsc::appendDuplicated(bits, second);
+    appendDuplicated(bits, second);
 }
 
-} // namespace
+void RadioPagingGsc::appendActivationCode(std::vector<uint8_t>& bits)
+{
+    uint32_t activation = golayEncode(m_activationCode);
+    appendCodewordPair(bits, activation, activation ^ golayComplement);
+}
 
 uint32_t RadioPagingGsc::golayEncode(uint16_t data)
 {
@@ -806,11 +812,8 @@ RadioPagingGsc::EncodeResult RadioPagingGsc::encode(const std::vector<TxMessage>
         switch (message.m_type)
         {
         case Voice:
-        {
-            uint32_t activation = golayEncode(m_activationCode);
-            appendCodewordPair(bits, activation, activation ^ golayComplement);
+            appendActivationCode(bits);
             break;
-        }
         case Numeric:
         case Alphanumeric:
             if (!appendBlocks(bits, message.m_type, message.m_text, result.m_error))

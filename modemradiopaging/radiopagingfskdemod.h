@@ -59,6 +59,9 @@ public:
 
     //!< Use tracking (low) loop gains once a sync word has been found, acquisition gains otherwise
     void setLocked(bool locked) { m_locked = locked; }
+    //!< Keep the DC offset and deviation as they are, e.g. while something else than symbols
+    //!< (voice audio) is received; the symbol timing goes on
+    void setHoldLevels(bool hold) { m_holdLevels = hold; }
     //!< Set DC offset and outer level deviation, e.g. measured over a sync word
     void setLevels(float dc, float deviation);
     //!< Place the next symbol instant samplesToNextSymbol samples after the last input sample,
@@ -74,6 +77,7 @@ private:
     double m_samplesPerSymbol;
     int m_levels;
     bool m_locked;
+    bool m_holdLevels;
 
     MovingAverageUtilVar<float, double> m_matchedFilter;
     float m_prevFiltered;           //!< Matched filter output of the previous input sample

@@ -52,6 +52,12 @@ void RadioPagingGscReceiver::setNonBatterySaver(bool enable)
     m_inverted.setNonBatterySaver(enable);
 }
 
+void RadioPagingGscReceiver::setVoiceTimeout(double seconds)
+{
+    m_normal.setVoiceTimeout(seconds);
+    m_inverted.setVoiceTimeout(seconds);
+}
+
 void RadioPagingGscReceiver::process(float sample)
 {
     RadioPagingFskDemod::Symbol symbol;
@@ -67,7 +73,13 @@ void RadioPagingGscReceiver::process(float sample)
         m_inverted.feedSoft(symbol.m_soft);
     }
 
-    m_demod.setLocked(isLocked());
+    // In the voice state there are no symbols to track: acquisition timing gains, so the
+    // turn-off word or a new preamble is picked up at once, and the levels of the data
+    // before are kept
+    bool voice = (m_normalEnabled && m_normal.inVoice()) || (m_invertedEnabled && m_inverted.inVoice());
+
+    m_demod.setLocked(isLocked() && !voice);
+    m_demod.setHoldLevels(voice);
     collect();
 }
 
@@ -81,6 +93,7 @@ void RadioPagingGscReceiver::flush()
     m_normal.flush();
     m_inverted.flush();
     m_demod.setLocked(false);
+    m_demod.setHoldLevels(false);
     collect();
 }
 

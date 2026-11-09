@@ -37,7 +37,8 @@
 //   per message: comma of 28 bits, word 1, 1 bit, word 2, then
 //     tone only      nothing, the next address follows at once
 //     voice          comma of 28 bits, activation code, 1 bit, complement of the activation
-//                    code (voice audio follows)
+//                    code; the alert time (2 s), the voice message and the activation
+//                    code again as the turn-off word follow (Motorola Figure 6-1)
 //     data           one or more blocks of 1 + 120 bits
 // The 10 preamble values are selected by (index digit + group digit 0) mod 10. In batch
 // mode the preamble codewords are complemented. Addresses, data blocks and start codes are
@@ -90,6 +91,7 @@ public:
     static const int m_batchSlots = 16;                 //!< Slots of 121 bits after a start code
     static const int m_maxBatchMessages = 32;           //!< Messages in a batch, at most
     static const int m_nonBatterySaverBits = 752;       //!< Preamble of repeating 1100
+    static const int m_dataBitRate = 600;               //!< Comma and data rate, the symbol rate
 
     enum MessageType {
         Tone,           //!< Address only
@@ -199,6 +201,12 @@ public:
     static void appendComma(std::vector<uint8_t>& bits, int nbBits, int firstBit);
     //!< Golay codeword, LSB first, every bit twice
     static void appendDuplicated(std::vector<uint8_t>& bits, uint32_t codeword);
+    //!< Comma of 28 bits, a codeword, the separator bit and a second codeword: the format of
+    //!< start code, address and activation code (Rep. 900-2 Annex I 2.3.2)
+    static void appendCodewordPair(std::vector<uint8_t>& bits, uint32_t first, uint32_t second);
+    //!< Activation code and its complement: sent after a voice address, and again as the
+    //!< turn-off word at the end of the voice message (Motorola GSC manual, Figure 6-1)
+    static void appendActivationCode(std::vector<uint8_t>& bits);
     //!< Interleaved block of 8 BCH codewords preceded by its separator bit
     static void appendBlock(std::vector<uint8_t>& bits, const uint16_t codewords[8]);
     //!< Golay codeword (23 bits) of 46 symbols: first bit of every pair
