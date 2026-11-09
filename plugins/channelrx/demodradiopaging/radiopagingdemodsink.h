@@ -47,15 +47,12 @@ class RadioPagingDemodSink : public ChannelSampleSink {
 public:
     struct Status
     {
-        bool m_pocsagEnabled[RadioPagingDemodSettings::m_nbPocsagSpeeds];
         bool m_pocsagSync[RadioPagingDemodSettings::m_nbPocsagSpeeds];      //!< A decoder of the speed is synchronised
         bool m_pocsagInverted[RadioPagingDemodSettings::m_nbPocsagSpeeds];  //!< ... and it is the inverted one
-        bool m_flexEnabled;
         bool m_flexSync;
         QString m_flexMode;
         bool m_flexInverted;
         float m_flexQuality;
-        bool m_gscEnabled;
         bool m_gscSync;
         bool m_gscVoice;
         bool m_gscInverted;

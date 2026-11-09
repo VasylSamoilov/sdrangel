@@ -106,17 +106,16 @@ private:
     void resizeTable();
     void recordReceived(const MessageRecord& record);
     void updateStatus();
-    static void setStatus(QLabel *label, bool enabled, bool sync, const QString& text, quint32 messages);
+    static void setStatus(QLabel *label, bool sync, const QString& text, quint32 messages);
 
 private slots:
     void on_deltaFrequency_changed(qint64 value);
     void on_rfBW_valueChanged(int value);
-    void on_normalPolarity_clicked(bool checked);
-    void on_invertedPolarity_clicked(bool checked);
-    void on_pocsagSpeed_clicked();
-    void on_flexMode_clicked();
-    void on_gscEnabled_clicked(bool checked);
+    void on_pocsagDeviation_valueChanged(int value);
+    void on_flexDeviation_valueChanged(int value);
     void on_gscNonBatterySaver_clicked(bool checked);
+    void on_gscVoiceTimeout_valueChanged(int value);
+    void on_gscDeviation_valueChanged(int value);
     void on_clearTable_clicked();
     void onWidgetRolled(QWidget* widget, bool rollDown);
     void onMenuDialogCalled(const QPoint& p);

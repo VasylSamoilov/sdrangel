@@ -1,5 +1,5 @@
 RadioPagingDemodSettings:
-  description: "Radio paging demodulator: POCSAG, FLEX and GSC decoded at the same time"
+  description: "Radio paging demodulator: POCSAG, FLEX and GSC, every speed and polarity, always all decoded"
   type: object
   properties:
     inputFrequencyOffset:
@@ -10,46 +10,14 @@ RadioPagingDemodSettings:
       description: Channel filter bandwidth in Hz. Each protocol filters further at its Carson bandwidth
       type: number
       format: float
-    pocsag512Enabled:
-      description: "Decode POCSAG at 512 bit/s (1 for yes, 0 for no)"
-      type: integer
-      format: int32
-    pocsag1200Enabled:
-      description: "Decode POCSAG at 1200 bit/s (1 for yes, 0 for no)"
-      type: integer
-      format: int32
-    pocsag2400Enabled:
-      description: "Decode POCSAG at 2400 bit/s (1 for yes, 0 for no)"
-      type: integer
-      format: int32
     pocsagDeviation:
       description: POCSAG frequency deviation in Hz
       type: number
       format: float
-    flex1600x2Enabled:
-      description: "Decode FLEX 1600 bit/s 2-level (1 for yes, 0 for no)"
-      type: integer
-      format: int32
-    flex3200x2Enabled:
-      description: "Decode FLEX 3200 bit/s 2-level (1 for yes, 0 for no)"
-      type: integer
-      format: int32
-    flex3200x4Enabled:
-      description: "Decode FLEX 3200 bit/s 4-level (1 for yes, 0 for no)"
-      type: integer
-      format: int32
-    flex6400x4Enabled:
-      description: "Decode FLEX 6400 bit/s 4-level (1 for yes, 0 for no)"
-      type: integer
-      format: int32
     flexDeviation:
       description: FLEX outer symbol frequency deviation in Hz
       type: number
       format: float
-    gscEnabled:
-      description: "Decode GSC (Golay Sequential Code) (1 for yes, 0 for no)"
-      type: integer
-      format: int32
     gscDeviation:
       description: GSC frequency deviation in Hz
       type: number
@@ -60,14 +28,6 @@ RadioPagingDemodSettings:
       format: int32
     gscVoiceTimeout:
       description: Maximum length of a GSC voice message in seconds
-      type: integer
-      format: int32
-    normalPolarity:
-      description: "Decode transmissions of normal polarity (1 for yes, 0 for no)"
-      type: integer
-      format: int32
-    invertedPolarity:
-      description: "Decode transmissions of inverted polarity (1 for yes, 0 for no)"
       type: integer
       format: int32
     rgbColor:

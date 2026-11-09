@@ -26,26 +26,21 @@
 
 class Serializable;
 
-// Settings of the radio paging demodulator: POCSAG, FLEX and GSC are all decoded at the
-// same time, every speed and both polarities. The options only switch decoders off
+// Settings of the radio paging demodulator: POCSAG, FLEX and GSC are always all decoded,
+// every speed, mode and polarity. Every message received is output with its protocol,
+// speed (or mode) and polarity; selecting networks is done downstream
 struct RadioPagingDemodSettings
 {
     static const int m_nbPocsagSpeeds = 3;
     static const int m_pocsagSpeeds[m_nbPocsagSpeeds];     //!< 512, 1200, 2400
-    static const int m_nbFlexModes = 4;                     //!< RadioPagingFlex::Mode order
 
     qint32 m_inputFrequencyOffset;
     Real m_rfBandwidth;                         //!< Channel filter, Hz. The legs filter further
-    bool m_pocsagSpeedEnabled[m_nbPocsagSpeeds];
     Real m_pocsagDeviation;                     //!< Hz
-    bool m_flexModeEnabled[m_nbFlexModes];
     Real m_flexDeviation;                       //!< Outer symbol, Hz
-    bool m_gscEnabled;
     Real m_gscDeviation;                        //!< Hz
     bool m_gscNonBatterySaver;                  //!< Also detect the 1100 pattern (no preamble)
     int m_gscVoiceTimeout;                      //!< Seconds
-    bool m_normalPolarity;
-    bool m_invertedPolarity;
 
     quint32 m_rgbColor;
     QString m_title;
@@ -76,8 +71,6 @@ struct RadioPagingDemodSettings
     double pocsagBandwidth() const;
     double flexBandwidth() const;
     double gscBandwidth() const;
-    bool pocsagEnabled() const;
-    bool flexEnabled() const;
 };
 
 #endif // INCLUDE_RADIOPAGINGDEMODSETTINGS_H

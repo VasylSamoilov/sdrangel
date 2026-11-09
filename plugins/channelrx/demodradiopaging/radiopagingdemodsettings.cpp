@@ -17,7 +17,6 @@
 
 #include <QColor>
 
-#include <algorithm>
 #include <sstream>
 
 #include "util/simpleserializer.h"
@@ -26,7 +25,6 @@
 
 const int RadioPagingDemodSettings::m_nbPocsagSpeeds;
 const int RadioPagingDemodSettings::m_pocsagSpeeds[m_nbPocsagSpeeds] = { 512, 1200, 2400 };
-const int RadioPagingDemodSettings::m_nbFlexModes;
 const int RadioPagingDemodSettings::m_channelSampleRate;
 
 namespace {
@@ -48,20 +46,11 @@ void RadioPagingDemodSettings::resetToDefaults()
 {
     m_inputFrequencyOffset = 0;
     m_rfBandwidth = 16000.0f;
-    for (int i = 0; i < m_nbPocsagSpeeds; i++) {
-        m_pocsagSpeedEnabled[i] = true;
-    }
     m_pocsagDeviation = 4500.0f;
-    for (int i = 0; i < m_nbFlexModes; i++) {
-        m_flexModeEnabled[i] = true;
-    }
     m_flexDeviation = 4800.0f;
-    m_gscEnabled = true;
     m_gscDeviation = 4500.0f;
     m_gscNonBatterySaver = false;
     m_gscVoiceTimeout = 50;
-    m_normalPolarity = true;
-    m_invertedPolarity = true;
 
     m_rgbColor = QColor(255, 170, 0).rgb();
     m_title = "Radio Paging Demodulator";
@@ -82,14 +71,11 @@ QByteArray RadioPagingDemodSettings::serialize() const
 
     s.writeS32(1, m_inputFrequencyOffset);
     s.writeFloat(2, m_rfBandwidth);
-    for (int i = 0; i < m_nbPocsagSpeeds; i++) {
-        s.writeBool(3 + i, m_pocsagSpeedEnabled[i]);
-    }
-    s.writeFloat(6, m_pocsagDeviation);
-    for (int i = 0; i < m_nbFlexModes; i++) {
-        s.writeBool(7 + i, m_flexModeEnabled[i]);
-    }
-    s.writeFloat(11, m_flexDeviation);
+    s.writeFloat(3, m_pocsagDeviation);
+    s.writeFloat(4, m_flexDeviation);
+    s.writeFloat(5, m_gscDeviation);
+    s.writeBool(6, m_gscNonBatterySaver);
+    s.writeS32(7, m_gscVoiceTimeout);
     s.writeU32(12, m_rgbColor);
     s.writeString(13, m_title);
 
@@ -103,12 +89,6 @@ QByteArray RadioPagingDemodSettings::serialize() const
     s.writeU32(18, m_reverseAPIPort);
     s.writeU32(19, m_reverseAPIDeviceIndex);
     s.writeU32(20, m_reverseAPIChannelIndex);
-    s.writeBool(21, m_gscEnabled);
-    s.writeFloat(22, m_gscDeviation);
-    s.writeBool(23, m_gscNonBatterySaver);
-    s.writeS32(24, m_gscVoiceTimeout);
-    s.writeBool(25, m_normalPolarity);
-    s.writeBool(26, m_invertedPolarity);
 
     if (m_rollupState) {
         s.writeBlob(27, m_rollupState->serialize());
@@ -138,14 +118,11 @@ bool RadioPagingDemodSettings::deserialize(const QByteArray& data)
 
         d.readS32(1, &m_inputFrequencyOffset, 0);
         d.readFloat(2, &m_rfBandwidth, 16000.0f);
-        for (int i = 0; i < m_nbPocsagSpeeds; i++) {
-            d.readBool(3 + i, &m_pocsagSpeedEnabled[i], true);
-        }
-        d.readFloat(6, &m_pocsagDeviation, 4500.0f);
-        for (int i = 0; i < m_nbFlexModes; i++) {
-            d.readBool(7 + i, &m_flexModeEnabled[i], true);
-        }
-        d.readFloat(11, &m_flexDeviation, 4800.0f);
+        d.readFloat(3, &m_pocsagDeviation, 4500.0f);
+        d.readFloat(4, &m_flexDeviation, 4800.0f);
+        d.readFloat(5, &m_gscDeviation, 4500.0f);
+        d.readBool(6, &m_gscNonBatterySaver, false);
+        d.readS32(7, &m_gscVoiceTimeout, 50);
         d.readU32(12, &m_rgbColor, QColor(255, 170, 0).rgb());
         d.readString(13, &m_title, "Radio Paging Demodulator");
 
@@ -170,12 +147,6 @@ bool RadioPagingDemodSettings::deserialize(const QByteArray& data)
         m_reverseAPIDeviceIndex = utmp > 99 ? 99 : utmp;
         d.readU32(20, &utmp, 0);
         m_reverseAPIChannelIndex = utmp > 99 ? 99 : utmp;
-        d.readBool(21, &m_gscEnabled, true);
-        d.readFloat(22, &m_gscDeviation, 4500.0f);
-        d.readBool(23, &m_gscNonBatterySaver, false);
-        d.readS32(24, &m_gscVoiceTimeout, 50);
-        d.readBool(25, &m_normalPolarity, true);
-        d.readBool(26, &m_invertedPolarity, true);
 
         if (m_rollupState)
         {
@@ -204,20 +175,11 @@ void RadioPagingDemodSettings::applySettings(const QStringList& settingsKeys, co
     if (settingsKeys.contains("rfBandwidth")) {
         m_rfBandwidth = settings.m_rfBandwidth;
     }
-    if (settingsKeys.contains("pocsagSpeedEnabled")) {
-        std::copy(settings.m_pocsagSpeedEnabled, settings.m_pocsagSpeedEnabled + m_nbPocsagSpeeds, m_pocsagSpeedEnabled);
-    }
     if (settingsKeys.contains("pocsagDeviation")) {
         m_pocsagDeviation = settings.m_pocsagDeviation;
     }
-    if (settingsKeys.contains("flexModeEnabled")) {
-        std::copy(settings.m_flexModeEnabled, settings.m_flexModeEnabled + m_nbFlexModes, m_flexModeEnabled);
-    }
     if (settingsKeys.contains("flexDeviation")) {
         m_flexDeviation = settings.m_flexDeviation;
-    }
-    if (settingsKeys.contains("gscEnabled")) {
-        m_gscEnabled = settings.m_gscEnabled;
     }
     if (settingsKeys.contains("gscDeviation")) {
         m_gscDeviation = settings.m_gscDeviation;
@@ -227,12 +189,6 @@ void RadioPagingDemodSettings::applySettings(const QStringList& settingsKeys, co
     }
     if (settingsKeys.contains("gscVoiceTimeout")) {
         m_gscVoiceTimeout = settings.m_gscVoiceTimeout;
-    }
-    if (settingsKeys.contains("normalPolarity")) {
-        m_normalPolarity = settings.m_normalPolarity;
-    }
-    if (settingsKeys.contains("invertedPolarity")) {
-        m_invertedPolarity = settings.m_invertedPolarity;
     }
     if (settingsKeys.contains("rgbColor")) {
         m_rgbColor = settings.m_rgbColor;
@@ -276,28 +232,11 @@ QString RadioPagingDemodSettings::getDebugString(const QStringList& settingsKeys
     if (settingsKeys.contains("rfBandwidth") || force) {
         ostr << " m_rfBandwidth: " << m_rfBandwidth;
     }
-    if (settingsKeys.contains("pocsagSpeedEnabled") || force)
-    {
-        ostr << " m_pocsagSpeedEnabled:";
-        for (int i = 0; i < m_nbPocsagSpeeds; i++) {
-            ostr << " " << m_pocsagSpeedEnabled[i];
-        }
-    }
     if (settingsKeys.contains("pocsagDeviation") || force) {
         ostr << " m_pocsagDeviation: " << m_pocsagDeviation;
     }
-    if (settingsKeys.contains("flexModeEnabled") || force)
-    {
-        ostr << " m_flexModeEnabled:";
-        for (int i = 0; i < m_nbFlexModes; i++) {
-            ostr << " " << m_flexModeEnabled[i];
-        }
-    }
     if (settingsKeys.contains("flexDeviation") || force) {
         ostr << " m_flexDeviation: " << m_flexDeviation;
-    }
-    if (settingsKeys.contains("gscEnabled") || force) {
-        ostr << " m_gscEnabled: " << m_gscEnabled;
     }
     if (settingsKeys.contains("gscDeviation") || force) {
         ostr << " m_gscDeviation: " << m_gscDeviation;
@@ -307,12 +246,6 @@ QString RadioPagingDemodSettings::getDebugString(const QStringList& settingsKeys
     }
     if (settingsKeys.contains("gscVoiceTimeout") || force) {
         ostr << " m_gscVoiceTimeout: " << m_gscVoiceTimeout;
-    }
-    if (settingsKeys.contains("normalPolarity") || force) {
-        ostr << " m_normalPolarity: " << m_normalPolarity;
-    }
-    if (settingsKeys.contains("invertedPolarity") || force) {
-        ostr << " m_invertedPolarity: " << m_invertedPolarity;
     }
     if (settingsKeys.contains("rgbColor") || force) {
         ostr << " m_rgbColor: " << m_rgbColor;
@@ -350,17 +283,8 @@ QString RadioPagingDemodSettings::getDebugString(const QStringList& settingsKeys
 
 double RadioPagingDemodSettings::pocsagBandwidth() const
 {
-    // Sized to the fastest enabled speed (OI-5a)
-    int fastest = m_pocsagSpeeds[0];
-
-    for (int i = 0; i < m_nbPocsagSpeeds; i++)
-    {
-        if (m_pocsagSpeedEnabled[i]) {
-            fastest = m_pocsagSpeeds[i];
-        }
-    }
-
-    return 2.0 * (m_pocsagDeviation + fastest);
+    // All speeds share the leg: sized to the fastest
+    return 2.0 * (m_pocsagDeviation + m_pocsagSpeeds[m_nbPocsagSpeeds - 1]);
 }
 
 double RadioPagingDemodSettings::flexBandwidth() const
@@ -371,14 +295,4 @@ double RadioPagingDemodSettings::flexBandwidth() const
 double RadioPagingDemodSettings::gscBandwidth() const
 {
     return 2.0 * (m_gscDeviation + gscRate);
-}
-
-bool RadioPagingDemodSettings::pocsagEnabled() const
-{
-    return std::any_of(m_pocsagSpeedEnabled, m_pocsagSpeedEnabled + m_nbPocsagSpeeds, [](bool b) { return b; });
-}
-
-bool RadioPagingDemodSettings::flexEnabled() const
-{
-    return std::any_of(m_flexModeEnabled, m_flexModeEnabled + m_nbFlexModes, [](bool b) { return b; });
 }

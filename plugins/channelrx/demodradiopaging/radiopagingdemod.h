@@ -123,9 +123,6 @@ public:
             const QStringList& channelSettingsKeys,
             SWGSDRangel::SWGChannelSettings& response);
 
-    //!< The WebAPI has one key per POCSAG speed and FLEX mode; the settings have one per array
-    static QStringList webapiSettingsKeys(const QStringList& channelSettingsKeys);
-
     double getMagSq() const { return m_basebandSink->getMagSq(); }
 
     void getMagSqLevels(double& avg, double& peak, int& nbSamples) {

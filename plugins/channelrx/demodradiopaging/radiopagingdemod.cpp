@@ -289,28 +289,6 @@ int RadioPagingDemod::getChannelSampleRate() const
     return RadioPagingDemodSettings::m_channelSampleRate;
 }
 
-QStringList RadioPagingDemod::webapiSettingsKeys(const QStringList& channelSettingsKeys)
-{
-    QStringList settingsKeys = channelSettingsKeys;
-
-    if (channelSettingsKeys.contains("pocsag512Enabled")
-        || channelSettingsKeys.contains("pocsag1200Enabled")
-        || channelSettingsKeys.contains("pocsag2400Enabled"))
-    {
-        settingsKeys.append("pocsagSpeedEnabled");
-    }
-
-    if (channelSettingsKeys.contains("flex1600x2Enabled")
-        || channelSettingsKeys.contains("flex3200x2Enabled")
-        || channelSettingsKeys.contains("flex3200x4Enabled")
-        || channelSettingsKeys.contains("flex6400x4Enabled"))
-    {
-        settingsKeys.append("flexModeEnabled");
-    }
-
-    return settingsKeys;
-}
-
 int RadioPagingDemod::webapiSettingsGet(
         SWGSDRangel::SWGChannelSettings& response,
         QString& errorMessage)
@@ -340,14 +318,13 @@ int RadioPagingDemod::webapiSettingsPutPatch(
     (void) errorMessage;
     RadioPagingDemodSettings settings = m_settings;
     webapiUpdateChannelSettings(settings, channelSettingsKeys, response);
-    QStringList settingsKeys = webapiSettingsKeys(channelSettingsKeys);
 
-    MsgConfigureRadioPagingDemod *msg = MsgConfigureRadioPagingDemod::create(settingsKeys, settings, force);
+    MsgConfigureRadioPagingDemod *msg = MsgConfigureRadioPagingDemod::create(channelSettingsKeys, settings, force);
     m_inputMessageQueue.push(msg);
 
     if (m_guiMessageQueue) // forward to GUI if any
     {
-        MsgConfigureRadioPagingDemod *msgToGUI = MsgConfigureRadioPagingDemod::create(settingsKeys, settings, force);
+        MsgConfigureRadioPagingDemod *msgToGUI = MsgConfigureRadioPagingDemod::create(channelSettingsKeys, settings, force);
         m_guiMessageQueue->push(msgToGUI);
     }
 
@@ -373,37 +350,11 @@ void RadioPagingDemod::webapiUpdateChannelSettings(
     if (channelSettingsKeys.contains("rfBandwidth")) {
         settings.m_rfBandwidth = model->getRfBandwidth();
     }
-    // POCSAG speeds in RadioPagingDemodSettings::m_pocsagSpeeds order
-    if (channelSettingsKeys.contains("pocsag512Enabled")) {
-        settings.m_pocsagSpeedEnabled[0] = model->getPocsag512Enabled() != 0;
-    }
-    if (channelSettingsKeys.contains("pocsag1200Enabled")) {
-        settings.m_pocsagSpeedEnabled[1] = model->getPocsag1200Enabled() != 0;
-    }
-    if (channelSettingsKeys.contains("pocsag2400Enabled")) {
-        settings.m_pocsagSpeedEnabled[2] = model->getPocsag2400Enabled() != 0;
-    }
     if (channelSettingsKeys.contains("pocsagDeviation")) {
         settings.m_pocsagDeviation = model->getPocsagDeviation();
     }
-    // FLEX modes in RadioPagingFlex::Mode order
-    if (channelSettingsKeys.contains("flex1600x2Enabled")) {
-        settings.m_flexModeEnabled[0] = model->getFlex1600x2Enabled() != 0;
-    }
-    if (channelSettingsKeys.contains("flex3200x2Enabled")) {
-        settings.m_flexModeEnabled[1] = model->getFlex3200x2Enabled() != 0;
-    }
-    if (channelSettingsKeys.contains("flex3200x4Enabled")) {
-        settings.m_flexModeEnabled[2] = model->getFlex3200x4Enabled() != 0;
-    }
-    if (channelSettingsKeys.contains("flex6400x4Enabled")) {
-        settings.m_flexModeEnabled[3] = model->getFlex6400x4Enabled() != 0;
-    }
     if (channelSettingsKeys.contains("flexDeviation")) {
         settings.m_flexDeviation = model->getFlexDeviation();
-    }
-    if (channelSettingsKeys.contains("gscEnabled")) {
-        settings.m_gscEnabled = model->getGscEnabled() != 0;
     }
     if (channelSettingsKeys.contains("gscDeviation")) {
         settings.m_gscDeviation = model->getGscDeviation();
@@ -413,12 +364,6 @@ void RadioPagingDemod::webapiUpdateChannelSettings(
     }
     if (channelSettingsKeys.contains("gscVoiceTimeout")) {
         settings.m_gscVoiceTimeout = model->getGscVoiceTimeout();
-    }
-    if (channelSettingsKeys.contains("normalPolarity")) {
-        settings.m_normalPolarity = model->getNormalPolarity() != 0;
-    }
-    if (channelSettingsKeys.contains("invertedPolarity")) {
-        settings.m_invertedPolarity = model->getInvertedPolarity() != 0;
     }
     if (channelSettingsKeys.contains("rgbColor")) {
         settings.m_rgbColor = model->getRgbColor();
@@ -468,21 +413,11 @@ void RadioPagingDemod::webapiFormatChannelSettings(SWGSDRangel::SWGChannelSettin
     SWGSDRangel::SWGRadioPagingDemodSettings *model = response.getRadioPagingDemodSettings();
     model->setInputFrequencyOffset(settings.m_inputFrequencyOffset);
     model->setRfBandwidth(settings.m_rfBandwidth);
-    model->setPocsag512Enabled(settings.m_pocsagSpeedEnabled[0] ? 1 : 0);
-    model->setPocsag1200Enabled(settings.m_pocsagSpeedEnabled[1] ? 1 : 0);
-    model->setPocsag2400Enabled(settings.m_pocsagSpeedEnabled[2] ? 1 : 0);
     model->setPocsagDeviation(settings.m_pocsagDeviation);
-    model->setFlex1600x2Enabled(settings.m_flexModeEnabled[0] ? 1 : 0);
-    model->setFlex3200x2Enabled(settings.m_flexModeEnabled[1] ? 1 : 0);
-    model->setFlex3200x4Enabled(settings.m_flexModeEnabled[2] ? 1 : 0);
-    model->setFlex6400x4Enabled(settings.m_flexModeEnabled[3] ? 1 : 0);
     model->setFlexDeviation(settings.m_flexDeviation);
-    model->setGscEnabled(settings.m_gscEnabled ? 1 : 0);
     model->setGscDeviation(settings.m_gscDeviation);
     model->setGscNonBatterySaver(settings.m_gscNonBatterySaver ? 1 : 0);
     model->setGscVoiceTimeout(settings.m_gscVoiceTimeout);
-    model->setNormalPolarity(settings.m_normalPolarity ? 1 : 0);
-    model->setInvertedPolarity(settings.m_invertedPolarity ? 1 : 0);
     model->setRgbColor(settings.m_rgbColor);
     model->setTitle(new QString(settings.m_title));
     model->setStreamIndex(settings.m_streamIndex);
@@ -578,27 +513,11 @@ void RadioPagingDemod::webapiFormatChannelSettings(
     if (channelSettingsKeys.contains("rfBandwidth") || force) {
         model->setRfBandwidth(settings.m_rfBandwidth);
     }
-    if (channelSettingsKeys.contains("pocsagSpeedEnabled") || force)
-    {
-        model->setPocsag512Enabled(settings.m_pocsagSpeedEnabled[0] ? 1 : 0);
-        model->setPocsag1200Enabled(settings.m_pocsagSpeedEnabled[1] ? 1 : 0);
-        model->setPocsag2400Enabled(settings.m_pocsagSpeedEnabled[2] ? 1 : 0);
-    }
     if (channelSettingsKeys.contains("pocsagDeviation") || force) {
         model->setPocsagDeviation(settings.m_pocsagDeviation);
     }
-    if (channelSettingsKeys.contains("flexModeEnabled") || force)
-    {
-        model->setFlex1600x2Enabled(settings.m_flexModeEnabled[0] ? 1 : 0);
-        model->setFlex3200x2Enabled(settings.m_flexModeEnabled[1] ? 1 : 0);
-        model->setFlex3200x4Enabled(settings.m_flexModeEnabled[2] ? 1 : 0);
-        model->setFlex6400x4Enabled(settings.m_flexModeEnabled[3] ? 1 : 0);
-    }
     if (channelSettingsKeys.contains("flexDeviation") || force) {
         model->setFlexDeviation(settings.m_flexDeviation);
-    }
-    if (channelSettingsKeys.contains("gscEnabled") || force) {
-        model->setGscEnabled(settings.m_gscEnabled ? 1 : 0);
     }
     if (channelSettingsKeys.contains("gscDeviation") || force) {
         model->setGscDeviation(settings.m_gscDeviation);
@@ -608,12 +527,6 @@ void RadioPagingDemod::webapiFormatChannelSettings(
     }
     if (channelSettingsKeys.contains("gscVoiceTimeout") || force) {
         model->setGscVoiceTimeout(settings.m_gscVoiceTimeout);
-    }
-    if (channelSettingsKeys.contains("normalPolarity") || force) {
-        model->setNormalPolarity(settings.m_normalPolarity ? 1 : 0);
-    }
-    if (channelSettingsKeys.contains("invertedPolarity") || force) {
-        model->setInvertedPolarity(settings.m_invertedPolarity ? 1 : 0);
     }
     if (channelSettingsKeys.contains("rgbColor") || force) {
         model->setRgbColor(settings.m_rgbColor);

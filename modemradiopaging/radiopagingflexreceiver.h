@@ -78,10 +78,9 @@ public:
 
     void create(double sampleRate);
     void reset();
-    //!< Enable or disable the reception of frames of one polarity
-    void setPolarities(bool normal, bool inverted) { m_normalEnabled = normal; m_invertedEnabled = inverted; }
-    //!< Enable or disable the reception of frames of one mode
-    void setModeEnabled(RadioPagingFlex::Mode mode, bool enabled) { m_modeEnabled[(int) mode] = enabled; }
+    //!< Enable or disable the network of each polarity. There is no mode enable: the system
+    //!< chooses the mode of each frame
+    void setPolarities(bool normal, bool inverted) { m_enabled[0] = normal; m_enabled[1] = inverted; }
 
     //!< Process one discriminator sample with its magnitude squared (pass 1 if not known)
     void process(float sample, float magsq = 1.0f);
@@ -92,17 +91,17 @@ public:
     void flush();
 
     Status getStatus() const;
-    RadioPagingFlexDecoder& decoder() { return m_decoder; }
+    RadioPagingFlexDecoder& decoder(bool inverted) { return m_decoder[inverted ? 1 : 0]; }
 
 private:
     double m_sampleRate;
-    bool m_normalEnabled;
-    bool m_invertedEnabled;
-    bool m_modeEnabled[4];
+    bool m_enabled[2];                  //!< Normal (0) and inverted (1)
 
     RadioPagingFskDemod m_syncDemod;    //!< 1600 baud, 2 levels, always running
     RadioPagingFskDemod m_dataDemod;    //!< Rate and levels of the frame mode
-    RadioPagingFlexDecoder m_decoder;
+    //!< One per polarity: the same capcode on the other polarity is another network, with its
+    //!< own frame timing, fragments, groups and retransmissions
+    RadioPagingFlexDecoder m_decoder[2];
 
     State m_state;
     uint64_t m_regLo;                   //!< Last 64 received sync rate bits, newest in bit 0

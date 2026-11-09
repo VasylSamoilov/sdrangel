@@ -50,8 +50,6 @@ int popcount32(uint32_t x)
 
 RadioPagingFlexReceiver::RadioPagingFlexReceiver() :
     m_sampleRate(38400.0),
-    m_normalEnabled(true),
-    m_invertedEnabled(true),
     m_syncs(0),
     m_frames(0),
     m_frameInfoFailures(0),
@@ -59,9 +57,7 @@ RadioPagingFlexReceiver::RadioPagingFlexReceiver() :
     m_lastFrame(0),
     m_lastQuality(0.0f)
 {
-    for (bool& enabled : m_modeEnabled) {
-        enabled = true;
-    }
+    setPolarities(true, true);
     create(m_sampleRate);
 }
 
@@ -75,7 +71,8 @@ void RadioPagingFlexReceiver::create(double sampleRate)
 void RadioPagingFlexReceiver::reset()
 {
     m_syncDemod.reset();
-    m_decoder.reset();
+    m_decoder[0].reset();
+    m_decoder[1].reset();
     m_messages.clear();
     m_recentPower.clear();
     m_syncs = 0;
@@ -104,9 +101,12 @@ RadioPagingFlexDecoder::Message RadioPagingFlexReceiver::takeMessage()
 
 void RadioPagingFlexReceiver::flush()
 {
-    std::vector<RadioPagingFlexDecoder::Message> messages = m_decoder.flush();
-    for (auto& message : messages) {
-        m_messages.push_back(message);
+    for (auto& decoder : m_decoder)
+    {
+        std::vector<RadioPagingFlexDecoder::Message> messages = decoder.flush();
+        for (auto& message : messages) {
+            m_messages.push_back(message);
+        }
     }
 }
 
@@ -171,15 +171,10 @@ bool RadioPagingFlexReceiver::checkSync(RadioPagingFlex::Mode& mode, bool& inver
     int bestMode = -1;
     bool bestInverted = false;
 
+    // Both polarities are scored, so the sync of a disabled one is rejected rather than
+    // taken for the other
     for (int pol = 0; pol < 2; pol++)
     {
-        if ((pol == 0) && !m_normalEnabled) {
-            continue;
-        }
-        if ((pol == 1) && !m_invertedEnabled) {
-            continue;
-        }
-
         uint32_t flip = pol ? 0xffffffffu : 0;
         int bErrors = popcount32((b ^ (flip & 0xffff)) ^ codeB);
 
@@ -203,7 +198,7 @@ bool RadioPagingFlexReceiver::checkSync(RadioPagingFlex::Mode& mode, bool& inver
         }
     }
 
-    if ((bestMode < 0) || !m_modeEnabled[bestMode]) {
+    if ((bestMode < 0) || !m_enabled[bestInverted ? 1 : 0]) {
         return false;
     }
 
@@ -453,7 +448,7 @@ void RadioPagingFlexReceiver::endFrame()
         frame.m_phases.push_back(phase);
     }
 
-    std::vector<RadioPagingFlexDecoder::Message> messages = m_decoder.decodeFrame(frame);
+    std::vector<RadioPagingFlexDecoder::Message> messages = m_decoder[m_inverted ? 1 : 0].decodeFrame(frame);
     for (auto& message : messages) {
         m_messages.push_back(message);
     }

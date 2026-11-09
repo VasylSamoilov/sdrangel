@@ -134,40 +134,28 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
     }
     m_magsqCount++;
 
-    if (m_settings.pocsagEnabled())
+    // Every protocol, speed and polarity is always decoded
+    Real fm = m_pocsagLeg.demod(ci);
+
+    for (int i = 0; i < RadioPagingDemodSettings::m_nbPocsagSpeeds; i++)
     {
-        Real fm = m_pocsagLeg.demod(ci);
+        m_pocsag[i].process(fm);
 
-        for (int i = 0; i < RadioPagingDemodSettings::m_nbPocsagSpeeds; i++)
-        {
-            if (!m_settings.m_pocsagSpeedEnabled[i]) {
-                continue;
-            }
-
-            m_pocsag[i].process(fm);
-
-            while (m_pocsag[i].hasMessage()) {
-                sendPocsag(m_pocsag[i].takeMessage(), RadioPagingDemodSettings::m_pocsagSpeeds[i]);
-            }
+        while (m_pocsag[i].hasMessage()) {
+            sendPocsag(m_pocsag[i].takeMessage(), RadioPagingDemodSettings::m_pocsagSpeeds[i]);
         }
     }
 
-    if (m_settings.flexEnabled())
-    {
-        m_flex.process(m_flexLeg.demod(ci), magsq);
+    m_flex.process(m_flexLeg.demod(ci), magsq);
 
-        while (m_flex.hasMessage()) {
-            sendFlex(m_flex.takeMessage());
-        }
+    while (m_flex.hasMessage()) {
+        sendFlex(m_flex.takeMessage());
     }
 
-    if (m_settings.m_gscEnabled)
-    {
-        m_gsc.process(m_gscLeg.demod(ci));
+    m_gsc.process(m_gscLeg.demod(ci));
 
-        while (m_gsc.hasMessage()) {
-            sendGsc(m_gsc.takeMessage());
-        }
+    while (m_gsc.hasMessage()) {
+        sendGsc(m_gsc.takeMessage());
     }
 
     if (++m_statusCount >= statusPeriodSamples)
@@ -211,8 +199,7 @@ void RadioPagingDemodSink::applySettings(const QStringList& settingsKeys, const 
         m_interpolatorDistanceRemain = m_interpolatorDistance;
     }
 
-    bool polarities = settingsKeys.contains("normalPolarity") || settingsKeys.contains("invertedPolarity") || force;
-    bool legs = settingsKeys.contains("rfBandwidth") || settingsKeys.contains("pocsagSpeedEnabled")
+    bool legs = settingsKeys.contains("rfBandwidth")
         || settingsKeys.contains("pocsagDeviation") || settingsKeys.contains("flexDeviation")
         || settingsKeys.contains("gscDeviation") || force;
 
@@ -226,45 +213,6 @@ void RadioPagingDemodSink::applySettings(const QStringList& settingsKeys, const 
         applyLegs();
     }
 
-    if (polarities)
-    {
-        for (int i = 0; i < RadioPagingDemodSettings::m_nbPocsagSpeeds; i++) {
-            m_pocsag[i].setPolarities(m_settings.m_normalPolarity, m_settings.m_invertedPolarity);
-        }
-        m_flex.setPolarities(m_settings.m_normalPolarity, m_settings.m_invertedPolarity);
-        m_gsc.setPolarities(m_settings.m_normalPolarity, m_settings.m_invertedPolarity);
-    }
-
-    if (settingsKeys.contains("pocsagSpeedEnabled") || force)
-    {
-        for (int i = 0; i < RadioPagingDemodSettings::m_nbPocsagSpeeds; i++)
-        {
-            if (!m_settings.m_pocsagSpeedEnabled[i]) {
-                m_pocsag[i].reset();
-            }
-        }
-    }
-
-    if (settingsKeys.contains("flexModeEnabled") || force)
-    {
-        for (int i = 0; i < RadioPagingDemodSettings::m_nbFlexModes; i++) {
-            m_flex.setModeEnabled((RadioPagingFlex::Mode) i, m_settings.m_flexModeEnabled[i]);
-        }
-        if (!m_settings.flexEnabled()) {
-            m_flex.reset();
-        }
-    }
-
-    if (settingsKeys.contains("gscEnabled") || force)
-    {
-        if (!m_settings.m_gscEnabled)
-        {
-            m_gsc.reset();
-            m_gscVoiceId[0].clear();
-            m_gscVoiceId[1].clear();
-        }
-    }
-
     if (settingsKeys.contains("gscNonBatterySaver") || force) {
         m_gsc.setNonBatterySaver(m_settings.m_gscNonBatterySaver);
     }
@@ -273,8 +221,8 @@ void RadioPagingDemodSink::applySettings(const QStringList& settingsKeys, const 
     }
 }
 
-// The filters are rebuilt when the bandwidth changes: the POCSAG filter follows the fastest
-// enabled speed (OI-5a)
+// The filters are rebuilt when the bandwidth or a deviation changes. All POCSAG speeds
+// share one leg sized to the fastest
 void RadioPagingDemodSink::applyLegs()
 {
     double channel = m_settings.m_rfBandwidth;
@@ -305,14 +253,12 @@ void RadioPagingDemodSink::updateStatus()
         bool normal = s.m_normal.m_state != RadioPagingPocsagDecoder::Hunting;
         bool inverted = s.m_inverted.m_state != RadioPagingPocsagDecoder::Hunting;
 
-        status.m_pocsagEnabled[i] = m_settings.m_pocsagSpeedEnabled[i];
-        status.m_pocsagSync[i] = status.m_pocsagEnabled[i] && (normal || inverted);
+        status.m_pocsagSync[i] = normal || inverted;
         status.m_pocsagInverted[i] = inverted && !normal;
     }
 
     RadioPagingFlexReceiver::Status flex = m_flex.getStatus();
-    status.m_flexEnabled = m_settings.flexEnabled();
-    status.m_flexSync = status.m_flexEnabled && (flex.m_state != RadioPagingFlexReceiver::Hunting);
+    status.m_flexSync = flex.m_state != RadioPagingFlexReceiver::Hunting;
     status.m_flexMode = RadioPagingFlex::modeName(flex.m_mode);
     status.m_flexInverted = flex.m_inverted;
     status.m_flexQuality = flex.m_quality;
@@ -320,8 +266,7 @@ void RadioPagingDemodSink::updateStatus()
     RadioPagingGscReceiver::Status gsc = m_gsc.getStatus();
     bool gscNormal = gsc.m_normal.m_state != RadioPagingGscDecoder::Hunting;
     bool gscInverted = gsc.m_inverted.m_state != RadioPagingGscDecoder::Hunting;
-    status.m_gscEnabled = m_settings.m_gscEnabled;
-    status.m_gscSync = status.m_gscEnabled && (gscNormal || gscInverted);
+    status.m_gscSync = gscNormal || gscInverted;
     status.m_gscVoice = (gsc.m_normal.m_state == RadioPagingGscDecoder::Voice) || (gsc.m_inverted.m_state == RadioPagingGscDecoder::Voice);
     status.m_gscInverted = gscInverted && !gscNormal;
 

@@ -209,45 +209,34 @@ void RadioPagingDemodGUI::on_rfBW_valueChanged(int value)
     applySettings(QStringList("rfBandwidth"));
 }
 
-void RadioPagingDemodGUI::on_normalPolarity_clicked(bool checked)
+void RadioPagingDemodGUI::on_pocsagDeviation_valueChanged(int value)
 {
-    m_settings.m_normalPolarity = checked;
-    applySettings(QStringList("normalPolarity"));
+    m_settings.m_pocsagDeviation = value;
+    applySettings(QStringList("pocsagDeviation"));
 }
 
-void RadioPagingDemodGUI::on_invertedPolarity_clicked(bool checked)
+void RadioPagingDemodGUI::on_flexDeviation_valueChanged(int value)
 {
-    m_settings.m_invertedPolarity = checked;
-    applySettings(QStringList("invertedPolarity"));
-}
-
-void RadioPagingDemodGUI::on_pocsagSpeed_clicked()
-{
-    m_settings.m_pocsagSpeedEnabled[0] = ui->pocsag512->isChecked();
-    m_settings.m_pocsagSpeedEnabled[1] = ui->pocsag1200->isChecked();
-    m_settings.m_pocsagSpeedEnabled[2] = ui->pocsag2400->isChecked();
-    applySettings(QStringList("pocsagSpeedEnabled"));
-}
-
-void RadioPagingDemodGUI::on_flexMode_clicked()
-{
-    m_settings.m_flexModeEnabled[0] = ui->flex1600_2->isChecked();
-    m_settings.m_flexModeEnabled[1] = ui->flex3200_2->isChecked();
-    m_settings.m_flexModeEnabled[2] = ui->flex3200_4->isChecked();
-    m_settings.m_flexModeEnabled[3] = ui->flex6400_4->isChecked();
-    applySettings(QStringList("flexModeEnabled"));
-}
-
-void RadioPagingDemodGUI::on_gscEnabled_clicked(bool checked)
-{
-    m_settings.m_gscEnabled = checked;
-    applySettings(QStringList("gscEnabled"));
+    m_settings.m_flexDeviation = value;
+    applySettings(QStringList("flexDeviation"));
 }
 
 void RadioPagingDemodGUI::on_gscNonBatterySaver_clicked(bool checked)
 {
     m_settings.m_gscNonBatterySaver = checked;
     applySettings(QStringList("gscNonBatterySaver"));
+}
+
+void RadioPagingDemodGUI::on_gscVoiceTimeout_valueChanged(int value)
+{
+    m_settings.m_gscVoiceTimeout = value;
+    applySettings(QStringList("gscVoiceTimeout"));
+}
+
+void RadioPagingDemodGUI::on_gscDeviation_valueChanged(int value)
+{
+    m_settings.m_gscDeviation = value;
+    applySettings(QStringList("gscDeviation"));
 }
 
 void RadioPagingDemodGUI::on_clearTable_clicked()
@@ -407,17 +396,11 @@ void RadioPagingDemodGUI::displaySettings()
     ui->deltaFrequency->setValue(m_channelMarker.getCenterFrequency());
     ui->rfBWText->setText(QString("%1k").arg(m_settings.m_rfBandwidth / 1000.0, 0, 'f', 1));
     ui->rfBW->setValue(m_settings.m_rfBandwidth / 100.0);
-    ui->normalPolarity->setChecked(m_settings.m_normalPolarity);
-    ui->invertedPolarity->setChecked(m_settings.m_invertedPolarity);
-    ui->pocsag512->setChecked(m_settings.m_pocsagSpeedEnabled[0]);
-    ui->pocsag1200->setChecked(m_settings.m_pocsagSpeedEnabled[1]);
-    ui->pocsag2400->setChecked(m_settings.m_pocsagSpeedEnabled[2]);
-    ui->flex1600_2->setChecked(m_settings.m_flexModeEnabled[0]);
-    ui->flex3200_2->setChecked(m_settings.m_flexModeEnabled[1]);
-    ui->flex3200_4->setChecked(m_settings.m_flexModeEnabled[2]);
-    ui->flex6400_4->setChecked(m_settings.m_flexModeEnabled[3]);
-    ui->gscEnabled->setChecked(m_settings.m_gscEnabled);
+    ui->pocsagDeviation->setValue(m_settings.m_pocsagDeviation);
+    ui->flexDeviation->setValue(m_settings.m_flexDeviation);
     ui->gscNonBatterySaver->setChecked(m_settings.m_gscNonBatterySaver);
+    ui->gscVoiceTimeout->setValue(m_settings.m_gscVoiceTimeout);
+    ui->gscDeviation->setValue(m_settings.m_gscDeviation);
 
     updateIndexLabel();
 
@@ -465,13 +448,10 @@ void RadioPagingDemodGUI::updateStatus()
 {
     RadioPagingDemodSink::Status status = m_radioPagingDemod->getStatus();
     QStringList pocsag;
-    bool pocsagEnabled = false;
     bool pocsagSync = false;
 
     for (int i = 0; i < RadioPagingDemodSettings::m_nbPocsagSpeeds; i++)
     {
-        pocsagEnabled = pocsagEnabled || status.m_pocsagEnabled[i];
-
         if (status.m_pocsagSync[i])
         {
             pocsagSync = true;
@@ -479,42 +459,28 @@ void RadioPagingDemodGUI::updateStatus()
         }
     }
 
-    setStatus(ui->pocsagStatus, pocsagEnabled, pocsagSync, "SYNC " + pocsag.join(", "), status.m_messages[0]);
-    setStatus(ui->flexStatus, status.m_flexEnabled, status.m_flexSync,
+    setStatus(ui->pocsagStatus, pocsagSync, "SYNC " + pocsag.join(", "), status.m_messages[0]);
+    setStatus(ui->flexStatus, status.m_flexSync,
         QString("SYNC %1%2").arg(status.m_flexMode).arg(status.m_flexInverted ? " inv" : ""), status.m_messages[1]);
-    setStatus(ui->gscStatus, status.m_gscEnabled, status.m_gscSync,
+    setStatus(ui->gscStatus, status.m_gscSync,
         QString(status.m_gscVoice ? "VOICE" : "SYNC") + (status.m_gscInverted ? " inv" : ""), status.m_messages[2]);
 }
 
-void RadioPagingDemodGUI::setStatus(QLabel *label, bool enabled, bool sync, const QString& text, quint32 messages)
+void RadioPagingDemodGUI::setStatus(QLabel *label, bool sync, const QString& text, quint32 messages)
 {
-    if (!enabled)
-    {
-        label->setText("OFF");
-        label->setStyleSheet("");
-    }
-    else
-    {
-        label->setText(QString("%1 (%2)").arg(sync ? text : QString("HUNT")).arg(messages));
-        label->setStyleSheet(sync ? "QLabel { color: rgb(0, 200, 0); }" : "");
-    }
+    label->setText(QString("%1 (%2)").arg(sync ? text : QString("HUNT")).arg(messages));
+    label->setStyleSheet(sync ? "QLabel { color: rgb(0, 200, 0); }" : "");
 }
 
 void RadioPagingDemodGUI::makeUIConnections()
 {
     QObject::connect(ui->deltaFrequency, &ValueDialZ::changed, this, &RadioPagingDemodGUI::on_deltaFrequency_changed);
     QObject::connect(ui->rfBW, &QSlider::valueChanged, this, &RadioPagingDemodGUI::on_rfBW_valueChanged);
-    QObject::connect(ui->normalPolarity, &QCheckBox::clicked, this, &RadioPagingDemodGUI::on_normalPolarity_clicked);
-    QObject::connect(ui->invertedPolarity, &QCheckBox::clicked, this, &RadioPagingDemodGUI::on_invertedPolarity_clicked);
-    QObject::connect(ui->pocsag512, &QCheckBox::clicked, this, &RadioPagingDemodGUI::on_pocsagSpeed_clicked);
-    QObject::connect(ui->pocsag1200, &QCheckBox::clicked, this, &RadioPagingDemodGUI::on_pocsagSpeed_clicked);
-    QObject::connect(ui->pocsag2400, &QCheckBox::clicked, this, &RadioPagingDemodGUI::on_pocsagSpeed_clicked);
-    QObject::connect(ui->flex1600_2, &QCheckBox::clicked, this, &RadioPagingDemodGUI::on_flexMode_clicked);
-    QObject::connect(ui->flex3200_2, &QCheckBox::clicked, this, &RadioPagingDemodGUI::on_flexMode_clicked);
-    QObject::connect(ui->flex3200_4, &QCheckBox::clicked, this, &RadioPagingDemodGUI::on_flexMode_clicked);
-    QObject::connect(ui->flex6400_4, &QCheckBox::clicked, this, &RadioPagingDemodGUI::on_flexMode_clicked);
-    QObject::connect(ui->gscEnabled, &QCheckBox::clicked, this, &RadioPagingDemodGUI::on_gscEnabled_clicked);
+    QObject::connect(ui->pocsagDeviation, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingDemodGUI::on_pocsagDeviation_valueChanged);
+    QObject::connect(ui->flexDeviation, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingDemodGUI::on_flexDeviation_valueChanged);
     QObject::connect(ui->gscNonBatterySaver, &QCheckBox::clicked, this, &RadioPagingDemodGUI::on_gscNonBatterySaver_clicked);
+    QObject::connect(ui->gscVoiceTimeout, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingDemodGUI::on_gscVoiceTimeout_valueChanged);
+    QObject::connect(ui->gscDeviation, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingDemodGUI::on_gscDeviation_valueChanged);
     QObject::connect(ui->clearTable, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_clearTable_clicked);
 }
 
