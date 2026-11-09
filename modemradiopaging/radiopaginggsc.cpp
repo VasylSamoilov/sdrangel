@@ -33,7 +33,7 @@ const int RadioPagingGsc::m_payloadBitsPerBlock;
 const int RadioPagingGsc::m_maxBlocks;
 const int RadioPagingGsc::m_maxMessageBits;
 const int RadioPagingGsc::m_batchSlots;
-const int RadioPagingGsc::m_extendedBatchSlots;
+const int RadioPagingGsc::m_maxBatchMessages;
 const int RadioPagingGsc::m_nonBatterySaverBits;
 
 namespace {
@@ -193,7 +193,7 @@ const int alphaSpare = 0x3f;
 const int numericNull = 0xa;
 const int numericTripleBar = 0xe;
 const int numericShift = 0xf;
-const int numericShiftSpare = 0xf;
+const int numericShiftSpare = 0xf;          // In the shifted set
 
 void appendSpare(std::string& text, unsigned code)
 {
@@ -219,8 +219,6 @@ int alphaCode(char c)
         return 0x3d;
     case '\\':
         return 0x20;
-    case '_':
-        return 0x3f;
     default:
         if (((unsigned char) c < 0x20) || ((unsigned char) c > 0x5d)) {
             return 0;       // Space
@@ -695,7 +693,7 @@ RadioPagingGsc::EncodeResult RadioPagingGsc::encode(const std::vector<TxMessage>
         result.m_error = "This mode takes exactly one message";
         return result;
     }
-    if (messages.size() > (size_t) m_extendedBatchSlots)
+    if (messages.size() > (size_t) m_maxBatchMessages)
     {
         result.m_error = "Too many messages for a batch";
         return result;
@@ -767,17 +765,31 @@ RadioPagingGsc::EncodeResult RadioPagingGsc::encode(const std::vector<TxMessage>
         result.m_preamble = preamble;
     }
 
+    // Batch slots are blocks of 121 bits: an address, a data block, a repeated start code
+    // or a fill comma (Rep. 900-2 Annex I 2.1 and 2.6: a data block has the length of an
+    // address block and takes its place in the batch). 'used' counts the slots of the
+    // current batch after its start code
+    size_t slotsStart = bits.size();
+    int used = 0;
+
     for (size_t i = 0; i < messages.size(); i++)
     {
         const TxMessage& message = messages[i];
         int function = message.m_addressNumber - 1;
 
-        if (i == (size_t) m_batchSlots)
+        // A batch holds 16 slots. A message started in it runs on to its end (Rep. 900-2
+        // Annex I 2.1, which would also allow a message to start in the 17th block; the
+        // start code is sent there instead), and the next address extends the batch with
+        // the start code, without a new preamble (Motorola GSC manual, Figure 6-2,
+        // extended batch transmission mode)
+        if ((mode == Batch) && (used >= m_batchSlots))
         {
-            uint32_t start = golayEncode(m_startCode);
-            appendCodewordPair(bits, start, start ^ golayComplement);
+            uint32_t startCode = golayEncode(m_startCode);
+            appendCodewordPair(bits, startCode, startCode ^ golayComplement);
+            used = 0;
         }
 
+        size_t messageStart = bits.size();
         uint32_t first = golayEncode(word1[i]);
         uint32_t second = golayEncode(word2[i]);
 
@@ -806,24 +818,24 @@ RadioPagingGsc::EncodeResult RadioPagingGsc::encode(const std::vector<TxMessage>
             }
             break;
         default:
-            appendComma(bits, m_toneCommaBits, 1);
+            // A tone only page is its address alone: the next address, start code or
+            // preamble follows at once (Rep. 900-2 Annex I 2.5; Motorola GSC manual,
+            // Figure 6-2, individual and batch transmission modes)
             break;
         }
+
+        used += (int) ((bits.size() - messageStart) / m_blockBits);
     }
 
+    // Unfilled batches are filled out with comma (Rep. 900-2 Annex I 2.1)
     if (mode == Batch)
     {
-        int slots = (messages.size() > (size_t) m_batchSlots) ? m_extendedBatchSlots : m_batchSlots;
-
-        for (size_t i = messages.size(); i < (size_t) slots; i++) {
+        for (; used < m_batchSlots; used++) {
             appendComma(bits, m_slotBits, 1);
         }
-        result.m_slots = slots;
     }
-    else
-    {
-        result.m_slots = (int) messages.size();
-    }
+
+    result.m_slots = (int) ((bits.size() - slotsStart) / m_blockBits);
 
     result.m_ok = true;
     return result;

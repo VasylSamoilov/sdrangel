@@ -24,6 +24,8 @@ const int RadioPagingGscDecoder::m_minNonBatterySaverBits;
 const int RadioPagingGscDecoder::m_syncHits;
 const int RadioPagingGscDecoder::m_maxPreambleWordsAfterLock;
 const float RadioPagingGscDecoder::m_minPairAgreement = 0.5f;
+const int RadioPagingGscDecoder::m_minDamagedBlockCodewords;
+const int RadioPagingGscDecoder::m_maxCommaErrors;
 
 namespace {
 
@@ -94,6 +96,7 @@ void RadioPagingGscDecoder::clearBuffer()
     m_soft.clear();
     m_pos = 0;
     m_scan = 0;
+    m_commaBlocks = 0;
 }
 
 RadioPagingGscDecoder::Status RadioPagingGscDecoder::getStatus() const
@@ -139,7 +142,7 @@ bool RadioPagingGscDecoder::isWord(int pos) const
         total += std::fabs(a) + std::fabs(b);
     }
 
-    return agree >= m_minPairAgreement * total;
+    return (total > 0.0f) && (agree >= m_minPairAgreement * total);
 }
 
 bool RadioPagingGscDecoder::decodeWord(int pos, RadioPagingGsc::GolayResult& result) const
@@ -311,7 +314,17 @@ void RadioPagingGscDecoder::startNonBatterySaver()
 // A message is truncated if the transmission ends before the message does
 void RadioPagingGscDecoder::endTransmission(bool truncated)
 {
-    if (m_active) {
+    // An address with nothing after it is a complete tone only page: a tone only page is
+    // its address alone (Rep. 900-2 Annex I 2.5 for non battery saver operation, Motorola
+    // GSC manual Figure 6-2 for the individual and batch modes). A data page whose signal
+    // ends before its first block cannot be told apart and is reported as tone only too
+    if (m_active && (m_parse == Classify))
+    {
+        m_current.m_type = RadioPagingGsc::Tone;
+        finishMessage(false);
+    }
+    else if (m_active)
+    {
         finishMessage(truncated);
     }
 
@@ -521,6 +534,21 @@ bool RadioPagingGscDecoder::parseAddress(int pos, Message& message, int& errors1
 // of the transmission
 bool RadioPagingGscDecoder::processNext()
 {
+    // The rest of a comma after a tone only address
+    if (m_commaBlocks > 0)
+    {
+        if ((int) m_buf.size() < m_pos + RadioPagingGsc::m_blockBits) {
+            return false;
+        }
+        if (isComma(&m_buf[m_pos]))
+        {
+            m_pos += RadioPagingGsc::m_blockBits;
+            m_commaBlocks--;
+            return true;
+        }
+        m_commaBlocks = 0;
+    }
+
     if ((int) m_buf.size() < m_pos + peekBits) {
         return false;
     }
@@ -528,21 +556,20 @@ bool RadioPagingGscDecoder::processNext()
     RadioPagingGsc::GolayResult r, r2;
     bool w1 = decodeWord(m_pos + RadioPagingGsc::m_commaBits, r);
 
+    Message message;
+    int e1, e2;
+
+    // A Word 1 that fails as an address may be a damaged start code Word 1: its Word 2 is
+    // tested below
     if (w1 && isWord1(r.m_data))
     {
         if ((int) m_buf.size() < m_pos + pairBits) {
             return false;
         }
+    }
 
-        Message message;
-        int e1, e2;
-
-        if (!parseAddress(m_pos, message, e1, e2))
-        {
-            endTransmission(false);
-            return false;
-        }
-
+    if (w1 && isWord1(r.m_data) && parseAddress(m_pos, message, e1, e2))
+    {
         m_current = message;
         m_current.m_errorsCorrected = e1 + e2;
         m_currentBits.clear();
@@ -571,8 +598,19 @@ bool RadioPagingGscDecoder::processNext()
     return false;
 }
 
-// What follows an address: the activation code is voice, a valid block is data, an
-// alternating comma is a tone only message. Anything else is a damaged block
+// The block after an address tells the page type (Rep. 900-2 Annex I 2.3 and 2.6, Motorola
+// GSC Figure 6-2):
+//   activation code                              voice
+//   data block (all codewords and checksum good) data
+//   comma and a word (address, start code or a
+//   preamble word of the next transmission)      tone only, the block is parsed next
+//   alternating comma                            tone only; the comma is skipped as long
+//                                                as it lasts, up to m_toneCommaBits
+//   anything else                                a data block with errors if at least
+//                                                m_minDamagedBlockCodewords codewords
+//                                                decode, otherwise tone only (a first
+//                                                block with more errors is lost: noise
+//                                                after a tone only page looks the same)
 bool RadioPagingGscDecoder::processClassify()
 {
     if ((int) m_buf.size() < m_pos + RadioPagingGsc::m_blockBits) {
@@ -582,8 +620,9 @@ bool RadioPagingGscDecoder::processClassify()
     const uint8_t *p = &m_buf[m_pos];
 
     RadioPagingGsc::GolayResult r;
+    bool word = decodeWord(m_pos + RadioPagingGsc::m_commaBits, r);
 
-    if (decodeWord(m_pos + RadioPagingGsc::m_commaBits, r) && (r.m_data == RadioPagingGsc::m_activationCode))
+    if (word && (r.m_data == RadioPagingGsc::m_activationCode))
     {
         m_current.m_type = RadioPagingGsc::Voice;
         finishMessage(false);
@@ -593,7 +632,7 @@ bool RadioPagingGscDecoder::processClassify()
 
     uint16_t codewords[8];
     uint8_t words[8];
-    bool data = true;
+    int good = 0;
 
     RadioPagingGsc::deinterleaveBlock(p + 1, codewords);
 
@@ -601,15 +640,16 @@ bool RadioPagingGscDecoder::processClassify()
     {
         RadioPagingGsc::BchResult b = RadioPagingGsc::bchDecode(codewords[k]);
 
-        if (b.m_bitErrors < 0)
+        if (b.m_bitErrors >= 0)
         {
-            data = false;
-            break;
+            words[k] = b.m_data;
+            good++;
         }
-        words[k] = b.m_data;
     }
 
-    if (data)
+    bool data = false;
+
+    if (good == 8)
     {
         uint32_t sum = 0;
 
@@ -619,17 +659,19 @@ bool RadioPagingGscDecoder::processClassify()
         data = (sum & 0x7f) == words[7];
     }
 
-    if (!data)
+    if (!data && word && (commaErrors(p, RadioPagingGsc::m_commaBits) <= m_maxCommaErrors))
     {
-        int transitions = 0;
+        // Tone only, followed at once by an address, a start code or a preamble
+        m_current.m_type = RadioPagingGsc::Tone;
+        finishMessage(false);
+        m_parse = Next;
+        return true;
+    }
 
-        for (int i = 1; i < RadioPagingGsc::m_blockBits; i++)
-        {
-            if (p[i] != p[i - 1]) {
-                transitions++;
-            }
-        }
-        data = transitions < maxTransitionsForData;
+    bool commaOnly = !data && isComma(p);
+
+    if (!data && !commaOnly) {
+        data = good >= m_minDamagedBlockCodewords;
     }
 
     if (data)
@@ -642,11 +684,39 @@ bool RadioPagingGscDecoder::processClassify()
     {
         m_current.m_type = RadioPagingGsc::Tone;
         finishMessage(false);
-        m_pos += RadioPagingGsc::m_toneCommaBits;
+
+        // A comma after a tone only address is skipped block by block, as long as it lasts,
+        // up to the m_toneCommaBits some transmitters send
+        if (commaOnly)
+        {
+            m_pos += RadioPagingGsc::m_blockBits;
+            m_commaBlocks = RadioPagingGsc::m_toneCommaBits / RadioPagingGsc::m_blockBits - 1;
+        }
         m_parse = Next;
     }
 
     return true;
+}
+
+int RadioPagingGscDecoder::commaErrors(const uint8_t *bits, int n)
+{
+    int errors = 0;
+
+    for (int i = 1; i < n; i++)
+    {
+        if (bits[i] == bits[i - 1]) {
+            errors++;
+        }
+    }
+
+    return errors;
+}
+
+// A block of 121 bits that is an alternating comma (commas fill unused batch slots,
+// Rep. 900-2 Annex I 2.1)
+bool RadioPagingGscDecoder::isComma(const uint8_t *bits)
+{
+    return (RadioPagingGsc::m_blockBits - 1 - commaErrors(bits, RadioPagingGsc::m_blockBits)) >= maxTransitionsForData;
 }
 
 bool RadioPagingGscDecoder::processData()

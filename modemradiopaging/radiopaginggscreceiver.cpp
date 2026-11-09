@@ -63,10 +63,13 @@ void RadioPagingGscReceiver::process(float sample)
         m_inverted.feedSoft(symbol.m_soft);
     }
 
-    bool synced = (m_normalEnabled && m_normal.isSynced()) || (m_invertedEnabled && m_inverted.isSynced());
-
-    m_demod.setLocked(synced);
+    m_demod.setLocked(isLocked());
     collect();
+}
+
+bool RadioPagingGscReceiver::isLocked() const
+{
+    return (m_normalEnabled && m_normal.isSynced()) || (m_invertedEnabled && m_inverted.isSynced());
 }
 
 void RadioPagingGscReceiver::flush()
@@ -98,7 +101,7 @@ RadioPagingGscReceiver::Status RadioPagingGscReceiver::getStatus() const
 {
     Status status;
 
-    status.m_locked = (m_normalEnabled && m_normal.isSynced()) || (m_invertedEnabled && m_inverted.isSynced());
+    status.m_locked = isLocked();
     status.m_normal = m_normal.getStatus();
     status.m_inverted = m_inverted.getStatus();
     status.m_deviation = m_demod.getDeviation();

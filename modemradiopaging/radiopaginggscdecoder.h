@@ -39,12 +39,17 @@
 // decoder looks for the start code on the word grid of the preamble: after each further
 // preamble word a comma and the start code may follow. The start code is detected on
 // Word 1 or on Word 2 (its complement), each on its own, and its position is refined to
-// the symbol that correlates best, which gives the timing of the 600 bit/s blocks. A word
-// is only taken where its symbols come in equal pairs, so a comma (alternating symbols,
-// whose pair sums are noise) is never decoded as a word. Then
-// addresses and data blocks are parsed as they arrive, so a message is available as soon
-// as its last block is in. A transmission ends when what follows an address is neither a
-// start code nor an address, when a new preamble is locked, or on flush().
+// the symbol that correlates best, which gives the timing of the 600 bit/s blocks. Later
+// words and blocks keep that timing: a symbol slip after the start code is not followed.
+//
+// A word is only taken where its symbols come in equal pairs. A comma has alternating
+// symbols whose pair sums are noise, so it is rejected unless the noise is strong.
+//
+// Addresses and data blocks are parsed as they arrive, so a message is available as soon
+// as its last block is in. A tone only page is its address alone, so the next address,
+// start code or preamble may follow at once. A transmission ends when what follows a
+// message is neither a start code nor an address, when a new preamble is locked, or on
+// flush().
 //
 // Symbols are the output of an FSK demodulator, positive = positive deviation. For normal
 // polarity a binary 1 is a positive deviation, inverted polarity is the opposite. Run
@@ -76,7 +81,7 @@ public:
         std::vector<uint8_t> m_rawData;     //!< Message bits, packed 8 per byte, first bit in the MSB
         int m_rawBits = 0;                  //!< Number of message bits, a multiple of 48; 0 = tone only or voice
         int m_preamble = -1;                //!< Preamble value index, -1 in non battery saver mode
-        int m_slot = 0;                     //!< Position of the address in the transmission, from 0
+        int m_slot = 0;                     //!< Index of the address in the transmission, from 0 (addresses only, not 121 bit batch slots)
         bool m_batch = false;               //!< Transmission with a complemented preamble
         bool m_nonBatterySaver = false;
         int m_errorsCorrected = 0;          //!< Bits corrected in the codewords of the address and message
@@ -122,6 +127,14 @@ public:
     //!< Share of the symbol energy of a word kept by the sums of its symbol pairs (1 for
     //!< equal pairs, 0 for a comma) above which it is taken for a word
     static const float m_minPairAgreement;
+    //!< BCH codewords of the 8 that must decode for a first block with errors to be taken for
+    //!< data rather than for the noise after a tone only page (a random 15-bit word is within
+    //!< 2 errors of a codeword with probability 128 * 121 / 32768 = 47%, so 7 of 8 happen by
+    //!< chance about 2.5% of the time)
+    static const int m_minDamagedBlockCodewords = 7;
+    //!< Bit errors allowed in the 28 bit comma of the address, start code or preamble that
+    //!< follows a tone only address at once
+    static const int m_maxCommaErrors = 2;
 
 private:
     enum Parse {
@@ -149,6 +162,7 @@ private:
     std::vector<float> m_soft;          //!< Soft symbols of m_buf, positive = 1
     int m_pos;                          //!< Parse position in m_buf (may be past its end while skipping a comma)
     int m_scan;                         //!< Next start code or address candidate offset
+    int m_commaBlocks;                  //!< Comma blocks after a tone only address that may still be skipped
 
     int m_preamble;
     bool m_batch;
@@ -182,6 +196,10 @@ private:
     bool isWord(int pos) const;
     //!< Decodes the word at a position of m_buf. False if the symbols are not a word
     bool decodeWord(int pos, RadioPagingGsc::GolayResult& result) const;
+    //!< Positions of n bits where a bit equals the one before it (0 for a comma)
+    static int commaErrors(const uint8_t *bits, int n);
+    //!< A 121 bit block is an alternating comma
+    static bool isComma(const uint8_t *bits);
     bool processSeekStart();
     bool processSeekAddress();
     bool processNext();

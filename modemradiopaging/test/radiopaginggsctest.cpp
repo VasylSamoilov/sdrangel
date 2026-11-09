@@ -397,6 +397,45 @@ void testErrors()
     injectGolay(encTone.m_bits, 1005);
     injectGolay(encTone.m_bits, 1052);
     check(allMatch(decode(encTone.m_bits, D::Normal, false, 0, 1), tone), "Tone only with errors in the address words");
+
+    // First data block with 1 and with 2 uncorrectable codewords: 7 of 8 good is still
+    // data, 6 of 8 is taken for noise after a tone only page
+    auto firstBlockBad = [](int nbBad) {
+        std::vector<G::TxMessage> m = { tx("100123", 1, G::Alphanumeric, "FIRST BLOCK DAMAGED") };
+        G::EncodeOptions single;
+        single.m_mode = G::Single;
+        std::vector<uint8_t> bits = G::encode(m, single).m_bits;
+        const int block = 1098;
+        for (int k = 0; k < nbBad; k++)
+        {
+            // 3 bit errors that the code detects as uncorrectable
+            bool done = false;
+            for (int a = 0; (a < 15) && !done; a++) {
+                for (int b = a + 1; (b < 15) && !done; b++) {
+                    for (int c = b + 1; (c < 15) && !done; c++)
+                    {
+                        uint16_t cw[8];
+                        G::deinterleaveBlock(&bits[block + 1], cw);
+                        uint16_t e = (uint16_t) (cw[k] ^ (1u << a) ^ (1u << b) ^ (1u << c));
+                        if (G::bchDecode(e).m_bitErrors < 0)
+                        {
+                            bits[block + 1 + a * 8 + k] ^= 1;
+                            bits[block + 1 + b * 8 + k] ^= 1;
+                            bits[block + 1 + c * 8 + k] ^= 1;
+                            done = true;
+                        }
+                    }
+                }
+            }
+        }
+        return decode(bits, D::Normal, false, 0, 1);
+    };
+    Decoded oneBad = firstBlockBad(1);
+    Decoded twoBad = firstBlockBad(2);
+    check((oneBad.m_messages.size() == 1) && (oneBad.m_messages[0].m_type == G::Data) && (oneBad.m_messages[0].m_errorsUncorrectable == 1),
+        "First data block with 1 uncorrectable codeword is data");
+    check(!twoBad.m_messages.empty() && (twoBad.m_messages[0].m_type == G::Tone),
+        "First data block with 2 uncorrectable codewords is taken for noise: tone only");
 }
 
 void testBatches()
@@ -431,7 +470,99 @@ void testBatches()
     }
     roundTrip("Extended batch of 20", extended);
     G::EncodeResult encExt = G::encode(extended);
-    check(encExt.m_ok && (encExt.m_slots == 32), "Extended batch uses 32 slots");
+    // Numeric 2 slots, tone 1, alphanumeric 5 (address and 4 blocks): every 6 messages fill
+    // 16 slots exactly, so start codes come before messages 7, 13 and 19, and the last batch
+    // (2 + 1 slots) is filled out to 16: 3 * 16 + 3 + 16
+    check(encExt.m_ok && (encExt.m_slots == 67), "Extended batch of 20: slots of addresses, data blocks, 3 start codes and fill");
+
+    // 20 tone only pages: 16 addresses, the start code as the 17th block, 4 addresses and
+    // 12 fill commas (Motorola extended batch, Figure 6-2)
+    std::vector<G::TxMessage> tones;
+    for (int i = 0; i < 20; i++)
+    {
+        char address[8];
+        std::snprintf(address, sizeof(address), "1006%02d", i);
+        tones.push_back(tx(address, 1 + (i & 3), G::Tone));
+    }
+    roundTrip("Extended batch of 20 tone only pages", tones);
+    G::EncodeResult encTones = G::encode(tones);
+    uint32_t sc = G::golayEncode(G::m_startCode);
+    bool scAt17 = encTones.m_ok && (encTones.m_bits.size() == (size_t) (856 + 121 + 33 * 121))
+        && (G::resolveDuplicated(&encTones.m_bits[856 + 121 + 16 * 121 + 28]) == sc);
+    check(scAt17 && (encTones.m_slots == 33), "Extended batch: start code in the 17th block, no tone comma, 33 slots");
+
+    // Word 1 of the repeated start code damaged into an address Word 1: Word 2 still
+    // identifies the start code
+    std::vector<uint8_t> fakeWord1;
+    G::appendDuplicated(fakeWord1, G::golayEncode(721));
+    std::vector<uint8_t> damagedSc(encTones.m_bits);
+    std::copy(fakeWord1.begin(), fakeWord1.end(), damagedSc.begin() + 856 + 121 + 16 * 121 + 28);
+    check(allMatch(decode(damagedSc, D::Normal, false, 0, 1), tones), "Repeated start code with Word 1 damaged into an address Word 1, found on Word 2");
+
+    // A message started in the batch runs on past the 16th slot, the start code follows it
+    std::vector<G::TxMessage> across;
+    for (int i = 0; i < 15; i++)
+    {
+        char address[8];
+        std::snprintf(address, sizeof(address), "1009%02d", i);
+        across.push_back(tx(address, 1, G::Tone));
+    }
+    across.push_back(tx("100950", 2, G::Alphanumeric, "RUNS PAST THE SIXTEENTH"));
+    across.push_back(tx("100951", 3, G::Tone));
+    roundTrip("Batch with a message running past the 16th slot", across);
+    check(G::encode(across).m_slots == 19 + 1 + 16, "Batch: message to slot 19, start code, then a new batch of 16 slots");
+
+    // Tone only addresses with the 968 bit comma after them, as some encoders send them
+    G::EncodeResult encComma = G::encode({ tx("100123", 1, G::Tone), tx("100456", 2, G::Alphanumeric, "AFTER COMMA") });
+    std::vector<uint8_t> comma;
+    G::appendComma(comma, G::m_toneCommaBits, 1);
+    encComma.m_bits.insert(encComma.m_bits.begin() + 1098, comma.begin(), comma.end());
+    check(allMatch(decode(encComma.m_bits, D::Normal, false, 0, 1), { tx("100123", 1, G::Tone), tx("100456", 2, G::Alphanumeric, "AFTER COMMA") }),
+        "Tone only address followed by a 968 bit comma is decoded");
+
+    // A shorter comma (3 blocks), then a start code and the next address: the comma is
+    // skipped as long as it lasts, not by a fixed length
+    std::vector<G::TxMessage> shortSent = { tx("100123", 1, G::Tone), tx("100456", 2, G::Alphanumeric, "AFTER SHORT COMMA") };
+    G::EncodeResult encShort = G::encode(shortSent);
+    std::vector<uint8_t> shortComma;
+    G::appendComma(shortComma, 3 * G::m_blockBits, 1);
+    uint32_t scWord = G::golayEncode(G::m_startCode);
+    G::appendComma(shortComma, G::m_commaBits, scWord & 1);
+    G::appendDuplicated(shortComma, scWord);
+    shortComma.push_back((uint8_t) (((scWord ^ 0x7fffff) & 1) ^ 1));
+    G::appendDuplicated(shortComma, scWord ^ 0x7fffff);
+    encShort.m_bits.insert(encShort.m_bits.begin() + 1098, shortComma.begin(), shortComma.end());
+    check(allMatch(decode(encShort.m_bits, D::Normal, false, 0, 1), shortSent), "Tone only address, a 3 block comma, a start code and an address");
+
+    // The comma of the address after a tone only address with 1 and 2 bit errors (outcome
+    // only: these blocks are also rejected as data by the damaged block rule)
+    std::vector<G::TxMessage> damaged = { tx("100123", 1, G::Tone), tx("100456", 2, G::Tone), tx("100789", 3, G::Alphanumeric, "HI") };
+    G::EncodeResult encDamaged = G::encode(damaged);
+    std::vector<uint8_t> oneError(encDamaged.m_bits);
+    oneError[1098 + 5] ^= 1;
+    std::vector<uint8_t> twoErrors(oneError);
+    twoErrors[1098 + 17] ^= 1;
+    check(allMatch(decode(oneError, D::Normal, false, 0, 1), damaged) && allMatch(decode(twoErrors, D::Normal, false, 0, 1), damaged),
+        "Address after a tone only address with 1 and 2 bit errors in its comma");
+
+    // Extension with a new preamble and start code after 16 slots (Rep. 900-2 Annex I 2.2)
+    std::vector<G::TxMessage> first16(tones.begin(), tones.begin() + 16);
+    std::vector<G::TxMessage> last4(tones.begin() + 16, tones.end());
+    G::EncodeOptions batchOptions;
+    batchOptions.m_mode = G::Batch;
+    std::vector<uint8_t> withPreamble = G::encode(first16, batchOptions).m_bits;
+    std::vector<uint8_t> second4 = G::encode(last4, batchOptions).m_bits;
+    withPreamble.insert(withPreamble.end(), second4.begin(), second4.end());
+    Decoded dPre = decode(withPreamble, D::Normal, false, 0, 1);
+    check(allMatch(dPre, tones) && (dPre.m_status.m_transmissions == 2), "Extended batch with a new preamble and start code (Rep. 900-2 Annex I 2.2)");
+
+    // Slots of a single page and of a non battery saver page
+    G::EncodeOptions single;
+    single.m_mode = G::Single;
+    G::EncodeOptions nbs;
+    nbs.m_mode = G::NonBatterySaver;
+    check((G::encode({ tx("100123", 1, G::Alphanumeric, "TWO BLOCKS HERE") }, single).m_slots == 3)
+        && (G::encode({ tx("100123", 1, G::Tone) }, nbs).m_slots == 1), "Slots: single page of 2 blocks is 3, non battery saver tone only is 1");
 
     Decoded d = decode(encExt.m_bits, D::Normal, false, 0, 1);
     bool batchFlag = !d.m_messages.empty();
@@ -497,6 +628,12 @@ void testInterpretation()
     check(allMatch(decode(G::encode(letters).m_bits, D::Normal, false, 0, 1), letters), "Numeric letters through the shift nibble");
 
     check(G::escapeControl(std::string("A\r") + "B") == "A<0x0D>B", "Control characters are escaped");
+
+    // Characters outside Table VII are not sent as the spare code
+    G::EncodeResult underscore = G::encode({ tx("100123", 1, G::Alphanumeric, "A_B") });
+    Decoded du = decode(underscore.m_bits, D::Normal, false, 0, 1);
+    check(!du.m_messages.empty() && (G::decodeAlphanumeric(du.m_messages[0].m_rawData, du.m_messages[0].m_rawBits) == "A B"),
+        "Alphanumeric: a character outside the set is sent as space, not as the spare code");
 }
 
 void testStreaming()
@@ -531,6 +668,30 @@ void testStreaming()
     tight.insert(tight.end(), second.begin(), second.end());
     Decoded two2 = decode(tight, D::Normal, false, 0, 1);
     check((two2.m_messages.size() == 2) && matches(two2.m_messages[0], a[0]) && matches(two2.m_messages[1], b[0]), "Two transmissions back to back");
+
+    // Individual transmission mode: a tone only page, then the next preamble at once
+    // (Motorola Figure 6-2)
+    std::vector<G::TxMessage> toneA = { tx("100123", 4, G::Tone) };
+    std::vector<uint8_t> individual = G::encode(toneA).m_bits;
+    individual.insert(individual.end(), second.begin(), second.end());
+    Decoded ind = decode(individual, D::Normal, false, 0, 1);
+    check((ind.m_messages.size() == 2) && matches(ind.m_messages[0], toneA[0]) && matches(ind.m_messages[1], b[0]),
+        "Tone only page followed at once by the preamble of the next transmission");
+
+    // A tone only page followed by noise (the carrier is gone) stays tone only
+    int toneOnly = 0;
+    G::EncodeResult encTone = G::encode(toneA);
+    for (int t = 0; t < 200; t++)
+    {
+        std::vector<uint8_t> noisy = encTone.m_bits;
+        for (int i = 0; i < 2000; i++) {
+            noisy.push_back((uint8_t) (rng() & 1));
+        }
+        Decoded dn = decode(noisy, D::Normal, false, 0, 1);
+        toneOnly += ((dn.m_messages.size() >= 1) && matches(dn.m_messages[0], toneA[0]) && !dn.m_messages[0].m_truncated) ? 1 : 0;
+    }
+    std::printf("      %d/200 tone only pages followed by noise decoded as tone only\n", toneOnly);
+    check(toneOnly >= 190, "Tone only page followed by noise is tone only (not data) in at least 95% of cases");
 
     // Voice and tone only
     roundTrip("Voice", { tx("100123", 3, G::Voice) });
@@ -580,9 +741,9 @@ void testNoFalseLock()
         && !normal.hasMessage() && !inverted.hasMessage() && !nbs.hasMessage(), "No lock on 300000 random bits, a comma and a constant");
 }
 
-// Decodes one alphanumeric message whose start code (first copy) and complement (second copy)
-// get the given numbers of single bit errors and of flipped bit pairs (a flipped pair is an
-// error the duplicated bits cannot reveal)
+// Decodes one alphanumeric message whose start code Word 1 and Word 2 get the given numbers
+// of single symbol errors (the first symbol of a pair: with hard symbols the pair sums to
+// zero and the first symbol decides, so it is a bit error) and of flipped symbol pairs
 bool startCodeReceived(int singles1, int pairs1, int singles2, int pairs2)
 {
     G::TxMessage message;
@@ -643,7 +804,8 @@ bool startCodeReceived(int singles1, int pairs1, int singles2, int pairs2)
 void testStartCodeCopies()
 {
     check(startCodeReceived(0, 0, 0, 0), "Start code: clean Word 1 and Word 2");
-    check(startCodeReceived(0, 3, 0, 3), "Start code: 3 undetectable errors in each word, both decode");
+    check(startCodeReceived(0, 3, 0, 3), "Start code: 3 flipped pairs in each word, both decode");
+    check(startCodeReceived(3, 0, 0, 8), "Start code: 3 first symbol errors in Word 1, Word 2 destroyed, detected on Word 1");
     check(startCodeReceived(0, 0, 0, 8), "Start code: Word 2 destroyed (8 flipped pairs), detected on Word 1 alone");
     check(startCodeReceived(0, 8, 0, 0), "Start code: Word 1 destroyed (8 flipped pairs), detected on Word 2 alone");
     check(!startCodeReceived(0, 4, 0, 4), "Start code: both words beyond their code (4 flipped pairs each), rejected");
@@ -741,16 +903,16 @@ void testCharacterSets()
 // Preamble, start code and address of a page (all 300 bit/s words) received through
 // Gaussian noise, decided on the first symbol of each bit (hard) and on the sum of both
 // symbols (soft)
-void testSoftDecisions()
+// Pages decoded of trials, hard and soft, at a symbol noise level
+void softTrials(float sigma, int trials, int& hardOk, int& softOk)
 {
-    const int trials = 200;
-    const float sigma = 0.8f;
-    int hardOk = 0;
-    int softOk = 0;
     std::mt19937 rng(17);
     std::normal_distribution<float> gauss(0.0f, sigma);
     std::vector<G::TxMessage> sent = { tx("100123", 2, G::Tone) };
     G::EncodeResult enc = G::encode(sent);
+
+    hardOk = 0;
+    softOk = 0;
 
     for (int t = 0; t < trials; t++)
     {
@@ -787,8 +949,22 @@ void testSoftDecisions()
         hardOk += addressFound(dh) ? 1 : 0;
         softOk += addressFound(ds) ? 1 : 0;
     }
+}
 
-    std::printf("      symbol noise sigma %.1f: %d/%d hard, %d/%d soft\n", sigma, hardOk, trials, softOk, trials);
+void testSoftDecisions()
+{
+    const int trials = 200;
+    int hardOk, softOk;
+    std::mt19937 rng(19);
+
+    for (float sigma : { 1.0f, 1.2f })
+    {
+        softTrials(sigma, trials, hardOk, softOk);
+        std::printf("      symbol noise sigma %.1f: %d/%d hard, %d/%d soft\n", sigma, hardOk, trials, softOk, trials);
+    }
+
+    softTrials(0.8f, trials, hardOk, softOk);
+    std::printf("      symbol noise sigma 0.8: %d/%d hard, %d/%d soft\n", hardOk, trials, softOk, trials);
     check(softOk > hardOk + trials / 4, "300 bit/s words decided on the sum of both soft symbols decode more pages than on one symbol");
 
     // Soft commas sum to noise: the fill commas of a batch and the noise after it never
@@ -816,6 +992,31 @@ void testSoftDecisions()
         exact += allMatch(out, batch) ? 1 : 0;
     }
     check(exact == 200, "Soft symbols: 200 noisy batches give exactly their messages, nothing from the fill commas or the noise after");
+
+    // Strong noise: count addresses that were never sent
+    std::normal_distribution<float> strong(0.0f, 1.0f);
+    int falseAddresses = 0;
+    for (int t = 0; t < 500; t++)
+    {
+        D d(D::Normal);
+        for (uint8_t b : encBatch.m_bits) {
+            d.feedSoft((b ? 1.0f : -1.0f) + strong(rng));
+        }
+        for (int i = 0; i < 2000; i++) {
+            d.feedSoft(((rng() & 1) ? 1.0f : -1.0f) + strong(rng));
+        }
+        d.flush();
+        while (d.hasMessage())
+        {
+            D::Message m = d.takeMessage();
+            bool known = false;
+            for (const G::TxMessage& s : batch) {
+                known = known || (m.m_address.substr(1) == s.m_address.substr(1));
+            }
+            falseAddresses += known ? 0 : 1;
+        }
+    }
+    std::printf("      symbol noise sigma 1.0: %d addresses never sent in 500 batches\n", falseAddresses);
 }
 
 // FM discriminator output for a bit stream, binary 1 = positive deviation, between random symbols

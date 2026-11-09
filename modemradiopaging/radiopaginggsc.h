@@ -30,18 +30,23 @@
 // is sent twice, so a Golay(23,12) codeword takes 46 symbols (bit 0 first, data in
 // bits 11-0 and check bits in bits 22-12). A comma is a run of alternating bits.
 //
-// Transmission (battery saver mode):
+// Transmission (battery saver mode), see ITU-R Rep. 900-2 Annex I 2 and the Motorola GSC
+// manual, Figure 6-2 (batch and extended batch operation):
 //   comma of 28 bits, 18 codewords of the preamble value
 //   comma of 28 bits, start code, 1 bit, complement of the start code
 //   per message: comma of 28 bits, word 1, 1 bit, word 2, then
-//     tone only      comma of 968 bits
+//     tone only      nothing, the next address follows at once
 //     voice          comma of 28 bits, activation code, 1 bit, complement of the activation
 //                    code (voice audio follows)
 //     data           one or more blocks of 1 + 120 bits
 // The 10 preamble values are selected by (index digit + group digit 0) mod 10. In batch
-// mode the preamble codewords are complemented. A batch holds 16 messages (unused slots
-// are filled with commas of 121 bits); in an extended batch of up to 32 messages the start
-// code is repeated before the 17th message.
+// mode the preamble codewords are complemented. Addresses, data blocks and start codes are
+// all 121 bits, the slots of a batch. A batch holds 16 slots after its start code, unused
+// slots are filled with commas of 121 bits. A message started in a batch runs on to its
+// end; the next address then extends the batch with the start code as the next slot,
+// without a new preamble (Motorola extended batch mode; Rep. 900-2 Annex I 2.2 asks for a
+// new preamble instead, the decoder accepts both). Tone only addresses interleaved into
+// the alert time of a voice page (Motorola GSC manual, Figure 6-1) are not sent.
 //
 // Word 1 selects two digits of the address (the table has 50 entries, the second word
 // carries a +50 offset for groups 50-99), word 2 the last three digits. The address
@@ -56,8 +61,10 @@
 // (Null/EOM) and numeric messages with 0xa (Null). Whether a block holds alphanumeric or
 // numeric characters is not signalled.
 //
-// Character sets: alphanumeric 0x00-0x3d are ASCII 0x20-0x5d with 0x3c as CR/LF, shown in
-// upper case as on the pagers' displays; 0x3f is a spare code. Numeric 0-9 are digits,
+// Character sets (Rep. 900-2 Annex I Table VII): alphanumeric 0x00-0x1f are ASCII
+// 0x20-0x3f, 0x20 is \, 0x21-0x3a are the letters, 0x3b {, 0x3c CR/LF, 0x3d }, 0x3e
+// Null/EOM and 0x3f a spare code. The table lists the letters in lower case; they are
+// given in upper case, as GSC pagers display them. Numeric 0-9 are digits,
 // 0xa Null, 0xb U, 0xc space, 0xd -, 0xe the triple bar (U+2261, given in UTF-8) and 0xf
 // shifts the next nibble to the set A B C D E space F G H J Null L N P R spare. A pager
 // without the shifted set shows 0xf as E, so a shift not followed by a character is E.
@@ -75,13 +82,13 @@ public:
     static const int m_codewordBits = 46;               //!< Duplicated Golay codeword
     static const int m_preambleCodewords = 18;
     static const int m_blockBits = 121;                 //!< 1 bit + 120 interleaved bits
-    static const int m_toneCommaBits = 968;
+    static const int m_toneCommaBits = 968;             //!< Longest comma after a tone only address skipped by the decoder (not sent by the encoder)
     static const int m_slotBits = 121;                  //!< Comma filling an unused batch slot
     static const int m_payloadBitsPerBlock = 48;
     static const int m_maxBlocks = 32;
     static const int m_maxMessageBits = 48 * 32;
-    static const int m_batchSlots = 16;
-    static const int m_extendedBatchSlots = 32;
+    static const int m_batchSlots = 16;                 //!< Slots of 121 bits after a start code
+    static const int m_maxBatchMessages = 32;           //!< Messages in a batch, at most
     static const int m_nonBatterySaverBits = 752;       //!< Preamble of repeating 1100
 
     enum MessageType {
@@ -95,8 +102,8 @@ public:
     enum Mode {
         Auto,               //!< Single for one message, otherwise Batch
         Single,             //!< One message after its own preamble
-        Batch,              //!< Complemented preamble, 16 slots, 32 if more than 16 messages
-        NonBatterySaver     //!< One message after a 1100 pattern, no codeword preamble or start code
+        Batch,              //!< Complemented preamble, 16 slots after each start code, extended as needed
+        NonBatterySaver     //!< One message after a 1100 pattern, no codeword preamble or start code (Rep. 900-2 Annex I 2.5)
     };
 
     struct TxMessage
@@ -104,7 +111,7 @@ public:
         std::string m_address;      //!< 6 digits: index, group, 3 address digits
         int m_addressNumber = 1;    //!< 1-4
         MessageType m_type = Alphanumeric;
-        std::string m_text;         //!< Numeric: 0-9 A-H J L N P R U space - and the triple bar (UTF-8 U+2261, also = or *)  Alphanumeric: upper case ASCII
+        std::string m_text;         //!< Numeric: 0-9 A-H J L N P R U space - and the triple bar (UTF-8 U+2261, also = or *)  Alphanumeric: ASCII 0x20-0x5d, letters of either case, @ [ ] sent as \ { }, others as space
     };
 
     struct EncodeOptions
@@ -118,7 +125,7 @@ public:
         std::string m_error;
         std::vector<uint8_t> m_bits;    //!< One bit per element in transmission order, 1 = positive deviation
         int m_preamble = -1;            //!< Preamble value index used, -1 if none
-        int m_slots = 0;                //!< Batch slots in use (16 or 32 for a batch, else the number of messages)
+        int m_slots = 0;                //!< 121 bit blocks after the first start code (or the 1100 pattern)
     };
 
     struct GolayResult

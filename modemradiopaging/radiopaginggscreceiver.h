@@ -70,6 +70,7 @@ private:
     std::deque<RadioPagingGscDecoder::Message> m_messages;
 
     void collect();
+    bool isLocked() const;
 };
 
 #endif // MODEMRADIOPAGING_RADIOPAGINGGSCRECEIVER_H
