@@ -107,6 +107,8 @@ public:
     static const int m_minNonBatterySaverBits = 80;     //!< Bits of the 1100 pattern before the lock
     static const int m_maxStartSearchBits = 1000;       //!< Bits searched for the start code after the lock
     static const int m_syncHits = 3;
+    //!< Bit errors allowed over the 92 bits of start code and complement when one copy does not decode
+    static const int m_maxStartCodeErrors = 12;
 
 private:
     enum Parse {
@@ -155,6 +157,7 @@ private:
     void startNonBatterySaver();
     void endTransmission(bool truncated);
     void process();
+    int startCodeErrors(int offset) const;
     bool processSeekStart();
     bool processSeekAddress();
     bool processNext();

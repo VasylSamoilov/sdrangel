@@ -578,11 +578,81 @@ void testNoFalseLock()
         && !normal.hasMessage() && !inverted.hasMessage() && !nbs.hasMessage(), "No lock on 300000 random bits, a comma and a constant");
 }
 
+// Decodes one alphanumeric message whose start code (first copy) and complement (second copy)
+// get the given numbers of single bit errors and of flipped bit pairs (a flipped pair is an
+// error the duplicated bits cannot reveal)
+bool startCodeReceived(int singles1, int pairs1, int singles2, int pairs2)
+{
+    G::TxMessage message;
+    message.m_address = "123456";
+    message.m_type = G::Alphanumeric;
+    message.m_text = "START";
+    G::EncodeOptions options;
+    options.m_mode = G::Single;
+    G::EncodeResult result = G::encode({message}, options);
+    std::vector<uint8_t> bits = result.m_bits;
+
+    // Locate the start code: 46 bits of the duplicated codeword of the start code value
+    uint32_t start = G::golayEncode(G::m_startCode);
+    int offset = -1;
+    for (int o = 0; (o + 46 <= (int) bits.size()) && (offset < 0); o++)
+    {
+        bool match = true;
+        for (int i = 0; (i < 23) && match; i++) {
+            match = (bits[o + 2 * i] == ((start >> i) & 1)) && (bits[o + 2 * i + 1] == ((start >> i) & 1));
+        }
+        if (match) {
+            offset = o;
+        }
+    }
+    if (offset < 0) {
+        return false;
+    }
+
+    auto damage = [&](int base, int singles, int pairs) {
+        for (int i = 0; i < singles; i++) {
+            bits[base + 2 * (i * 5 % 23)] ^= 1;
+        }
+        for (int i = 0; i < pairs; i++)
+        {
+            int p = (i * 7 + 3) % 23;
+            bits[base + 2 * p] ^= 1;
+            bits[base + 2 * p + 1] ^= 1;
+        }
+    };
+    damage(offset, singles1, pairs1);
+    damage(offset + 47, singles2, pairs2);
+
+    D decoder(D::Normal);
+    for (uint8_t b : bits) {
+        decoder.feed(b);
+    }
+    decoder.flush();
+
+    bool found = false;
+    while (decoder.hasMessage())
+    {
+        D::Message m = decoder.takeMessage();
+        found = found || (m.m_address == "123456");
+    }
+    return found;
+}
+
+void testStartCodeCopies()
+{
+    check(startCodeReceived(0, 0, 0, 0), "Start code: clean start code and complement");
+    check(startCodeReceived(0, 3, 0, 3), "Start code: 3 undetectable errors in each copy, both decode");
+    check(startCodeReceived(2, 0, 0, 4), "Start code: complement beyond its code (4 flipped pairs), 10 bit errors in total over both copies, accepted");
+    check(startCodeReceived(0, 4, 3, 0), "Start code: start code beyond its code (4 flipped pairs), 11 bit errors in total, accepted");
+    check(!startCodeReceived(0, 4, 0, 4), "Start code: both copies beyond their code (16 bit errors in total), rejected");
+}
+
 } // namespace
 
 int main()
 {
     testCodes();
+    testStartCodeCopies();
     testAddresses();
     testStreaming();
     testErrors();

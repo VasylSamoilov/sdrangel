@@ -22,6 +22,7 @@
 const int RadioPagingGscDecoder::m_minNonBatterySaverBits;
 const int RadioPagingGscDecoder::m_maxStartSearchBits;
 const int RadioPagingGscDecoder::m_syncHits;
+const int RadioPagingGscDecoder::m_maxStartCodeErrors;
 
 namespace {
 
@@ -315,24 +316,48 @@ void RadioPagingGscDecoder::trim()
     }
 }
 
-// The start code and, 47 bits later, its complement, at any bit offset
+// Bit errors of the 92 received bits of start code and complement (each codeword bit sent
+// twice) against what is transmitted, for the start code at the given bit offset
+int RadioPagingGscDecoder::startCodeErrors(int offset) const
+{
+    static const uint32_t start = RadioPagingGsc::golayEncode(RadioPagingGsc::m_startCode);
+    static const uint32_t complement = start ^ 0x7fffff;
+    int errors = 0;
+
+    for (int i = 0; i < 23; i++)
+    {
+        int bit = (start >> i) & 1;
+        errors += (m_buf[offset + 2 * i] != bit) + (m_buf[offset + 2 * i + 1] != bit);
+    }
+
+    int second = offset + codewordBits + 1;
+
+    for (int i = 0; i < 23; i++)
+    {
+        int bit = (complement >> i) & 1;
+        errors += (m_buf[second + 2 * i] != bit) + (m_buf[second + 2 * i + 1] != bit);
+    }
+
+    return errors;
+}
+
+// The start code and, 47 bits later, its complement, at any bit offset. Accepted when both
+// copies decode, or when the two copies together have at most m_maxStartCodeErrors bit
+// errors over their 92 bits (one copy may then be beyond what its own code corrects)
 bool RadioPagingGscDecoder::processSeekStart()
 {
     while (m_scan + 2 * codewordBits + 1 <= (int) m_buf.size())
     {
         RadioPagingGsc::GolayResult a = RadioPagingGsc::golayDecode(RadioPagingGsc::resolveDuplicated(&m_buf[m_scan]));
+        RadioPagingGsc::GolayResult b = RadioPagingGsc::golayDecode(RadioPagingGsc::resolveDuplicated(&m_buf[m_scan + codewordBits + 1]));
+        bool bothDecode = (a.m_data == RadioPagingGsc::m_startCode) && (b.m_data == (RadioPagingGsc::m_startCode ^ 0xfff));
 
-        if (a.m_data == RadioPagingGsc::m_startCode)
+        if (bothDecode || (startCodeErrors(m_scan) <= m_maxStartCodeErrors))
         {
-            RadioPagingGsc::GolayResult b = RadioPagingGsc::golayDecode(RadioPagingGsc::resolveDuplicated(&m_buf[m_scan + codewordBits + 1]));
-
-            if (b.m_data == (RadioPagingGsc::m_startCode ^ 0xfff))
-            {
-                m_pos = m_scan + 2 * codewordBits + 1;
-                m_state = InTransmission;
-                m_parse = Next;
-                return true;
-            }
+            m_pos = m_scan + 2 * codewordBits + 1;
+            m_state = InTransmission;
+            m_parse = Next;
+            return true;
         }
 
         if (++m_scan > m_maxStartSearchBits)
