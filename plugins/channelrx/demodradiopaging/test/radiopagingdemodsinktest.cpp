@@ -61,13 +61,14 @@ struct Modulator
 {
     double m_phase = 0.0;
     float m_smoothed = 0.0f;
+    double m_offset = 0.0;              //!< Carrier frequency offset, Hz
     std::mt19937 m_rng{3};
     std::normal_distribution<float> m_noise{0.0f, 0.05f};
     SampleVector m_samples;
 
     void sample(double frequency)
     {
-        m_phase += 2.0 * M_PI * frequency / sampleRate;
+        m_phase += 2.0 * M_PI * (frequency + m_offset) / sampleRate;
         double a = 0.5 * SDR_RX_SCALED;
         m_samples.push_back(Sample(
             (FixReal) (a * (std::cos(m_phase) + m_noise(m_rng))),
@@ -199,6 +200,74 @@ RadioPagingGsc::TxMessage gsc(const char *address, int number, RadioPagingGsc::M
     m.m_type = type;
     m.m_text = text;
     return m;
+}
+
+// Pages of every protocol received with a carrier frequency offset (transmitter and receiver
+// oscillators): records received per protocol at a channel bandwidth
+std::vector<int> receiveWithOffset(double offset, float rfBandwidth)
+{
+    Modulator mod;
+    std::set<std::string> sent;
+
+    mod.m_offset = offset;
+    mod.noise(3000);
+    addPocsag(mod, sent, 1200, 1234567, "POCSAG WITH A FREQUENCY OFFSET", false);
+    addPocsag(mod, sent, 2400, 2000001, "POCSAG 2400 OFFSET", false);
+    addFlex(mod, sent, RadioPagingFlex::Mode1600_2, { 123456 });
+    addFlex(mod, sent, RadioPagingFlex::Mode6400_4, { 345678 });
+    addGsc(mod, sent, { gsc("100123", 3, RadioPagingGsc::Alphanumeric, "GSC OFFSET") });
+
+    MessageQueue queue;
+    RadioPagingDemodSink sink;
+    RadioPagingDemodSettings settings;
+    settings.m_rfBandwidth = rfBandwidth;
+    sink.setMessageQueueToChannel(&queue);
+    sink.applyChannelSettings((int) sampleRate, 0, true);
+    sink.applySettings(QStringList(), settings, true);
+
+    for (size_t i = 0; i < mod.m_samples.size(); i += 4096)
+    {
+        size_t end = std::min(mod.m_samples.size(), i + 4096);
+        sink.feed(mod.m_samples.begin() + i, mod.m_samples.begin() + end);
+    }
+
+    std::vector<int> received(3, 0);
+    Message *message;
+
+    while ((message = queue.pop()))
+    {
+        if (MainCore::MsgMessageRecord::match(*message))
+        {
+            const MessageRecord& r = ((MainCore::MsgMessageRecord *) message)->getRecord();
+            if (sent.count(key(r.m_protocol.toStdString(), r.m_mode.toStdString(), r.m_address.toStdString(),
+                r.m_polarity == MessageRecord::PolarityInverted)))
+            {
+                received[(r.m_protocol == "pocsag") ? 0 : (r.m_protocol == "flex") ? 1 : 2]++;
+            }
+        }
+        delete message;
+    }
+
+    return received;
+}
+
+void testFrequencyOffset()
+{
+    const double offsets[] = {0.0, 1000.0, -1000.0, 2000.0, -2000.0, 3000.0, -3000.0};
+
+    for (float bandwidth : {16000.0f, 20000.0f})
+    {
+        for (double offset : offsets)
+        {
+            std::vector<int> r = receiveWithOffset(offset, bandwidth);
+            std::printf("      %5.0f Hz bandwidth, %+5.0f Hz offset: POCSAG %d/2 FLEX %d/2 GSC %d/1\n",
+                bandwidth, offset, r[0], r[1], r[2]);
+            if ((bandwidth == 20000.0f) && (std::fabs(offset) <= 2000.0)) {
+                check((r[0] == 2) && (r[1] == 2) && (r[2] == 1), "Pages are received with a "
+                    + std::to_string((int) offset) + " Hz offset at a 20 kHz channel bandwidth");
+            }
+        }
+    }
 }
 
 // GSC voice page, a voice tone, then the turn-off word if wanted
@@ -389,6 +458,7 @@ int main()
     check((status.m_messages[0] == 4) && (status.m_messages[1] == 3) && (status.m_messages[2] == 4), "Status counts the records per protocol");
 
     testVoiceAudio();
+    testFrequencyOffset();
 
     std::printf("%d passed, %d failed\n", passes, failures);
     return failures ? 1 : 0;

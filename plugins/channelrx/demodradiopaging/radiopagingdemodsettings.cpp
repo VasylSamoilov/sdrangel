@@ -46,7 +46,7 @@ RadioPagingDemodSettings::RadioPagingDemodSettings() :
 void RadioPagingDemodSettings::resetToDefaults()
 {
     m_inputFrequencyOffset = 0;
-    m_rfBandwidth = 16000.0f;
+    m_rfBandwidth = 20000.0f;           // FLEX 16 kHz and room for the oscillator offsets
     m_pocsagEnabled = true;
     m_pocsagDeviation = 4500.0f;
     m_flexEnabled = true;
@@ -128,7 +128,7 @@ bool RadioPagingDemodSettings::deserialize(const QByteArray& data)
         uint32_t utmp;
 
         d.readS32(1, &m_inputFrequencyOffset, 0);
-        d.readFloat(2, &m_rfBandwidth, 16000.0f);
+        d.readFloat(2, &m_rfBandwidth, 20000.0f);
         d.readBool(3, &m_pocsagEnabled, true);
         d.readFloat(4, &m_pocsagDeviation, 4500.0f);
         d.readBool(5, &m_flexEnabled, true);
