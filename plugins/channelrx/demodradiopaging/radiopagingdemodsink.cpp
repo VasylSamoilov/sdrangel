@@ -41,6 +41,8 @@ const int statusPeriodSamples = RadioPagingDemodSettings::m_channelSampleRate / 
 const double voiceCutoff = 3000.0;      // Hz, upper edge of the voice band
 const Real dcBlockPole = 0.995f;        // About 30 Hz at 38400 Hz
 const int audioBufferSize = 1 << 12;
+const double huntCentreDecay = 0.967216;    // exp(-1 s / 30 s), per second
+const double narrowResidual = 300.0;        // Hz: a leg is narrowed once a measurement is this close
 
 enum Protocol {
     ProtocolPocsag,
@@ -50,26 +52,134 @@ enum Protocol {
 
 } // namespace
 
-void RadioPagingDemodSink::Leg::create(double bandwidth, double channelBandwidth, double deviation)
+void RadioPagingDemodSink::Leg::create(double huntBandwidth, double trackBandwidth, double channelBandwidth, double deviation)
 {
-    m_filtered = bandwidth < channelBandwidth;
-
-    if (m_filtered) {
-        m_filter.create(legFilterTaps, RadioPagingDemodSettings::m_channelSampleRate, bandwidth / 2.0);
-    }
+    m_huntBandwidth = std::min(huntBandwidth, channelBandwidth);
+    m_trackBandwidth = std::min(trackBandwidth, channelBandwidth);
+    m_deviation = deviation;
+    m_maxShift = std::max(0.0, (channelBandwidth - trackBandwidth) / 2.0);
+    m_filter.create(legFilterTaps, RadioPagingDemodSettings::m_channelSampleRate,
+        (m_tracking ? m_trackBandwidth : m_huntBandwidth) / 2.0);
 
     // Outer deviation gives +/-1
     m_discri.setFMScaling(RadioPagingDemodSettings::m_channelSampleRate / (2.0 * deviation));
     m_discri.reset();
 }
 
+void RadioPagingDemodSink::Leg::setTracking(bool tracking)
+{
+    if (tracking != m_tracking)
+    {
+        m_tracking = tracking;
+        m_filter.retune(legFilterTaps, RadioPagingDemodSettings::m_channelSampleRate,
+            (m_tracking ? m_trackBandwidth : m_huntBandwidth) / 2.0);
+    }
+}
+
+void RadioPagingDemodSink::Leg::setShift(double shift)
+{
+    shift = std::max(-m_maxShift, std::min(m_maxShift, shift));
+
+    if (shift == m_shift) {
+        return;
+    }
+
+    // The discriminator output moves by the change once the samples shifted before the
+    // filter come out of it (its delay)
+    m_pendingDelta += (float) (-(shift - m_shift) / m_deviation);
+    m_pendingSamples = legFilterTaps / 2;
+    m_shift = shift;
+    m_nco.setFreq((Real) -m_shift, (Real) RadioPagingDemodSettings::m_channelSampleRate);
+}
+
+bool RadioPagingDemodSink::Leg::takeHandover(float& delta)
+{
+    if ((m_pendingSamples > 0) || (m_pendingDelta == 0.0f)) {
+        return false;
+    }
+
+    delta = m_pendingDelta;
+    m_pendingDelta = 0.0f;
+    return true;
+}
+
 Real RadioPagingDemodSink::Leg::demod(const Complex& sample)
 {
     double magsq;
     Real fmDev;
-    Complex c = m_filtered ? m_filter.filter(sample) : sample;
+    Complex c = (m_shift != 0.0) ? sample * m_nco.nextIQ() : sample;
 
-    return m_discri.phaseDiscriminatorDelta(c, magsq, fmDev);
+    if (m_pendingSamples > 0) {
+        m_pendingSamples--;
+    }
+
+    return m_discri.phaseDiscriminatorDelta(m_filter.filter(c), magsq, fmDev);
+}
+
+// The residual offset measured by a receiver moves the leg onto the carrier and narrows it
+void RadioPagingDemodSink::legMeasured(Leg& leg, int protocol, float dc)
+{
+    if (!RadioPagingDemodSettings::m_legAfc) {
+        return;
+    }
+
+    if (leg.m_fits == 0)
+    {
+        leg.m_messagesAtStart = m_status.m_messages[protocol];
+        leg.m_framesAtStart = (protocol == ProtocolFlex) ? m_flex.getStatus().m_frames : 0;
+    }
+
+    // Near the noise threshold a signal cut by the filter on one side is measured too close
+    // to the filter centre: the leg is narrowed only once the carrier is on its centre (a
+    // small residual), before that it is only moved. GSC has too few known patterns for one
+    // measurement to place the carrier closely at a low signal to noise ratio: its receiving
+    // leg keeps the offset room and is narrowed at the first measurement
+    double residual = dc * leg.m_deviation;
+
+    leg.m_fits++;
+    leg.setShift(leg.m_shift + residual);
+
+    if ((protocol == ProtocolGsc) || (std::fabs(residual) < narrowResidual)) {
+        leg.setTracking(true);
+    }
+}
+
+// The correction of a transmission that was really received (messages, or measured more than
+// once, or a FLEX frame decoded) becomes the hunting centre; otherwise the previous one stays
+void RadioPagingDemodSink::legReleased(Leg& leg, int protocol, bool confirmed)
+{
+    if (leg.m_fits == 0) {
+        return;
+    }
+
+    confirmed = confirmed || (leg.m_fits >= 2) || (m_status.m_messages[protocol] > leg.m_messagesAtStart);
+
+    if (confirmed) {
+        leg.m_huntCentre = leg.m_shift;
+    }
+    leg.m_fits = 0;
+    leg.setTracking(false);
+    leg.setShift(leg.m_huntCentre);
+}
+
+// Every second: the hunting centres decay to 0 (time constant 30 s), so a wrong or old
+// correction does not stay
+void RadioPagingDemodSink::decayHuntCentres()
+{
+    for (Leg *leg : {&m_pocsagLeg, &m_flexLeg, &m_gscLeg})
+    {
+        // Only while hunting: a transmission being received (measured at least once) keeps
+        // its correction
+        if ((leg->m_fits > 0) || (leg->m_huntCentre == 0.0)) {
+            continue;
+        }
+
+        leg->m_huntCentre *= huntCentreDecay;
+        if (std::fabs(leg->m_huntCentre) < 10.0) {
+            leg->m_huntCentre = 0.0;
+        }
+        leg->setShift(leg->m_huntCentre);
+    }
 }
 
 RadioPagingDemodSink::RadioPagingDemodSink() :
@@ -152,10 +262,15 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
     }
     m_magsqCount++;
 
-    // A protocol that is on is decoded at every speed, mode and polarity
+    // A protocol that is on is decoded at every speed, mode and polarity. After each sample
+    // the legs follow the carrier offsets the receivers measure (see Leg)
+    float dc;
+    float delta;
+
     if (m_settings.m_pocsagEnabled)
     {
         Real fm = m_pocsagLeg.demod(ci);
+        bool synced = false;
 
         for (int i = 0; i < RadioPagingDemodSettings::m_nbPocsagSpeeds; i++)
         {
@@ -163,6 +278,20 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
 
             while (m_pocsag[i].hasMessage()) {
                 sendPocsag(m_pocsag[i].takeMessage(), RadioPagingDemodSettings::m_pocsagSpeeds[i]);
+            }
+            if (m_pocsag[i].takeLevelsMeasured(dc)) {
+                legMeasured(m_pocsagLeg, ProtocolPocsag, dc);
+            }
+            synced = synced || m_pocsag[i].isSynced();
+        }
+
+        if (!synced) {
+            legReleased(m_pocsagLeg, ProtocolPocsag, false);
+        }
+        if (m_pocsagLeg.takeHandover(delta))
+        {
+            for (auto& pocsag : m_pocsag) {
+                pocsag.offsetLevels(delta);
             }
         }
     }
@@ -174,6 +303,15 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
         while (m_flex.hasMessage()) {
             sendFlex(m_flex.takeMessage());
         }
+        if (m_flex.takeLevelsMeasured(dc)) {
+            legMeasured(m_flexLeg, ProtocolFlex, dc);
+        }
+        if (m_flex.isHunting() && m_flexLeg.m_tracking) {
+            legReleased(m_flexLeg, ProtocolFlex, m_flex.getStatus().m_frames > m_flexLeg.m_framesAtStart);
+        }
+        if (m_flexLeg.takeHandover(delta)) {
+            m_flex.offsetLevels(delta);
+        }
     }
 
     if (m_settings.m_gscEnabled)
@@ -183,6 +321,15 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
 
         while (m_gsc.hasMessage()) {
             sendGsc(m_gsc.takeMessage());
+        }
+        if (m_gsc.takeLevelsMeasured(dc)) {
+            legMeasured(m_gscLeg, ProtocolGsc, dc);
+        }
+        if (!m_gsc.locked()) {
+            legReleased(m_gscLeg, ProtocolGsc, false);
+        }
+        if (m_gscLeg.takeHandover(delta)) {
+            m_gsc.offsetLevels(delta);
         }
 
         if (m_settings.m_gscAudio) {
@@ -194,6 +341,12 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
     {
         m_statusCount = 0;
         updateStatus();
+
+        if (++m_afcCount >= 10)
+        {
+            m_afcCount = 0;
+            decayHuntCentres();
+        }
     }
 }
 
@@ -364,14 +517,20 @@ void RadioPagingDemodSink::applyLegs()
 {
     double channel = m_settings.m_rfBandwidth;
 
-    m_pocsagLeg.create(m_settings.pocsagBandwidth(), channel, m_settings.m_pocsagDeviation);
-    m_flexLeg.create(m_settings.flexBandwidth(), channel, m_settings.m_flexDeviation);
-    m_gscLeg.create(m_settings.gscBandwidth(), channel, m_settings.m_gscDeviation);
+    // Following the carrier, the legs hunt at the channel width; otherwise at Carson and the
+    // offset room
+    bool afc = RadioPagingDemodSettings::m_legAfc;
 
-    qDebug() << "RadioPagingDemodSink::applyLegs:"
-        << "POCSAG" << m_settings.pocsagBandwidth() << (m_pocsagLeg.m_filtered ? "filtered" : "channel filter")
-        << "FLEX" << m_settings.flexBandwidth() << (m_flexLeg.m_filtered ? "filtered" : "channel filter")
-        << "GSC" << m_settings.gscBandwidth() << (m_gscLeg.m_filtered ? "filtered" : "channel filter");
+    m_pocsagLeg.create(afc ? channel : m_settings.pocsagBandwidth(), m_settings.pocsagCarson(), channel, m_settings.m_pocsagDeviation);
+    m_flexLeg.create(afc ? channel : m_settings.flexBandwidth(), m_settings.flexCarson(), channel, m_settings.m_flexDeviation);
+    // GSC receives with the offset room: one measurement may place its carrier that far off
+    m_gscLeg.create(afc ? channel : m_settings.gscBandwidth(), afc ? m_settings.gscBandwidth() : m_settings.gscCarson(),
+        channel, m_settings.m_gscDeviation);
+
+    qDebug() << "RadioPagingDemodSink::applyLegs: hunting / receiving"
+        << "POCSAG" << m_pocsagLeg.m_huntBandwidth << m_pocsagLeg.m_trackBandwidth
+        << "FLEX" << m_flexLeg.m_huntBandwidth << m_flexLeg.m_trackBandwidth
+        << "GSC" << m_gscLeg.m_huntBandwidth << m_gscLeg.m_trackBandwidth;
 }
 
 RadioPagingDemodSink::Status RadioPagingDemodSink::getStatus() const
@@ -400,6 +559,10 @@ void RadioPagingDemodSink::updateStatus()
             if (ber.valid()) {
                 m_lastBer[0] = ber;
             }
+            // The carrier offset: the correction of the leg and what is left at the
+            // discriminator (+/-1 at the deviation)
+            m_lastOffset[0] = m_pocsagLeg.m_shift + s.m_dc * m_settings.m_pocsagDeviation;
+            m_lastOffsetValid[0] = true;
             m_lastPocsagBatches = inverted && !normal ? s.m_inverted.m_batches : s.m_normal.m_batches;
         }
     }
@@ -413,6 +576,11 @@ void RadioPagingDemodSink::updateStatus()
     status.m_flexQuality = flex.m_quality;
     if (status.m_flexSync && flex.m_ber.valid()) {
         m_lastBer[1] = flex.m_ber;
+    }
+    if (status.m_flexSync)
+    {
+        m_lastOffset[1] = m_flexLeg.m_shift + flex.m_dc * m_settings.m_flexDeviation;
+        m_lastOffsetValid[1] = true;
     }
     status.m_flexFrame = flex.m_frameReport;
     status.m_flexTime = flex.m_networkTime;
@@ -434,6 +602,8 @@ void RadioPagingDemodSink::updateStatus()
         if (ber.valid()) {
             m_lastBer[2] = ber;
         }
+        m_lastOffset[2] = m_gscLeg.m_shift + gsc.m_dc * m_settings.m_gscDeviation;
+        m_lastOffsetValid[2] = true;
     }
 
     bool sync[3] = { pocsagSync, status.m_flexSync, status.m_gscSync };
@@ -442,6 +612,8 @@ void RadioPagingDemodSink::updateStatus()
     {
         status.m_ber[p] = m_lastBer[p];
         status.m_berLive[p] = sync[p] && m_lastBer[p].valid();
+        status.m_offset[p] = m_lastOffset[p];
+        status.m_offsetValid[p] = m_lastOffsetValid[p];
     }
     status.m_gscVoice = (gsc.m_normal.m_state == RadioPagingGscDecoder::Voice) || (gsc.m_inverted.m_state == RadioPagingGscDecoder::Voice);
     status.m_gscInverted = gscInverted && !gscNormal;

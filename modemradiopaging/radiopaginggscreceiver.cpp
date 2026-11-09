@@ -77,14 +77,48 @@ void RadioPagingGscReceiver::process(float sample)
         m_inverted.feedSoft(symbol.m_soft);
     }
 
+    // DC offset and deviation are measured on the known patterns the decoders recognise (the
+    // preamble words that locked, each start code, the non battery saver pattern) and held
+    // while a transmission is decoded, through the voice message too. Hunting, they follow
+    // the means of the preamble or carrier
+    RadioPagingGscDecoder::KnownPattern pattern;
+
+    while (m_normalEnabled && m_normal.takeKnownPattern(pattern)) {
+        fitKnown(pattern);
+    }
+    while (m_invertedEnabled && m_inverted.takeKnownPattern(pattern)) {
+        fitKnown(pattern);
+    }
+    if (!isLocked()) {
+        m_demod.setHoldLevels(false);
+    }
+
     // In the voice state there are no symbols to track: acquisition timing gains, so the
-    // turn-off word or a new preamble is picked up at once, and the levels of the data
-    // before are kept
+    // turn-off word or a new preamble is picked up at once
     bool voice = (m_normalEnabled && m_normal.inVoice()) || (m_invertedEnabled && m_inverted.inVoice());
 
     m_demod.setLocked(isLocked() && !voice);
-    m_demod.setHoldLevels(voice);
     collect();
+}
+
+void RadioPagingGscReceiver::fitKnown(const RadioPagingGscDecoder::KnownPattern& pattern)
+{
+    if (m_demod.fitLevels(pattern.m_levels, pattern.m_symbolsAgo))
+    {
+        m_levelsMeasured = true;
+        m_measuredDc = m_demod.getDC();
+    }
+}
+
+bool RadioPagingGscReceiver::takeLevelsMeasured(float& dc)
+{
+    if (!m_levelsMeasured) {
+        return false;
+    }
+
+    m_levelsMeasured = false;
+    dc = m_measuredDc;
+    return true;
 }
 
 bool RadioPagingGscReceiver::isLocked() const
@@ -206,6 +240,7 @@ RadioPagingGscReceiver::Status RadioPagingGscReceiver::getStatus() const
     status.m_normal = m_normal.getStatus();
     status.m_inverted = m_inverted.getStatus();
     status.m_deviation = m_demod.getDeviation();
+    status.m_dc = m_demod.getDC();
 
     return status;
 }

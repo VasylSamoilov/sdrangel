@@ -56,6 +56,7 @@ public:
         RadioPagingGscDecoder::Status m_normal;
         RadioPagingGscDecoder::Status m_inverted;
         float m_deviation;                          //!< Measured deviation, discriminator units
+        float m_dc;                                 //!< Measured DC offset (carrier offset), discriminator units
     };
 
     RadioPagingGscReceiver();
@@ -82,9 +83,18 @@ public:
     bool inVoice() const { return m_normal.inVoice() || m_inverted.inVoice(); }
     //!< A voice page is in its voice message (the alert time is over), until its end
     bool inVoiceMessage() const { return m_normal.inVoiceMessage() || m_inverted.inVoiceMessage(); }
+    //!< A transmission is being decoded
+    bool locked() const { return isLocked(); }
+    //!< DC offset and deviation were just measured on a known pattern: the DC offset, discriminator units
+    bool takeLevelsMeasured(float& dc);
+    //!< The input was moved by delta (frequency correction before the discriminator)
+    void offsetLevels(float delta) { m_demod.offsetLevels(delta); }
 
 private:
     bool m_normalEnabled;
+    bool m_levelsMeasured = false;
+    float m_measuredDc = 0.0f;
+    void fitKnown(const RadioPagingGscDecoder::KnownPattern& pattern);
     bool m_invertedEnabled;
     RadioPagingFskDemod m_demod;
     RadioPagingGscDecoder m_normal;

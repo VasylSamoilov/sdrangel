@@ -18,6 +18,7 @@
 #ifndef MODEMRADIOPAGING_RADIOPAGINGGSCDECODER_H
 #define MODEMRADIOPAGING_RADIOPAGINGGSCDECODER_H
 
+#include <bitset>
 #include <cstdint>
 #include <deque>
 #include <string>
@@ -156,7 +157,23 @@ public:
     bool hasMessage() const { return !m_messages.empty(); }
     Message takeMessage();
 
+    //! A pattern of known symbols just recognised (the preamble words that locked, a start
+    //! code and its complement, the non battery saver pattern), to measure DC offset and
+    //! deviation on
+    struct KnownPattern
+    {
+        std::vector<float> m_levels;        //!< +1 positive deviation, -1 negative, oldest first
+        size_t m_symbolsAgo;                //!< Symbols fed after its last symbol
+    };
+    bool takeKnownPattern(KnownPattern& pattern);
+
     static const int m_minNonBatterySaverBits = 80;     //!< Bits of the 1100 pattern before the lock
+    //!< Consecutive bits off the 1100 pattern that end it once locked. A bit error is off the
+    //!< pattern for at most 3 bits; the comma that follows is off it at every bit
+    static const int m_nonBatterySaverEndBits = 8;
+    //!< Bits off the 1100 pattern allowed in the bits it locks on: 2 bit errors. By chance a
+    //!< bit fits the pattern with probability 1/4, so random bits do not lock
+    static const int m_maxNonBatterySaverLockMisses = 6;
     static const int m_syncHits = 3;
     //!< Preamble words that can follow the lock before the start code
     static const int m_maxPreambleWordsAfterLock = RadioPagingGsc::m_preambleCodewords - m_syncHits;
@@ -168,8 +185,9 @@ public:
     //!< 2 errors of a codeword with probability 128 * 121 / 32768 = 47%, so 7 of 8 happen by
     //!< chance about 2.5% of the time)
     static const int m_minDamagedBlockCodewords = 7;
-    //!< Bit errors allowed in the 28 bit comma of the address, start code or preamble that
-    //!< follows a tone only address at once
+    //!< Repeated bits allowed in the 28 bit comma (2 for one bit error) of the address, start
+    //!< code or preamble that follows a tone only address at once, and of the first address
+    //!< after the non battery saver pattern
     static const int m_maxCommaErrors = 2;
     //!< Alert time after the activation code in which tone only addresses may be interleaved:
     //!< 2 s at 600 bit/s (Motorola GSC manual, Figure 6-1)
@@ -201,7 +219,11 @@ private:
     int m_softPos;
     int8_t m_hits[2 * RadioPagingGsc::m_codewordBits + 1];  //!< Preamble hit history, ring indexed by m_hitPos
     int m_hitPos;
-    int m_patternRun;                   //!< Consecutive bits of the 1100 pattern
+    std::bitset<m_minNonBatterySaverBits> m_patternMissHistory;   //!< Bits off the 1100 pattern before the lock, newest in bit 0
+    int m_patternBits;                  //!< Bits in m_patternMissHistory
+    bool m_patternLocked;
+    int m_patternRun;                   //!< Bits of the 1100 pattern since the lock, bit errors included
+    int m_patternMisses;                //!< Consecutive bits off the 1100 pattern once locked
 
     std::vector<uint8_t> m_buf;         //!< Bits received since the lock
     std::vector<float> m_soft;          //!< Soft symbols of m_buf, positive = 1
@@ -232,6 +254,11 @@ private:
     uint32_t m_messageCount;
 
     std::deque<Message> m_messages;
+    std::deque<KnownPattern> m_known;
+
+    //!< Known bits (decoder polarity, 1 = positive) as levels of the demodulator
+    void addKnown(const std::vector<uint8_t>& bits, size_t symbolsAgo);
+    void resetPattern();
 
     int preambleHit() const;
     void startTransmission(int index, bool batch);

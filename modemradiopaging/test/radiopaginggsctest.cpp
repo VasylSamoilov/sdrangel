@@ -603,6 +603,26 @@ void testNonBatterySaver()
     check(allMatch(onNoise, sent), "Non battery saver after random noise");
     check(allMatch(onInverted, sent), "Non battery saver, inverted bits, inverted decoder");
 
+    // Bit errors in the 1100 pattern, 2 of them within its last 80 bits, single and adjacent:
+    // the pattern runs on to its end
+    std::vector<uint8_t> damaged = enc.m_bits;
+    for (int i : {100, 301, 302, 500, 690, 731, 732}) {
+        damaged[i] ^= 1;
+    }
+    check(allMatch(decode(damaged, D::Normal, false, 0, 1, true), sent), "Non battery saver, bit errors in the pattern up to its end");
+
+    // A bit error every 60 bits: no 80 bits of the pattern without one
+    std::vector<uint8_t> noisy = enc.m_bits;
+    for (int i = 30; i < G::m_nonBatterySaverBits; i += 60) {
+        noisy[i] ^= 1;
+    }
+    check(allMatch(decode(noisy, D::Normal, false, 0, 1, true), sent), "Non battery saver, a bit error every 60 bits of the pattern");
+
+    // A bit error in the comma of the first address
+    std::vector<uint8_t> comma = enc.m_bits;
+    comma[G::m_nonBatterySaverBits + 12] ^= 1;
+    check(allMatch(decode(comma, D::Normal, false, 0, 1, true), sent), "Non battery saver, a bit error in the comma of the first address");
+
     std::vector<G::TxMessage> tone = { tx("500123", 1, G::Tone) };
     check(allMatch(decode(G::encode(tone, options).m_bits, D::Normal, false, 0, 1, true), tone), "Non battery saver tone only");
     std::vector<G::TxMessage> voice = { tx("500123", 3, G::Voice) };

@@ -72,6 +72,7 @@ void RadioPagingFlexReceiver::reset()
 {
     m_syncDemod.reset();
     m_decoder.reset();
+    m_levelsMeasured = false;
     m_messages.clear();
     m_recentPower.clear();
     m_syncs = 0;
@@ -89,6 +90,7 @@ void RadioPagingFlexReceiver::backToHunting()
     m_regLo = 0;
     m_regHi = 0;
     m_syncDemod.setLocked(false);
+    m_syncDemod.setHoldLevels(false);
 }
 
 RadioPagingFlexDecoder::Message RadioPagingFlexReceiver::takeMessage()
@@ -120,6 +122,9 @@ RadioPagingFlexReceiver::Status RadioPagingFlexReceiver::getStatus() const
     status.m_frameInfoFailures = m_frameInfoFailures;
     status.m_quality = m_lastQuality;
     status.m_deviation = m_syncDemod.getDeviation();
+    // In a frame the data demodulator has the levels (it tracks them on 2-level data)
+    bool inFrame = (m_state == Sync2) || (m_state == Data);
+    status.m_dc = inFrame ? m_dataDemod.getDC() : m_syncDemod.getDC();
     // BER and frame report of the last frame; network state of its polarity
     status.m_ber = m_decoder.status().m_ber;
     status.m_frameReport = m_decoder.lastFrame();
@@ -161,6 +166,47 @@ void RadioPagingFlexReceiver::process(float sample, float magsq)
             m_recentPower.pop_front();
         }
     }
+}
+
+// Known levels of A, B and inverted A of a mode, most significant bit first; a 1 is a positive
+// deviation in normal polarity
+void RadioPagingFlexReceiver::fitSync1(RadioPagingFlex::Mode mode, bool inverted)
+{
+    std::vector<float> known;
+    auto append = [&](uint32_t word, int bits) {
+        for (int i = bits - 1; i >= 0; i--) {
+            known.push_back((((word >> i) & 1) != 0) != inverted ? 1.0f : -1.0f);
+        }
+    };
+
+    append(codeA[(int) mode], 32);
+    append(codeB, 16);
+    append(codeAInv[(int) mode], 32);
+
+    if (m_syncDemod.fitLevels(known))
+    {
+        m_levelsMeasured = true;
+        m_measuredDc = m_syncDemod.getDC();
+    }
+
+    m_syncDemod.setHoldLevels(true);
+}
+
+bool RadioPagingFlexReceiver::takeLevelsMeasured(float& dc)
+{
+    if (!m_levelsMeasured) {
+        return false;
+    }
+
+    m_levelsMeasured = false;
+    dc = m_measuredDc;
+    return true;
+}
+
+void RadioPagingFlexReceiver::offsetLevels(float delta)
+{
+    m_syncDemod.offsetLevels(delta);
+    m_dataDemod.offsetLevels(delta);
 }
 
 bool RadioPagingFlexReceiver::checkSync(RadioPagingFlex::Mode& mode, bool& inverted) const
@@ -230,6 +276,10 @@ void RadioPagingFlexReceiver::syncSymbol(const RadioPagingFskDemod::Symbol& symb
             m_syncs++;
             m_state = FrameInfo;
             m_syncDemod.setLocked(true);
+            // DC offset and deviation are measured on A, B and inverted A, the last 80
+            // symbols, and held through the frame (the sync demodulator then sees symbols of
+            // the frame's rate and levels) until it hunts again
+            fitSync1(mode, inverted);
 
             double sum = 0.0;
             for (float p : m_recentPower) {
@@ -270,6 +320,8 @@ void RadioPagingFlexReceiver::startData(float offset)
     m_dataDemod.create(m_sampleRate, baud, levels);
     m_dataDemod.setLevels(m_syncDemod.getDC(), m_syncDemod.getDeviation());
     m_dataDemod.setLocked(true);
+    // The levels measured on sync 1 are kept for the frame
+    m_dataDemod.setHoldLevels(true);
     // The first symbol of the second sync ends one symbol after the end of the frame
     // information word. Its matched filter fills during that symbol
     m_dataDemod.startSymbols(samplesPerSymbol - offset);

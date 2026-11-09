@@ -95,6 +95,7 @@ bool RadioPagingPocsagDecoder::syncMatch() const
 
 void RadioPagingPocsagDecoder::startCandidate()
 {
+    m_syncWords++;
     m_state = InBatch;
     m_slot = 0;
     m_word = 0;
@@ -154,6 +155,7 @@ void RadioPagingPocsagDecoder::feed(int symbol)
             if (sync)
             {
                 // The batch lies between two sync codewords one batch apart
+                m_syncWords++;
                 decodeBatch();
                 m_leadingConfirmed = true;
                 m_slot = 0;

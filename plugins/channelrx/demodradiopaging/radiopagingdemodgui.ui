@@ -315,7 +315,7 @@
       <item row="0" column="3" colspan="2">
        <widget class="QLabel" name="pocsagStatus">
         <property name="toolTip">
-         <string>POCSAG state: HUNT or SYNC with the speeds being received and their polarity, the bit error rate of the reception (green: no errors, yellow: errors corrected, red: errors the code cannot correct) and the number of messages</string>
+         <string>POCSAG state: HUNT or SYNC with the speeds being received and their polarity, the bit error rate of the reception (green: no errors, yellow: errors corrected, red: errors the code cannot correct), df the carrier frequency offset (measured as the DC offset of the discriminator) and the number of messages</string>
         </property>
         <property name="text">
          <string>HUNT</string>
@@ -364,7 +364,7 @@
       <item row="1" column="3" colspan="2">
        <widget class="QLabel" name="flexStatus">
         <property name="toolTip">
-         <string>FLEX state: HUNT or SYNC with the mode and polarity of the frame, the bit error rate of the reception (green: no errors, yellow: errors corrected, red: errors the code cannot correct) and the number of messages</string>
+         <string>FLEX state: HUNT or SYNC with the mode and polarity of the frame, the bit error rate of the reception (green: no errors, yellow: errors corrected, red: errors the code cannot correct), df the carrier frequency offset (measured as the DC offset of the discriminator) and the number of messages</string>
         </property>
         <property name="text">
          <string>HUNT</string>
@@ -495,7 +495,7 @@
       <item row="2" column="4">
        <widget class="QLabel" name="gscStatus">
         <property name="toolTip">
-         <string>GSC state: HUNT, SYNC or VOICE with the polarity, the bit error rate of the reception (green: no errors, yellow: errors corrected, red: errors the code cannot correct) and the number of messages</string>
+         <string>GSC state: HUNT, SYNC or VOICE with the polarity, the bit error rate of the reception (green: no errors, yellow: errors corrected, red: errors the code cannot correct), df the carrier frequency offset (measured as the DC offset of the discriminator) and the number of messages</string>
         </property>
         <property name="text">
          <string>HUNT</string>

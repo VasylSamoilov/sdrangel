@@ -15,6 +15,7 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.          //
 ///////////////////////////////////////////////////////////////////////////////////
 
+#include "radiopagingpocsag.h"
 #include "radiopagingpocsagreceiver.h"
 
 const int RadioPagingPocsagReceiver::m_preambleLockBits;
@@ -48,6 +49,43 @@ void RadioPagingPocsagReceiver::reset()
     m_messages.clear();
     m_dedup.reset();
     m_time = 0.0;
+    m_levelsMeasured = false;
+    m_measuredDc = 0.0f;
+}
+
+// The last 32 symbols were the sync codeword, sent most significant bit first; a binary 1
+// is a negative deviation in normal polarity
+void RadioPagingPocsagReceiver::fitSyncCodeword(bool inverted)
+{
+    std::vector<float> known;
+
+    for (int i = 31; i >= 0; i--)
+    {
+        bool one = (RadioPagingPocsag::m_syncWord >> i) & 1;
+        known.push_back((one != inverted) ? -1.0f : 1.0f);
+    }
+
+    if (m_demod.fitLevels(known))
+    {
+        m_levelsMeasured = true;
+        m_measuredDc = m_demod.getDC();
+    }
+}
+
+bool RadioPagingPocsagReceiver::takeLevelsMeasured(float& dc)
+{
+    if (!m_levelsMeasured) {
+        return false;
+    }
+
+    m_levelsMeasured = false;
+    dc = m_measuredDc;
+    return true;
+}
+
+bool RadioPagingPocsagReceiver::isSynced() const
+{
+    return (m_normalEnabled && m_normal.isSynced()) || (m_invertedEnabled && m_inverted.isSynced());
 }
 
 void RadioPagingPocsagReceiver::process(float sample)
@@ -74,6 +112,9 @@ void RadioPagingPocsagReceiver::process(float sample)
         m_bitsSincePreamble = 0;
     }
 
+    uint32_t normalSyncs = m_normal.syncWords();
+    uint32_t invertedSyncs = m_inverted.syncWords();
+
     if (m_normalEnabled) {
         m_normal.feed(symbol.m_value);
     }
@@ -81,7 +122,20 @@ void RadioPagingPocsagReceiver::process(float sample)
         m_inverted.feed(symbol.m_value);
     }
 
+    // A sync codeword was just received (the candidate of a batch or the codeword of the
+    // next batch): DC offset and deviation are measured on it and held for the batch
+    if (m_normalEnabled && (m_normal.syncWords() != normalSyncs)) {
+        fitSyncCodeword(false);
+    } else if (m_invertedEnabled && (m_inverted.syncWords() != invertedSyncs)) {
+        fitSyncCodeword(true);
+    }
+
     bool synced = (m_normalEnabled && m_normal.isSynced()) || (m_invertedEnabled && m_inverted.isSynced());
+
+    // Hunting: the levels follow the means of the preamble (or carrier)
+    if (!synced) {
+        m_demod.setHoldLevels(false);
+    }
 
     // The preamble lock is handed over to the decoders once a batch is being received. The
     // preamble is followed by the sync codeword, so the lock is kept for one codeword after
@@ -132,6 +186,7 @@ RadioPagingPocsagReceiver::Status RadioPagingPocsagReceiver::getStatus() const
     status.m_normal = m_normal.getStatus();
     status.m_inverted = m_inverted.getStatus();
     status.m_deviation = m_demod.getDeviation();
+    status.m_dc = m_demod.getDC();
 
     return status;
 }

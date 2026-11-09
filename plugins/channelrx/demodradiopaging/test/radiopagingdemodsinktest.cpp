@@ -36,6 +36,7 @@
 #include "radiopagingflex.h"
 #include "radiopagingflexscheduler.h"
 #include "radiopaginggsc.h"
+#include "radiopagingfskmod.h"
 
 #include "radiopagingdemodsink.h"
 
@@ -204,7 +205,7 @@ RadioPagingGsc::TxMessage gsc(const char *address, int number, RadioPagingGsc::M
 
 // Pages of every protocol received with a carrier frequency offset (transmitter and receiver
 // oscillators): records received per protocol at a channel bandwidth
-std::vector<int> receiveWithOffset(double offset, float rfBandwidth)
+std::vector<int> receiveWithOffset(double offset, float rfBandwidth, std::vector<float>& measured)
 {
     Modulator mod;
     std::set<std::string> sent;
@@ -229,6 +230,15 @@ std::vector<int> receiveWithOffset(double offset, float rfBandwidth)
     {
         size_t end = std::min(mod.m_samples.size(), i + 4096);
         sink.feed(mod.m_samples.begin() + i, mod.m_samples.begin() + end);
+    }
+
+    RadioPagingDemodSink::Status status = sink.getStatus();
+    measured.assign(3, 1e9f);
+    for (int p = 0; p < 3; p++)
+    {
+        if (status.m_offsetValid[p]) {
+            measured[p] = status.m_offset[p];
+        }
     }
 
     std::vector<int> received(3, 0);
@@ -259,12 +269,300 @@ void testFrequencyOffset()
     {
         for (double offset : offsets)
         {
-            std::vector<int> r = receiveWithOffset(offset, bandwidth);
-            std::printf("      %5.0f Hz bandwidth, %+5.0f Hz offset: POCSAG %d/2 FLEX %d/2 GSC %d/1\n",
-                bandwidth, offset, r[0], r[1], r[2]);
-            if ((bandwidth == 20000.0f) && (std::fabs(offset) <= 2000.0)) {
+            std::vector<float> m;
+            std::vector<int> r = receiveWithOffset(offset, bandwidth, m);
+            std::printf("      %5.0f Hz bandwidth, %+5.0f Hz offset: POCSAG %d/2 FLEX %d/2 GSC %d/1, measured %+.0f %+.0f %+.0f Hz\n",
+                bandwidth, offset, r[0], r[1], r[2], m[0], m[1], m[2]);
+            if ((bandwidth == 20000.0f) && (std::fabs(offset) <= 2000.0))
+            {
                 check((r[0] == 2) && (r[1] == 2) && (r[2] == 1), "Pages are received with a "
                     + std::to_string((int) offset) + " Hz offset at a 20 kHz channel bandwidth");
+                check((std::fabs(m[0] - offset) < 150.0) && (std::fabs(m[1] - offset) < 150.0) && (std::fabs(m[2] - offset) < 150.0),
+                    "The status gives the " + std::to_string((int) offset) + " Hz offset for each protocol");
+            }
+        }
+    }
+}
+
+// Sweep of carrier offset and noise ("radiopagingdemodsinktest sweep"): transmissions made by
+// the FSK modulator, separated by noise only, received through the sink. For each case the
+// pages received and the error of the reported carrier offset (df) when each page is output
+
+struct SweepCase
+{
+    std::string m_name;
+    int m_protocol;                     // 0 POCSAG, 1 FLEX, 2 GSC
+    std::vector<std::pair<int, std::vector<float>>> m_blocks;
+    double m_deviation;
+    double m_shaping;
+    std::set<std::string> m_sent;
+};
+
+std::vector<float> nrzLevels(const std::vector<uint8_t>& bits, bool oneIsPositive)
+{
+    std::vector<float> levels;
+    for (uint8_t b : bits) {
+        levels.push_back(((b != 0) == oneIsPositive) ? 1.0f : -1.0f);
+    }
+    return levels;
+}
+
+std::vector<SweepCase> sweepCases()
+{
+    std::vector<SweepCase> cases;
+
+    for (int baud : {512, 1200, 2400})
+    {
+        SweepCase c;
+        RadioPagingPocsag::TxMessage a, b;
+        a.m_address = 1234567; a.m_function = 3; a.m_type = RadioPagingPocsag::Alphanumeric; a.m_text = "POCSAG SWEEP 0123456789";
+        b.m_address = 7654; b.m_function = 0; b.m_type = RadioPagingPocsag::Numeric; b.m_text = "0123456789";
+        c.m_name = "POCSAG " + std::to_string(baud);
+        c.m_protocol = 0;
+        c.m_blocks = {{baud, nrzLevels(RadioPagingPocsag::encode({a, b}).m_bits, false)}};
+        c.m_deviation = 4500.0;
+        c.m_shaping = baud;
+        c.m_sent = {key("pocsag", std::to_string(baud), "1234567D", false), key("pocsag", std::to_string(baud), "0007654A", false)};
+        cases.push_back(c);
+    }
+
+    const std::pair<RadioPagingGsc::Mode, const char *> gscModes[] = {
+        {RadioPagingGsc::Single, "single"}, {RadioPagingGsc::Batch, "batch"}, {RadioPagingGsc::NonBatterySaver, "NBS"}};
+
+    for (const auto& gm : gscModes)
+    {
+        SweepCase c;
+        RadioPagingGsc::EncodeOptions options;
+        options.m_mode = gm.first;
+        std::vector<RadioPagingGsc::TxMessage> messages = {gsc("219789", 2, RadioPagingGsc::Numeric, "5551234")};
+        if (gm.first != RadioPagingGsc::Single) {
+            messages.push_back(gsc("219457", 4, RadioPagingGsc::Alphanumeric, "GSC SWEEP"));
+        }
+        c.m_name = std::string("GSC ") + gm.second;
+        c.m_protocol = 2;
+        c.m_blocks = {{600, nrzLevels(RadioPagingGsc::encode(messages, options).m_bits, true)}};
+        c.m_deviation = 4500.0;
+        c.m_shaping = 600.0;
+        for (const auto& m : messages) {
+            std::string address = (gm.first == RadioPagingGsc::NonBatterySaver) ? "N" + m.m_address.substr(1) : m.m_address;
+            c.m_sent.insert(key("gsc", "600", address + std::to_string(m.m_addressNumber), false));
+        }
+        cases.push_back(c);
+    }
+
+    static const float levels4[4] = {-1.0f, -1.0f / 3.0f, 1.0f / 3.0f, 1.0f};
+    const RadioPagingFlex::Mode modes[] = {RadioPagingFlex::Mode1600_2, RadioPagingFlex::Mode3200_2,
+        RadioPagingFlex::Mode3200_4, RadioPagingFlex::Mode6400_4};
+
+    for (RadioPagingFlex::Mode mode : modes)
+    {
+        SweepCase c;
+        RadioPagingFlexEncoder encoder;
+        encoder.setMode(mode);
+        for (uint64_t capcode : {123456ULL, 234567ULL})
+        {
+            RadioPagingFlexEncoder::TxMessage m;
+            m.m_capcode = capcode;
+            m.m_type = RadioPagingFlex::Alphanumeric;
+            m.m_text = "FLEX sweep page";
+            encoder.enqueue(m);
+            char a[16];
+            std::snprintf(a, sizeof(a), "%010llu", (unsigned long long) capcode);
+            c.m_sent.insert(key("flex", RadioPagingFlex::modeName(mode), a, false));
+        }
+        for (uint64_t index = 0; (encoder.pending() > 0) && (index < 50); index++)
+        {
+            RadioPagingFlexEncoder::Frame frame = encoder.buildFrame(index);
+            for (const auto& block : frame.m_blocks)
+            {
+                std::vector<float> levels;
+                for (uint8_t s : block.m_symbols) {
+                    levels.push_back((block.m_levels == 4) ? levels4[s & 3] : ((s & 1) ? 1.0f : -1.0f));
+                }
+                c.m_blocks.push_back({block.m_baud, levels});
+            }
+        }
+        c.m_name = std::string("FLEX ") + RadioPagingFlex::modeName(mode);
+        c.m_protocol = 1;
+        c.m_deviation = 4800.0;
+        c.m_shaping = 3200.0;
+        cases.push_back(c);
+    }
+
+    return cases;
+}
+
+struct SweepResult
+{
+    int m_received = 0;
+    int m_sent = 0;
+    double m_dfErrorSum = 0.0;          // |df - offset| of the pages received
+    double m_dfErrorMax = 0.0;
+};
+
+// Noise only, the transmission (repeated), noise only. sigma: noise per component, the
+// carrier amplitude being 1
+SweepResult sweepRun(const SweepCase& c, double offset, float sigma, int repeats, unsigned seed)
+{
+    std::mt19937 rng(seed);
+    std::normal_distribution<float> gauss(0.0f, sigma);
+    SampleVector samples;
+    const double a = 0.5 * SDR_RX_SCALED;
+    double phase = 0.0;
+
+    auto noiseOnly = [&](int n) {
+        for (int i = 0; i < n; i++) {
+            samples.push_back(Sample((FixReal) (a * gauss(rng)), (FixReal) (a * gauss(rng))));
+        }
+    };
+
+    noiseOnly((int) sampleRate / 2);
+
+    for (int r = 0; r < repeats; r++)
+    {
+        RadioPagingFskMod mod;
+        mod.setChannelSampleRate((int) sampleRate);
+        mod.setDeviation(c.m_deviation);
+        mod.setShaping(c.m_shaping);
+        for (const auto& b : c.m_blocks) {
+            mod.push(b.first, b.second);
+        }
+        while (mod.busy())
+        {
+            phase += 2.0 * M_PI * offset / sampleRate;
+            Complex s = mod.next() * Complex((float) std::cos(phase), (float) std::sin(phase));
+            samples.push_back(Sample((FixReal) (a * (s.real() + gauss(rng))), (FixReal) (a * (s.imag() + gauss(rng)))));
+        }
+        noiseOnly((int) sampleRate / 2);
+    }
+
+    MessageQueue queue;
+    RadioPagingDemodSink sink;
+    sink.setMessageQueueToChannel(&queue);
+    sink.applyChannelSettings((int) sampleRate, 0, true);
+
+    SweepResult result;
+    result.m_sent = (int) c.m_sent.size() * repeats;
+    quint32 lastCount = 0;
+    const size_t chunk = 1024;
+
+    for (size_t i = 0; i < samples.size(); i += chunk)
+    {
+        size_t end = std::min(samples.size(), i + chunk);
+        sink.feed(samples.begin() + i, samples.begin() + end);
+
+        RadioPagingDemodSink::Status st = sink.getStatus();
+        Message *message;
+
+        while ((message = queue.pop()))
+        {
+            if (MainCore::MsgMessageRecord::match(*message))
+            {
+                const MessageRecord& rec = ((MainCore::MsgMessageRecord *) message)->getRecord();
+                // Each repeat is a transmission of its own: its pages are output tagged duplicate
+                if (c.m_sent.count(key(rec.m_protocol.toStdString(), rec.m_mode.toStdString(), rec.m_address.toStdString(),
+                    rec.m_polarity == MessageRecord::PolarityInverted)))
+                {
+                    result.m_received++;
+                    double err = st.m_offsetValid[c.m_protocol] ? std::fabs(st.m_offset[c.m_protocol] - offset) : 99999.0;
+                    result.m_dfErrorSum += err;
+                    result.m_dfErrorMax = std::max(result.m_dfErrorMax, err);
+                }
+            }
+            delete message;
+        }
+        lastCount = st.m_messages[c.m_protocol];
+    }
+    (void) lastCount;
+
+    return result;
+}
+
+void sweep()
+{
+    const double offsets[] = {-3000.0, -1500.0, 0.0, 1500.0, 3000.0};
+    const float sigmas[] = {0.1f, 0.3f, 0.45f, 0.6f};
+    const int repeats = 3;
+    std::vector<SweepCase> cases = sweepCases();
+
+    std::printf("sweep: %d transmissions per case, noise sigma per component (carrier 1); C/N in 16 kHz:", repeats);
+    for (float s : sigmas) {
+        std::printf(" %.2f=%.1f dB", s, 10.0 * std::log10(1.0 / (2.0 * s * s * 16000.0 / sampleRate)));
+    }
+    std::printf("\n%-12s", "case");
+    for (float s : sigmas) {
+        std::printf(" | sigma %.2f: pages, df err mean/max Hz ", s);
+    }
+    std::printf("\n");
+
+    for (const SweepCase& c : cases)
+    {
+        for (double offset : offsets)
+        {
+            std::printf("%-12s %+5.0f", c.m_name.c_str(), offset);
+            for (float sigma : sigmas)
+            {
+                SweepResult r = sweepRun(c, offset, sigma, repeats, (unsigned) (offset + 10000.0 + sigma * 1000.0));
+                std::printf(" | %2d/%-2d %5.0f %5.0f", r.m_received, r.m_sent,
+                    r.m_received ? r.m_dfErrorSum / r.m_received : 0.0, r.m_dfErrorMax);
+            }
+            std::printf("\n");
+            std::fflush(stdout);
+        }
+    }
+}
+
+// Sensitivity of a leg configuration ("radiopagingdemodsinktest sensitivity afc|carson|room2k|channel
+// [deep]"): pages received out of those sent over noise levels around the threshold
+void sensitivity(const std::string& config, bool deep)
+{
+    // afc (the default configuration): legs following the measured carrier. Otherwise fixed
+    // legs: Carson, Carson + 2 kHz each side, or the channel
+    RadioPagingDemodSettings::m_legAfc = (config == "afc");
+
+    if (config == "carson") {
+        RadioPagingDemodSettings::m_legOffsetAllowance = 0.0;
+    } else if (config == "channel") {
+        RadioPagingDemodSettings::m_legOffsetAllowance = 1.0e6;     // Legs wider than the channel: not filtered
+    } else {
+        RadioPagingDemodSettings::m_legOffsetAllowance = 2000.0;
+    }
+
+    // Deep: the slow protocols, whose threshold lies below the normal range
+    std::vector<double> offsets = deep ? std::vector<double>{0.0, 2000.0} : std::vector<double>{0.0, 2000.0, 3000.0};
+    std::vector<float> sigmas = deep ? std::vector<float>{0.9f, 1.0f, 1.1f, 1.2f, 1.3f, 1.4f, 1.5f, 1.6f}
+        : std::vector<float>{0.50f, 0.55f, 0.60f, 0.65f, 0.70f, 0.75f, 0.80f, 0.85f};
+    const int repeats = 10;
+    std::vector<std::string> selected = deep
+        ? std::vector<std::string>{"POCSAG 512", "POCSAG 1200", "GSC single", "GSC batch", "GSC NBS", "FLEX 1600/2"}
+        : std::vector<std::string>{"POCSAG 512", "POCSAG 1200", "POCSAG 2400", "GSC single", "GSC batch", "GSC NBS", "FLEX 1600/2", "FLEX 6400/4"};
+    std::vector<SweepCase> all = sweepCases();
+
+    std::printf("sensitivity %s (leg room %.0f Hz), %d transmissions per cell; percent of pages received at sigma (C/N in 16 kHz):\n",
+        config.c_str(), RadioPagingDemodSettings::m_legOffsetAllowance, repeats);
+    std::printf("%-12s %5s", "case", "off");
+    for (float s : sigmas) {
+        std::printf(" %4.2f(%4.1f)", s, 10.0 * std::log10(1.0 / (2.0 * s * s * 16000.0 / sampleRate)));
+    }
+    std::printf("\n");
+
+    for (const std::string& name : selected)
+    {
+        for (const SweepCase& c : all)
+        {
+            if (c.m_name != name) {
+                continue;
+            }
+            for (double offset : offsets)
+            {
+                std::printf("%-12s %+5.0f", c.m_name.c_str(), offset);
+                for (float sigma : sigmas)
+                {
+                    SweepResult r = sweepRun(c, offset, sigma, repeats, (unsigned) (offset + 20000.0 + sigma * 1000.0));
+                    std::printf(" %10.0f%%", 100.0 * r.m_received / std::max(1, r.m_sent));
+                }
+                std::printf("\n");
+                std::fflush(stdout);
             }
         }
     }
@@ -385,8 +683,19 @@ void testVoiceAudio()
 
 } // namespace
 
-int main()
+int main(int argc, char **argv)
 {
+    if ((argc > 1) && (std::string(argv[1]) == "sweep"))
+    {
+        sweep();
+        return 0;
+    }
+    if ((argc > 1) && (std::string(argv[1]) == "sensitivity"))
+    {
+        sensitivity(argc > 2 ? std::string(argv[2]) : std::string(), (argc > 3) && (std::string(argv[3]) == "deep"));
+        return 0;
+    }
+
     Modulator mod;
     std::set<std::string> sent;
 

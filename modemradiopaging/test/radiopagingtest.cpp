@@ -110,6 +110,14 @@ int runFsk(double sampleRate, double symbolRate, int levels, double clockError, 
     demod.create(sampleRate, symbolRate, levels);
     std::vector<int> received;
 
+    // A 4-level demodulator is given the levels measured on the 2-level sync before it (FLEX
+    // sync 1); 2-level hunts with the means of the symbols
+    if (levels == 4)
+    {
+        demod.setLevels(dc, 1.0f);
+        demod.setHoldLevels(true);
+    }
+
     double txSamplesPerSymbol = sampleRate / (symbolRate * (1.0 + clockError));
     double t = 0.0;
     float smoothed = 0.0f;

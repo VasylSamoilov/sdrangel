@@ -97,6 +97,9 @@ public:
     void feed(int symbol);
 
     bool isSynced() const { return m_state != Hunting; }
+    //!< Sync codewords recognised since reset: when it changes, the last 32 symbols fed were
+    //!< a sync codeword (a known pattern to measure the levels on)
+    uint32_t syncWords() const { return m_syncWords; }
     Status getStatus() const;
     bool hasMessage() const { return !m_messages.empty(); }
     Message takeMessage();
@@ -127,6 +130,7 @@ private:
     uint32_t m_codewordsUncorrectable;
     uint32_t m_transmissions;
     uint32_t m_candidatesDropped;
+    uint32_t m_syncWords = 0;
     RadioPagingBerWindow m_ber;
 
     std::deque<Message> m_messages;

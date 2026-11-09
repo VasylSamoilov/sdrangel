@@ -73,6 +73,7 @@ public:
         std::vector<RadioPagingFlexDecoder::GroupSlot> m_groups;
         int m_reassemblies;
         float m_deviation;              //!< Measured outer deviation, discriminator units
+        float m_dc;                     //!< Measured DC offset (carrier offset), discriminator units
     };
 
     //!< Number of bit errors allowed over the 80 bits of A, B and inverted A
@@ -100,6 +101,13 @@ public:
 
     Status getStatus() const;
     RadioPagingFlexDecoder& decoder() { return m_decoder; }
+
+    //!< Hunting for sync 1 (not in a frame)
+    bool isHunting() const { return m_state == Hunting; }
+    //!< DC offset and deviation were just measured on sync 1: the DC offset, discriminator units
+    bool takeLevelsMeasured(float& dc);
+    //!< The input was moved by delta (frequency correction before the discriminator)
+    void offsetLevels(float delta);
 
 private:
     double m_sampleRate;
@@ -150,6 +158,9 @@ private:
 
     void syncSymbol(const RadioPagingFskDemod::Symbol& symbol, float magsq);
     bool checkSync(RadioPagingFlex::Mode& mode, bool& inverted) const;
+    void fitSync1(RadioPagingFlex::Mode mode, bool inverted);
+    bool m_levelsMeasured = false;
+    float m_measuredDc = 0.0f;
     void startData(float offset);
     void dataSymbol(int symbol, float error, float magsq);
     void sync2Symbol(int symbol);

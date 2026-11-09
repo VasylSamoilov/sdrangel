@@ -21,6 +21,8 @@
 #include <cmath>
 
 const int RadioPagingGscDecoder::m_minNonBatterySaverBits;
+const int RadioPagingGscDecoder::m_nonBatterySaverEndBits;
+const int RadioPagingGscDecoder::m_maxNonBatterySaverLockMisses;
 const int RadioPagingGscDecoder::m_syncHits;
 const int RadioPagingGscDecoder::m_maxPreambleWordsAfterLock;
 const float RadioPagingGscDecoder::m_minPairAgreement = 0.5f;
@@ -38,18 +40,9 @@ const int peekBits = 74;            // Comma and word 1
 const int hitRing = 2 * codewordBits + 1;
 const int maxTransitionsForData = 108;
 const uint16_t startComplement = RadioPagingGsc::m_startCode ^ 0xfff;
-
-bool alternates(const uint8_t *bits, int n)
-{
-    for (int i = 1; i < n; i++)
-    {
-        if (bits[i] == bits[i - 1]) {
-            return false;
-        }
-    }
-
-    return true;
-}
+// Last bits handed to the address search when the 1100 pattern ends: the misses that ended
+// it and the 4 bits of the pattern test, with margin
+const int nonBatterySaverHandover = RadioPagingGscDecoder::m_nonBatterySaverEndBits + 7;
 
 bool isWord1(uint16_t data)
 {
@@ -81,7 +74,7 @@ void RadioPagingGscDecoder::reset()
     m_softPos = 0;
     std::fill(m_hits, m_hits + hitRing, (int8_t) -1);
     m_hitPos = 0;
-    m_patternRun = 0;
+    resetPattern();
     clearBuffer();
     m_preamble = -1;
     m_batch = false;
@@ -98,9 +91,43 @@ void RadioPagingGscDecoder::reset()
     m_ber.reset();
     m_messageCount = 0;
     m_messages.clear();
+    m_known.clear();
     m_voiceMessage = Message();
     m_voiceSymbols = 0;
     m_voiceHold = 0;
+}
+
+void RadioPagingGscDecoder::resetPattern()
+{
+    m_patternMissHistory.reset();
+    m_patternBits = 0;
+    m_patternLocked = false;
+    m_patternRun = 0;
+    m_patternMisses = 0;
+}
+
+void RadioPagingGscDecoder::addKnown(const std::vector<uint8_t>& bits, size_t symbolsAgo)
+{
+    KnownPattern pattern;
+    float sign = (m_polarity == Normal) ? 1.0f : -1.0f;
+
+    for (uint8_t b : bits) {
+        pattern.m_levels.push_back((b ? 1.0f : -1.0f) * sign);
+    }
+
+    pattern.m_symbolsAgo = symbolsAgo;
+    m_known.push_back(pattern);
+}
+
+bool RadioPagingGscDecoder::takeKnownPattern(KnownPattern& pattern)
+{
+    if (m_known.empty()) {
+        return false;
+    }
+
+    pattern = m_known.front();
+    m_known.pop_front();
+    return true;
 }
 
 void RadioPagingGscDecoder::clearBuffer()
@@ -240,6 +267,17 @@ void RadioPagingGscDecoder::feedSoft(float soft)
                 endTransmission(true);
             }
             startTransmission(hit >> 1, (hit & 1) != 0);
+
+            // The last three codewords were the preamble value (complemented in batch mode)
+            std::vector<uint8_t> bits;
+            uint32_t word = RadioPagingGsc::golayEncode(RadioPagingGsc::preambleValue(hit >> 1));
+            if (hit & 1) {
+                word ^= 0x7fffff;
+            }
+            for (int k = 0; k < m_syncHits; k++) {
+                RadioPagingGsc::appendDuplicated(bits, word);
+            }
+            addKnown(bits, 0);
             return;
         }
     }
@@ -250,16 +288,38 @@ void RadioPagingGscDecoder::feedSoft(float soft)
         int b2 = (int) ((m_reg >> 2) & 1);
         int b4 = (int) ((m_reg >> 4) & 1);
 
-        if ((b0 == b4) && (b0 != b2))
+        bool onPattern = (b0 == b4) && (b0 != b2);
+
+        if (!m_patternLocked)
         {
+            // Locked on the last m_minNonBatterySaverBits bits with few bit errors
+            m_patternMissHistory <<= 1;
+            m_patternMissHistory[0] = !onPattern;
+            m_patternBits = std::min(m_patternBits + 1, m_minNonBatterySaverBits);
+
+            if ((m_patternBits >= m_minNonBatterySaverBits) && ((int) m_patternMissHistory.count() <= m_maxNonBatterySaverLockMisses))
+            {
+                m_patternLocked = true;
+                m_patternRun = m_minNonBatterySaverBits;
+                m_patternMisses = 0;
+            }
+        }
+        else if (onPattern)
+        {
+            m_patternRun++;
+            m_patternMisses = 0;
+        }
+        else if (++m_patternMisses < m_nonBatterySaverEndBits)
+        {
+            // A bit error within the pattern
             m_patternRun++;
         }
         else
         {
             int run = m_patternRun;
-            m_patternRun = 0;
+            resetPattern();
 
-            if (m_nonBatterySaver && enabled && (run >= m_minNonBatterySaverBits))
+            if (m_nonBatterySaver && enabled)
             {
                 if (m_state == Voice) {
                     endVoice(VoiceNewTransmission, run + 4);
@@ -267,6 +327,15 @@ void RadioPagingGscDecoder::feedSoft(float soft)
                     endTransmission(true);
                 }
                 startNonBatterySaver();
+
+                // The pattern ended within the last nonBatterySaverHandover - 4 bits: the
+                // bits before those are the 1100 pattern
+                std::vector<uint8_t> bits;
+                for (int i = 63; i >= nonBatterySaverHandover; i--) {
+                    bits.push_back((uint8_t) ((m_reg >> i) & 1));
+                }
+                addKnown(bits, nonBatterySaverHandover);
+
                 process();
                 return;
             }
@@ -383,7 +452,7 @@ void RadioPagingGscDecoder::endVoice(VoiceEnd end, int before)
 void RadioPagingGscDecoder::startTransmission(int index, bool batch)
 {
     std::fill(m_hits, m_hits + hitRing, (int8_t) -1);
-    m_patternRun = 0;
+    resetPattern();
     m_state = AwaitStart;
     m_parse = SeekStart;
     clearBuffer();
@@ -399,13 +468,13 @@ void RadioPagingGscDecoder::startTransmission(int index, bool batch)
 void RadioPagingGscDecoder::startNonBatterySaver()
 {
     std::fill(m_hits, m_hits + hitRing, (int8_t) -1);
-    m_patternRun = 0;
+    resetPattern();
     m_state = AwaitStart;
     m_parse = SeekAddress;
     clearBuffer();
 
-    // The pattern may have run on into the comma by a few bits
-    for (int i = 7; i >= 0; i--)
+    // The pattern was taken as ended some bits into the comma
+    for (int i = nonBatterySaverHandover - 1; i >= 0; i--)
     {
         m_buf.push_back((uint8_t) ((m_reg >> i) & 1));
         m_soft.push_back(m_softRing[(m_softPos + codewordBits - 1 - i) % codewordBits]);
@@ -549,6 +618,13 @@ bool RadioPagingGscDecoder::processSeekStart()
             m_pos = bestPos + 2 * codewordBits + 1;
             m_state = InTransmission;
             m_parse = Next;
+
+            // Start code, separator bit and complement of the start code
+            std::vector<uint8_t> bits;
+            RadioPagingGsc::appendDuplicated(bits, word1);
+            bits.push_back((uint8_t) ((word2 & 1) ^ 1));
+            RadioPagingGsc::appendDuplicated(bits, word2);
+            addKnown(bits, m_buf.size() - std::min(m_buf.size(), (size_t) m_pos));
             return true;
         }
 
@@ -560,14 +636,14 @@ bool RadioPagingGscDecoder::processSeekStart()
     }
 }
 
-// First address after the pattern, at the bit offset where an alternating comma and a word 1 are
+// First address after the pattern, at the bit offset where a comma and a word 1 are
 bool RadioPagingGscDecoder::processSeekAddress()
 {
     while (m_scan + pairBits <= (int) m_buf.size())
     {
         int o = m_scan;
 
-        if (alternates(&m_buf[o], RadioPagingGsc::m_commaBits))
+        if (commaErrors(&m_buf[o], RadioPagingGsc::m_commaBits) <= m_maxCommaErrors)
         {
             Message message;
             int e1, e2;

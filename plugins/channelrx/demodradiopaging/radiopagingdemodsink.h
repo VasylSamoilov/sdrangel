@@ -51,6 +51,8 @@ public:
         bool m_enabled[3];              //!< POCSAG, FLEX, GSC decoding on
         RadioPagingBerWindow m_ber[3];  //!< Of the reception in progress, or the last one
         bool m_berLive[3];              //!< m_ber is of a reception in progress
+        float m_offset[3];              //!< Carrier frequency offset (DC offset) of the same reception, Hz
+        bool m_offsetValid[3];          //!< m_offset was measured
         int m_pocsagBatches;            //!< Batches of the POCSAG transmission in progress (or last)
         // FLEX: the network of the last frame
         RadioPagingFlexDecoder::FrameReport m_flexFrame;
@@ -121,14 +123,44 @@ private:
         double m_magsqPeak;
     };
 
-    // Filter and FM discriminator of one protocol
+    //! Low pass whose taps are changed without clearing its samples (same number of taps, so
+    //! the same delay): the leg changes width without a transient
+    struct LegFilter : public Lowpass<Complex>
+    {
+        void retune(int nTaps, double sampleRate, double cutoff) {
+            FirFilterGenerators::generateLowPassFilter(nTaps, sampleRate, cutoff, this->m_taps);
+        }
+    };
+
+    // Frequency correction, filter and FM discriminator of one protocol. Hunting, the leg is
+    // the channel wide, centred on the last carrier offset, which decays to 0. While a
+    // transmission is received it is moved onto the carrier offset measured on the known
+    // patterns and narrowed: POCSAG and FLEX to the Carson bandwidth, GSC to the Carson
+    // bandwidth and the offset room
     struct Leg
     {
-        Lowpass<Complex> m_filter;
-        bool m_filtered = false;        //!< The leg is narrower than the channel filter
+        NCO m_nco;
+        LegFilter m_filter;
         PhaseDiscriminators m_discri;
+        double m_huntBandwidth = 0.0;
+        double m_trackBandwidth = 0.0;
+        double m_deviation = 1.0;       //!< Hz at discriminator output 1
+        double m_maxShift = 0.0;        //!< Largest correction: the room the channel leaves, Hz
+        bool m_tracking = false;
+        double m_shift = 0.0;           //!< Correction applied: the signal is moved down by it, Hz
+        double m_huntCentre = 0.0;      //!< Correction while hunting, Hz
+        int m_fits = 0;                 //!< Measurements of the transmission being received
+        quint32 m_messagesAtStart = 0;
+        uint32_t m_framesAtStart = 0;
+        int m_pendingSamples = 0;       //!< Samples until a correction reaches the discriminator
+        float m_pendingDelta = 0.0f;    //!< DC change of that correction, discriminator units
 
-        void create(double bandwidth, double channelBandwidth, double deviation);
+        void create(double huntBandwidth, double trackBandwidth, double channelBandwidth, double deviation);
+        void setTracking(bool tracking);
+        //!< Move the correction; the receivers' levels move by the returned delta once it has
+        //!< gone through the filter (takeHandover())
+        void setShift(double shift);
+        bool takeHandover(float& delta);
         Real demod(const Complex& sample);
     };
 
@@ -158,6 +190,8 @@ private:
     RadioPagingGscReceiver m_gsc;
     QString m_gscVoiceId[2];            //!< Record id of the voice page in progress, by polarity
     RadioPagingBerWindow m_lastBer[3];  //!< BER of the last reception of each protocol
+    float m_lastOffset[3] = {0.0f, 0.0f, 0.0f};         //!< Carrier offset of the last reception, Hz
+    bool m_lastOffsetValid[3] = {false, false, false};
     int m_lastPocsagBatches = 0;
     int m_lastGscPreamble = -1;
     bool m_lastGscBatch = false;
@@ -183,6 +217,12 @@ private:
 
     void processOneSample(Complex& ci);
     void applyLegs();
+    //!< A receiver measured the DC offset dc on a known pattern: the leg absorbs it
+    void legMeasured(Leg& leg, int protocol, float dc);
+    //!< The receivers of the leg hunt again: back to the hunting width and centre
+    void legReleased(Leg& leg, int protocol, bool confirmed);
+    int m_afcCount = 0;                 //!< Status periods since the last decay of the hunting centres
+    void decayHuntCentres();
     void processAudio(Real fm);
     void pushAudio(Real sample);
     void closeAudio();

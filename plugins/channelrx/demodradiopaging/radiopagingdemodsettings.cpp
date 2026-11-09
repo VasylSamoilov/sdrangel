@@ -27,12 +27,17 @@
 const int RadioPagingDemodSettings::m_nbPocsagSpeeds;
 const int RadioPagingDemodSettings::m_pocsagSpeeds[m_nbPocsagSpeeds] = { 512, 1200, 2400 };
 const int RadioPagingDemodSettings::m_channelSampleRate;
+// Leg configuration, fixed (the sink test compares others): carrier offset room on each side
+// of a leg, and legs following the measured carrier offset
+double RadioPagingDemodSettings::m_legOffsetAllowance = 2000.0;
+bool RadioPagingDemodSettings::m_legAfc = true;
 
 namespace {
 
 // Highest modulation rate of the legs (Carson bandwidth), bits per second
 const int flexMaxRate = 3200;
 const int gscRate = 600;
+
 
 } // namespace
 
@@ -327,18 +332,35 @@ QString RadioPagingDemodSettings::getDebugString(const QStringList& settingsKeys
     return QString(ostr.str().c_str());
 }
 
-double RadioPagingDemodSettings::pocsagBandwidth() const
+double RadioPagingDemodSettings::pocsagCarson() const
 {
-    // All speeds share the leg: sized to the fastest
     return 2.0 * (m_pocsagDeviation + m_pocsagSpeeds[m_nbPocsagSpeeds - 1]);
 }
 
-double RadioPagingDemodSettings::flexBandwidth() const
+double RadioPagingDemodSettings::flexCarson() const
 {
     return 2.0 * (m_flexDeviation + flexMaxRate);
 }
 
-double RadioPagingDemodSettings::gscBandwidth() const
+double RadioPagingDemodSettings::gscCarson() const
 {
     return 2.0 * (m_gscDeviation + gscRate);
+}
+
+// Hunting, the legs pass the Carson bandwidth and the carrier offset on each side: a signal
+// off centre is not cut on one side, which would bias the measured DC offset and lose symbols
+double RadioPagingDemodSettings::pocsagBandwidth() const
+{
+    // All speeds share the leg: sized to the fastest
+    return 2.0 * (m_pocsagDeviation + m_pocsagSpeeds[m_nbPocsagSpeeds - 1] + m_legOffsetAllowance);
+}
+
+double RadioPagingDemodSettings::flexBandwidth() const
+{
+    return 2.0 * (m_flexDeviation + flexMaxRate + m_legOffsetAllowance);
+}
+
+double RadioPagingDemodSettings::gscBandwidth() const
+{
+    return 2.0 * (m_gscDeviation + gscRate + m_legOffsetAllowance);
 }

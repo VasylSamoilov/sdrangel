@@ -892,8 +892,9 @@ QString RadioPagingDemodGUI::flexDetails(const RadioPagingDemodSink::Status& sta
 QString RadioPagingDemodGUI::flexToolTip(const RadioPagingDemodSink::Status& status)
 {
     QString tip = tr("FLEX state: SYNC or HUNT, mode and polarity of the frame, quality (100% minus the bit error rate: "
-        "green no errors, yellow errors corrected, red errors that could not be corrected, grey after the reception) "
-        "and messages received.\n"
+        "green no errors, yellow errors corrected, red errors that could not be corrected, grey after the reception), "
+        "df the carrier frequency offset (DC offset of the discriminator; the levels of sync 1 are kept through 4-level "
+        "frames) and messages received.\n"
         "Cxx/Fxxx: cycle and frame of the last frame. Collapse n: pagers wake up every 2^n frames. "
         "Roaming: roaming bit of the frame. Repeat xN: the frame content is sent N times.\n"
         "Date, time and zone: network time from the block information words. LID: local id, coverage: coverage zone, "
@@ -917,6 +918,14 @@ QString RadioPagingDemodGUI::flexToolTip(const RadioPagingDemodSink::Status& sta
 QString RadioPagingDemodGUI::polarityHtml(bool inverted)
 {
     return inverted ? QString("<span style=\"color:#ffcc44\">INV</span>") : QString("<span style=\"color:#88aacc\">NORM</span>");
+}
+
+// Carrier frequency offset measured as the DC offset of the discriminator. Grey once the
+// reception ended (the last value is kept)
+QString RadioPagingDemodGUI::offsetHtml(float offset, bool live)
+{
+    QString text = QString("df %1%2 Hz").arg(offset < 0.0f ? "-" : "+").arg((int) std::round(std::fabs(offset)));
+    return live ? text : QString("<span style=\"color:#888888\">%1</span>").arg(text);
 }
 
 // Quality is 100% minus the bit error rate. Green: no bit errors, yellow: errors the code
@@ -948,6 +957,9 @@ void RadioPagingDemodGUI::setStatus(QLabel *label, const RadioPagingDemodSink::S
 
     if (!quality.isEmpty()) {
         text += "&nbsp;&nbsp;" + quality;
+    }
+    if (status.m_offsetValid[protocol]) {
+        text += "&nbsp;&nbsp;" + offsetHtml(status.m_offset[protocol], status.m_berLive[protocol]);
     }
 
     label->setText(text + QString("&nbsp;&nbsp;(%1)").arg(status.m_messages[protocol]));

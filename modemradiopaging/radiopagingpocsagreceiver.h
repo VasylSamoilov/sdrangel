@@ -51,6 +51,7 @@ public:
         RadioPagingPocsagDecoder::Status m_normal;
         RadioPagingPocsagDecoder::Status m_inverted;
         float m_deviation;                          //!< Measured deviation, discriminator units
+        float m_dc;                                 //!< Measured DC offset (carrier offset), discriminator units
     };
 
     RadioPagingPocsagReceiver();
@@ -69,6 +70,13 @@ public:
     RadioPagingPocsagDecoder::Message takeMessage();
     Status getStatus() const;
 
+    //!< A decoder of either polarity is synchronised
+    bool isSynced() const;
+    //!< DC offset and deviation were just measured on a sync codeword: the DC offset, discriminator units
+    bool takeLevelsMeasured(float& dc);
+    //!< The input was moved by delta (frequency correction before the discriminator)
+    void offsetLevels(float delta) { m_demod.offsetLevels(delta); }
+
 private:
     int m_baud;
     bool m_normalEnabled;
@@ -83,8 +91,11 @@ private:
     std::deque<RadioPagingPocsagDecoder::Message> m_messages;
     RadioPagingDedup m_dedup;
     double m_time = 0.0;                //!< Seconds of signal received, for the duplicate window
+    bool m_levelsMeasured = false;
+    float m_measuredDc = 0.0f;
 
     void collect(RadioPagingPocsagDecoder::Message message);
+    void fitSyncCodeword(bool inverted);
 };
 
 #endif // MODEMRADIOPAGING_RADIOPAGINGPOCSAGRECEIVER_H

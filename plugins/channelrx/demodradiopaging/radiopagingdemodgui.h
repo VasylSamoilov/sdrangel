@@ -116,6 +116,7 @@ private:
     static QString flexDetails(const RadioPagingDemodSink::Status& status);
     QString flexToolTip(const RadioPagingDemodSink::Status& status);
     static QString qualityHtml(const RadioPagingBerWindow& ber, bool live);
+    static QString offsetHtml(float offset, bool live);
 
 private slots:
     void on_deltaFrequency_changed(qint64 value);

@@ -63,6 +63,8 @@ struct RadioPagingDemodSettings
     bool m_hidden;
 
     static const int m_channelSampleRate = 38400;   //!< Multiple of 512, 1200, 2400, 1600, 3200 and 600 baud
+    static double m_legOffsetAllowance;             //!< Offset room each side of a leg, Hz
+    static bool m_legAfc;                           //!< Legs follow the measured carrier offset
 
     RadioPagingDemodSettings();
     void resetToDefaults();
@@ -73,7 +75,11 @@ struct RadioPagingDemodSettings
     void applySettings(const QStringList& settingsKeys, const RadioPagingDemodSettings& settings);
     QString getDebugString(const QStringList& settingsKeys, bool force = false) const;
 
-    //!< Carson bandwidths 2 * (deviation + highest modulation rate) of the legs, Hz
+    //!< Carson bandwidths 2 * (deviation + highest modulation rate): the legs while receiving, Hz
+    double pocsagCarson() const;
+    double flexCarson() const;
+    double gscCarson() const;
+    //!< Leg bandwidths while hunting: Carson and the offset room each side, Hz
     double pocsagBandwidth() const;
     double flexBandwidth() const;
     double gscBandwidth() const;

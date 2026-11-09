@@ -32,7 +32,12 @@
 //   symbol timing    Gardner timing error detector on the matched filter output,
 //                    sampled twice per symbol with linear interpolation, so any
 //                    (fractional) samples per symbol ratio is supported
-//   levels           decision directed tracking of DC offset and deviation
+//   levels           DC offset (carrier frequency offset) and deviation. While hunting: the
+//                    mean of the symbol values over a window (the preamble or the carrier
+//                    averages to the offset) and the mean distance from it. On a known pattern
+//                    (sync word, preamble codewords): a least squares fit of the symbol values
+//                    to the known levels, exact for unbalanced patterns, then held. Data
+//                    symbols never move the levels
 //   decision         2-level: sign; 4-level: thresholds at 0 and +/-2/3 of deviation
 //
 // The symbol clock free runs at the nominal rate and is only nudged by the timing
@@ -57,13 +62,25 @@ public:
     //!< Process one discriminator sample. Returns true when a symbol has been decided
     bool process(float sample, Symbol& symbol);
 
-    //!< Use tracking (low) loop gains once a sync word has been found, acquisition gains otherwise
+    //!< Use tracking (low) timing loop gains once a sync word has been found, acquisition gains otherwise
     void setLocked(bool locked) { m_locked = locked; }
-    //!< Keep the DC offset and deviation as they are, e.g. while something else than symbols
-    //!< (voice audio) is received; the symbol timing goes on
+    //!< Keep the DC offset and deviation as they are (a transmission is being decoded); when
+    //!< released they follow the hunting means again
     void setHoldLevels(bool hold) { m_holdLevels = hold; }
-    //!< Set DC offset and outer level deviation, e.g. measured over a sync word
+    bool getHoldLevels() const { return m_holdLevels; }
+    //!< Set DC offset and outer level deviation, e.g. measured by another demodulator
     void setLevels(float dc, float deviation);
+    //!< Symbols of the hunting means (default 64)
+    void setHuntWindow(int symbols);
+    //!< The input moved by delta (a frequency correction before the discriminator): the DC
+    //!< offset and the symbol history move with it, the hunting means continue over the
+    //!< moved history
+    void offsetLevels(float delta);
+    //!< Fit DC offset and deviation to known.size() symbols whose levels (outer +/-1, inner
+    //!< +/-1/3) are known, oldest first, the last of them symbolsAgo symbols before the last
+    //!< symbol, and hold them. False (nothing changed) if they are no longer in the history
+    //!< or the levels do not vary
+    bool fitLevels(const std::vector<float>& known, size_t symbolsAgo = 0);
     //!< Place the next symbol instant samplesToNextSymbol samples after the last input sample,
     //!< e.g. to continue the symbol clock of another demodulator at a new symbol rate
     void startSymbols(double samplesToNextSymbol);
@@ -90,6 +107,11 @@ private:
 
     float m_dc;
     float m_deviation;
+    MovingAverageUtilVar<float, double> m_huntDc;          //!< Symbol values
+    MovingAverageUtilVar<float, double> m_huntDeviation;   //!< Their distance from the DC offset
+    std::vector<float> m_history;                           //!< Last symbol values (DC included), ring
+    size_t m_historyPos;
+    size_t m_historyCount;
 
     int decide(float normalised) const;
     static float levelValue(int symbol, int levels);
