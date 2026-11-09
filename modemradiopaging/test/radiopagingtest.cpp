@@ -29,6 +29,7 @@
 #include "radiopagingfskdemod.h"
 #include "radiopagingpocsag.h"
 #include "radiopagingpocsagdecoder.h"
+#include "radiopagingpocsagreceiver.h"
 
 namespace {
 
@@ -228,38 +229,84 @@ std::vector<float> makeWaveform(const std::vector<uint8_t>& bits, double sampleR
     return samples;
 }
 
-// A demodulator and a decoder per polarity for one speed
+bool sameMessages(const std::vector<RadioPagingPocsagDecoder::Message>& rx, const std::vector<RadioPagingPocsag::TxMessage>& tx, std::string& why);
+std::vector<RadioPagingPocsag::TxMessage> pocsagTestMessages();
+
+// The receiver of one speed, messages split by polarity
 struct PocsagLeg
 {
-    RadioPagingFskDemod m_demod;
-    RadioPagingPocsagDecoder m_normal{RadioPagingPocsagDecoder::Normal};
-    RadioPagingPocsagDecoder m_inverted{RadioPagingPocsagDecoder::Inverted};
+    RadioPagingPocsagReceiver m_receiver;
     std::vector<RadioPagingPocsagDecoder::Message> m_normalMessages;
     std::vector<RadioPagingPocsagDecoder::Message> m_invertedMessages;
+    bool m_lockedInPreamble = false;
 
     PocsagLeg(double sampleRate, double baud) {
-        m_demod.create(sampleRate, baud, 2);
+        m_receiver.create(sampleRate, (int) baud);
     }
 
     void process(float sample)
     {
-        RadioPagingFskDemod::Symbol symbol;
+        m_receiver.process(sample);
 
-        if (m_demod.process(sample, symbol))
+        RadioPagingPocsagReceiver::Status status = m_receiver.getStatus();
+        if (status.m_preamble && status.m_locked) {
+            m_lockedInPreamble = true;
+        }
+
+        while (m_receiver.hasMessage())
         {
-            m_normal.feed(symbol.m_value);
-            m_inverted.feed(symbol.m_value);
-            m_demod.setLocked(m_normal.isSynced() || m_inverted.isSynced());
-
-            while (m_normal.hasMessage()) {
-                m_normalMessages.push_back(m_normal.takeMessage());
-            }
-            while (m_inverted.hasMessage()) {
-                m_invertedMessages.push_back(m_inverted.takeMessage());
+            RadioPagingPocsagDecoder::Message m = m_receiver.takeMessage();
+            if (m.m_polarity == RadioPagingPocsagDecoder::Inverted) {
+                m_invertedMessages.push_back(m);
+            } else {
+                m_normalMessages.push_back(m);
             }
         }
     }
 };
+
+// Transmission with only the last preambleBits of the preamble, received at one speed
+bool decodedWithShortPreamble(int preambleBits, double baud, bool& lockedInPreamble)
+{
+    std::vector<RadioPagingPocsag::TxMessage> messages = pocsagTestMessages();
+    RadioPagingPocsag::EncodeResult result = RadioPagingPocsag::encode(messages);
+    std::vector<uint8_t> bits(result.m_bits.begin() + (RadioPagingPocsag::m_preambleBits - preambleBits), result.m_bits.end());
+    std::vector<float> samples = makeWaveform(bits, 38400.0, baud, false, 0.08f, 0.12f, 300, 300, 21);
+    PocsagLeg leg(38400.0, baud);
+
+    for (float s : samples) {
+        leg.process(s);
+    }
+
+    lockedInPreamble = leg.m_lockedInPreamble;
+    std::string why;
+    return sameMessages(leg.m_normalMessages, messages, why);
+}
+
+void testPocsagPreambleLock()
+{
+    const double bauds[3] = {512.0, 1200.0, 2400.0};
+    char what[160];
+
+    for (double baud : bauds)
+    {
+        bool locked = false;
+        bool ok = decodedWithShortPreamble(RadioPagingPocsag::m_preambleBits, baud, locked);
+        std::snprintf(what, sizeof(what), "POCSAG %.0f baud: the demodulator locks on the preamble", baud);
+        check(locked, what);
+        std::snprintf(what, sizeof(what), "POCSAG %.0f baud: full preamble, all messages", baud);
+        check(ok, what);
+
+        ok = decodedWithShortPreamble(64, baud, locked);
+        std::snprintf(what, sizeof(what), "POCSAG %.0f baud: only 64 bits of preamble received, locked %s, all messages %s",
+            baud, locked ? "yes" : "no", ok ? "yes" : "no");
+        check(ok, what);
+
+        ok = decodedWithShortPreamble(0, baud, locked);
+        std::snprintf(what, sizeof(what), "POCSAG %.0f baud: no preamble at all, all messages %s", baud, ok ? "yes" : "no");
+        check(ok, what);
+    }
+}
 
 bool sameMessages(const std::vector<RadioPagingPocsagDecoder::Message>& rx, const std::vector<RadioPagingPocsag::TxMessage>& tx, std::string& why)
 {
@@ -409,6 +456,153 @@ void testPocsagLink()
     }
 }
 
+// Feeds bits straight to a decoder (normal polarity: binary 1 is symbol 0) and returns the messages
+std::vector<RadioPagingPocsagDecoder::Message> decodeBits(const std::vector<uint8_t>& bits)
+{
+    RadioPagingPocsagDecoder decoder(RadioPagingPocsagDecoder::Normal);
+    std::vector<RadioPagingPocsagDecoder::Message> messages;
+
+    for (uint8_t b : bits)
+    {
+        decoder.feed(b ? 0 : 1);
+        while (decoder.hasMessage()) {
+            messages.push_back(decoder.takeMessage());
+        }
+    }
+    // A few bits of silence after the transmission
+    for (int i = 0; i < 64; i++)
+    {
+        decoder.feed(i & 1);
+        while (decoder.hasMessage()) {
+            messages.push_back(decoder.takeMessage());
+        }
+    }
+
+    return messages;
+}
+
+void flipBits(std::vector<uint8_t>& bits, size_t codewordIndex, int count)
+{
+    for (int i = 0; i < count; i++) {
+        bits[RadioPagingPocsag::m_preambleBits + 32 * codewordIndex + 3 + 7 * i] ^= 1;
+    }
+}
+
+bool hasAddressText(const std::vector<RadioPagingPocsagDecoder::Message>& messages, uint32_t address, const std::string& text)
+{
+    for (const auto& m : messages)
+    {
+        if ((m.m_address == address) && (RadioPagingPocsag::interpret(m.m_rawData, m.m_rawBits).m_text == text)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void testPocsagStandardRules()
+{
+    // Encoder: an idle or address codeword between a message and the next message's address,
+    // and an idle codeword at the end of the transmission
+    std::vector<RadioPagingPocsag::TxMessage> messages = pocsagTestMessages();
+    RadioPagingPocsag::TxMessage m;
+    m.m_address = 9; m.m_function = 3; m.m_type = RadioPagingPocsag::Alphanumeric; m.m_text = "abc";
+    messages.push_back(m);
+    m.m_address = 10; m.m_text = "def";     // Frame 2, right after the previous message
+    messages.push_back(m);
+    RadioPagingPocsag::EncodeResult result = RadioPagingPocsag::encode(messages);
+
+    bool separated = true;
+    uint32_t previous = RadioPagingPocsag::m_idleWord;
+    for (uint32_t w : result.m_codewords)
+    {
+        if (w == RadioPagingPocsag::m_syncWord) {
+            continue;
+        }
+        bool isAddress = ((w & 0x80000000u) == 0) && (w != RadioPagingPocsag::m_idleWord);
+        if (isAddress && ((previous & 0x80000000u) != 0)) {
+            separated = false;
+        }
+        previous = w;
+    }
+    check(separated, "POCSAG encoder: no address codeword directly after a message codeword");
+    check(result.m_codewords.back() == RadioPagingPocsag::m_idleWord, "POCSAG encoder: the last codeword is an idle codeword");
+
+    // A message that fills a batch exactly is followed by a batch of idle codewords
+    RadioPagingPocsag::TxMessage full;
+    full.m_address = 0; full.m_type = RadioPagingPocsag::Numeric; full.m_text = std::string(75, '1');
+    RadioPagingPocsag::EncodeResult fullResult = RadioPagingPocsag::encode({full});
+    check(fullResult.m_codewords.back() == RadioPagingPocsag::m_idleWord, "POCSAG encoder: a full batch is followed by idle codewords");
+
+    // Decoder: all messages from bits alone
+    std::vector<RadioPagingPocsagDecoder::Message> all = decodeBits(result.m_bits);
+    check(all.size() == messages.size(), "POCSAG decoder: all messages of a multi-batch transmission");
+
+    // Joining during a transmission, without the preamble: start at the second batch
+    std::vector<uint8_t> late(result.m_bits.begin() + RadioPagingPocsag::m_preambleBits + 17 * 32 - 5, result.m_bits.end());
+    std::vector<RadioPagingPocsagDecoder::Message> joined = decodeBits(late);
+    bool lateOk = hasAddressText(joined, 9, "abc") && hasAddressText(joined, 10, "def") && hasAddressText(joined, 100, "A\r\nB");
+    check(lateOk, "POCSAG decoder: joining at the second batch without preamble decodes the later messages");
+
+    // No preamble at all: a single batch is decoded because it is valid by itself
+    RadioPagingPocsag::TxMessage one;
+    one.m_address = 77; one.m_type = RadioPagingPocsag::Alphanumeric; one.m_text = "single";
+    RadioPagingPocsag::EncodeOptions noPreamble;
+    noPreamble.m_preamble = false;
+    RadioPagingPocsag::EncodeResult single = RadioPagingPocsag::encode({one}, noPreamble);
+    check(single.m_codewords.size() == 17, "POCSAG encoder: a short message is a single batch");
+    std::vector<uint8_t> singleBits(single.m_bits);
+    singleBits.insert(singleBits.begin(), 40, 0);
+    check(hasAddressText(decodeBits(singleBits), 77, "single"), "POCSAG decoder: a valid single batch is decoded without preamble");
+
+    // A single batch with an undecodable codeword has no confirming sync codeword: dropped
+    std::vector<uint8_t> badSingle = single.m_bits;
+    for (int i = 0; i < 3; i++) {
+        badSingle[32 * 15 + 2 + 9 * i] ^= 1;    // 3 errors in the last idle codeword
+    }
+    check(decodeBits(badSingle).empty(), "POCSAG decoder: an unconfirmed batch with an undecodable codeword is not decoded");
+
+    // The same damage in the last batch of a multi-batch transmission: its sync codeword is
+    // confirmed by the previous one, the batch is decoded
+    std::vector<uint8_t> badLast = result.m_bits;
+    flipBits(badLast, result.m_codewords.size() - 1, 3);
+    check(decodeBits(badLast).size() == messages.size(), "POCSAG decoder: the last batch of a confirmed transmission is decoded with an undecodable codeword");
+
+    // Two successive undecodable codewords end a message; the next messages are still decoded
+    RadioPagingPocsag::TxMessage longMessage;
+    longMessage.m_address = 1000; longMessage.m_type = RadioPagingPocsag::Alphanumeric;
+    longMessage.m_text = std::string(60, 'x');
+    RadioPagingPocsag::TxMessage after;
+    after.m_address = 1001; after.m_type = RadioPagingPocsag::Alphanumeric; after.m_text = "after";
+    RadioPagingPocsag::EncodeResult twoResult = RadioPagingPocsag::encode({longMessage, after});
+    std::vector<uint8_t> two = twoResult.m_bits;
+    // Codewords of the first batch: sync (index 0), address of 1000 in frame 0 (index 1),
+    // message codewords from index 2
+    flipBits(two, 4, 3);
+    flipBits(two, 5, 3);
+    std::vector<RadioPagingPocsagDecoder::Message> twoMessages = decodeBits(two);
+    bool cut = false;
+    for (const auto& msg : twoMessages)
+    {
+        if (msg.m_address == 1000) {
+            cut = msg.m_truncated && (msg.m_errorsUncorrectable == 2) && (msg.m_rawBits == 2 * 20 + 20);
+        }
+    }
+    check(cut, "POCSAG decoder: two successive undecodable codewords end the message");
+    check(hasAddressText(twoMessages, 1001, "after"), "POCSAG decoder: the message after them is decoded");
+
+    // A single undecodable codeword stays in the message
+    std::vector<uint8_t> oneBad = twoResult.m_bits;
+    flipBits(oneBad, 4, 3);
+    bool kept = false;
+    for (const auto& msg : decodeBits(oneBad))
+    {
+        if (msg.m_address == 1000) {
+            kept = !msg.m_truncated && (msg.m_errorsUncorrectable == 1);
+        }
+    }
+    check(kept, "POCSAG decoder: one undecodable codeword is kept in the message");
+}
+
 } // namespace
 
 int main()
@@ -416,6 +610,8 @@ int main()
     testBCH();
     testPocsagCodec();
     testPocsagLink();
+    testPocsagStandardRules();
+    testPocsagPreambleLock();
     testFsk();
     std::printf("%s (%d failure%s)\n", failures ? "FAILED" : "OK", failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;

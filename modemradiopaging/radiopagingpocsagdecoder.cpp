@@ -20,8 +20,6 @@
 #include "radiopagingbch.h"
 #include "radiopagingpocsag.h"
 
-const int RadioPagingPocsagDecoder::m_minPreambleBits;
-const int RadioPagingPocsagDecoder::m_minPreambleBitsCorrected;
 const int RadioPagingPocsagDecoder::m_maxSyncErrors;
 const int RadioPagingPocsagDecoder::m_maxMessageBits;
 
@@ -51,14 +49,16 @@ void RadioPagingPocsagDecoder::reset()
     m_word = 0;
     m_wordBits = 0;
     m_slot = 0;
+    m_leadingConfirmed = false;
     m_batch = 0;
-    m_batches = 0;
     m_active = false;
     m_currentBits.clear();
+    m_uncorrectableRun = 0;
     m_codewords = 0;
     m_codewordsCorrected = 0;
     m_codewordsUncorrectable = 0;
     m_transmissions = 0;
+    m_candidatesDropped = 0;
     m_messages.clear();
 }
 
@@ -68,11 +68,13 @@ RadioPagingPocsagDecoder::Status RadioPagingPocsagDecoder::getStatus() const
 
     status.m_state = m_state;
     status.m_polarity = m_polarity;
-    status.m_batches = m_batches;
+    status.m_confirmed = m_leadingConfirmed;
+    status.m_batches = m_batch;
     status.m_codewords = m_codewords;
     status.m_codewordsCorrected = m_codewordsCorrected;
     status.m_codewordsUncorrectable = m_codewordsUncorrectable;
     status.m_transmissions = m_transmissions;
+    status.m_candidatesDropped = m_candidatesDropped;
 
     return status;
 }
@@ -84,28 +86,19 @@ RadioPagingPocsagDecoder::Message RadioPagingPocsagDecoder::takeMessage()
     return message;
 }
 
-// Number of alternating bits immediately before the last 32 bits of the shift register
-int RadioPagingPocsagDecoder::alternatingRun() const
+bool RadioPagingPocsagDecoder::syncMatch() const
 {
-    if (m_regBits < 64) {
-        return 0;
-    }
+    return (m_regBits >= 32) && (popcount32(m_reg ^ RadioPagingPocsag::m_syncWord) <= m_maxSyncErrors);
+}
 
-    uint32_t before = (uint32_t) (m_reg >> 32);
-    // Bit i of changes is set when bit i and bit i+1 differ
-    uint32_t changes = before ^ (before >> 1);
-    int run = 1;
-
-    for (int i = 0; i < 31; i++)
-    {
-        if (changes & (1u << i)) {
-            run++;
-        } else {
-            break;
-        }
-    }
-
-    return run;
+void RadioPagingPocsagDecoder::startCandidate()
+{
+    m_state = InBatch;
+    m_slot = 0;
+    m_word = 0;
+    m_wordBits = 0;
+    m_leadingConfirmed = false;
+    m_batch = 0;
 }
 
 void RadioPagingPocsagDecoder::feed(int symbol)
@@ -113,41 +106,32 @@ void RadioPagingPocsagDecoder::feed(int symbol)
     // Binary 1 is a negative deviation for normal polarity
     int bit = (m_polarity == Normal) ? (symbol ? 0 : 1) : (symbol ? 1 : 0);
 
-    m_reg = (m_reg << 1) | (uint64_t) bit;
-    if (m_regBits < 64) {
+    m_reg = (m_reg << 1) | (uint32_t) bit;
+    if (m_regBits < 32) {
         m_regBits++;
     }
 
     switch (m_state)
     {
     case Hunting:
-        if (m_regBits >= 32)
-        {
-            int errors = popcount32((uint32_t) m_reg ^ RadioPagingPocsag::m_syncWord);
-
-            if (errors <= m_maxSyncErrors)
-            {
-                int needed = (errors == 0) ? m_minPreambleBits : m_minPreambleBitsCorrected;
-
-                if (alternatingRun() >= needed)
-                {
-                    m_state = InBatch;
-                    m_slot = 0;
-                    m_wordBits = 0;
-                    m_word = 0;
-                    m_batch = 0;
-                    m_batches = 1;
-                    m_transmissions++;
-                }
-            }
+        if (syncMatch()) {
+            startCandidate();
         }
         break;
 
     case InBatch:
+        // An unconfirmed candidate gives way to a sync codeword at another position
+        if (!m_leadingConfirmed && syncMatch())
+        {
+            m_candidatesDropped++;
+            startCandidate();
+            break;
+        }
+
         m_word = (m_word << 1) | (uint32_t) bit;
         if (++m_wordBits == 32)
         {
-            processCodeword(m_word);
+            m_batchWords[m_slot] = m_word;
             m_wordBits = 0;
             m_word = 0;
             if (++m_slot == RadioPagingPocsag::m_codewordsPerBatch) {
@@ -160,27 +144,65 @@ void RadioPagingPocsagDecoder::feed(int symbol)
         m_word = (m_word << 1) | (uint32_t) bit;
         if (++m_wordBits == 32)
         {
-            int errors = popcount32(m_word ^ RadioPagingPocsag::m_syncWord);
+            bool sync = popcount32(m_word ^ RadioPagingPocsag::m_syncWord) <= m_maxSyncErrors;
 
             m_wordBits = 0;
             m_word = 0;
 
-            if (errors <= m_maxSyncErrors)
+            if (sync)
             {
-                m_state = InBatch;
+                // The batch lies between two sync codewords one batch apart
+                decodeBatch();
+                m_leadingConfirmed = true;
                 m_slot = 0;
-                m_batch++;
-                m_batches++;
+                m_state = InBatch;
             }
             else
             {
-                finishMessage(true);
-                m_state = Hunting;
-                m_batches = 0;
+                if (m_leadingConfirmed || batchValid()) {
+                    decodeBatch();
+                } else {
+                    m_candidatesDropped++;
+                }
+                endTransmission();
             }
         }
         break;
     }
+}
+
+bool RadioPagingPocsagDecoder::batchValid() const
+{
+    for (uint32_t word : m_batchWords)
+    {
+        if (RadioPagingBCH::decode(word).m_bitErrors < 0) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void RadioPagingPocsagDecoder::decodeBatch()
+{
+    if (m_batch == 0) {
+        m_transmissions++;
+    }
+
+    for (m_slot = 0; m_slot < RadioPagingPocsag::m_codewordsPerBatch; m_slot++) {
+        processCodeword(m_batchWords[m_slot]);
+    }
+
+    m_batch++;
+}
+
+void RadioPagingPocsagDecoder::endTransmission()
+{
+    finishMessage(true);
+    m_state = Hunting;
+    m_leadingConfirmed = false;
+    m_batch = 0;
+    m_uncorrectableRun = 0;
 }
 
 void RadioPagingPocsagDecoder::processCodeword(uint32_t word)
@@ -190,33 +212,41 @@ void RadioPagingPocsagDecoder::processCodeword(uint32_t word)
 
     if (result.m_bitErrors < 0)
     {
-        // Uncorrectable. Bit 31 decides what it was supposed to be, as far as we can tell
         m_codewordsUncorrectable++;
-        if (word & 0x80000000u) {
-            appendMessageBits(RadioPagingBCH::data(word), false, true);
-        } else {
-            finishMessage(true);
+        m_uncorrectableRun++;
+
+        if (m_active)
+        {
+            m_current.m_errorsUncorrectable++;
+
+            if (m_uncorrectableRun >= 2) {
+                finishMessage(true);
+            } else {
+                appendMessageBits(RadioPagingBCH::data(word) & 0xfffff);
+            }
         }
         return;
     }
 
-    bool corrected = (result.m_bitErrors > 0) || result.m_parityError;
-    if (corrected) {
+    m_uncorrectableRun = 0;
+
+    int corrections = result.m_bitErrors + (result.m_parityError ? 1 : 0);
+    if (corrections > 0) {
         m_codewordsCorrected++;
     }
 
-    uint32_t corrected_word = result.m_word;
+    uint32_t corrected = result.m_word;
 
-    if (corrected_word == RadioPagingPocsag::m_idleWord)
+    if (corrected == RadioPagingPocsag::m_idleWord)
     {
         finishMessage(false);
     }
-    else if ((corrected_word & 0x80000000u) == 0)
+    else if ((corrected & 0x80000000u) == 0)
     {
         // Address
         finishMessage(false);
 
-        uint32_t data = RadioPagingBCH::data(corrected_word);
+        uint32_t data = RadioPagingBCH::data(corrected);
 
         m_active = true;
         m_current = Message();
@@ -224,30 +254,18 @@ void RadioPagingPocsagDecoder::processCodeword(uint32_t word)
         m_current.m_function = data & 3;
         m_current.m_batch = m_batch;
         m_current.m_polarity = m_polarity;
-        m_current.m_errorsCorrected = corrected ? (result.m_bitErrors > 0 ? result.m_bitErrors : 1) : 0;
+        m_current.m_errorsCorrected = corrections;
         m_currentBits.clear();
     }
-    else
+    else if (m_active)
     {
-        appendMessageBits(RadioPagingBCH::data(corrected_word), corrected, false);
-        if (corrected && m_active) {
-            m_current.m_errorsCorrected += (result.m_bitErrors > 0) ? result.m_bitErrors : 1;
-        }
+        appendMessageBits(RadioPagingBCH::data(corrected) & 0xfffff);
+        m_current.m_errorsCorrected += corrections;
     }
 }
 
-void RadioPagingPocsagDecoder::appendMessageBits(uint32_t data, bool corrected, bool uncorrectable)
+void RadioPagingPocsagDecoder::appendMessageBits(uint32_t data)
 {
-    (void) corrected;
-
-    if (!m_active) {
-        return;
-    }
-
-    if (uncorrectable) {
-        m_current.m_errorsUncorrectable++;
-    }
-
     if ((int) m_currentBits.size() >= m_maxMessageBits) {
         return;
     }

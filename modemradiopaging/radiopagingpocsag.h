@@ -85,7 +85,9 @@ public:
     };
 
     //!< Build the transmission for messages in the given order. Each address is placed in
-    //!< its frame, starting a new batch when the frame has already passed
+    //!< its frame, starting a new batch when the frame has already passed. An idle codeword
+    //!< separates the end of a message from the address of the next message, and the last
+    //!< codeword of the transmission is an idle codeword
     static EncodeResult encode(const std::vector<TxMessage>& messages, const EncodeOptions& options);
     static EncodeResult encode(const std::vector<TxMessage>& messages);
 

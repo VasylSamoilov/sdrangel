@@ -65,6 +65,7 @@ RadioPagingPocsag::EncodeResult RadioPagingPocsag::encode(const std::vector<TxMe
 {
     EncodeResult result;
     int slot = m_codewordsPerBatch;     // Forces the first batch to start
+    bool previousHadMessage = false;    // The previous message ended with message codewords
 
     auto startBatch = [&]() {
         result.m_codewords.push_back(m_syncWord);
@@ -152,6 +153,12 @@ RadioPagingPocsag::EncodeResult RadioPagingPocsag::encode(const std::vector<TxMe
             }
         }
 
+        // At least one idle or address codeword between the end of a message and the
+        // address of the next message
+        if (previousHadMessage) {
+            put(m_idleWord);
+        }
+
         // Place the address in its frame, in either codeword of the frame
         if (slot == m_codewordsPerBatch) {
             startBatch();
@@ -182,6 +189,8 @@ RadioPagingPocsag::EncodeResult RadioPagingPocsag::encode(const std::vector<TxMe
             }
             put(RadioPagingBCH::encode((1u << 20) | chunk));
         }
+
+        previousHadMessage = !bits.empty();
     }
 
     if (result.m_codewords.empty())
@@ -190,7 +199,11 @@ RadioPagingPocsag::EncodeResult RadioPagingPocsag::encode(const std::vector<TxMe
         return result;
     }
 
-    // Complete the last batch with idle codewords
+    // Complete the last batch with idle codewords. The last codeword of a transmission is
+    // an idle codeword, so a full batch is followed by a batch of idle codewords
+    if (slot == m_codewordsPerBatch) {
+        startBatch();
+    }
     while (slot < m_codewordsPerBatch) {
         put(m_idleWord);
     }
