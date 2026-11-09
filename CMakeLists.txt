@@ -1105,6 +1105,7 @@ add_subdirectory(swagger)
 add_subdirectory(devices)
 
 add_subdirectory(modemm17)
+add_subdirectory(modemradiopaging)
 add_subdirectory(modemmeshtastic)
 add_subdirectory(modemmeshcore)
 add_subdirectory(modemdvb)

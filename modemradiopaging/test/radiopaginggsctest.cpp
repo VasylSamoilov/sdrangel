@@ -1,0 +1,596 @@
+///////////////////////////////////////////////////////////////////////////////////
+// Copyright (C) 2026 Vasyl Samoilov <vasyl.samoilov@gmail.com>                  //
+//                                                                               //
+// This program is free software; you can redistribute it and/or modify          //
+// it under the terms of the GNU General Public License as published by          //
+// the Free Software Foundation as version 3 of the License, or                  //
+// (at your option) any later version.                                           //
+//                                                                               //
+// This program is distributed in the hope that it will be useful,               //
+// but WITHOUT ANY WARRANTY; without even the implied warranty of                //
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the                  //
+// GNU General Public License V3 for more details.                               //
+//                                                                               //
+// You should have received a copy of the GNU General Public License             //
+// along with this program. If not, see <http://www.gnu.org/licenses/>.          //
+///////////////////////////////////////////////////////////////////////////////////
+
+// Self test of the sequential Golay paging format. Prints one line per check and
+// returns non-zero if any check fails.
+
+#include <cstdio>
+#include <random>
+#include <string>
+#include <vector>
+
+#include "radiopaginggsc.h"
+#include "radiopaginggscdecoder.h"
+
+namespace {
+
+int passes = 0;
+int failures = 0;
+
+void check(bool ok, const char *what)
+{
+    std::printf("%s: %s\n", ok ? "PASS" : "FAIL", what);
+    if (ok) {
+        passes++;
+    } else {
+        failures++;
+    }
+}
+
+typedef RadioPagingGsc G;
+typedef RadioPagingGscDecoder D;
+
+void testCodes()
+{
+    bool encodeOk = true;
+    bool errorsOk = true;
+    bool complementOk = true;
+    long patterns = 0;
+
+    for (uint32_t data = 0; data < 4096; data++)
+    {
+        uint32_t cw = G::golayEncode((uint16_t) data);
+
+        if ((G::golaySyndrome(cw) != 0) || ((cw & 0xfff) != data)) {
+            encodeOk = false;
+        }
+        if (G::golaySyndrome(cw ^ 0x7fffff) != 0) {
+            complementOk = false;
+        }
+
+        G::GolayResult clean = G::golayDecode(cw);
+        if ((clean.m_word != cw) || (clean.m_data != data) || (clean.m_bitErrors != 0)) {
+            errorsOk = false;
+        }
+
+        for (int i = 0; i < 23; i++)
+        {
+            uint32_t e1 = 1u << i;
+            G::GolayResult r1 = G::golayDecode(cw ^ e1);
+            patterns++;
+            if ((r1.m_word != cw) || (r1.m_bitErrors != 1)) {
+                errorsOk = false;
+            }
+
+            for (int j = i + 1; j < 23; j++)
+            {
+                uint32_t e2 = e1 | (1u << j);
+                G::GolayResult r2 = G::golayDecode(cw ^ e2);
+                patterns++;
+                if ((r2.m_word != cw) || (r2.m_bitErrors != 2)) {
+                    errorsOk = false;
+                }
+
+                for (int k = j + 1; k < 23; k++)
+                {
+                    G::GolayResult r3 = G::golayDecode(cw ^ e2 ^ (1u << k));
+                    patterns++;
+                    if ((r3.m_word != cw) || (r3.m_bitErrors != 3)) {
+                        errorsOk = false;
+                    }
+                }
+            }
+        }
+    }
+
+    check(encodeOk, "Golay: all 4096 data words encode to codewords with data in bits 11-0");
+    check(complementOk, "Golay: the complement of every codeword is a codeword");
+    check(errorsOk, "Golay: all error patterns of weight 0-3 on all 4096 codewords decode to the original");
+    std::printf("      %ld error patterns checked\n", patterns);
+
+    check(G::golayEncode(0) == 0, "Golay: zero data gives the zero codeword");
+
+    bool bchEncodeOk = true;
+    bool bchErrorsOk = true;
+    bool bchBeyond = true;
+    long bchPatterns = 0;
+
+    for (uint32_t data = 0; data < 128; data++)
+    {
+        uint16_t cw = G::bchEncode((uint8_t) data);
+
+        if ((G::bchSyndrome(cw) != 0) || ((cw & 0x7f) != data)) {
+            bchEncodeOk = false;
+        }
+
+        G::BchResult clean = G::bchDecode(cw);
+        if ((clean.m_word != cw) || (clean.m_data != data) || (clean.m_bitErrors != 0)) {
+            bchErrorsOk = false;
+        }
+
+        for (int i = 0; i < 15; i++)
+        {
+            uint16_t e1 = (uint16_t) (1u << i);
+            G::BchResult r1 = G::bchDecode(cw ^ e1);
+            bchPatterns++;
+            if ((r1.m_word != cw) || (r1.m_bitErrors != 1)) {
+                bchErrorsOk = false;
+            }
+
+            for (int j = i + 1; j < 15; j++)
+            {
+                G::BchResult r2 = G::bchDecode(cw ^ e1 ^ (1u << j));
+                bchPatterns++;
+                if ((r2.m_word != cw) || (r2.m_bitErrors != 2)) {
+                    bchErrorsOk = false;
+                }
+            }
+        }
+    }
+
+    // Some patterns of weight 3 are detected as uncorrectable, none are silently accepted as weight 0
+    int detected = 0;
+    for (int i = 0; i < 15; i++)
+    {
+        for (int j = i + 1; j < 15; j++)
+        {
+            for (int k = j + 1; k < 15; k++)
+            {
+                G::BchResult r = G::bchDecode((uint16_t) ((1u << i) | (1u << j) | (1u << k)));
+                if (r.m_bitErrors < 0) {
+                    detected++;
+                } else if (r.m_bitErrors == 0) {
+                    bchBeyond = false;
+                }
+            }
+        }
+    }
+
+    check(bchEncodeOk, "BCH: all 128 data words encode to codewords with data in bits 6-0");
+    check(bchErrorsOk, "BCH: all error patterns of weight 0-2 on all 128 codewords decode to the original");
+    check(bchBeyond && (detected > 0), "BCH: weight 3 patterns are never taken for clean codewords and some are detected");
+    std::printf("      %ld error patterns checked, %d of 455 weight 3 patterns detected\n", bchPatterns, detected);
+}
+
+void testAddresses()
+{
+    bool roundTrip = true;
+    bool illegalOk = true;
+    long count = 0;
+
+    for (int index = 0; index < 10; index++)
+    {
+        for (int group = 0; group < 100; group++)
+        {
+            for (int low = 0; low < 1000; low++)
+            {
+                char buf[8];
+                std::snprintf(buf, sizeof(buf), "%d%02d%03d", index, group, low);
+                std::string address(buf);
+                int preamble;
+                uint16_t w1, w2;
+                bool ok = G::encodeAddress(address, preamble, w1, w2);
+                std::string back;
+
+                if (ok)
+                {
+                    count++;
+                    if (!G::decodeAddress(w1, w2, preamble, back) || (back != address) || (w2 >= 2000)
+                        || (G::word1Index(w1 ^ 0xfff) >= 0) || (G::word1Index(w1) < 0)) {
+                        roundTrip = false;
+                    }
+                }
+                else
+                {
+                    // The same digits are refused for every index
+                    static const int lowIllegal[16] = { 0, 25, 51, 103, 206, 340, 363, 412, 445, 530, 642, 726, 782, 810, 825, 877 };
+                    static const int highIllegal[7] = { 0, 292, 425, 584, 631, 841, 851 };
+                    bool expected = false;
+
+                    for (int v : lowIllegal) {
+                        expected = expected || ((group < 50) && (v == low));
+                    }
+                    for (int v : highIllegal) {
+                        expected = expected || ((group >= 50) && (v == low));
+                    }
+                    if (!expected) {
+                        illegalOk = false;
+                    }
+                }
+            }
+        }
+    }
+
+    check(roundTrip, "Address: encode and decode agree for all legal addresses, word 2 below 2000, no word 1 collides with a complement");
+    check(illegalOk, "Address: only the listed digit combinations are refused");
+    std::printf("      %ld legal addresses\n", count);
+
+    int preamble;
+    uint16_t w1, w2;
+    std::string error;
+    check(!G::encodeAddress("12345", preamble, w1, w2, &error), "Address: 5 digits refused");
+    check(!G::encodeAddress("12a456", preamble, w1, w2, &error), "Address: non digit refused");
+
+    bool preambleOk = true;
+    for (int i = 0; i < 10; i++)
+    {
+        uint32_t cw = G::golayEncode(G::preambleValue(i));
+        G::GolayResult direct = G::golayDecode(cw);
+        G::GolayResult flipped = G::golayDecode(cw ^ 0x7fffff);
+
+        if ((G::preambleIndex(direct.m_data) != i) || (G::preambleIndex(flipped.m_data) >= 0)
+            || (G::preambleIndex(flipped.m_data ^ 0xfff) != i)) {
+            preambleOk = false;
+        }
+    }
+    check(preambleOk, "Preamble values and their complements are distinguishable");
+}
+
+// Feed the bits, optionally inverted, after random noise
+struct Decoded
+{
+    std::vector<D::Message> m_messages;
+    D::Status m_status;
+    bool m_availableBeforeFlush = false;
+};
+
+Decoded decode(const std::vector<uint8_t>& bits, D::Polarity polarity, bool invertBits, int noiseBits, unsigned seed, bool nbs = false)
+{
+    std::mt19937 rng(seed);
+    D decoder(polarity);
+    Decoded out;
+
+    decoder.setNonBatterySaver(nbs);
+
+    for (int i = 0; i < noiseBits; i++) {
+        decoder.feed((int) (rng() & 1));
+    }
+    for (uint8_t bit : bits) {
+        decoder.feed(invertBits ? (bit ^ 1) : bit);
+    }
+
+    out.m_availableBeforeFlush = decoder.hasMessage();
+    decoder.flush();
+
+    while (decoder.hasMessage()) {
+        out.m_messages.push_back(decoder.takeMessage());
+    }
+    out.m_status = decoder.getStatus();
+
+    return out;
+}
+
+G::TxMessage tx(const char *address, int number, G::MessageType type, const char *text = "")
+{
+    G::TxMessage m;
+
+    m.m_address = address;
+    m.m_addressNumber = number;
+    m.m_type = type;
+    m.m_text = text;
+
+    return m;
+}
+
+bool matches(const D::Message& rx, const G::TxMessage& m)
+{
+    if ((rx.m_address.substr(1) != m.m_address.substr(1)) || (rx.m_addressNumber != m.m_addressNumber)) {
+        return false;
+    }
+    if ((rx.m_address[0] != '?') && (rx.m_address[0] != m.m_address[0])) {
+        return false;
+    }
+
+    switch (m.m_type)
+    {
+    case G::Tone:
+        return (rx.m_type == G::Tone) && (rx.m_rawBits == 0);
+    case G::Voice:
+        return (rx.m_type == G::Voice) && (rx.m_rawBits == 0);
+    case G::Numeric:
+        return (rx.m_type == G::Data) && (G::decodeNumeric(rx.m_rawData, rx.m_rawBits) == m.m_text);
+    default:
+        return (rx.m_type == G::Data) && (G::decodeAlphanumeric(rx.m_rawData, rx.m_rawBits) == m.m_text);
+    }
+}
+
+bool allMatch(const Decoded& d, const std::vector<G::TxMessage>& sent)
+{
+    if (d.m_messages.size() != sent.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < sent.size(); i++)
+    {
+        if (!matches(d.m_messages[i], sent[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void roundTrip(const char *name, const std::vector<G::TxMessage>& sent, G::Mode mode = G::Auto)
+{
+    G::EncodeOptions options;
+    options.m_mode = mode;
+    G::EncodeResult enc = G::encode(sent, options);
+    std::string label = name;
+
+    if (!enc.m_ok)
+    {
+        std::printf("      encode error: %s\n", enc.m_error.c_str());
+        check(false, (label + ": encode").c_str());
+        return;
+    }
+
+    Decoded normal = decode(enc.m_bits, D::Normal, false, 0, 1);
+    check(allMatch(normal, sent), (label + ": normal polarity round trip").c_str());
+
+    Decoded inverted = decode(enc.m_bits, D::Inverted, true, 0, 1);
+    check(allMatch(inverted, sent), (label + ": inverted bits, inverted decoder").c_str());
+
+    Decoded wrongA = decode(enc.m_bits, D::Inverted, false, 0, 1);
+    Decoded wrongB = decode(enc.m_bits, D::Normal, true, 0, 1);
+    check(wrongA.m_messages.empty() && wrongB.m_messages.empty(), (label + ": the other polarity decoder stays silent").c_str());
+
+    Decoded noisy = decode(enc.m_bits, D::Normal, false, 3000, 7);
+    check(allMatch(noisy, sent), (label + ": preceded by random noise").c_str());
+}
+
+// Offsets of a single message transmission with a preamble (see the format description)
+void injectGolay(std::vector<uint8_t>& bits, size_t start)
+{
+    static const int pairs[3] = { 1, 8, 17 };
+
+    for (int p : pairs) {
+        bits[start + 2 * p] ^= 1;
+    }
+}
+
+void testErrors()
+{
+    std::vector<G::TxMessage> sent = { tx("100123", 3, G::Alphanumeric, "ERRORS IN ALL CODEWORDS OF THIS LONGER MESSAGE 0123456789") };
+    G::EncodeResult enc = G::encode(sent);
+    int blocks = ((int) enc.m_bits.size() - 1098) / 121;
+
+    for (int i = 0; i < 18; i++) {
+        injectGolay(enc.m_bits, 28 + 46 * i);
+    }
+    injectGolay(enc.m_bits, 884);
+    injectGolay(enc.m_bits, 931);
+    injectGolay(enc.m_bits, 1005);
+    injectGolay(enc.m_bits, 1052);
+
+    for (int b = 0; b < blocks; b++)
+    {
+        for (int k = 0; k < 8; k++)
+        {
+            enc.m_bits[1099 + 121 * b + 3 * 8 + k] ^= 1;
+            enc.m_bits[1099 + 121 * b + 11 * 8 + k] ^= 1;
+        }
+    }
+
+    Decoded d = decode(enc.m_bits, D::Normal, false, 0, 1);
+    check(allMatch(d, sent), "Three errors in every Golay codeword and two in every BCH codeword still decode");
+    check(!d.m_messages.empty() && (d.m_messages[0].m_errorsCorrected > 0) && (d.m_messages[0].m_errorsUncorrectable == 0)
+        && (d.m_messages[0].m_checksumErrors == 0), "Corrections are reported, nothing uncorrectable");
+    std::printf("      %d blocks, %d bits corrected\n", blocks, d.m_messages.empty() ? -1 : d.m_messages[0].m_errorsCorrected);
+
+    // A tone only message with errors in its address
+    std::vector<G::TxMessage> tone = { tx("100123", 2, G::Tone) };
+    G::EncodeResult encTone = G::encode(tone);
+    injectGolay(encTone.m_bits, 1005);
+    injectGolay(encTone.m_bits, 1052);
+    check(allMatch(decode(encTone.m_bits, D::Normal, false, 0, 1), tone), "Tone only with errors in the address words");
+}
+
+void testBatches()
+{
+    std::vector<G::TxMessage> three = {
+        tx("100123", 1, G::Tone),
+        tx("219789", 2, G::Numeric, "5551234 -U"),
+        tx("100456", 4, G::Alphanumeric, "MEETING AT NOON"),
+    };
+    roundTrip("Batch of 3", three);
+
+    G::EncodeResult enc = G::encode(three);
+    check(enc.m_ok && (enc.m_slots == 16), "Batch of 3 uses 16 slots");
+
+    std::vector<G::TxMessage> full;
+    for (int i = 0; i < 16; i++)
+    {
+        char address[8];
+        std::snprintf(address, sizeof(address), "1007%02d", i);
+        full.push_back(tx(address, 1 + (i & 3), (i % 3 == 0) ? G::Tone : ((i % 3 == 1) ? G::Numeric : G::Alphanumeric),
+            (i % 3 == 1) ? "0123456789" : ((i % 3 == 2) ? "PAGE" : "")));
+    }
+    roundTrip("Normal batch of 16", full);
+
+    std::vector<G::TxMessage> extended;
+    for (int i = 0; i < 20; i++)
+    {
+        char address[8];
+        std::snprintf(address, sizeof(address), "1007%02d", i);
+        extended.push_back(tx(address, 1 + ((i + 1) & 3), (i % 3 == 0) ? G::Numeric : ((i % 3 == 1) ? G::Tone : G::Alphanumeric),
+            (i % 3 == 0) ? "98765 4321" : ((i % 3 == 2) ? "EXTENDED BATCH MESSAGE NUMBER" : "")));
+    }
+    roundTrip("Extended batch of 20", extended);
+    G::EncodeResult encExt = G::encode(extended);
+    check(encExt.m_ok && (encExt.m_slots == 32), "Extended batch uses 32 slots");
+
+    Decoded d = decode(encExt.m_bits, D::Normal, false, 0, 1);
+    bool batchFlag = !d.m_messages.empty();
+    for (const D::Message& m : d.m_messages) {
+        batchFlag = batchFlag && m.m_batch && (m.m_preamble == 1);
+    }
+    check(batchFlag && (d.m_messages.size() == 20) && (d.m_messages[19].m_slot == 19), "Batch flag, preamble index and slots are reported");
+
+    std::vector<G::TxMessage> mixedPreamble = { tx("100123", 1, G::Tone), tx("300123", 1, G::Tone) };
+    check(!G::encode(mixedPreamble).m_ok, "Batch with different preamble values is refused");
+    check(!G::encode({ tx("100123", 1, G::Voice), tx("100456", 1, G::Tone) }).m_ok, "Voice in a batch is refused");
+}
+
+void testNonBatterySaver()
+{
+    std::vector<G::TxMessage> sent = { tx("500123", 2, G::Alphanumeric, "NO PREAMBLE CODEWORDS") };
+    G::EncodeOptions options;
+    options.m_mode = G::NonBatterySaver;
+    G::EncodeResult enc = G::encode(sent, options);
+    Decoded off = decode(enc.m_bits, D::Normal, false, 0, 1, false);
+    Decoded on = decode(enc.m_bits, D::Normal, false, 0, 1, true);
+    Decoded onNoise = decode(enc.m_bits, D::Normal, false, 500, 3, true);
+    Decoded onInverted = decode(enc.m_bits, D::Inverted, true, 0, 1, true);
+
+    check(enc.m_ok && off.m_messages.empty(), "Non battery saver pattern is ignored unless enabled");
+    check(allMatch(on, sent) && on.m_messages[0].m_nonBatterySaver && (on.m_messages[0].m_address[0] == '?'), "Non battery saver alphanumeric round trip");
+    check(allMatch(onNoise, sent), "Non battery saver after random noise");
+    check(allMatch(onInverted, sent), "Non battery saver, inverted bits, inverted decoder");
+
+    std::vector<G::TxMessage> tone = { tx("500123", 1, G::Tone) };
+    check(allMatch(decode(G::encode(tone, options).m_bits, D::Normal, false, 0, 1, true), tone), "Non battery saver tone only");
+    std::vector<G::TxMessage> voice = { tx("500123", 3, G::Voice) };
+    check(allMatch(decode(G::encode(voice, options).m_bits, D::Normal, false, 0, 1, true), voice), "Non battery saver voice");
+}
+
+void testInterpretation()
+{
+    std::vector<G::TxMessage> alpha = { tx("100123", 1, G::Alphanumeric, "HELLO WORLD") };
+    std::vector<G::TxMessage> numeric = { tx("100123", 1, G::Numeric, "5551234") };
+    Decoded a = decode(G::encode(alpha).m_bits, D::Normal, false, 0, 1);
+    Decoded n = decode(G::encode(numeric).m_bits, D::Normal, false, 0, 1);
+
+    G::Interpretation ia = G::interpret(a.m_messages[0].m_rawData, a.m_messages[0].m_rawBits);
+    G::Interpretation in = G::interpret(n.m_messages[0].m_rawData, n.m_messages[0].m_rawBits);
+
+    check((ia.m_type == "alphanumeric") && (ia.m_text == "HELLO WORLD") && (ia.m_altType == "numeric") && (ia.m_score > ia.m_altScore),
+        "Interpretation of an alphanumeric message");
+    check((in.m_type == "numeric") && (in.m_text == "5551234") && (in.m_altType == "alphanumeric") && (in.m_score > in.m_altScore),
+        "Interpretation of a numeric message");
+    std::printf("      alpha: %s %d / %s %d, numeric: %s %d / %s %d\n", ia.m_type.c_str(), ia.m_score, ia.m_altType.c_str(), ia.m_altScore,
+        in.m_type.c_str(), in.m_score, in.m_altType.c_str(), in.m_altScore);
+
+    check(G::interpret(std::vector<uint8_t>(), 0).m_type == "tone_only", "Interpretation without bits is tone only");
+
+    // A full block of alphanumeric text has no padding
+    std::vector<G::TxMessage> full = { tx("100123", 1, G::Alphanumeric, "ABCDEFGH") };
+    Decoded f = decode(G::encode(full).m_bits, D::Normal, false, 0, 1);
+    G::Interpretation fi = G::interpret(f.m_messages[0].m_rawData, f.m_messages[0].m_rawBits);
+    check(!f.m_messages.empty() && ((fi.m_type == "alphanumeric" ? fi.m_text : fi.m_altText) == "ABCDEFGH"),
+        "A message that fills a block (no padding) keeps the alphanumeric reading as a candidate");
+
+    std::vector<G::TxMessage> letters = { tx("100123", 1, G::Numeric, "ABCDEFGHJLNPR U-0123") };
+    check(allMatch(decode(G::encode(letters).m_bits, D::Normal, false, 0, 1), letters), "Numeric letters through the shift nibble");
+
+    check(G::escapeControl(std::string("A\r") + "B") == "A<0x0D>B", "Control characters are escaped");
+}
+
+void testStreaming()
+{
+    // Message available as soon as its last block is in, without flush
+    std::vector<G::TxMessage> sent = { tx("100123", 1, G::Alphanumeric, "STREAMING") };
+    Decoded d = decode(G::encode(sent).m_bits, D::Normal, false, 0, 1);
+    check(d.m_availableBeforeFlush && allMatch(d, sent), "Message is available before flush");
+
+    // Truncated message
+    G::EncodeResult enc = G::encode({ tx("100123", 1, G::Alphanumeric, "THIS MESSAGE HAS THREE BLOCKS OF TEXT.") });
+    std::vector<uint8_t> cut(enc.m_bits.begin(), enc.m_bits.begin() + 1098 + 121 * 2);
+    Decoded t = decode(cut, D::Normal, false, 0, 1);
+    check((t.m_messages.size() == 1) && t.m_messages[0].m_truncated && (t.m_messages[0].m_rawBits == 96), "Cut off message is reported truncated after flush");
+
+    // Two transmissions with noise in between
+    std::mt19937 rng(5);
+    std::vector<G::TxMessage> a = { tx("100123", 1, G::Alphanumeric, "FIRST") };
+    std::vector<G::TxMessage> b = { tx("300456", 2, G::Numeric, "123") };
+    std::vector<uint8_t> bits = G::encode(a).m_bits;
+    for (int i = 0; i < 300; i++) {
+        bits.push_back((uint8_t) (rng() & 1));
+    }
+    std::vector<uint8_t> second = G::encode(b).m_bits;
+    bits.insert(bits.end(), second.begin(), second.end());
+    Decoded two = decode(bits, D::Normal, false, 100, 2);
+    check((two.m_messages.size() == 2) && matches(two.m_messages[0], a[0]) && matches(two.m_messages[1], b[0]) && (two.m_status.m_transmissions == 2),
+        "Two transmissions separated by noise");
+
+    // Back to back without any gap
+    std::vector<uint8_t> tight = G::encode(a).m_bits;
+    tight.insert(tight.end(), second.begin(), second.end());
+    Decoded two2 = decode(tight, D::Normal, false, 0, 1);
+    check((two2.m_messages.size() == 2) && matches(two2.m_messages[0], a[0]) && matches(two2.m_messages[1], b[0]), "Two transmissions back to back");
+
+    // Voice and tone only
+    roundTrip("Voice", { tx("100123", 3, G::Voice) });
+    roundTrip("Tone only", { tx("100123", 4, G::Tone) });
+    roundTrip("Numeric", { tx("100123", 1, G::Numeric, "0123456789 -U") });
+    roundTrip("Alphanumeric", { tx("100123", 2, G::Alphanumeric, "HELLO WORLD 123") });
+    std::string longText;
+    while (longText.size() < 200) {
+        longText += "THE QUICK BROWN FOX 0123456789 ";
+    }
+    roundTrip("Long alphanumeric", { tx("750123", 1, G::Alphanumeric, longText.c_str()) });
+    roundTrip("Group 50-99 numeric", { tx("968001", 1, G::Numeric, "42") });
+    check(!G::encode({ tx("100123", 1, G::Alphanumeric, std::string(300, 'A').c_str()) }).m_ok, "Too long message refused");
+    check(!G::encode({ tx("100123", 5, G::Tone) }).m_ok, "Address number 5 refused");
+    check(!G::encode({ tx("100123", 1, G::Numeric, "12?") }).m_ok, "Character not allowed in numeric refused");
+}
+
+void testNoFalseLock()
+{
+    std::mt19937 rng(11);
+    D normal(D::Normal);
+    D inverted(D::Inverted);
+    D nbs(D::Normal);
+
+    nbs.setNonBatterySaver(true);
+
+    for (int i = 0; i < 300000; i++)
+    {
+        int bit = (int) (rng() & 1);
+        normal.feed(bit);
+        inverted.feed(bit);
+        nbs.feed(bit);
+    }
+    // Alternating bits and a lot of equal bits
+    for (int i = 0; i < 5000; i++)
+    {
+        normal.feed(i & 1);
+        inverted.feed(i & 1);
+    }
+    for (int i = 0; i < 5000; i++)
+    {
+        normal.feed(1);
+        inverted.feed(0);
+    }
+
+    check((normal.getStatus().m_transmissions == 0) && (inverted.getStatus().m_transmissions == 0) && (nbs.getStatus().m_transmissions == 0)
+        && !normal.hasMessage() && !inverted.hasMessage() && !nbs.hasMessage(), "No lock on 300000 random bits, a comma and a constant");
+}
+
+} // namespace
+
+int main()
+{
+    testCodes();
+    testAddresses();
+    testStreaming();
+    testErrors();
+    testBatches();
+    testNonBatterySaver();
+    testInterpretation();
+    testNoFalseLock();
+
+    std::printf("%d passed, %d failed\n", passes, failures);
+    return failures ? 1 : 0;
+}
