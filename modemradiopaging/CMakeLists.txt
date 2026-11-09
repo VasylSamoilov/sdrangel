@@ -9,6 +9,9 @@ set(modemradiopaging_SOURCES
     radiopaginggscdecoder.cpp
     radiopagingflex.cpp
     radiopagingflexscheduler.cpp
+    radiopagingflexdecoder.cpp
+    radiopagingflexdecodermsg.cpp
+    radiopagingflexreceiver.cpp
 )
 
 set(modemradiopaging_HEADERS
@@ -20,6 +23,8 @@ set(modemradiopaging_HEADERS
     radiopaginggscdecoder.h
     radiopagingflex.h
     radiopagingflexscheduler.h
+    radiopagingflexdecoder.h
+    radiopagingflexreceiver.h
 )
 
 include_directories(
@@ -39,8 +44,8 @@ target_link_libraries(modemradiopaging
 install(TARGETS modemradiopaging DESTINATION ${INSTALL_LIB_DIR})
 
 # Self tests of the codecs and the demodulator, not built by default:
-#   cmake --build <build dir> --target radiopagingtest radiopaginggsctest radiopagingflextest
-foreach(radiopaging_test radiopagingtest radiopaginggsctest radiopagingflextest)
+#   cmake --build <build dir> --target radiopagingtest radiopaginggsctest radiopagingflextest radiopagingflexdecodertest radiopagingflexreceivertest
+foreach(radiopaging_test radiopagingtest radiopaginggsctest radiopagingflextest radiopagingflexdecodertest radiopagingflexreceivertest)
     add_executable(${radiopaging_test} EXCLUDE_FROM_ALL test/${radiopaging_test}.cpp)
     target_link_libraries(${radiopaging_test} modemradiopaging)
     target_include_directories(${radiopaging_test} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test)

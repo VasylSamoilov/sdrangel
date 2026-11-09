@@ -72,6 +72,13 @@ void RadioPagingFskDemod::setLevels(float dc, float deviation)
     m_deviation = std::max(deviation, 1e-3f);
 }
 
+void RadioPagingFskDemod::startSymbols(double samplesToNextSymbol)
+{
+    m_timeToNext = samplesToNextSymbol;
+    m_nextIsSymbol = true;
+    m_haveMid = false;
+}
+
 float RadioPagingFskDemod::levelValue(int symbol, int levels)
 {
     if (levels == 4)
@@ -149,6 +156,7 @@ bool RadioPagingFskDemod::process(float sample, Symbol& symbol)
             symbol.m_value = decided;
             symbol.m_soft = normalised;
             symbol.m_error = normalised - level;
+            symbol.m_offset = (float) -m_timeToNext;
             produced = true;
 
             m_timeToNext += halfSymbol + correction;

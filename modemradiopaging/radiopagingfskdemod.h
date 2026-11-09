@@ -46,6 +46,7 @@ public:
         int m_value;        //!< 2-level: 0 or 1 (1 = positive deviation); 4-level: 0..3 (3 = highest frequency)
         float m_soft;       //!< Normalised symbol value: outer levels +/-1, inner +/-1/3
         float m_error;      //!< Distance from the decided level, normalised
+        float m_offset;     //!< The symbol instant lies this many samples (0 to 1) before the last input sample
     };
 
     RadioPagingFskDemod();
@@ -60,6 +61,9 @@ public:
     void setLocked(bool locked) { m_locked = locked; }
     //!< Set DC offset and outer level deviation, e.g. measured over a sync word
     void setLevels(float dc, float deviation);
+    //!< Place the next symbol instant samplesToNextSymbol samples after the last input sample,
+    //!< e.g. to continue the symbol clock of another demodulator at a new symbol rate
+    void startSymbols(double samplesToNextSymbol);
 
     float getDC() const { return m_dc; }
     float getDeviation() const { return m_deviation; }
