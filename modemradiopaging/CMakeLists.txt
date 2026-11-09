@@ -8,6 +8,7 @@ set(modemradiopaging_SOURCES
     radiopagingpocsagreceiver.cpp
     radiopaginggsc.cpp
     radiopaginggscdecoder.cpp
+    radiopaginggscreceiver.cpp
     radiopagingflex.cpp
     radiopagingflexscheduler.cpp
     radiopagingflexdecoder.cpp
@@ -23,6 +24,7 @@ set(modemradiopaging_HEADERS
     radiopagingpocsagreceiver.h
     radiopaginggsc.h
     radiopaginggscdecoder.h
+    radiopaginggscreceiver.h
     radiopagingflex.h
     radiopagingflexscheduler.h
     radiopagingflexdecoder.h

@@ -18,11 +18,12 @@
 #include "radiopaginggscdecoder.h"
 
 #include <algorithm>
+#include <cmath>
 
 const int RadioPagingGscDecoder::m_minNonBatterySaverBits;
-const int RadioPagingGscDecoder::m_maxStartSearchBits;
 const int RadioPagingGscDecoder::m_syncHits;
-const int RadioPagingGscDecoder::m_maxStartCodeErrors;
+const int RadioPagingGscDecoder::m_maxPreambleWordsAfterLock;
+const float RadioPagingGscDecoder::m_minPairAgreement = 0.5f;
 
 namespace {
 
@@ -31,6 +32,7 @@ const int pairBits = 121;           // Comma, word 1, separator bit, word 2
 const int peekBits = 74;            // Comma and word 1
 const int hitRing = 2 * codewordBits + 1;
 const int maxTransitionsForData = 108;
+const uint16_t startComplement = RadioPagingGsc::m_startCode ^ 0xfff;
 
 bool alternates(const uint8_t *bits, int n)
 {
@@ -64,12 +66,12 @@ void RadioPagingGscDecoder::reset()
     m_parse = SeekStart;
     m_reg = 0;
     m_regBits = 0;
+    std::fill(m_softRing, m_softRing + codewordBits, 0.0f);
+    m_softPos = 0;
     std::fill(m_hits, m_hits + hitRing, (int8_t) -1);
     m_hitPos = 0;
     m_patternRun = 0;
-    m_buf.clear();
-    m_pos = 0;
-    m_scan = 0;
+    clearBuffer();
     m_preamble = -1;
     m_batch = false;
     m_nbs = false;
@@ -84,6 +86,14 @@ void RadioPagingGscDecoder::reset()
     m_transmissions = 0;
     m_messageCount = 0;
     m_messages.clear();
+}
+
+void RadioPagingGscDecoder::clearBuffer()
+{
+    m_buf.clear();
+    m_soft.clear();
+    m_pos = 0;
+    m_scan = 0;
 }
 
 RadioPagingGscDecoder::Status RadioPagingGscDecoder::getStatus() const
@@ -108,16 +118,63 @@ RadioPagingGscDecoder::Message RadioPagingGscDecoder::takeMessage()
     return message;
 }
 
-// Preamble hit for the last 46 bits: index * 2, plus 1 if complemented. -1 if none
-int RadioPagingGscDecoder::preambleHit() const
+uint32_t RadioPagingGscDecoder::wordAt(int pos) const
 {
-    uint32_t word = 0;
+    return RadioPagingGsc::resolveDuplicated(&m_soft[pos]);
+}
 
-    for (int i = 0; i < 23; i++) {
-        word |= (uint32_t) ((m_reg >> (45 - 2 * i)) & 1) << i;
+// The two symbols of a 300 bit/s bit are equal, those of a comma alternate. A word is
+// taken where the pairs agree: the sum of each pair keeps at least half of the energy of
+// its symbols over the word. A comma then never decodes as a word
+bool RadioPagingGscDecoder::isWord(int pos) const
+{
+    float agree = 0.0f;
+    float total = 0.0f;
+
+    for (int i = 0; i < 23; i++)
+    {
+        float a = m_soft[pos + 2 * i];
+        float b = m_soft[pos + 2 * i + 1];
+        agree += std::fabs(a + b);
+        total += std::fabs(a) + std::fabs(b);
     }
 
-    RadioPagingGsc::GolayResult result = RadioPagingGsc::golayDecode(word);
+    return agree >= m_minPairAgreement * total;
+}
+
+bool RadioPagingGscDecoder::decodeWord(int pos, RadioPagingGsc::GolayResult& result) const
+{
+    if (!isWord(pos)) {
+        return false;
+    }
+
+    result = RadioPagingGsc::golayDecode(wordAt(pos));
+    return true;
+}
+
+float RadioPagingGscDecoder::correlation(int pos, uint32_t codeword) const
+{
+    float c = 0.0f;
+
+    for (int i = 0; i < 23; i++)
+    {
+        float s = m_soft[pos + 2 * i] + m_soft[pos + 2 * i + 1];
+        c += ((codeword >> i) & 1) ? s : -s;
+    }
+
+    return c;
+}
+
+// Preamble hit for the last 46 symbols: index * 2, plus 1 if complemented. -1 if none
+int RadioPagingGscDecoder::preambleHit() const
+{
+    float window[codewordBits];
+
+    for (int i = 0; i < codewordBits; i++) {
+        window[i] = m_softRing[(m_softPos + i) % codewordBits];
+    }
+
+    RadioPagingGsc::GolayResult result = RadioPagingGsc::golayDecode(RadioPagingGsc::resolveDuplicated(window));
     int index = RadioPagingGsc::preambleIndex(result.m_data);
 
     if (index >= 0) {
@@ -131,12 +188,20 @@ int RadioPagingGscDecoder::preambleHit() const
 
 void RadioPagingGscDecoder::feed(int symbol)
 {
-    int bit = (m_polarity == Normal) ? (symbol ? 1 : 0) : (symbol ? 0 : 1);
+    feedSoft(symbol ? 1.0f : -1.0f);
+}
+
+void RadioPagingGscDecoder::feedSoft(float soft)
+{
+    float s = (m_polarity == Normal) ? soft : -soft;
+    int bit = (s > 0.0f) ? 1 : 0;
 
     m_reg = (m_reg << 1) | (uint64_t) bit;
     if (m_regBits < 64) {
         m_regBits++;
     }
+    m_softRing[m_softPos] = s;
+    m_softPos = (m_softPos + 1) % codewordBits;
 
     // A new preamble is only looked for when no start code search is going on
     bool enabled = (m_state == Hunting) || (m_state == InTransmission);
@@ -190,6 +255,7 @@ void RadioPagingGscDecoder::feed(int symbol)
     if (m_state != Hunting)
     {
         m_buf.push_back((uint8_t) bit);
+        m_soft.push_back(s);
         process();
     }
 }
@@ -209,9 +275,7 @@ void RadioPagingGscDecoder::startTransmission(int index, bool batch)
     m_patternRun = 0;
     m_state = AwaitStart;
     m_parse = SeekStart;
-    m_buf.clear();
-    m_pos = 0;
-    m_scan = 0;
+    clearBuffer();
     m_preamble = index;
     m_batch = batch;
     m_nbs = false;
@@ -226,15 +290,15 @@ void RadioPagingGscDecoder::startNonBatterySaver()
     m_patternRun = 0;
     m_state = AwaitStart;
     m_parse = SeekAddress;
-    m_buf.clear();
+    clearBuffer();
 
     // The pattern may have run on into the comma by a few bits
-    for (int i = 7; i >= 0; i--) {
+    for (int i = 7; i >= 0; i--)
+    {
         m_buf.push_back((uint8_t) ((m_reg >> i) & 1));
+        m_soft.push_back(m_softRing[(m_softPos + codewordBits - 1 - i) % codewordBits]);
     }
 
-    m_pos = 0;
-    m_scan = 0;
     m_preamble = -1;
     m_batch = false;
     m_nbs = true;
@@ -252,9 +316,7 @@ void RadioPagingGscDecoder::endTransmission(bool truncated)
     }
 
     m_state = Hunting;
-    m_buf.clear();
-    m_pos = 0;
-    m_scan = 0;
+    clearBuffer();
 }
 
 void RadioPagingGscDecoder::finishMessage(bool truncated)
@@ -312,62 +374,67 @@ void RadioPagingGscDecoder::trim()
         int n = std::min(m_pos, (int) m_buf.size());
 
         m_buf.erase(m_buf.begin(), m_buf.begin() + n);
+        m_soft.erase(m_soft.begin(), m_soft.begin() + n);
         m_pos -= n;
     }
 }
 
-// Bit errors of the 92 received bits of start code and complement (each codeword bit sent
-// twice) against what is transmitted, for the start code at the given bit offset
-int RadioPagingGscDecoder::startCodeErrors(int offset) const
-{
-    static const uint32_t start = RadioPagingGsc::golayEncode(RadioPagingGsc::m_startCode);
-    static const uint32_t complement = start ^ 0x7fffff;
-    int errors = 0;
-
-    for (int i = 0; i < 23; i++)
-    {
-        int bit = (start >> i) & 1;
-        errors += (m_buf[offset + 2 * i] != bit) + (m_buf[offset + 2 * i + 1] != bit);
-    }
-
-    int second = offset + codewordBits + 1;
-
-    for (int i = 0; i < 23; i++)
-    {
-        int bit = (complement >> i) & 1;
-        errors += (m_buf[second + 2 * i] != bit) + (m_buf[second + 2 * i + 1] != bit);
-    }
-
-    return errors;
-}
-
-// The start code and, 47 bits later, its complement, at any bit offset. Accepted when both
-// copies decode, or when the two copies together have at most m_maxStartCodeErrors bit
-// errors over their 92 bits (one copy may then be beyond what its own code corrects)
+// The buffer starts at the end of the preamble word that locked. After each further
+// preamble word (m_scan of them) a comma and the start code may follow. The start code is
+// accepted when its Word 1 or its Word 2 decodes. Each copy is tried one symbol either
+// side of the grid position and the position that correlates best is taken: it sets the
+// symbol timing of the 600 bit/s blocks that follow
 bool RadioPagingGscDecoder::processSeekStart()
 {
-    while (m_scan + 2 * codewordBits + 1 <= (int) m_buf.size())
-    {
-        RadioPagingGsc::GolayResult a = RadioPagingGsc::golayDecode(RadioPagingGsc::resolveDuplicated(&m_buf[m_scan]));
-        RadioPagingGsc::GolayResult b = RadioPagingGsc::golayDecode(RadioPagingGsc::resolveDuplicated(&m_buf[m_scan + codewordBits + 1]));
-        bool bothDecode = (a.m_data == RadioPagingGsc::m_startCode) && (b.m_data == (RadioPagingGsc::m_startCode ^ 0xfff));
+    static const uint32_t word1 = RadioPagingGsc::golayEncode(RadioPagingGsc::m_startCode);
+    static const uint32_t word2 = word1 ^ 0x7fffff;
 
-        if (bothDecode || (startCodeErrors(m_scan) <= m_maxStartCodeErrors))
+    for (;;)
+    {
+        int grid = m_scan * codewordBits + RadioPagingGsc::m_commaBits;
+
+        if (grid + 1 + 2 * codewordBits + 1 > (int) m_buf.size()) {
+            return false;
+        }
+
+        bool found = false;
+        float best = 0.0f;
+        int bestPos = 0;
+
+        for (int d = -1; d <= 1; d++)
         {
-            m_pos = m_scan + 2 * codewordBits + 1;
+            int o = grid + d;
+            RadioPagingGsc::GolayResult a, b;
+            float c = -1.0e30f;
+
+            if (decodeWord(o, a) && (a.m_data == RadioPagingGsc::m_startCode)) {
+                c = correlation(o, word1);
+            }
+            if (decodeWord(o + codewordBits + 1, b) && (b.m_data == startComplement)) {
+                c = std::max(c, correlation(o + codewordBits + 1, word2));
+            }
+            if ((c > -1.0e30f) && (!found || (c > best)))
+            {
+                found = true;
+                best = c;
+                bestPos = o;
+            }
+        }
+
+        if (found)
+        {
+            m_pos = bestPos + 2 * codewordBits + 1;
             m_state = InTransmission;
             m_parse = Next;
             return true;
         }
 
-        if (++m_scan > m_maxStartSearchBits)
+        if (++m_scan > m_maxPreambleWordsAfterLock)
         {
             endTransmission(false);
             return false;
         }
     }
-
-    return false;
 }
 
 // First address after the pattern, at the bit offset where an alternating comma and a word 1 are
@@ -379,11 +446,10 @@ bool RadioPagingGscDecoder::processSeekAddress()
 
         if (alternates(&m_buf[o], RadioPagingGsc::m_commaBits))
         {
-            RadioPagingGsc::GolayResult r = RadioPagingGsc::golayDecode(RadioPagingGsc::resolveDuplicated(&m_buf[o + RadioPagingGsc::m_commaBits]));
             Message message;
             int e1, e2;
 
-            if (isWord1(r.m_data) && parseAddress(o, message, e1, e2))
+            if (parseAddress(o, message, e1, e2))
             {
                 m_pos = o;
                 m_state = InTransmission;
@@ -404,11 +470,14 @@ bool RadioPagingGscDecoder::processSeekAddress()
 
 bool RadioPagingGscDecoder::parseAddress(int pos, Message& message, int& errors1, int& errors2) const
 {
-    const uint8_t *p = &m_buf[pos];
-    RadioPagingGsc::GolayResult r1 = RadioPagingGsc::golayDecode(RadioPagingGsc::resolveDuplicated(p + RadioPagingGsc::m_commaBits));
+    RadioPagingGsc::GolayResult r1, r2;
     uint16_t word1;
     bool inverted1 = false;
     bool inverted2 = false;
+
+    if (!decodeWord(pos + RadioPagingGsc::m_commaBits, r1) || !decodeWord(pos + RadioPagingGsc::m_commaBits + codewordBits + 1, r2)) {
+        return false;
+    }
 
     if (RadioPagingGsc::word1Index(r1.m_data) >= 0)
     {
@@ -424,7 +493,6 @@ bool RadioPagingGscDecoder::parseAddress(int pos, Message& message, int& errors1
         return false;
     }
 
-    RadioPagingGsc::GolayResult r2 = RadioPagingGsc::golayDecode(RadioPagingGsc::resolveDuplicated(p + RadioPagingGsc::m_commaBits + codewordBits + 1));
     std::string address;
 
     if (!RadioPagingGsc::decodeAddress(word1, r2.m_data, m_preamble, address))
@@ -449,16 +517,18 @@ bool RadioPagingGscDecoder::parseAddress(int pos, Message& message, int& errors1
     return true;
 }
 
-// After a message: another address, a repeated start code, or the end of the transmission
+// After a message: another address, a repeated start code (Word 1 or Word 2), or the end
+// of the transmission
 bool RadioPagingGscDecoder::processNext()
 {
     if ((int) m_buf.size() < m_pos + peekBits) {
         return false;
     }
 
-    RadioPagingGsc::GolayResult r = RadioPagingGsc::golayDecode(RadioPagingGsc::resolveDuplicated(&m_buf[m_pos + RadioPagingGsc::m_commaBits]));
+    RadioPagingGsc::GolayResult r, r2;
+    bool w1 = decodeWord(m_pos + RadioPagingGsc::m_commaBits, r);
 
-    if (isWord1(r.m_data))
+    if (w1 && isWord1(r.m_data))
     {
         if ((int) m_buf.size() < m_pos + pairBits) {
             return false;
@@ -485,12 +555,14 @@ bool RadioPagingGscDecoder::processNext()
         return true;
     }
 
-    if (r.m_data == RadioPagingGsc::m_startCode)
-    {
-        if ((int) m_buf.size() < m_pos + pairBits) {
-            return false;
-        }
+    if ((int) m_buf.size() < m_pos + pairBits) {
+        return false;
+    }
 
+    bool w2 = decodeWord(m_pos + RadioPagingGsc::m_commaBits + codewordBits + 1, r2);
+
+    if ((w1 && (r.m_data == RadioPagingGsc::m_startCode)) || (w2 && (r2.m_data == startComplement)))
+    {
         m_pos += pairBits;
         return true;
     }
@@ -509,9 +581,9 @@ bool RadioPagingGscDecoder::processClassify()
 
     const uint8_t *p = &m_buf[m_pos];
 
-    RadioPagingGsc::GolayResult r = RadioPagingGsc::golayDecode(RadioPagingGsc::resolveDuplicated(p + RadioPagingGsc::m_commaBits));
+    RadioPagingGsc::GolayResult r;
 
-    if (r.m_data == RadioPagingGsc::m_activationCode)
+    if (decodeWord(m_pos + RadioPagingGsc::m_commaBits, r) && (r.m_data == RadioPagingGsc::m_activationCode))
     {
         m_current.m_type = RadioPagingGsc::Voice;
         finishMessage(false);

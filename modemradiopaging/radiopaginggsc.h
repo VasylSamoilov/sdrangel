@@ -52,9 +52,16 @@
 // Words 0-5 and the low 6 bits of word 6 carry 48 payload bits, bit 6 of word 6 is the
 // continuation flag and word 7 is a checksum (sum of the 15-bit codewords 0-6, low 7 bits).
 // The payload bits are 8 six bit characters (alphanumeric) or 12 four bit characters
-// (numeric), least significant bit first. Alphanumeric messages are padded with 0x3e and
-// numeric messages with 0xa. Whether a block holds alphanumeric or numeric characters is
-// not signalled.
+// (numeric), least significant bit first. Alphanumeric messages are padded with 0x3e
+// (Null/EOM) and numeric messages with 0xa (Null). Whether a block holds alphanumeric or
+// numeric characters is not signalled.
+//
+// Character sets: alphanumeric 0x00-0x3d are ASCII 0x20-0x5d with 0x3c as CR/LF, shown in
+// upper case as on the pagers' displays; 0x3f is a spare code. Numeric 0-9 are digits,
+// 0xa Null, 0xb U, 0xc space, 0xd -, 0xe the triple bar (U+2261, given in UTF-8) and 0xf
+// shifts the next nibble to the set A B C D E space F G H J Null L N P R spare. A pager
+// without the shifted set shows 0xf as E, so a shift not followed by a character is E.
+// Spare codes give <0xNN> with the code value.
 //
 // Message bits in a decoded message are the payload bits of all blocks, first transmitted
 // bit first, packed 8 per byte with the first bit in the most significant bit.
@@ -97,7 +104,7 @@ public:
         std::string m_address;      //!< 6 digits: index, group, 3 address digits
         int m_addressNumber = 1;    //!< 1-4
         MessageType m_type = Alphanumeric;
-        std::string m_text;         //!< Numeric: 0-9 A-H J L N P R U space - = *  Alphanumeric: upper case ASCII
+        std::string m_text;         //!< Numeric: 0-9 A-H J L N P R U space - and the triple bar (UTF-8 U+2261, also = or *)  Alphanumeric: upper case ASCII
     };
 
     struct EncodeOptions
@@ -189,6 +196,11 @@ public:
     static void appendBlock(std::vector<uint8_t>& bits, const uint16_t codewords[8]);
     //!< Golay codeword (23 bits) of 46 symbols: first bit of every pair
     static uint32_t resolveDuplicated(const uint8_t *bits);
+    //!< Golay codeword (23 bits) of 46 soft symbols (positive = 1): every bit is decided on
+    //!< the sum of its two symbols, a zero sum on the first symbol
+    static uint32_t resolveDuplicated(const float *soft);
+    //!< The triple bar of the numeric set in UTF-8
+    static const char *tripleBar();
     //!< 8 BCH codewords of a block, bits points after the separator bit
     static void deinterleaveBlock(const uint8_t *bits, uint16_t codewords[8]);
 };

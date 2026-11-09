@@ -179,12 +179,28 @@ const BchTables& bchTables()
     return tables;
 }
 
+// 0 for Null and the spare codes, they have no character
 const char alphaChars[65] =
     " !\"#$%&'()*+,-./0123456789:;<=>?"
-    "\\ABCDEFGHIJKLMNOPQRSTUVWXYZ{\r}\0_";
+    "\\ABCDEFGHIJKLMNOPQRSTUVWXYZ{\r}\0\0";
 
-const char numericChars[17] = "0123456789\0U -\0\0";
-const char numericShiftChars[17] = "ABCDE FGHJ\0LNPR?";
+const char numericShiftChars[17] = "ABCDE FGHJ\0LNPR\0";
+
+const char tripleBarUtf8[] = "\xe2\x89\xa1";    // U+2261 IDENTICAL TO
+
+const int alphaNull = 0x3e;
+const int alphaSpare = 0x3f;
+const int numericNull = 0xa;
+const int numericTripleBar = 0xe;
+const int numericShift = 0xf;
+const int numericShiftSpare = 0xf;
+
+void appendSpare(std::string& text, unsigned code)
+{
+    char buf[8];
+    std::snprintf(buf, sizeof(buf), "<0x%02X>", code);
+    text += buf;
+}
 
 int alphaCode(char c)
 {
@@ -279,14 +295,27 @@ bool appendBlocks(std::vector<uint8_t>& out, RadioPagingGsc::MessageType type, c
             appendLsbFirst(payload, alphaCode(c), 6);
         }
         while (payload.empty() || ((payload.size() % RadioPagingGsc::m_payloadBitsPerBlock) != 0)) {
-            appendLsbFirst(payload, 0x3e, 6);
+            appendLsbFirst(payload, alphaNull, 6);
         }
     }
     else
     {
-        for (char c : text)
+        const size_t tripleBarLength = sizeof(tripleBarUtf8) - 1;
+
+        for (size_t pos = 0; pos < text.size(); pos++)
         {
-            int code = numericCode(c);
+            char c = text[pos];
+            int code;
+
+            if (text.compare(pos, tripleBarLength, tripleBarUtf8) == 0)
+            {
+                code = numericTripleBar;
+                pos += tripleBarLength - 1;
+            }
+            else
+            {
+                code = numericCode(c);
+            }
 
             if (code < 0)
             {
@@ -301,7 +330,7 @@ bool appendBlocks(std::vector<uint8_t>& out, RadioPagingGsc::MessageType type, c
             appendLsbFirst(payload, code, 4);
         }
         while (payload.empty() || ((payload.size() % RadioPagingGsc::m_payloadBitsPerBlock) != 0)) {
-            appendLsbFirst(payload, 0xa, 4);
+            appendLsbFirst(payload, numericNull, 4);
         }
     }
 
@@ -612,6 +641,26 @@ uint32_t RadioPagingGsc::resolveDuplicated(const uint8_t *bits)
     return word;
 }
 
+uint32_t RadioPagingGsc::resolveDuplicated(const float *soft)
+{
+    uint32_t word = 0;
+
+    for (int i = 0; i < 23; i++)
+    {
+        float sum = soft[2 * i] + soft[2 * i + 1];
+        bool one = (sum > 0.0f) || ((sum == 0.0f) && (soft[2 * i] > 0.0f));
+
+        word |= (uint32_t) (one ? 1 : 0) << i;
+    }
+
+    return word;
+}
+
+const char *RadioPagingGsc::tripleBar()
+{
+    return tripleBarUtf8;
+}
+
 void RadioPagingGsc::deinterleaveBlock(const uint8_t *bits, uint16_t codewords[8])
 {
     for (int k = 0; k < 8; k++) {
@@ -787,33 +836,45 @@ RadioPagingGsc::EncodeResult RadioPagingGsc::encode(const std::vector<TxMessage>
 
 std::string RadioPagingGsc::decodeNumeric(const std::vector<uint8_t>& packed, int nbBits)
 {
+    // 0x0-0xd, Null (0xa) is not looked up
+    static const char numericChars[] = "0123456789\0U -";
     std::string text;
     bool shifted = false;
 
     for (int i = 0; i + 4 <= nbBits; i += 4)
     {
         unsigned v = streamValue(packed, i, 4);
-        char c;
 
         if (shifted)
         {
-            c = numericShiftChars[v];
             shifted = false;
+
+            // A shift followed by Null is the E of the pagers without the shifted set
+            if (v == (unsigned) numericNull) {
+                text.push_back('E');
+            } else if (v == (unsigned) numericShiftSpare) {
+                appendSpare(text, v);
+            } else {
+                text.push_back(numericShiftChars[v]);
+            }
         }
-        else if (v == 0xf)
+        else if (v == (unsigned) numericShift)
         {
             shifted = true;
-            continue;
         }
-        else
+        else if (v == (unsigned) numericTripleBar)
         {
-            c = numericChars[v];
+            text += tripleBarUtf8;
         }
+        else if (v != (unsigned) numericNull)
+        {
+            text.push_back(numericChars[v]);
+        }
+    }
 
-        // Fill and end of message nibbles do not give a character
-        if (c != 0) {
-            text.push_back(c);
-        }
+    // A shift at the end has no character to shift
+    if (shifted) {
+        text.push_back('E');
     }
 
     return text;
@@ -825,11 +886,13 @@ std::string RadioPagingGsc::decodeAlphanumeric(const std::vector<uint8_t>& packe
 
     for (int i = 0; i + 6 <= nbBits; i += 6)
     {
-        char c = alphaChars[streamValue(packed, i, 6)];
+        unsigned code = streamValue(packed, i, 6);
 
-        // Fill characters do not give a character
-        if (c != 0) {
-            text.push_back(c);
+        // Null/EOM is padding and does not give a character
+        if (code == (unsigned) alphaSpare) {
+            appendSpare(text, code);
+        } else if (code != (unsigned) alphaNull) {
+            text.push_back(alphaChars[code]);
         }
     }
 
@@ -845,7 +908,7 @@ int RadioPagingGsc::scoreAlphanumeric(const std::vector<uint8_t>& packed, int nb
     {
         unsigned code = streamValue(packed, i, 6);
 
-        if (code == 0x3e)
+        if (code == (unsigned) alphaNull)
         {
             fill++;
             continue;

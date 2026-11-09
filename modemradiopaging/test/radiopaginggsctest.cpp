@@ -18,6 +18,7 @@
 // Self test of the sequential Golay paging format. Prints one line per check and
 // returns non-zero if any check fails.
 
+#include <cmath>
 #include <cstdio>
 #include <random>
 #include <string>
@@ -25,6 +26,7 @@
 
 #include "radiopaginggsc.h"
 #include "radiopaginggscdecoder.h"
+#include "radiopaginggscreceiver.h"
 
 namespace {
 
@@ -640,11 +642,259 @@ bool startCodeReceived(int singles1, int pairs1, int singles2, int pairs2)
 
 void testStartCodeCopies()
 {
-    check(startCodeReceived(0, 0, 0, 0), "Start code: clean start code and complement");
-    check(startCodeReceived(0, 3, 0, 3), "Start code: 3 undetectable errors in each copy, both decode");
-    check(startCodeReceived(2, 0, 0, 4), "Start code: complement beyond its code (4 flipped pairs), 10 bit errors in total over both copies, accepted");
-    check(startCodeReceived(0, 4, 3, 0), "Start code: start code beyond its code (4 flipped pairs), 11 bit errors in total, accepted");
-    check(!startCodeReceived(0, 4, 0, 4), "Start code: both copies beyond their code (16 bit errors in total), rejected");
+    check(startCodeReceived(0, 0, 0, 0), "Start code: clean Word 1 and Word 2");
+    check(startCodeReceived(0, 3, 0, 3), "Start code: 3 undetectable errors in each word, both decode");
+    check(startCodeReceived(0, 0, 0, 8), "Start code: Word 2 destroyed (8 flipped pairs), detected on Word 1 alone");
+    check(startCodeReceived(0, 8, 0, 0), "Start code: Word 1 destroyed (8 flipped pairs), detected on Word 2 alone");
+    check(!startCodeReceived(0, 4, 0, 4), "Start code: both words beyond their code (4 flipped pairs each), rejected");
+
+    // Every preamble value, single and batch: no rotation of a preamble word and no comma
+    // on the word grid is taken for the start code, the message is found
+    bool all = true;
+    for (int index = 0; index < 10; index++)
+    {
+        for (int batch = 0; batch < 2; batch++)
+        {
+            char address[8];
+            std::snprintf(address, sizeof(address), "%d00123", index);
+            std::vector<G::TxMessage> sent = { tx(address, 2, G::Alphanumeric, "GRID") };
+            G::EncodeOptions options;
+            options.m_mode = batch ? G::Batch : G::Single;
+            Decoded d = decode(G::encode(sent, options).m_bits, D::Normal, false, 0, 1);
+            all = all && allMatch(d, sent) && (d.m_messages[0].m_preamble == index) && (d.m_messages[0].m_batch == (batch != 0));
+        }
+    }
+    check(all, "Start code: found on the word grid after all 10 preamble values, single and batch");
+
+    // Lock on a later preamble word: the first 10 preamble words are damaged
+    std::vector<G::TxMessage> late = { tx("100123", 1, G::Numeric, "123") };
+    G::EncodeResult enc = G::encode(late);
+    for (int w = 0; w < 10; w++)
+    {
+        // 4 flipped pairs, at different bits in every word
+        for (int p = 0; p < 4; p++)
+        {
+            int bit = (p * 5 + w * 7) % 23;
+            enc.m_bits[28 + 46 * w + 2 * bit] ^= 1;
+            enc.m_bits[28 + 46 * w + 2 * bit + 1] ^= 1;
+        }
+    }
+    check(allMatch(decode(enc.m_bits, D::Normal, false, 0, 1), late), "Start code: found after a lock on the 13th preamble word");
+
+    // One symbol of timing offset (a symbol lost before the start code): the start code
+    // position is refined and the 600 bit/s blocks are still in step
+    std::vector<G::TxMessage> slip = { tx("100123", 3, G::Alphanumeric, "TIMING OF THE BLOCKS") };
+    G::EncodeResult encSlip = G::encode(slip);
+    std::vector<uint8_t> lost(encSlip.m_bits);
+    lost.erase(lost.begin() + 28 + 46 * 17 + 10);
+    check(allMatch(decode(lost, D::Normal, false, 0, 1), slip), "Start code: one symbol lost in the last preamble word, blocks in step");
+    std::vector<uint8_t> extra(encSlip.m_bits);
+    extra.insert(extra.begin() + 28 + 46 * 17 + 10, extra[28 + 46 * 17 + 10]);
+    check(allMatch(decode(extra, D::Normal, false, 0, 1), slip), "Start code: one symbol inserted in the last preamble word, blocks in step");
+}
+
+// Packs values of nbBits bits, least significant bit first, into message bits
+std::vector<uint8_t> packValues(const std::vector<unsigned>& values, int nbBits, int& total)
+{
+    std::vector<uint8_t> packed((values.size() * nbBits + 7) / 8, 0);
+    int pos = 0;
+
+    for (unsigned v : values)
+    {
+        for (int j = 0; j < nbBits; j++, pos++)
+        {
+            if ((v >> j) & 1) {
+                packed[pos >> 3] |= (uint8_t) (0x80 >> (pos & 7));
+            }
+        }
+    }
+
+    total = pos;
+    return packed;
+}
+
+void testCharacterSets()
+{
+    int n;
+    std::vector<uint8_t> p;
+    std::string bar = G::tripleBar();
+
+    p = packValues({ 1, 0xe, 2, 0xa, 0xa }, 4, n);
+    check(G::decodeNumeric(p, n) == "1" + bar + "2", "Numeric 0xe is the triple bar, Null gives no character");
+    p = packValues({ 1, 2, 3, 0xf }, 4, n);
+    check(G::decodeNumeric(p, n) == "123E", "Numeric shift at the end is E");
+    p = packValues({ 1, 0xf, 0xa, 0xa, 0xa }, 4, n);
+    check(G::decodeNumeric(p, n) == "1E", "Numeric shift followed by Null (padding) is E");
+    p = packValues({ 0xf, 0x0, 0xf, 0x5, 0xf, 0xe, 0xf, 0xf }, 4, n);
+    check(G::decodeNumeric(p, n) == "A R<0x0F>", "Numeric shifted set: A, space, R and the spare as <0x0F>");
+    p = packValues({ 0x21, 0x3c, 0x3f, 0x3e, 0x22, 0x3e, 0x3e }, 6, n);
+    check(G::decodeAlphanumeric(p, n) == "A\r<0x3F>B", "Alphanumeric: upper case letters, CR/LF, spare as <0x3F>, Null/EOM gives no character");
+
+    std::vector<G::TxMessage> sent = { tx("100123", 1, G::Numeric, ("12" + bar + "34").c_str()) };
+    check(allMatch(decode(G::encode(sent).m_bits, D::Normal, false, 0, 1), sent), "Numeric triple bar in UTF-8 round trip");
+    G::EncodeResult eq = G::encode({ tx("100123", 1, G::Numeric, "1=2*3") });
+    Decoded deq = decode(eq.m_bits, D::Normal, false, 0, 1);
+    check(!deq.m_messages.empty() && (G::decodeNumeric(deq.m_messages[0].m_rawData, deq.m_messages[0].m_rawBits) == "1" + bar + "2" + bar + "3"),
+        "Numeric = and * are sent as the triple bar");
+}
+
+// Preamble, start code and address of a page (all 300 bit/s words) received through
+// Gaussian noise, decided on the first symbol of each bit (hard) and on the sum of both
+// symbols (soft)
+void testSoftDecisions()
+{
+    const int trials = 200;
+    const float sigma = 0.8f;
+    int hardOk = 0;
+    int softOk = 0;
+    std::mt19937 rng(17);
+    std::normal_distribution<float> gauss(0.0f, sigma);
+    std::vector<G::TxMessage> sent = { tx("100123", 2, G::Tone) };
+    G::EncodeResult enc = G::encode(sent);
+
+    for (int t = 0; t < trials; t++)
+    {
+        D hard(D::Normal);
+        D soft(D::Normal);
+
+        for (uint8_t b : enc.m_bits)
+        {
+            float s = (b ? 1.0f : -1.0f) + gauss(rng);
+            hard.feed(s > 0.0f ? 1 : 0);
+            soft.feedSoft(s);
+        }
+        for (int i = 0; i < 200; i++)
+        {
+            float s = ((i & 1) ? 1.0f : -1.0f) + gauss(rng);
+            hard.feed(s > 0.0f ? 1 : 0);
+            soft.feedSoft(s);
+        }
+        hard.flush();
+        soft.flush();
+
+        Decoded dh, ds;
+        while (hard.hasMessage()) {
+            dh.m_messages.push_back(hard.takeMessage());
+        }
+        while (soft.hasMessage()) {
+            ds.m_messages.push_back(soft.takeMessage());
+        }
+        // Only the words count: what follows the address is a 600 bit/s comma
+        auto addressFound = [&](const Decoded& d) {
+            return (d.m_messages.size() >= 1) && (d.m_messages[0].m_address == sent[0].m_address)
+                && (d.m_messages[0].m_addressNumber == sent[0].m_addressNumber);
+        };
+        hardOk += addressFound(dh) ? 1 : 0;
+        softOk += addressFound(ds) ? 1 : 0;
+    }
+
+    std::printf("      symbol noise sigma %.1f: %d/%d hard, %d/%d soft\n", sigma, hardOk, trials, softOk, trials);
+    check(softOk > hardOk + trials / 4, "300 bit/s words decided on the sum of both soft symbols decode more pages than on one symbol");
+
+    // Soft commas sum to noise: the fill commas of a batch and the noise after it never
+    // give an address
+    std::normal_distribution<float> light(0.0f, 0.3f);
+    std::vector<G::TxMessage> batch = { tx("219789", 2, G::Numeric, "5551234"), tx("219456", 1, G::Tone), tx("219457", 4, G::Alphanumeric, "BATCH") };
+    G::EncodeResult encBatch = G::encode(batch);
+    int exact = 0;
+
+    for (int t = 0; t < 200; t++)
+    {
+        D d(D::Normal);
+        Decoded out;
+
+        for (uint8_t b : encBatch.m_bits) {
+            d.feedSoft((b ? 1.0f : -1.0f) + light(rng));
+        }
+        for (int i = 0; i < 2000; i++) {
+            d.feedSoft(((rng() & 1) ? 1.0f : -1.0f) + light(rng));
+        }
+        d.flush();
+        while (d.hasMessage()) {
+            out.m_messages.push_back(d.takeMessage());
+        }
+        exact += allMatch(out, batch) ? 1 : 0;
+    }
+    check(exact == 200, "Soft symbols: 200 noisy batches give exactly their messages, nothing from the fill commas or the noise after");
+}
+
+// FM discriminator output for a bit stream, binary 1 = positive deviation, between random symbols
+std::vector<float> makeWaveform(const std::vector<uint8_t>& bits, double sampleRate, bool inverted, float dc, float noise, int lead, int tail, unsigned seed)
+{
+    std::mt19937 rng(seed);
+    std::normal_distribution<float> gauss(0.0f, noise);
+    std::vector<float> levels;
+
+    for (int i = 0; i < lead; i++) {
+        levels.push_back((rng() & 1) ? 1.0f : -1.0f);
+    }
+    for (uint8_t b : bits)
+    {
+        float level = b ? 1.0f : -1.0f;
+        levels.push_back(inverted ? -level : level);
+    }
+    for (int i = 0; i < tail; i++) {
+        levels.push_back((rng() & 1) ? 1.0f : -1.0f);
+    }
+
+    double samplesPerSymbol = sampleRate / RadioPagingGscReceiver::m_baud;
+    float alpha = (float) (1.0 - std::exp(-1.0 / (0.1 * samplesPerSymbol)));
+    std::vector<float> samples;
+    float smoothed = 0.0f;
+
+    for (double t = 0.0; (size_t) (t / samplesPerSymbol) < levels.size(); t += 1.0)
+    {
+        smoothed += alpha * (levels[(size_t) (t / samplesPerSymbol)] - smoothed);
+        samples.push_back(smoothed + dc + gauss(rng));
+    }
+
+    return samples;
+}
+
+void receive(const std::vector<G::TxMessage>& sent, G::Mode mode, bool inverted, const char *name)
+{
+    G::EncodeOptions options;
+    options.m_mode = mode;
+    std::vector<float> samples = makeWaveform(G::encode(sent, options).m_bits, 38400.0, inverted, 0.06f, 0.15f, 300, 300, 23);
+    RadioPagingGscReceiver receiver;
+    Decoded d;
+    bool locked = false;
+
+    receiver.create(38400.0);
+    for (float s : samples)
+    {
+        receiver.process(s);
+        locked = locked || receiver.getStatus().m_locked;
+    }
+    receiver.flush();
+
+    bool polarityOk = true;
+    while (receiver.hasMessage())
+    {
+        D::Message m = receiver.takeMessage();
+        polarityOk = polarityOk && (m.m_polarity == (inverted ? D::Inverted : D::Normal));
+        d.m_messages.push_back(m);
+    }
+
+    std::string label = std::string("Receiver: ") + name + (inverted ? ", inverted" : ", normal");
+    check(locked, (label + ": the demodulator locks on the preamble").c_str());
+    check(allMatch(d, sent) && polarityOk, (label + ": all messages, from the decoder of the right polarity").c_str());
+}
+
+void testReceiver()
+{
+    std::vector<G::TxMessage> single = { tx("100123", 3, G::Alphanumeric, "RECEIVED OVER THE AIR") };
+    std::vector<G::TxMessage> batch = {
+        tx("219789", 2, G::Numeric, "5551234"),
+        tx("219456", 1, G::Tone),
+        tx("219457", 4, G::Alphanumeric, "BATCH"),
+    };
+
+    for (int inverted = 0; inverted < 2; inverted++)
+    {
+        receive(single, G::Single, inverted != 0, "single alphanumeric");
+        receive(batch, G::Batch, inverted != 0, "batch of 3");
+    }
 }
 
 } // namespace
@@ -653,6 +903,9 @@ int main()
 {
     testCodes();
     testStartCodeCopies();
+    testCharacterSets();
+    testSoftDecisions();
+    testReceiver();
     testAddresses();
     testStreaming();
     testErrors();
