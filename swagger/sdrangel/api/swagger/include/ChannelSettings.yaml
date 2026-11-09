@@ -193,6 +193,9 @@ ChannelSettings:
     RadioClockSettings:
       $ref: "http://swgserver:8081/api/swagger/include/RadioClock.yaml#/RadioClockSettings"
       description: "Radio clock settings configuration for Channel."
+    RadioPagingDemodSettings:
+      $ref: "http://swgserver:8081/api/swagger/include/RadioPagingDemod.yaml#/RadioPagingDemodSettings"
+      description: "Radio paging demodulator settings configuration for Channel."
     RadiosondeDemodSettings:
       $ref: "http://swgserver:8081/api/swagger/include/RadiosondeDemod.yaml#/RadiosondeDemodSettings"
       description: "Radiosonde demod settings configuration for Channel."

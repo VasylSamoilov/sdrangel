@@ -346,6 +346,8 @@
 #include "SWGRadioAstronomySettings.h"
 #include "SWGRadioClockReport.h"
 #include "SWGRadioClockSettings.h"
+#include "SWGRadioPagingDemodReport.h"
+#include "SWGRadioPagingDemodSettings.h"
 #include "SWGRadiosonde.h"
 #include "SWGRadiosondeDemodReport.h"
 #include "SWGRadiosondeDemodSettings.h"
@@ -2123,6 +2125,16 @@ namespace SWGSDRangel {
     }
     if(QString("SWGRadioClockSettings").compare(type) == 0) {
       SWGRadioClockSettings *obj = new SWGRadioClockSettings();
+      obj->init();
+      return obj;
+    }
+    if(QString("SWGRadioPagingDemodReport").compare(type) == 0) {
+      SWGRadioPagingDemodReport *obj = new SWGRadioPagingDemodReport();
+      obj->init();
+      return obj;
+    }
+    if(QString("SWGRadioPagingDemodSettings").compare(type) == 0) {
+      SWGRadioPagingDemodSettings *obj = new SWGRadioPagingDemodSettings();
       obj->init();
       return obj;
     }

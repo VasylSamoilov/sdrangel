@@ -16,9 +16,20 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include <QDebug>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QBuffer>
+
+#include "SWGChannelSettings.h"
+#include "SWGWorkspaceInfo.h"
+#include "SWGRadioPagingDemodSettings.h"
+#include "SWGChannelReport.h"
+#include "SWGRadioPagingDemodReport.h"
 
 #include "dsp/dspcommands.h"
 #include "device/deviceapi.h"
+#include "settings/serializable.h"
+#include "util/db.h"
 #include "util/messagerecord.h"
 #include "maincore.h"
 
@@ -47,11 +58,16 @@ RadioPagingDemod::RadioPagingDemod(DeviceAPI *deviceAPI) :
 
     m_deviceAPI->addChannelSink(this);
     m_deviceAPI->addChannelSinkAPI(this);
+
+    m_networkManager = new QNetworkAccessManager();
+    QObject::connect(m_networkManager, &QNetworkAccessManager::finished, this, &RadioPagingDemod::networkManagerFinished);
 }
 
 RadioPagingDemod::~RadioPagingDemod()
 {
     qDebug("RadioPagingDemod::~RadioPagingDemod");
+    QObject::disconnect(m_networkManager, &QNetworkAccessManager::finished, this, &RadioPagingDemod::networkManagerFinished);
+    delete m_networkManager;
     m_deviceAPI->removeChannelSinkAPI(this);
     m_deviceAPI->removeChannelSink(this, true);
 
@@ -213,6 +229,16 @@ void RadioPagingDemod::applySettings(const QStringList& settingsKeys, const Radi
         RadioPagingDemodBaseband::MsgConfigureRadioPagingDemodBaseband::create(settingsKeys, settings, force);
     m_basebandSink->getInputMessageQueue()->push(msg);
 
+    if (settings.m_useReverseAPI)
+    {
+        bool fullUpdate = (settingsKeys.contains("useReverseAPI") && (m_settings.m_useReverseAPI != settings.m_useReverseAPI)) ||
+                settingsKeys.contains("reverseAPIAddress") ||
+                settingsKeys.contains("reverseAPIPort") ||
+                settingsKeys.contains("reverseAPIDeviceIndex") ||
+                settingsKeys.contains("reverseAPIChannelIndex");
+        webapiReverseSendSettings(settingsKeys, settings, fullUpdate || force);
+    }
+
     if (force) {
         m_settings = settings;
     } else {
@@ -261,4 +287,376 @@ void RadioPagingDemod::sendSampleRateToDemodAnalyzer()
 int RadioPagingDemod::getChannelSampleRate() const
 {
     return RadioPagingDemodSettings::m_channelSampleRate;
+}
+
+QStringList RadioPagingDemod::webapiSettingsKeys(const QStringList& channelSettingsKeys)
+{
+    QStringList settingsKeys = channelSettingsKeys;
+
+    if (channelSettingsKeys.contains("pocsag512Enabled")
+        || channelSettingsKeys.contains("pocsag1200Enabled")
+        || channelSettingsKeys.contains("pocsag2400Enabled"))
+    {
+        settingsKeys.append("pocsagSpeedEnabled");
+    }
+
+    if (channelSettingsKeys.contains("flex1600x2Enabled")
+        || channelSettingsKeys.contains("flex3200x2Enabled")
+        || channelSettingsKeys.contains("flex3200x4Enabled")
+        || channelSettingsKeys.contains("flex6400x4Enabled"))
+    {
+        settingsKeys.append("flexModeEnabled");
+    }
+
+    return settingsKeys;
+}
+
+int RadioPagingDemod::webapiSettingsGet(
+        SWGSDRangel::SWGChannelSettings& response,
+        QString& errorMessage)
+{
+    (void) errorMessage;
+    response.setRadioPagingDemodSettings(new SWGSDRangel::SWGRadioPagingDemodSettings());
+    response.getRadioPagingDemodSettings()->init();
+    webapiFormatChannelSettings(response, m_settings);
+    return 200;
+}
+
+int RadioPagingDemod::webapiWorkspaceGet(
+        SWGSDRangel::SWGWorkspaceInfo& response,
+        QString& errorMessage)
+{
+    (void) errorMessage;
+    response.setIndex(m_settings.m_workspaceIndex);
+    return 200;
+}
+
+int RadioPagingDemod::webapiSettingsPutPatch(
+        bool force,
+        const QStringList& channelSettingsKeys,
+        SWGSDRangel::SWGChannelSettings& response,
+        QString& errorMessage)
+{
+    (void) errorMessage;
+    RadioPagingDemodSettings settings = m_settings;
+    webapiUpdateChannelSettings(settings, channelSettingsKeys, response);
+    QStringList settingsKeys = webapiSettingsKeys(channelSettingsKeys);
+
+    MsgConfigureRadioPagingDemod *msg = MsgConfigureRadioPagingDemod::create(settingsKeys, settings, force);
+    m_inputMessageQueue.push(msg);
+
+    if (m_guiMessageQueue) // forward to GUI if any
+    {
+        MsgConfigureRadioPagingDemod *msgToGUI = MsgConfigureRadioPagingDemod::create(settingsKeys, settings, force);
+        m_guiMessageQueue->push(msgToGUI);
+    }
+
+    webapiFormatChannelSettings(response, settings);
+
+    return 200;
+}
+
+void RadioPagingDemod::webapiUpdateChannelSettings(
+        RadioPagingDemodSettings& settings,
+        const QStringList& channelSettingsKeys,
+        SWGSDRangel::SWGChannelSettings& response)
+{
+    SWGSDRangel::SWGRadioPagingDemodSettings *model = response.getRadioPagingDemodSettings();
+
+    if (!model) {
+        return;
+    }
+
+    if (channelSettingsKeys.contains("inputFrequencyOffset")) {
+        settings.m_inputFrequencyOffset = model->getInputFrequencyOffset();
+    }
+    if (channelSettingsKeys.contains("rfBandwidth")) {
+        settings.m_rfBandwidth = model->getRfBandwidth();
+    }
+    // POCSAG speeds in RadioPagingDemodSettings::m_pocsagSpeeds order
+    if (channelSettingsKeys.contains("pocsag512Enabled")) {
+        settings.m_pocsagSpeedEnabled[0] = model->getPocsag512Enabled() != 0;
+    }
+    if (channelSettingsKeys.contains("pocsag1200Enabled")) {
+        settings.m_pocsagSpeedEnabled[1] = model->getPocsag1200Enabled() != 0;
+    }
+    if (channelSettingsKeys.contains("pocsag2400Enabled")) {
+        settings.m_pocsagSpeedEnabled[2] = model->getPocsag2400Enabled() != 0;
+    }
+    if (channelSettingsKeys.contains("pocsagDeviation")) {
+        settings.m_pocsagDeviation = model->getPocsagDeviation();
+    }
+    // FLEX modes in RadioPagingFlex::Mode order
+    if (channelSettingsKeys.contains("flex1600x2Enabled")) {
+        settings.m_flexModeEnabled[0] = model->getFlex1600x2Enabled() != 0;
+    }
+    if (channelSettingsKeys.contains("flex3200x2Enabled")) {
+        settings.m_flexModeEnabled[1] = model->getFlex3200x2Enabled() != 0;
+    }
+    if (channelSettingsKeys.contains("flex3200x4Enabled")) {
+        settings.m_flexModeEnabled[2] = model->getFlex3200x4Enabled() != 0;
+    }
+    if (channelSettingsKeys.contains("flex6400x4Enabled")) {
+        settings.m_flexModeEnabled[3] = model->getFlex6400x4Enabled() != 0;
+    }
+    if (channelSettingsKeys.contains("flexDeviation")) {
+        settings.m_flexDeviation = model->getFlexDeviation();
+    }
+    if (channelSettingsKeys.contains("gscEnabled")) {
+        settings.m_gscEnabled = model->getGscEnabled() != 0;
+    }
+    if (channelSettingsKeys.contains("gscDeviation")) {
+        settings.m_gscDeviation = model->getGscDeviation();
+    }
+    if (channelSettingsKeys.contains("gscNonBatterySaver")) {
+        settings.m_gscNonBatterySaver = model->getGscNonBatterySaver() != 0;
+    }
+    if (channelSettingsKeys.contains("gscVoiceTimeout")) {
+        settings.m_gscVoiceTimeout = model->getGscVoiceTimeout();
+    }
+    if (channelSettingsKeys.contains("normalPolarity")) {
+        settings.m_normalPolarity = model->getNormalPolarity() != 0;
+    }
+    if (channelSettingsKeys.contains("invertedPolarity")) {
+        settings.m_invertedPolarity = model->getInvertedPolarity() != 0;
+    }
+    if (channelSettingsKeys.contains("rgbColor")) {
+        settings.m_rgbColor = model->getRgbColor();
+    }
+    if (channelSettingsKeys.contains("title") && model->getTitle()) {
+        settings.m_title = *model->getTitle();
+    }
+    if (channelSettingsKeys.contains("streamIndex")) {
+        settings.m_streamIndex = model->getStreamIndex();
+    }
+    if (channelSettingsKeys.contains("useReverseAPI")) {
+        settings.m_useReverseAPI = model->getUseReverseApi() != 0;
+    }
+    if (channelSettingsKeys.contains("reverseAPIAddress") && model->getReverseApiAddress()) {
+        settings.m_reverseAPIAddress = *model->getReverseApiAddress();
+    }
+    if (channelSettingsKeys.contains("reverseAPIPort")) {
+        settings.m_reverseAPIPort = model->getReverseApiPort();
+    }
+    if (channelSettingsKeys.contains("reverseAPIDeviceIndex")) {
+        settings.m_reverseAPIDeviceIndex = model->getReverseApiDeviceIndex();
+    }
+    if (channelSettingsKeys.contains("reverseAPIChannelIndex")) {
+        settings.m_reverseAPIChannelIndex = model->getReverseApiChannelIndex();
+    }
+    if (settings.m_channelMarker && channelSettingsKeys.contains("channelMarker") && model->getChannelMarker()) {
+        settings.m_channelMarker->updateFrom(channelSettingsKeys, model->getChannelMarker());
+    }
+    if (settings.m_rollupState && channelSettingsKeys.contains("rollupState") && model->getRollupState()) {
+        settings.m_rollupState->updateFrom(channelSettingsKeys, model->getRollupState());
+    }
+}
+
+int RadioPagingDemod::webapiReportGet(
+        SWGSDRangel::SWGChannelReport& response,
+        QString& errorMessage)
+{
+    (void) errorMessage;
+    response.setRadioPagingDemodReport(new SWGSDRangel::SWGRadioPagingDemodReport());
+    response.getRadioPagingDemodReport()->init();
+    webapiFormatChannelReport(response);
+    return 200;
+}
+
+void RadioPagingDemod::webapiFormatChannelSettings(SWGSDRangel::SWGChannelSettings& response, const RadioPagingDemodSettings& settings)
+{
+    SWGSDRangel::SWGRadioPagingDemodSettings *model = response.getRadioPagingDemodSettings();
+    model->setInputFrequencyOffset(settings.m_inputFrequencyOffset);
+    model->setRfBandwidth(settings.m_rfBandwidth);
+    model->setPocsag512Enabled(settings.m_pocsagSpeedEnabled[0] ? 1 : 0);
+    model->setPocsag1200Enabled(settings.m_pocsagSpeedEnabled[1] ? 1 : 0);
+    model->setPocsag2400Enabled(settings.m_pocsagSpeedEnabled[2] ? 1 : 0);
+    model->setPocsagDeviation(settings.m_pocsagDeviation);
+    model->setFlex1600x2Enabled(settings.m_flexModeEnabled[0] ? 1 : 0);
+    model->setFlex3200x2Enabled(settings.m_flexModeEnabled[1] ? 1 : 0);
+    model->setFlex3200x4Enabled(settings.m_flexModeEnabled[2] ? 1 : 0);
+    model->setFlex6400x4Enabled(settings.m_flexModeEnabled[3] ? 1 : 0);
+    model->setFlexDeviation(settings.m_flexDeviation);
+    model->setGscEnabled(settings.m_gscEnabled ? 1 : 0);
+    model->setGscDeviation(settings.m_gscDeviation);
+    model->setGscNonBatterySaver(settings.m_gscNonBatterySaver ? 1 : 0);
+    model->setGscVoiceTimeout(settings.m_gscVoiceTimeout);
+    model->setNormalPolarity(settings.m_normalPolarity ? 1 : 0);
+    model->setInvertedPolarity(settings.m_invertedPolarity ? 1 : 0);
+    model->setRgbColor(settings.m_rgbColor);
+    model->setTitle(new QString(settings.m_title));
+    model->setStreamIndex(settings.m_streamIndex);
+    model->setUseReverseApi(settings.m_useReverseAPI ? 1 : 0);
+    model->setReverseApiAddress(new QString(settings.m_reverseAPIAddress));
+    model->setReverseApiPort(settings.m_reverseAPIPort);
+    model->setReverseApiDeviceIndex(settings.m_reverseAPIDeviceIndex);
+    model->setReverseApiChannelIndex(settings.m_reverseAPIChannelIndex);
+
+    if (settings.m_channelMarker)
+    {
+        SWGSDRangel::SWGChannelMarker *swgChannelMarker = new SWGSDRangel::SWGChannelMarker();
+        settings.m_channelMarker->formatTo(swgChannelMarker);
+        model->setChannelMarker(swgChannelMarker);
+    }
+
+    if (settings.m_rollupState)
+    {
+        SWGSDRangel::SWGRollupState *swgRollupState = new SWGSDRangel::SWGRollupState();
+        settings.m_rollupState->formatTo(swgRollupState);
+        model->setRollupState(swgRollupState);
+    }
+}
+
+void RadioPagingDemod::webapiFormatChannelReport(SWGSDRangel::SWGChannelReport& response)
+{
+    double magsqAvg, magsqPeak;
+    int nbMagsqSamples;
+    getMagSqLevels(magsqAvg, magsqPeak, nbMagsqSamples);
+    RadioPagingDemodSink::Status status = getStatus();
+    SWGSDRangel::SWGRadioPagingDemodReport *model = response.getRadioPagingDemodReport();
+
+    // 0 not synchronised, 1 synchronised, 2 synchronised on inverted polarity
+    auto sync = [](bool synchronised, bool inverted) { return synchronised ? (inverted ? 2 : 1) : 0; };
+
+    model->setChannelPowerDb(CalcDb::dbPower(magsqAvg));
+    model->setChannelSampleRate(RadioPagingDemodSettings::m_channelSampleRate);
+    model->setPocsag512Sync(sync(status.m_pocsagSync[0], status.m_pocsagInverted[0]));
+    model->setPocsag1200Sync(sync(status.m_pocsagSync[1], status.m_pocsagInverted[1]));
+    model->setPocsag2400Sync(sync(status.m_pocsagSync[2], status.m_pocsagInverted[2]));
+    model->setFlexSync(sync(status.m_flexSync, status.m_flexInverted));
+    model->setFlexMode(new QString(status.m_flexMode));
+    model->setFlexQuality(status.m_flexQuality);
+    model->setGscSync(sync(status.m_gscSync, status.m_gscInverted));
+    model->setGscVoice(status.m_gscVoice ? 1 : 0);
+    model->setPocsagMessages(status.m_messages[0]);
+    model->setFlexMessages(status.m_messages[1]);
+    model->setGscMessages(status.m_messages[2]);
+}
+
+void RadioPagingDemod::webapiReverseSendSettings(const QStringList& channelSettingsKeys, const RadioPagingDemodSettings& settings, bool force)
+{
+    SWGSDRangel::SWGChannelSettings *swgChannelSettings = new SWGSDRangel::SWGChannelSettings();
+    webapiFormatChannelSettings(channelSettingsKeys, swgChannelSettings, settings, force);
+
+    QString channelSettingsURL = QString("http://%1:%2/sdrangel/deviceset/%3/channel/%4/settings")
+            .arg(settings.m_reverseAPIAddress)
+            .arg(settings.m_reverseAPIPort)
+            .arg(settings.m_reverseAPIDeviceIndex)
+            .arg(settings.m_reverseAPIChannelIndex);
+    m_networkRequest.setUrl(QUrl(channelSettingsURL));
+    m_networkRequest.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    QBuffer *buffer = new QBuffer();
+    buffer->open((QBuffer::ReadWrite));
+    buffer->write(swgChannelSettings->asJson().toUtf8());
+    buffer->seek(0);
+
+    // Always use PATCH to avoid passing reverse API settings
+    QNetworkReply *reply = m_networkManager->sendCustomRequest(m_networkRequest, "PATCH", buffer);
+    buffer->setParent(reply);
+
+    delete swgChannelSettings;
+}
+
+void RadioPagingDemod::webapiFormatChannelSettings(
+        const QStringList& channelSettingsKeys,
+        SWGSDRangel::SWGChannelSettings *swgChannelSettings,
+        const RadioPagingDemodSettings& settings,
+        bool force)
+{
+    swgChannelSettings->setDirection(0); // Single sink (Rx)
+    swgChannelSettings->setOriginatorChannelIndex(getIndexInDeviceSet());
+    swgChannelSettings->setOriginatorDeviceSetIndex(getDeviceSetIndex());
+    swgChannelSettings->setChannelType(new QString(m_channelId));
+    swgChannelSettings->setRadioPagingDemodSettings(new SWGSDRangel::SWGRadioPagingDemodSettings());
+    SWGSDRangel::SWGRadioPagingDemodSettings *model = swgChannelSettings->getRadioPagingDemodSettings();
+
+    // Only the keys that changed, unless force
+    if (channelSettingsKeys.contains("inputFrequencyOffset") || force) {
+        model->setInputFrequencyOffset(settings.m_inputFrequencyOffset);
+    }
+    if (channelSettingsKeys.contains("rfBandwidth") || force) {
+        model->setRfBandwidth(settings.m_rfBandwidth);
+    }
+    if (channelSettingsKeys.contains("pocsagSpeedEnabled") || force)
+    {
+        model->setPocsag512Enabled(settings.m_pocsagSpeedEnabled[0] ? 1 : 0);
+        model->setPocsag1200Enabled(settings.m_pocsagSpeedEnabled[1] ? 1 : 0);
+        model->setPocsag2400Enabled(settings.m_pocsagSpeedEnabled[2] ? 1 : 0);
+    }
+    if (channelSettingsKeys.contains("pocsagDeviation") || force) {
+        model->setPocsagDeviation(settings.m_pocsagDeviation);
+    }
+    if (channelSettingsKeys.contains("flexModeEnabled") || force)
+    {
+        model->setFlex1600x2Enabled(settings.m_flexModeEnabled[0] ? 1 : 0);
+        model->setFlex3200x2Enabled(settings.m_flexModeEnabled[1] ? 1 : 0);
+        model->setFlex3200x4Enabled(settings.m_flexModeEnabled[2] ? 1 : 0);
+        model->setFlex6400x4Enabled(settings.m_flexModeEnabled[3] ? 1 : 0);
+    }
+    if (channelSettingsKeys.contains("flexDeviation") || force) {
+        model->setFlexDeviation(settings.m_flexDeviation);
+    }
+    if (channelSettingsKeys.contains("gscEnabled") || force) {
+        model->setGscEnabled(settings.m_gscEnabled ? 1 : 0);
+    }
+    if (channelSettingsKeys.contains("gscDeviation") || force) {
+        model->setGscDeviation(settings.m_gscDeviation);
+    }
+    if (channelSettingsKeys.contains("gscNonBatterySaver") || force) {
+        model->setGscNonBatterySaver(settings.m_gscNonBatterySaver ? 1 : 0);
+    }
+    if (channelSettingsKeys.contains("gscVoiceTimeout") || force) {
+        model->setGscVoiceTimeout(settings.m_gscVoiceTimeout);
+    }
+    if (channelSettingsKeys.contains("normalPolarity") || force) {
+        model->setNormalPolarity(settings.m_normalPolarity ? 1 : 0);
+    }
+    if (channelSettingsKeys.contains("invertedPolarity") || force) {
+        model->setInvertedPolarity(settings.m_invertedPolarity ? 1 : 0);
+    }
+    if (channelSettingsKeys.contains("rgbColor") || force) {
+        model->setRgbColor(settings.m_rgbColor);
+    }
+    if (channelSettingsKeys.contains("title") || force) {
+        model->setTitle(new QString(settings.m_title));
+    }
+    if (channelSettingsKeys.contains("streamIndex") || force) {
+        model->setStreamIndex(settings.m_streamIndex);
+    }
+
+    if (settings.m_channelMarker && (channelSettingsKeys.contains("channelMarker") || force))
+    {
+        SWGSDRangel::SWGChannelMarker *swgChannelMarker = new SWGSDRangel::SWGChannelMarker();
+        settings.m_channelMarker->formatTo(swgChannelMarker);
+        model->setChannelMarker(swgChannelMarker);
+    }
+
+    if (settings.m_rollupState && (channelSettingsKeys.contains("rollupState") || force))
+    {
+        SWGSDRangel::SWGRollupState *swgRollupState = new SWGSDRangel::SWGRollupState();
+        settings.m_rollupState->formatTo(swgRollupState);
+        model->setRollupState(swgRollupState);
+    }
+}
+
+void RadioPagingDemod::networkManagerFinished(QNetworkReply *reply)
+{
+    QNetworkReply::NetworkError replyError = reply->error();
+
+    if (replyError)
+    {
+        qWarning() << "RadioPagingDemod::networkManagerFinished:"
+                << " error(" << (int) replyError
+                << "): " << replyError
+                << ": " << reply->errorString();
+    }
+    else
+    {
+        QString answer = reply->readAll();
+        answer.chop(1); // remove last \n
+        qDebug("RadioPagingDemod::networkManagerFinished: reply:\n%s", answer.toStdString().c_str());
+    }
+
+    reply->deleteLater();
 }

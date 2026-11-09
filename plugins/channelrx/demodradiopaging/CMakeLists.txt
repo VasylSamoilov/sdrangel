@@ -6,6 +6,7 @@ set(demodradiopaging_SOURCES
     radiopagingdemodbaseband.cpp
     radiopagingdemodsink.cpp
     radiopagingdemodplugin.cpp
+    radiopagingdemodwebapiadapter.cpp
 )
 
 set(demodradiopaging_HEADERS

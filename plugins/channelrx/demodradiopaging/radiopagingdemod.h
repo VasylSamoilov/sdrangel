@@ -18,6 +18,7 @@
 #ifndef INCLUDE_RADIOPAGINGDEMOD_H
 #define INCLUDE_RADIOPAGINGDEMOD_H
 
+#include <QNetworkRequest>
 #include <QThread>
 
 #include "dsp/basebandsamplesink.h"
@@ -27,6 +28,8 @@
 #include "radiopagingdemodbaseband.h"
 #include "radiopagingdemodsettings.h"
 
+class QNetworkAccessManager;
+class QNetworkReply;
 class DeviceAPI;
 
 // Radio paging demodulator: POCSAG, FLEX and GSC, all speeds and polarities at the same
@@ -93,6 +96,36 @@ public:
         return 0;
     }
 
+    virtual int webapiSettingsGet(
+            SWGSDRangel::SWGChannelSettings& response,
+            QString& errorMessage);
+
+    virtual int webapiWorkspaceGet(
+            SWGSDRangel::SWGWorkspaceInfo& response,
+            QString& errorMessage);
+
+    virtual int webapiSettingsPutPatch(
+            bool force,
+            const QStringList& channelSettingsKeys,
+            SWGSDRangel::SWGChannelSettings& response,
+            QString& errorMessage);
+
+    virtual int webapiReportGet(
+            SWGSDRangel::SWGChannelReport& response,
+            QString& errorMessage);
+
+    static void webapiFormatChannelSettings(
+            SWGSDRangel::SWGChannelSettings& response,
+            const RadioPagingDemodSettings& settings);
+
+    static void webapiUpdateChannelSettings(
+            RadioPagingDemodSettings& settings,
+            const QStringList& channelSettingsKeys,
+            SWGSDRangel::SWGChannelSettings& response);
+
+    //!< The WebAPI has one key per POCSAG speed and FLEX mode; the settings have one per array
+    static QStringList webapiSettingsKeys(const QStringList& channelSettingsKeys);
+
     double getMagSq() const { return m_basebandSink->getMagSq(); }
 
     void getMagSqLevels(double& avg, double& peak, int& nbSamples) {
@@ -113,11 +146,23 @@ private:
     RadioPagingDemodSettings m_settings;
     int m_basebandSampleRate;           //!< stored from device message used when starting baseband sink
     qint64 m_centerFrequency;
+    QNetworkAccessManager *m_networkManager;
+    QNetworkRequest m_networkRequest;
 
     virtual bool handleMessage(const Message& cmd);
     void applySettings(const QStringList& settingsKeys, const RadioPagingDemodSettings& settings, bool force = false);
     void sendSampleRateToDemodAnalyzer();
     void publishRecord(MessageRecord record);
+    void webapiReverseSendSettings(const QStringList& channelSettingsKeys, const RadioPagingDemodSettings& settings, bool force);
+    void webapiFormatChannelSettings(
+            const QStringList& channelSettingsKeys,
+            SWGSDRangel::SWGChannelSettings *swgChannelSettings,
+            const RadioPagingDemodSettings& settings,
+            bool force);
+    void webapiFormatChannelReport(SWGSDRangel::SWGChannelReport& response);
+
+private slots:
+    void networkManagerFinished(QNetworkReply *reply);
 };
 
 #endif // INCLUDE_RADIOPAGINGDEMOD_H

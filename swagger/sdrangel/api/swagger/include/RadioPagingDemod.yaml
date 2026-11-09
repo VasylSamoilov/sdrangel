@@ -1,0 +1,155 @@
+RadioPagingDemodSettings:
+  description: "Radio paging demodulator: POCSAG, FLEX and GSC decoded at the same time"
+  type: object
+  properties:
+    inputFrequencyOffset:
+      description: Channel center frequency shift from baseband center in Hz
+      type: integer
+      format: int64
+    rfBandwidth:
+      description: Channel filter bandwidth in Hz. Each protocol filters further at its Carson bandwidth
+      type: number
+      format: float
+    pocsag512Enabled:
+      description: "Decode POCSAG at 512 bit/s (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    pocsag1200Enabled:
+      description: "Decode POCSAG at 1200 bit/s (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    pocsag2400Enabled:
+      description: "Decode POCSAG at 2400 bit/s (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    pocsagDeviation:
+      description: POCSAG frequency deviation in Hz
+      type: number
+      format: float
+    flex1600x2Enabled:
+      description: "Decode FLEX 1600 bit/s 2-level (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    flex3200x2Enabled:
+      description: "Decode FLEX 3200 bit/s 2-level (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    flex3200x4Enabled:
+      description: "Decode FLEX 3200 bit/s 4-level (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    flex6400x4Enabled:
+      description: "Decode FLEX 6400 bit/s 4-level (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    flexDeviation:
+      description: FLEX outer symbol frequency deviation in Hz
+      type: number
+      format: float
+    gscEnabled:
+      description: "Decode GSC (Golay Sequential Code) (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    gscDeviation:
+      description: GSC frequency deviation in Hz
+      type: number
+      format: float
+    gscNonBatterySaver:
+      description: "Also detect GSC non battery saver transmissions, which have no preamble (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    gscVoiceTimeout:
+      description: Maximum length of a GSC voice message in seconds
+      type: integer
+      format: int32
+    normalPolarity:
+      description: "Decode transmissions of normal polarity (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    invertedPolarity:
+      description: "Decode transmissions of inverted polarity (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    rgbColor:
+      type: integer
+      format: int32
+    title:
+      type: string
+    streamIndex:
+      description: MIMO channel. Not relevant when connected to SI (single Rx).
+      type: integer
+      format: int32
+    useReverseAPI:
+      description: Synchronize with reverse API (1 for yes, 0 for no)
+      type: integer
+      format: int32
+    reverseAPIAddress:
+      type: string
+    reverseAPIPort:
+      type: integer
+      format: int32
+    reverseAPIDeviceIndex:
+      type: integer
+      format: int32
+    reverseAPIChannelIndex:
+      type: integer
+      format: int32
+    channelMarker:
+      $ref: "http://swgserver:8081/api/swagger/include/ChannelMarker.yaml#/ChannelMarker"
+    rollupState:
+      $ref: "http://swgserver:8081/api/swagger/include/RollupState.yaml#/RollupState"
+
+RadioPagingDemodReport:
+  description: Radio paging demodulator
+  type: object
+  properties:
+    channelPowerDB:
+      description: Power received in channel (dB)
+      type: number
+      format: float
+    channelSampleRate:
+      type: integer
+      format: int32
+    pocsag512Sync:
+      description: "POCSAG 512 bit/s decoder: 0 not synchronised, 1 synchronised, 2 synchronised on inverted polarity"
+      type: integer
+      format: int32
+    pocsag1200Sync:
+      description: "POCSAG 1200 bit/s decoder: 0 not synchronised, 1 synchronised, 2 synchronised on inverted polarity"
+      type: integer
+      format: int32
+    pocsag2400Sync:
+      description: "POCSAG 2400 bit/s decoder: 0 not synchronised, 1 synchronised, 2 synchronised on inverted polarity"
+      type: integer
+      format: int32
+    flexSync:
+      description: "FLEX decoder: 0 not synchronised, 1 synchronised, 2 synchronised on inverted polarity"
+      type: integer
+      format: int32
+    flexMode:
+      description: FLEX mode of the last frame
+      type: string
+    flexQuality:
+      description: FLEX decode quality of the last frame, 0 to 1
+      type: number
+      format: float
+    gscSync:
+      description: "GSC decoder: 0 not synchronised, 1 synchronised, 2 synchronised on inverted polarity"
+      type: integer
+      format: int32
+    gscVoice:
+      description: "A GSC voice message is being received (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    pocsagMessages:
+      description: Number of POCSAG messages decoded since start
+      type: integer
+      format: int64
+    flexMessages:
+      description: Number of FLEX messages decoded since start
+      type: integer
+      format: int64
+    gscMessages:
+      description: Number of GSC messages decoded since start
+      type: integer
+      format: int64

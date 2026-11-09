@@ -32,6 +32,16 @@ public:
     virtual QByteArray serialize() const { return m_settings.serialize(); }
     virtual bool deserialize(const QByteArray& data) { return m_settings.deserialize(data); }
 
+    virtual int webapiSettingsGet(
+            SWGSDRangel::SWGChannelSettings& response,
+            QString& errorMessage);
+
+    virtual int webapiSettingsPutPatch(
+            bool force,
+            const QStringList& channelSettingsKeys,
+            SWGSDRangel::SWGChannelSettings& response,
+            QString& errorMessage);
+
 private:
     RadioPagingDemodSettings m_settings;
 };

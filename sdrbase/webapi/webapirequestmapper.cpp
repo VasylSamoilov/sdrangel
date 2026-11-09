@@ -5194,6 +5194,12 @@ bool WebAPIRequestMapper::getChannelSettings(
             channelSettings->getRadioClockSettings()->init();
             channelSettings->getRadioClockSettings()->fromJsonObject(settingsJsonObject);
         }
+        else if (channelSettingsKey == "RadioPagingDemodSettings")
+        {
+            channelSettings->setRadioPagingDemodSettings(new SWGSDRangel::SWGRadioPagingDemodSettings());
+            channelSettings->getRadioPagingDemodSettings()->init();
+            channelSettings->getRadioPagingDemodSettings()->fromJsonObject(settingsJsonObject);
+        }
         else if (channelSettingsKey == "RadiosondeDemodSettings")
         {
             channelSettings->setRadiosondeDemodSettings(new SWGSDRangel::SWGRadiosondeDemodSettings());
