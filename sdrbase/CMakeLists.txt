@@ -243,6 +243,7 @@ set(sdrbase_SOURCES
     util/droneid.cpp
     util/CRC64.cpp
     util/csv.cpp
+    util/messagerecord.cpp
     util/db.cpp
     util/dsc.cpp
     util/fixedtraits.cpp
@@ -530,6 +531,7 @@ set(sdrbase_HEADERS
     util/countrydat.h
     util/CRC64.h
     util/csv.h
+    util/messagerecord.h
     util/db.h
     util/dsc.h
     util/doublebuffer.h
