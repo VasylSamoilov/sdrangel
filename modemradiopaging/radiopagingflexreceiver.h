@@ -31,8 +31,11 @@
 //
 // A demodulator at 1600 baud with 2 levels runs all the time and hunts for sync 1 on its
 // own, in both polarities: the mode code A, the 16 bit pattern B and the inverted mode
-// code are compared with the code of each mode, allowing a few bit errors over the 80
-// bits. The frame information word follows at the same rate. A second demodulator then
+// code are compared with the code of each mode. Sync 1 is accepted when the 80 bits have
+// at most m_maxSyncErrors bit errors, or when the two copies of the mode code (A and
+// inverted A) each decode to the same mode (up to 2 bit errors in one copy and 3 in the
+// other), whatever B holds. Only the received bits of the frame are used: nothing is
+// predicted from earlier frames. The frame information word follows at the same rate. A second demodulator then
 // continues the symbol clock at the rate and number of levels of the frame mode,
 // starting with the DC offset and deviation measured during sync 1. The second sync is
 // skipped by its nominal length (corrected by one symbol when its closing pattern is

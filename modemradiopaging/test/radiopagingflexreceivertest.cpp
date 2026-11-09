@@ -259,6 +259,79 @@ void testPolarityFilter()
     check(receiver.getStatus().m_frames == 0, "FLEX RX: an inverted frame is not received with inverted polarity disabled");
 }
 
+// Sync part symbol positions: bit sync 0-31, A 32-63, B 64-79, inverted A 80-111
+std::vector<int> errorPositions(int start, int count, int stride)
+{
+    std::vector<int> positions;
+    for (int i = 0; i < count; i++) {
+        positions.push_back(start + i * stride);
+    }
+    return positions;
+}
+
+// One frame with one message whose sync 1 symbols are damaged at the given positions
+bool receivedWithDamagedSync(const std::vector<int>& positions)
+{
+    RadioPagingFlexEncoder encoder;
+    encoder.setMode(RadioPagingFlex::Mode3200_2);
+    RadioPagingFlexEncoder::TxMessage m;
+    m.m_capcode = 54321;
+    m.m_text = "sync damage";
+    encoder.enqueue(m);
+
+    RadioPagingFlexEncoder::Frame frame;
+    for (uint64_t index = 0; index < 200; index++)
+    {
+        frame = encoder.buildFrame(index);
+        if (!frame.m_idle) {
+            break;
+        }
+    }
+
+    for (int p : positions) {
+        frame.m_blocks[0].m_symbols[p] ^= 1;
+    }
+
+    Signal signal;
+    signal.m_noise = 0.03f;
+    std::vector<float> samples = makeSamples(frame.m_blocks, signal, 2000);
+    RadioPagingFlexReceiver receiver;
+    receiver.create(38400.0);
+    bool found = false;
+
+    for (float s : samples)
+    {
+        receiver.process(s);
+        while (receiver.hasMessage()) {
+            found = found || (receiver.takeMessage().m_text == "sync damage");
+        }
+    }
+
+    return found;
+}
+
+void testDamagedSync()
+{
+    std::vector<int> p;
+
+    check(receivedWithDamagedSync({}), "FLEX RX: undamaged sync 1 is received");
+
+    p = errorPositions(32, 3, 9);
+    for (int q : errorPositions(64, 3, 5)) { p.push_back(q); }
+    for (int q : errorPositions(80, 2, 13)) { p.push_back(q); }
+    check(receivedWithDamagedSync(p), "FLEX RX: 8 bit errors over A, B and inverted A are accepted");
+
+    p = errorPositions(64, 12, 1);
+    for (int q : errorPositions(32, 2, 11)) { p.push_back(q); }
+    for (int q : errorPositions(80, 3, 9)) { p.push_back(q); }
+    check(receivedWithDamagedSync(p), "FLEX RX: B destroyed (12 errors), A 2 errors and inverted A 3 errors: the two copies agree, accepted");
+
+    p = errorPositions(64, 4, 3);
+    for (int q : errorPositions(32, 3, 9)) { p.push_back(q); }
+    for (int q : errorPositions(80, 3, 9)) { p.push_back(q); }
+    check(!receivedWithDamagedSync(p), "FLEX RX: 3 errors in each copy of the mode code and 4 in B are rejected");
+}
+
 } // namespace
 
 int main()
@@ -275,6 +348,7 @@ int main()
     }
     testNoiseOnly();
     testPolarityFilter();
+    testDamagedSync();
 
     std::printf("%s (%d failure%s)\n", failures ? "FAILED" : "OK", failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;

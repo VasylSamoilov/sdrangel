@@ -185,8 +185,16 @@ bool RadioPagingFlexReceiver::checkSync(RadioPagingFlex::Mode& mode, bool& inver
 
         for (int m = 0; m < 4; m++)
         {
-            int errors = bErrors + popcount32((a ^ flip) ^ codeA[m]) + popcount32((aInv ^ flip) ^ codeAInv[m]);
-            if (errors < best)
+            int aErrors = popcount32((a ^ flip) ^ codeA[m]);
+            int aInvErrors = popcount32((aInv ^ flip) ^ codeAInv[m]);
+            int errors = bErrors + aErrors + aInvErrors;
+            // A and inverted A are two copies of the same codeword. Within 2 bit errors a
+            // copy is the codeword the code corrects it to; one copy may then have one more
+            // error when the other confirms the same mode. B is not needed in that case
+            bool copiesAgree = ((aErrors <= 2) && (aInvErrors <= 3)) || ((aErrors <= 3) && (aInvErrors <= 2));
+            bool accepted = (errors <= m_maxSyncErrors) || copiesAgree;
+
+            if (accepted && (errors < best))
             {
                 best = errors;
                 bestMode = m;
@@ -195,7 +203,7 @@ bool RadioPagingFlexReceiver::checkSync(RadioPagingFlex::Mode& mode, bool& inver
         }
     }
 
-    if ((bestMode < 0) || (best > m_maxSyncErrors) || !m_modeEnabled[bestMode]) {
+    if ((bestMode < 0) || !m_modeEnabled[bestMode]) {
         return false;
     }
 
