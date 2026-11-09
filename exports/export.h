@@ -167,6 +167,18 @@
 #  define MODEMRADIOPAGING_API
 #endif
 
+/* the 'MODEMCELLULAR_API' controls the import/export of 'modemcellular' symbols
+ */
+#if !defined(sdrangel_STATIC)
+#  ifdef modemcellular_EXPORTS
+#    define MODEMCELLULAR_API __SDR_EXPORT
+#  else
+#    define MODEMCELLULAR_API __SDR_IMPORT
+#  endif
+#else
+#  define MODEMCELLULAR_API
+#endif
+
 /* the 'MODEMMESHTASTIC_API' controls the import/export of 'modemmeshtastic' symbols
  */
 #if !defined(sdrangel_STATIC)
