@@ -440,7 +440,7 @@
         <item>
          <widget class="QToolButton" name="gscAudio">
           <property name="toolTip">
-           <string>Left: play the voice of GSC voice pages, from the activation code to the end of the page (turn off code, new transmission, signal lost or the longest voice message). Right: select the audio output device</string>
+           <string>Left: play the voice message of GSC voice pages, from the end of the alert time to the end of the page (turn off code, new transmission, signal lost or the longest voice message). Right: select the audio output device</string>
           </property>
           <property name="icon">
            <iconset resource="../../../sdrgui/resources/res.qrc">

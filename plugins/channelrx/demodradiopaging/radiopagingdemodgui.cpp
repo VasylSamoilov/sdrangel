@@ -823,7 +823,7 @@ void RadioPagingDemodGUI::updateStatus()
     ui->flexStatus->setToolTip(flexToolTip(status));
 
     // Green while the voice is played
-    bool playing = m_settings.m_gscAudio && status.m_enabled[2] && status.m_gscVoice;
+    bool playing = status.m_enabled[2] && status.m_gscAudio;
     ui->gscAudio->setStyleSheet(playing ? "QToolButton { background-color : green; }" : "");
 }
 

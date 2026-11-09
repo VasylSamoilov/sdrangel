@@ -294,21 +294,24 @@ Audio receiveAudio(const std::vector<Sample>& samples, bool audio, int voiceTime
 
 void testVoiceAudio()
 {
-    std::vector<Sample> page = voicePage(3.0, true);
+    // 5 s after the activation code: 2.2 s of alert time are not played, then 2.8 s of
+    // voice and the turn-off word
+    std::vector<Sample> page = voicePage(5.0, true);
     Audio on = receiveAudio(page, true, 50);
     double seconds = on.m_samples / 48000.0;
     double frequency = on.m_crossings / (2.0 * 2.0);
     std::printf("      voice audio %.2f s, %.0f Hz, peak %d\n", seconds, frequency, on.m_peak);
-    check((seconds > 2.9) && (seconds < 3.5), "Voice audio: opens on the voice page, closes on the turn-off word");
+    check((seconds > 2.8) && (seconds < 3.2), "Voice audio: opens after the alert time, closes on the turn-off word");
     check((frequency > 950.0) && (frequency < 1050.0), "Voice audio: the voice tone at its frequency");
     const double level = 32767 * 3000.0 / 4500.0;    // 3 kHz of the 4.5 kHz GSC deviation
     check((on.m_peak > 0.85 * level) && (on.m_peak < 1.15 * level), "Voice audio: level of the deviation at volume 1");
 
     check(receiveAudio(page, false, 50).m_samples == 0, "Voice audio off: nothing is output");
 
-    Audio timeout = receiveAudio(voicePage(3.0, false), true, 1);
-    std::printf("      voice audio with a 1 s voice timeout %.2f s\n", timeout.m_samples / 48000.0);
-    check((timeout.m_samples > 0.9 * 48000) && (timeout.m_samples < 1.2 * 48000), "Voice audio: closes at the longest voice message");
+    // The voice timeout counts from the activation code
+    Audio timeout = receiveAudio(voicePage(6.0, false), true, 4);
+    std::printf("      voice audio with a 4 s voice timeout %.2f s\n", timeout.m_samples / 48000.0);
+    check((timeout.m_samples > 1.7 * 48000) && (timeout.m_samples < 1.9 * 48000), "Voice audio: closes at the longest voice message");
 }
 
 } // namespace

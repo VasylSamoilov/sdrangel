@@ -70,6 +70,7 @@ public:
         float m_flexQuality;
         bool m_gscSync;
         bool m_gscVoice;
+        bool m_gscAudio;                //!< The voice message is being played
         bool m_gscInverted;
         quint32 m_messages[3];          //!< POCSAG, FLEX, GSC records sent since start
     };

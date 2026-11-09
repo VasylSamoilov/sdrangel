@@ -149,6 +149,9 @@ public:
     //!< Alert time or voice message of a voice page: no symbols, other than the turn-off word,
     //!< interleaved addresses or a new preamble
     bool inVoice() const { return m_state == Voice; }
+    //!< Voice message of a voice page: after the alert time and the last word that may be
+    //!< interleaved in it, until the end of the page
+    bool inVoiceMessage() const { return (m_state == Voice) && (m_voiceSymbols > m_voiceMessageStart); }
     Status getStatus() const;
     bool hasMessage() const { return !m_messages.empty(); }
     Message takeMessage();
@@ -171,6 +174,9 @@ public:
     //!< Alert time after the activation code in which tone only addresses may be interleaved:
     //!< 2 s at 600 bit/s (Motorola GSC manual, Figure 6-1)
     static const int m_alertSymbols = 1200;
+    //!< Symbols after the activation code at which the voice message starts: the alert time and
+    //!< an interleaved address (comma, word 1, separator bit, word 2) that may end after it
+    static const int m_voiceMessageStart = m_alertSymbols + RadioPagingGsc::m_commaBits + 2 * RadioPagingGsc::m_codewordBits + 1;
     //!< Default voice timeout: the longest documented pager timeout, 50 s (Motorola GSC manual,
     //!< Code Word Automatic Reset). Rep. 900-2 gives none
     static const int m_defaultVoiceTimeoutSeconds = 50;

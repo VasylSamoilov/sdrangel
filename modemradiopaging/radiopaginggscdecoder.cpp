@@ -27,6 +27,7 @@ const float RadioPagingGscDecoder::m_minPairAgreement = 0.5f;
 const int RadioPagingGscDecoder::m_minDamagedBlockCodewords;
 const int RadioPagingGscDecoder::m_maxCommaErrors;
 const int RadioPagingGscDecoder::m_alertSymbols;
+const int RadioPagingGscDecoder::m_voiceMessageStart;
 const int RadioPagingGscDecoder::m_defaultVoiceTimeoutSeconds;
 
 namespace {
@@ -351,7 +352,7 @@ void RadioPagingGscDecoder::processVoice()
     Message message;
     int e1, e2;
 
-    if ((m_voiceSymbols <= m_alertSymbols + pairBits) && parseAddress(p, message, e1, e2))
+    if ((m_voiceSymbols <= m_voiceMessageStart) && parseAddress(p, message, e1, e2))
     {
         message.m_type = RadioPagingGsc::Tone;
         message.m_interleaved = true;

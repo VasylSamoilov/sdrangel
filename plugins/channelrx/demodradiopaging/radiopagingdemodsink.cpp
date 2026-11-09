@@ -285,12 +285,12 @@ void RadioPagingDemodSink::applyAudioSampleRate(int sampleRate)
     m_audioSampleRate = sampleRate;
 }
 
-// The audio opens when the GSC receiver enters the alert time of a voice page and closes
-// when the page ends: turn-off word, new transmission, signal lost or the voice timeout
-// (the longest voice message)
+// The audio opens when the alert time of a voice page is over, as a pager opens its audio
+// after the alert, and closes when the page ends: turn-off word, new transmission, signal
+// lost or the voice timeout (the longest voice message)
 void RadioPagingDemodSink::processAudio(Real fm)
 {
-    if (!m_gsc.inVoice())
+    if (!m_gsc.inVoiceMessage())
     {
         closeAudio();
         return;
@@ -445,6 +445,7 @@ void RadioPagingDemodSink::updateStatus()
     }
     status.m_gscVoice = (gsc.m_normal.m_state == RadioPagingGscDecoder::Voice) || (gsc.m_inverted.m_state == RadioPagingGscDecoder::Voice);
     status.m_gscInverted = gscInverted && !gscNormal;
+    status.m_gscAudio = m_audioOpen;
 
     status.m_enabled[0] = m_settings.m_pocsagEnabled;
     status.m_enabled[1] = m_settings.m_flexEnabled;

@@ -80,6 +80,8 @@ public:
     Status getStatus() const;
     //!< A voice page is in its alert time or voice message, until its end
     bool inVoice() const { return m_normal.inVoice() || m_inverted.inVoice(); }
+    //!< A voice page is in its voice message (the alert time is over), until its end
+    bool inVoiceMessage() const { return m_normal.inVoiceMessage() || m_inverted.inVoiceMessage(); }
 
 private:
     bool m_normalEnabled;
