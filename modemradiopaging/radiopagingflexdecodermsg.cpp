@@ -292,7 +292,7 @@ void RadioPagingFlexDecoder::walkAddresses(unsigned addressStart, unsigned vecto
 
             msg.m_type = TypeTone;
             countWords(msg, a.m_index, a.m_index + (a.m_long ? 1 : 0));
-            emit(msg);
+            emitMessage(msg);
             continue;
         }
 
@@ -422,7 +422,7 @@ void RadioPagingFlexDecoder::processVector(const AddressContext& a, int j)
         proto.m_overload = ((mw >> 16) & 1) != 0;
         countWords(proto, mw1, mw1);
         setRaw(proto, std::vector<uint32_t>(1, mw));
-        emit(proto);
+        emitMessage(proto);
         return;
     }
 
@@ -509,7 +509,7 @@ void RadioPagingFlexDecoder::decodeShortInstruction(Message& proto, const Addres
         proto.m_operatorCategory = operatorCategory(a.m_word);
     }
 
-    emit(proto);
+    emitMessage(proto);
 }
 
 // Short message: the message is in the vector word (two words for a long address)
@@ -558,7 +558,7 @@ void RadioPagingFlexDecoder::decodeShortMessage(Message& proto, const AddressCon
     }
 
     setRaw(proto, raw);
-    emit(proto);
+    emitMessage(proto);
 }
 
 // Reassembly of fragments of alphanumeric, secure and binary messages
@@ -572,12 +572,12 @@ void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& 
     {
     case FragmentUnknown:
         msg.m_complete = false;
-        emit(msg);
+        emitMessage(msg);
         return;
 
     case FragmentComplete:
         reassemblyInvalidate(a.m_capcode, -1);
-        emit(msg);
+        emitMessage(msg);
         return;
 
     case FragmentFirst:
@@ -614,7 +614,7 @@ void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& 
 
             fragment.m_fragmented = true;
             fragment.m_isFragment = true;
-            emit(fragment);
+            emitMessage(fragment);
         }
         return;
     }
@@ -629,7 +629,7 @@ void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& 
             // The first fragment was not received
             msg.m_fragmented = true;
             msg.m_complete = false;
-            emit(msg);
+            emitMessage(msg);
             return;
         }
 
@@ -673,7 +673,7 @@ void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& 
 
                 fragment.m_fragmented = true;
                 fragment.m_isFragment = true;
-                emit(fragment);
+                emitMessage(fragment);
             }
             return;
         }
@@ -710,10 +710,10 @@ void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& 
 
             fragment.m_fragmented = true;
             fragment.m_isFragment = true;
-            emit(fragment);
+            emitMessage(fragment);
         }
 
-        emit(out);
+        emitMessage(out);
         return;
     }
     }
@@ -1152,7 +1152,7 @@ void RadioPagingFlexDecoder::decodeNumeric(Message& proto, const AddressContext&
 
     countWords(msg, mw1, mw2);
     setRaw(msg, raw);
-    emit(msg);
+    emitMessage(msg);
 }
 
 // Hex / binary messages (vector 6). First word: K (12 bits), C, F, N. The first fragment has a second

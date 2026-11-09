@@ -578,7 +578,7 @@ private:
     void countWord(Message& msg, const Word& word) const;
     void countWords(Message& msg, int first, int last) const;
     static void setRaw(Message& msg, const std::vector<uint32_t>& words);
-    void emit(Message& msg);
+    void emitMessage(Message& msg);
     bool wordOk(int index) const;
 
     // Fragment reassembly

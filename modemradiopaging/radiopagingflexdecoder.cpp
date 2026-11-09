@@ -1107,7 +1107,7 @@ RadioPagingFlexDecoder::Message RadioPagingFlexDecoder::newMessage(const Address
     return msg;
 }
 
-void RadioPagingFlexDecoder::emit(Message& msg)
+void RadioPagingFlexDecoder::emitMessage(Message& msg)
 {
     msg.m_typeName = messageTypeName(msg.m_type);
 
@@ -1255,7 +1255,7 @@ void RadioPagingFlexDecoder::emitIncomplete(Reassembly& slot)
         msg.m_signature = CheckIncomplete;
     }
 
-    emit(msg);
+    emitMessage(msg);
 }
 
 // Message history: retransmissions of messages with a message number
