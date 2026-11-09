@@ -449,149 +449,147 @@ void RadioPagingFlexDecoder::combineSubframes(SubframeStore& store, Word *out, i
     }
 }
 
-// Multiple transmission: the frame holds N subframes, each a copy of the same content that is sent again
-// in the following frames of the repeat unit. Copies are collected and combined word by word
+// Multiple transmission (STD-43A 3.4.2, Fig. 3.4.2-3): a frame holds N subframes, subframe k
+// (1 to N) carrying the k-th transmission of a content first sent in subframe 1 of the frame
+// (k - 1) repeat intervals earlier; the repeat interval is the TD collapse cycle if given
+// (3.6), else the system collapse cycle. The subframes of one frame are different contents.
+// The copies of a content are collected under the frame of its first transmission and
+// combined word by word. The content is decoded once: as soon as its words are all good,
+// else with the best words when its last transmission is due. A content whose first
+// transmission was missed is decoded from its later copies
 void RadioPagingFlexDecoder::decodeSubframes(int phaseIndex)
 {
-    SubframeStore& store = pol().m_stores[phaseIndex];
+    std::vector<SubframeStore>& stores = pol().m_stores[phaseIndex];
 
     // The collapse is the network's: kept per polarity
     if ((m_w[0].m_status == WordClean) || (m_w[0].m_status == WordCorrected)) {
         pol().m_lastCollapse = (m_w[0].m_data >> 18) & 7;
     }
 
-    int transmissions = m_ctx.m_transmissions;
+    const FrameContext current = m_ctx;
+    const char name = m_name;
+    int transmissions = std::min(current.m_transmissions, 4);
     int words = subframeWords(transmissions);
-    uint32_t interval = 1u << ((m_ctx.m_tdCollapse >= 0) ? m_ctx.m_tdCollapse : pol().m_lastCollapse);
-    uint32_t unit = (uint32_t) transmissions * interval;
+    uint32_t interval = 1u << ((current.m_tdCollapse >= 0) ? current.m_tdCollapse : pol().m_lastCollapse);
     uint32_t abs = absFrame();
+    Word frame[wordsPerFrame];
 
-    if (!store.m_active)
-    {
-        store = SubframeStore();
-        store.m_active = true;
-        store.m_expected = transmissions;
-        store.m_words = words;
-        store.m_timeoutFrame = (abs + unit + interval) % framesPerHour;
-        store.m_phase = m_name;
-        store.m_context = m_ctx;
-    }
+    std::copy(m_w, m_w + wordsPerFrame, frame);
 
     for (int slot = 0; slot < transmissions; slot++)
     {
-        int offset = slot * words;
+        const Word *w = &frame[slot * words];
 
-        if (offset + words > wordsPerFrame) {
-            break;
-        }
-
-        SubframeCopy& copy = store.m_copies[slot];
-
-        if (copy.m_received) {
-            continue;
-        }
-
-        int uncorrectable = 0;
-
-        for (int i = 0; i < words; i++)
+        // A subframe without addresses is idle
+        if (w[0].m_status != WordUncorrectable)
         {
-            copy.m_words[i] = m_w[offset + i];
-
-            if (m_w[offset + i].m_status == WordUncorrectable) {
-                uncorrectable++;
-            }
-        }
-
-        if (m_w[offset].m_status != WordUncorrectable)
-        {
-            // A subframe without addresses is idle
-            uint32_t biw = m_w[offset].m_data;
-            unsigned vector = (biw >> 10) & 0x3f;
-            unsigned address = ((biw >> 8) & 3) + 1;
+            unsigned vector = (w[0].m_data >> 10) & 0x3f;
+            unsigned address = ((w[0].m_data >> 8) & 3) + 1;
 
             if (vector == address) {
                 continue;
             }
         }
 
+        uint32_t origin = (abs + framesPerHour - ((uint32_t) slot * interval) % framesPerHour) % framesPerHour;
+        SubframeStore *store = nullptr;
+
+        for (SubframeStore& s : stores)
+        {
+            if ((s.m_origin == origin) && (s.m_expected == transmissions) && (s.m_interval == interval))
+            {
+                store = &s;
+                break;
+            }
+        }
+
+        if (!store)
+        {
+            stores.push_back(SubframeStore());
+            store = &stores.back();
+            store->m_origin = origin;
+            store->m_interval = interval;
+            store->m_expected = transmissions;
+            store->m_words = words;
+            store->m_phase = name;
+            store->m_context = current;
+            store->m_context.m_cycle = origin / 128;
+            store->m_context.m_frame = origin % 128;
+        }
+
+        SubframeCopy& copy = store->m_copies[slot];
+
+        if (copy.m_received) {
+            continue;
+        }
+
         copy.m_received = true;
-        copy.m_uncorrectable = uncorrectable;
-        store.m_received++;
-    }
+        copy.m_uncorrectable = 0;
 
-    int32_t diff = (int32_t) abs - (int32_t) store.m_timeoutFrame;
-    bool timedOut = (diff >= 0) || (diff < -960);
+        for (int i = 0; i < words; i++)
+        {
+            copy.m_words[i] = w[i];
 
-    // Already decoded: the remaining copies are collected so they are not decoded again
-    if (store.m_decoded)
-    {
-        if ((store.m_received >= store.m_expected) || timedOut) {
-            store = SubframeStore();
+            if (w[i].m_status == WordUncorrectable) {
+                copy.m_uncorrectable++;
+            }
         }
 
-        return;
-    }
+        store->m_received++;
 
-    if (store.m_received == 0)
-    {
-        if (timedOut) {
-            store = SubframeStore();
+        if (!store->m_decoded)
+        {
+            Word combined[wordsPerFrame];
+            int remaining;
+
+            combineSubframes(*store, combined, remaining);
+
+            if (remaining == 0) {
+                decodeStore(*store);
+            }
         }
-
-        return;
     }
 
-    Word combined[wordsPerFrame];
-    int remaining;
+    // Contents whose last transmission is due: decoded with what was received, then dropped
+    bool waiting = false;
 
-    combineSubframes(store, combined, remaining);
-
-    if (remaining == 0)
+    for (auto it = stores.begin(); it != stores.end();)
     {
-        // All words are good: decode now, later copies of the same content are collected only
-        store.m_decoded = true;
+        uint32_t age = (abs + framesPerHour - it->m_origin) % framesPerHour;
 
-        if (store.m_received >= store.m_expected) {
-            store = SubframeStore();
+        if (age >= (uint32_t) (it->m_expected - 1) * it->m_interval)
+        {
+            if (!it->m_decoded) {
+                decodeStore(*it);
+            }
+
+            it = stores.erase(it);
         }
-
-        std::copy(combined, combined + wordsPerFrame, m_w);
-        parsePhase();
-        return;
+        else
+        {
+            waiting = waiting || !it->m_decoded;
+            ++it;
+        }
     }
 
-    if ((store.m_received >= store.m_expected) || timedOut)
-    {
-        store = SubframeStore();
-        std::copy(combined, combined + wordsPerFrame, m_w);
-        parsePhase();
-        return;
-    }
+    m_ctx = current;
+    m_name = name;
 
-    m_block->m_waiting = true;
+    if (waiting) {
+        m_block->m_waiting = true;
+    }
 }
 
-void RadioPagingFlexDecoder::flushStore(int p, int phaseIndex)
+void RadioPagingFlexDecoder::decodeStore(SubframeStore& store)
 {
-    SubframeStore& store = m_pol[p].m_stores[phaseIndex];
-
-    if (!store.m_active || store.m_decoded || (store.m_received == 0))
-    {
-        store = SubframeStore();
-        return;
-    }
-
     Word combined[wordsPerFrame];
     int remaining;
 
     combineSubframes(store, combined, remaining);
+    store.m_decoded = true;
     m_ctx = store.m_context;
     m_name = store.m_phase;
-    store = SubframeStore();
     std::copy(combined, combined + wordsPerFrame, m_w);
-    m_report.m_blocks.push_back(BlockInfo());
-    m_block = &m_report.m_blocks.back();
-    m_block->m_phase = m_name;
     parsePhase();
 }
 
@@ -602,10 +600,23 @@ std::vector<RadioPagingFlexDecoder::Message> RadioPagingFlexDecoder::flush()
     m_out = &out;
     m_report = FrameReport();
 
+    // Contents of a multiple transmission still waiting for copies: decoded with the copies received
     for (int p = 0; p < 2; p++)
     {
-        for (int i = 0; i < 4; i++) {
-            flushStore(p, i);
+        for (int i = 0; i < 4; i++)
+        {
+            for (SubframeStore& store : m_pol[p].m_stores[i])
+            {
+                if (!store.m_decoded && (store.m_received > 0))
+                {
+                    m_report.m_blocks.push_back(BlockInfo());
+                    m_block = &m_report.m_blocks.back();
+                    m_block->m_phase = store.m_phase;
+                    decodeStore(store);
+                }
+            }
+
+            m_pol[p].m_stores[i].clear();
         }
     }
 

@@ -1101,120 +1101,133 @@ void testGroup()
         "group: a frame of the other polarity 256 frames later does not expire the assignments of this one");
 }
 
-// Multiple transmission: two copies of a subframe in a frame, combined word by word
+// Multiple transmission (STD-43A 3.4.2, Fig. 3.4.2-3), 2x with collapse 1: repeat interval 2
+// frames. Subframe 1 of frame f is the first transmission of a content, subframe 2 of frame
+// f + 2 its second transmission; the two subframes of one frame are different contents
 void testSubframes()
 {
+    std::string error;
     Enc enc;
+    Enc encB;
     Enc::TxMessage tx;
+    Enc::TxMessage tx2;
+    Enc::TxMessage txB;
 
+    enc.setCollapse(1, error);
+    encB.setCollapse(1, error);
     tx.m_capcode = 5000;
     tx.m_type = Flex::Alphanumeric;
     tx.m_text = "Subframe copies repair each other";
-
-    Enc::TxMessage tx2;
-
     tx2.m_capcode = 5001;
     tx2.m_type = Flex::Numeric;
     tx2.m_text = "424242";
+    txB.m_capcode = 6000;
+    txB.m_type = Flex::Alphanumeric;
+    txB.m_text = "Another page";
 
+    // Content A (two messages) and content B (one message), each fits a 44 word subframe
     Dec::RxFrame base = encoderFrame(enc, {tx, tx2});
-    std::vector<uint32_t> cw = codewords(base.m_phases[0]);
+    std::vector<uint32_t> a = codewords(base.m_phases[0]);
+    std::vector<uint32_t> b = codewords(encoderFrame(encB, {txB}).m_phases[0]);
+    std::vector<uint32_t> idle(44, Flex::encodeWord(0));
 
-    // 2x: the first 44 words are repeated in words 44-87
-    std::vector<uint32_t> two = cw;
+    a.resize(44);
+    b.resize(44);
+    idle[0] = Flex::blockInfoWord(0, 0, 1, 0, 1);   // No addresses
 
-    for (int i = 0; i < 44; i++) {
-        two[44 + i] = cw[i];
-    }
+    const int target = 12;                          // A message word of content A
 
-    auto frameOf = [&](const std::vector<uint32_t>& words, const std::vector<uint8_t>& erased) {
+    // Frame of 2 subframes; erased word positions are frame positions
+    auto frameOf = [&](unsigned frame, const std::vector<uint32_t>& sub1, const std::vector<uint32_t>& sub2,
+        const std::vector<int>& erasedWords) {
         Dec::RxFrame f = base;
+        std::vector<uint32_t> words(sub1);
+        std::vector<uint8_t> erased(88, 0);
+
+        words.insert(words.end(), sub2.begin(), sub2.end());
+        for (int i : erasedWords) {
+            erased[i] = 1;
+        }
         f.m_hasFiw = false;
         f.m_cycle = 2;
-        f.m_frame = 8;
+        f.m_frame = frame;
         f.m_repeat = true;
-        f.m_traffic = 1;
+        f.m_traffic = 1;                            // r = 1, t1 t0 = 01: 2 transmissions
         f.m_phases[0].m_words = interleaved(words);
         f.m_phases[0].m_erased = erased;
         return f;
     };
-
-    {
-        Dec d;
-        std::vector<Dec::Message> out = d.decodeFrame(frameOf(two, std::vector<uint8_t>()));
-        check(out.size() == 2 && d.lastFrame().m_transmissions == 2 && out[0].m_wordsUncorrectable == 0,
-            "subframes: 2x frame with two good copies decodes");
-    }
-    {
-        // A word lost in the first copy and another lost in the second copy
-        std::vector<uint8_t> erased(88, 0);
-        int target = 12;
-
-        erased[target] = 1;
-        erased[44 + target + 1] = 1;
-
-        Dec d;
-        std::vector<Dec::Message> out = d.decodeFrame(frameOf(two, erased));
-        bool ok = (out.size() == 2);
-
+    auto count = [](const std::vector<Dec::Message>& out, uint64_t capcode) {
+        int n = 0;
         for (const Dec::Message& m : out) {
-            ok = ok && (m.m_wordsUncorrectable == 0) && (m.m_complete);
+            n += (m.m_capcode == capcode) ? 1 : 0;
         }
-        check(ok, "subframes: words lost in different copies are repaired by the other copy");
-    }
-    {
-        // Same word lost in both copies: the message shows the loss
-        std::vector<uint8_t> erased(88, 0);
-
-        erased[12] = 1;
-        erased[44 + 12] = 1;
-
-        Dec d;
-        std::vector<Dec::Message> out = d.decodeFrame(frameOf(two, erased));
-        int lost = 0;
-
+        return n;
+    };
+    auto lost = [](const std::vector<Dec::Message>& out) {
+        int n = 0;
         for (const Dec::Message& m : out) {
-            lost += m.m_wordsUncorrectable;
+            n += m.m_wordsUncorrectable;
         }
-        check(out.size() == 2 && lost == 1, "subframes: same word lost in both copies stays lost");
+        return n;
+    };
+
+    {
+        // A in frame 8, its second transmission in frame 10 next to the first of B
+        Dec d;
+        std::vector<Dec::Message> first = d.decodeFrame(frameOf(8, a, idle, {}));
+        std::vector<Dec::Message> second = d.decodeFrame(frameOf(10, b, a, {}));
+        check((first.size() == 2) && (lost(first) == 0) && (d.lastFrame().m_transmissions == 2)
+            && (second.size() == 1) && (count(second, 6000) == 1),
+            "subframes: a clean first transmission decodes at once, its second transmission is not output again");
     }
     {
-        // First frame carries only the first copy (second slot idle), the copy arrives later
-        std::vector<uint32_t> half = cw;
-        std::vector<uint32_t> idle = deinterleaved(interleaved(std::vector<uint32_t>(88, 0)));
+        // Damaged A in subframe 1 and a clean B (second transmission, first one missed) in
+        // subframe 2: they are not combined; B decodes from its copy, A waits for its own
         Dec d;
-
-        for (int i = 44; i < 88; i++) {
-            half[i] = Flex::encodeWord(0);
+        std::vector<Dec::Message> first = d.decodeFrame(frameOf(8, a, b, {target}));
+        bool waiting = d.lastFrame().m_blocks[0].m_waiting;
+        std::vector<Dec::Message> second = d.decodeFrame(frameOf(10, idle, a, {}));
+        check((first.size() == 1) && (count(first, 6000) == 1) && (lost(first) == 0) && waiting,
+            "subframes: the two subframes of a frame are different contents, a content is decoded from its second transmission");
+        check((second.size() == 2) && (count(second, 5000) == 1) && (lost(second) == 0),
+            "subframes: the second transmission repairs the first, two frames later");
+        bool frameOk = !second.empty();
+        for (const Dec::Message& m : second) {
+            frameOk = frameOk && (m.m_frame == 8);
         }
-        // second slot: a block information word without addresses
-        half[44] = Flex::blockInfoWord(0, 0, 1, 0, 0);
-        (void) idle;
-
-        std::vector<uint8_t> erased(88, 0);
-        erased[12] = 1;
-
-        std::vector<Dec::Message> a = d.decodeFrame(frameOf(half, erased));
-        check(a.empty() && d.lastFrame().m_blocks[0].m_waiting, "subframes: waits for the other copy while words are missing");
-
-        Dec::RxFrame second = frameOf(two, std::vector<uint8_t>());
-        second.m_frame = 16;
-        std::vector<Dec::Message> b = d.decodeFrame(second);
-        check(b.size() == 2, "subframes: later copy completes the subframe");
+        check(frameOk, "subframes: the content is given the frame of its first transmission");
     }
     {
+        // Words lost in each transmission are repaired by the other
         Dec d;
-        std::vector<uint8_t> erased(88, 0);
-
-        erased[12] = 1;
-        erased[44 + 12] = 1;
-
-        // Only a damaged subframe: waits, then flush releases it
-        std::vector<uint32_t> half = two;
-        half[44] = Flex::blockInfoWord(0, 0, 1, 0, 0);
-        std::vector<Dec::Message> a = d.decodeFrame(frameOf(half, erased));
+        std::vector<Dec::Message> first = d.decodeFrame(frameOf(8, a, idle, {target}));
+        std::vector<Dec::Message> second = d.decodeFrame(frameOf(10, idle, a, {44 + target + 1}));
+        check(first.empty() && (second.size() == 2) && (lost(second) == 0),
+            "subframes: words lost in different transmissions are repaired by the other");
+    }
+    {
+        // The same word lost in both transmissions: decoded at the last one with the loss
+        Dec d;
+        std::vector<Dec::Message> first = d.decodeFrame(frameOf(8, a, idle, {target}));
+        std::vector<Dec::Message> second = d.decodeFrame(frameOf(10, idle, a, {44 + target}));
+        check(first.empty() && (second.size() == 2) && (lost(second) == 1),
+            "subframes: the same word lost in both transmissions stays lost");
+    }
+    {
+        // Last transmission not received: decoded when it is due
+        Dec d;
+        std::vector<Dec::Message> first = d.decodeFrame(frameOf(8, a, idle, {target}));
+        std::vector<Dec::Message> later = d.decodeFrame(frameOf(12, idle, idle, {}));
+        check(first.empty() && (later.size() == 2) && (lost(later) == 1),
+            "subframes: a content whose next transmission is missed is decoded with the words received");
+    }
+    {
+        // Signal lost: flush decodes what was received
+        Dec d;
+        std::vector<Dec::Message> first = d.decodeFrame(frameOf(8, a, idle, {target}));
         std::vector<Dec::Message> f = d.flush();
-        check(a.empty() && f.size() == 2, "subframes: flush decodes the copies received");
+        check(first.empty() && (f.size() == 2), "subframes: flush decodes the transmissions received");
     }
 }
 

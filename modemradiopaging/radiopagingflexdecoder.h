@@ -432,23 +432,27 @@ private:
         std::vector<uint32_t> m_raw;        //!< Message words of the fragment
     };
 
+    static const int m_maxSubframeWords = 44;   //!< Subframe of a 2x multiple transmission
+
     struct SubframeCopy
     {
         bool m_received = false;
         int m_uncorrectable = 0;
-        Word m_words[RadioPagingFlex::m_wordsPerFrame];
+        Word m_words[m_maxSubframeWords];
     };
 
+    //! The transmissions of one subframe content of a phase (multiple transmission): the k-th
+    //! copy is subframe k of the frame (k - 1) repeat intervals after the first transmission
     struct SubframeStore
     {
-        bool m_active = false;
-        bool m_decoded = false;
-        int m_expected = 0;
+        uint32_t m_origin = 0;              //!< Frame of the first transmission, 0-1919 in the hour
+        uint32_t m_interval = 1;            //!< Repeat interval, frames
+        bool m_decoded = false;             //!< Decoded: later copies are only collected
+        int m_expected = 0;                 //!< Number of transmissions
         int m_received = 0;
         int m_words = 0;
-        uint32_t m_timeoutFrame = 0;
         char m_phase = 'A';
-        FrameContext m_context;
+        FrameContext m_context;             //!< Of the first transmission frame
         SubframeCopy m_copies[4];
     };
 
@@ -548,7 +552,7 @@ private:
         TempSlot m_temp[16];
         std::vector<Reassembly> m_reassembly;
         std::vector<HistoryEntry> m_history;
-        SubframeStore m_stores[4];
+        std::vector<SubframeStore> m_stores[4];     //!< Per phase, contents waiting for copies
         BiwState m_biw;
         int m_lastCollapse = 0;             //!< System collapse of the last BIW 1 that decoded (clean or corrected)
     };
@@ -624,7 +628,8 @@ private:
     static int zoneMinutes(unsigned zone);
 
     void expireTempGroups();
-    void flushStore(int pol, int phaseIndex);
+    //!< Decode the combined copies of a subframe content in the context of its first transmission
+    void decodeStore(SubframeStore& store);
 };
 
 #endif // MODEMRADIOPAGING_RADIOPAGINGFLEXDECODER_H
