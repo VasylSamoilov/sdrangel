@@ -71,8 +71,7 @@ void RadioPagingFlexReceiver::create(double sampleRate)
 void RadioPagingFlexReceiver::reset()
 {
     m_syncDemod.reset();
-    m_decoder[0].reset();
-    m_decoder[1].reset();
+    m_decoder.reset();
     m_messages.clear();
     m_recentPower.clear();
     m_syncs = 0;
@@ -101,12 +100,9 @@ RadioPagingFlexDecoder::Message RadioPagingFlexReceiver::takeMessage()
 
 void RadioPagingFlexReceiver::flush()
 {
-    for (auto& decoder : m_decoder)
-    {
-        std::vector<RadioPagingFlexDecoder::Message> messages = decoder.flush();
-        for (auto& message : messages) {
-            m_messages.push_back(message);
-        }
+    std::vector<RadioPagingFlexDecoder::Message> messages = m_decoder.flush();
+    for (auto& message : messages) {
+        m_messages.push_back(message);
     }
 }
 
@@ -124,12 +120,12 @@ RadioPagingFlexReceiver::Status RadioPagingFlexReceiver::getStatus() const
     status.m_frameInfoFailures = m_frameInfoFailures;
     status.m_quality = m_lastQuality;
     status.m_deviation = m_syncDemod.getDeviation();
-    const RadioPagingFlexDecoder& decoder = m_decoder[m_inverted ? 1 : 0];
-    status.m_ber = decoder.status().m_ber;
-    status.m_frameReport = decoder.lastFrame();
-    status.m_networkTime = decoder.networkTime(m_inverted);
-    status.m_groups = decoder.groups(m_inverted);
-    status.m_reassemblies = decoder.reassemblies(m_inverted);
+    // BER and frame report of the last frame; network state of its polarity
+    status.m_ber = m_decoder.status().m_ber;
+    status.m_frameReport = m_decoder.lastFrame();
+    status.m_networkTime = m_decoder.networkTime(m_inverted);
+    status.m_groups = m_decoder.groups(m_inverted);
+    status.m_reassemblies = m_decoder.reassemblies(m_inverted);
 
     return status;
 }
@@ -454,7 +450,7 @@ void RadioPagingFlexReceiver::endFrame()
         frame.m_phases.push_back(phase);
     }
 
-    std::vector<RadioPagingFlexDecoder::Message> messages = m_decoder[m_inverted ? 1 : 0].decodeFrame(frame);
+    std::vector<RadioPagingFlexDecoder::Message> messages = m_decoder.decodeFrame(frame);
     for (auto& message : messages) {
         m_messages.push_back(message);
     }

@@ -88,11 +88,7 @@ public:
     //!< chooses the mode of each frame
     void setPolarities(bool normal, bool inverted) { m_enabled[0] = normal; m_enabled[1] = inverted; }
     //!< Also output each fragment of a fragmented message, before the reassembled message. Default off
-    void setReportFragments(bool enable)
-    {
-        m_decoder[0].setReportFragments(enable);
-        m_decoder[1].setReportFragments(enable);
-    }
+    void setReportFragments(bool enable) { m_decoder.setReportFragments(enable); }
 
     //!< Process one discriminator sample with its magnitude squared (pass 1 if not known)
     void process(float sample, float magsq = 1.0f);
@@ -103,7 +99,7 @@ public:
     void flush();
 
     Status getStatus() const;
-    RadioPagingFlexDecoder& decoder(bool inverted) { return m_decoder[inverted ? 1 : 0]; }
+    RadioPagingFlexDecoder& decoder() { return m_decoder; }
 
 private:
     double m_sampleRate;
@@ -111,9 +107,9 @@ private:
 
     RadioPagingFskDemod m_syncDemod;    //!< 1600 baud, 2 levels, always running
     RadioPagingFskDemod m_dataDemod;    //!< Rate and levels of the frame mode
-    //!< One per polarity: the same capcode on the other polarity is another network, with its
-    //!< own frame timing, fragments, groups and retransmissions
-    RadioPagingFlexDecoder m_decoder[2];
+    //!< Frames of one polarity at a time. The decoder keeps the state of each polarity apart:
+    //!< the same capcode on the other polarity is another network
+    RadioPagingFlexDecoder m_decoder;
 
     State m_state;
     uint64_t m_regLo;                   //!< Last 64 received sync rate bits, newest in bit 0

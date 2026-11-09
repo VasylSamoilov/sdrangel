@@ -285,7 +285,7 @@ std::vector<RadioPagingFlex::SymbolBlock> networkBlocks(bool inverted, uint64_t 
 }
 
 // The same capcode on the other polarity is another network: both messages are output,
-// and each polarity's frames go to their own decoder
+// neither is taken for a retransmission of the other
 void testTwoNetworks()
 {
     int normalFrames, invertedFrames;
@@ -315,11 +315,9 @@ void testTwoNetworks()
     check((normalMessages == 1) && (invertedMessages == 1),
         "FLEX RX: the same capcode and message on both polarities gives one message per polarity ("
         + std::to_string(normalMessages) + " normal, " + std::to_string(invertedMessages) + " inverted)");
-    check(((int) receiver.decoder(false).status().m_frames == normalFrames)
-        && ((int) receiver.decoder(true).status().m_frames == invertedFrames),
-        "FLEX RX: each polarity's frames are decoded by its own decoder ("
-        + std::to_string(receiver.decoder(false).status().m_frames) + "/" + std::to_string(normalFrames) + " normal, "
-        + std::to_string(receiver.decoder(true).status().m_frames) + "/" + std::to_string(invertedFrames) + " inverted)");
+    check((int) receiver.decoder().status().m_frames == normalFrames + invertedFrames,
+        "FLEX RX: the frames of both polarities are decoded ("
+        + std::to_string(receiver.decoder().status().m_frames) + "/" + std::to_string(normalFrames + invertedFrames) + ")");
 }
 
 // Sync part symbol positions: bit sync 0-31, A 32-63, B 64-79, inverted A 80-111
