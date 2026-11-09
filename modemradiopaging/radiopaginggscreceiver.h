@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "export.h"
+#include "radiopagingdedup.h"
 #include "radiopagingfskdemod.h"
 #include "radiopaginggscdecoder.h"
 
@@ -67,6 +68,8 @@ public:
     void setNonBatterySaver(bool enable);
     //!< Longest voice message without a turn-off word, in seconds
     void setVoiceTimeout(double seconds);
+    //!< Pages received again within this time are marked duplicate (default 60 s)
+    void setDuplicateWindow(double seconds) { m_dedup.setWindow(seconds); }
 
     void process(float sample);
     //!< The signal is gone: finish the transmissions in progress
@@ -75,6 +78,8 @@ public:
     bool hasMessage() const { return !m_messages.empty(); }
     RadioPagingGscDecoder::Message takeMessage();
     Status getStatus() const;
+    //!< A voice page is in its alert time or voice message, until its end
+    bool inVoice() const { return m_normal.inVoice() || m_inverted.inVoice(); }
 
 private:
     bool m_normalEnabled;
@@ -92,6 +97,8 @@ private:
     };
     NbsPolarity m_nbsPolarity;
     std::vector<RadioPagingGscDecoder::Message> m_nbsPending[2];   //!< Held messages, by decoder polarity
+    RadioPagingDedup m_dedup;
+    double m_time = 0.0;                        //!< Seconds of signal received, for the duplicate window
 
     void collect();
     void takeFrom(RadioPagingGscDecoder& decoder);

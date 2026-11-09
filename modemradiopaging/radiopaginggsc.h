@@ -52,7 +52,9 @@
 // Word 1 selects two digits of the address (the table has 50 entries, the second word
 // carries a +50 offset for groups 50-99), word 2 the last three digits. The address
 // number 1-4 is carried by complementing word 1 (number bit 1) and word 2 (number bit 0).
-// An address is written as 6 digits: index, group (2 digits) and 3 address digits.
+// An address (capcode) is written as 6 digits: index, group (2 digits) and 3 address
+// digits; without a preamble (non battery saver) the index is N. The function (address
+// number) is written after it: capcode and function, e.g. 2197892 or N197892.
 //
 // A data block is 8 BCH(15,7) codewords of 7 bits, interleaved bit by bit into 120 bits.
 // Words 0-5 and the low 6 bits of word 6 carry 48 payload bits, bit 6 of word 6 is the
@@ -174,12 +176,10 @@ public:
     //!< Words 1 and 2 of a 6 digit address and the preamble index. Fails for non digits and
     //!< for the address digit combinations that are not allowed
     static bool encodeAddress(const std::string& address, int& preamble, uint16_t& word1, uint16_t& word2, std::string *error = nullptr);
-    //!< Inverse of encodeAddress(). Needs the preamble index (-1 if unknown: the index digit is then '?')
+    //!< Inverse of encodeAddress(). Needs the preamble index (-1 if none, non battery saver: the index is then N)
     static bool decodeAddress(uint16_t word1, uint16_t word2, int preamble, std::string& address);
     //!< Index of a word 1 value in the table of 50 values, -1 if it is none
     static int word1Index(uint16_t word1);
-    //!< Seventh digit of the 7 digit functional address: voice 1-4, alphanumeric and numeric 5-8, tone 9 0 3 4
-    static char suffixDigit(MessageType type, int addressNumber);
 
     //!< Build the transmission for the messages in the given order
     static EncodeResult encode(const std::vector<TxMessage>& messages, const EncodeOptions& options);

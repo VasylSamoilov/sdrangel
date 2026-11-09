@@ -61,6 +61,7 @@ RadioPagingDemod::RadioPagingDemod(DeviceAPI *deviceAPI) :
 
     m_networkManager = new QNetworkAccessManager();
     QObject::connect(m_networkManager, &QNetworkAccessManager::finished, this, &RadioPagingDemod::networkManagerFinished);
+    QObject::connect(this, &ChannelAPI::indexInDeviceSetChanged, this, &RadioPagingDemod::handleIndexInDeviceSetChanged);
 }
 
 RadioPagingDemod::~RadioPagingDemod()
@@ -115,6 +116,20 @@ void RadioPagingDemod::start()
     RadioPagingDemodBaseband::MsgConfigureRadioPagingDemodBaseband *msg =
         RadioPagingDemodBaseband::MsgConfigureRadioPagingDemodBaseband::create(QStringList(), m_settings, true);
     m_basebandSink->getInputMessageQueue()->push(msg);
+}
+
+// The voice audio is labelled with the channel in the audio output dialog
+void RadioPagingDemod::handleIndexInDeviceSetChanged(int index)
+{
+    if (index < 0) {
+        return;
+    }
+
+    QString fifoLabel = QString("%1 [%2:%3]")
+        .arg(m_channelId)
+        .arg(m_deviceAPI->getDeviceSetIndex())
+        .arg(index);
+    m_basebandSink->setAudioFifoLabel(fifoLabel);
 }
 
 void RadioPagingDemod::stop()
@@ -350,20 +365,35 @@ void RadioPagingDemod::webapiUpdateChannelSettings(
     if (channelSettingsKeys.contains("rfBandwidth")) {
         settings.m_rfBandwidth = model->getRfBandwidth();
     }
+    if (channelSettingsKeys.contains("pocsagEnabled")) {
+        settings.m_pocsagEnabled = model->getPocsagEnabled() != 0;
+    }
     if (channelSettingsKeys.contains("pocsagDeviation")) {
         settings.m_pocsagDeviation = model->getPocsagDeviation();
+    }
+    if (channelSettingsKeys.contains("flexEnabled")) {
+        settings.m_flexEnabled = model->getFlexEnabled() != 0;
     }
     if (channelSettingsKeys.contains("flexDeviation")) {
         settings.m_flexDeviation = model->getFlexDeviation();
     }
+    if (channelSettingsKeys.contains("gscEnabled")) {
+        settings.m_gscEnabled = model->getGscEnabled() != 0;
+    }
     if (channelSettingsKeys.contains("gscDeviation")) {
         settings.m_gscDeviation = model->getGscDeviation();
     }
-    if (channelSettingsKeys.contains("gscNonBatterySaver")) {
-        settings.m_gscNonBatterySaver = model->getGscNonBatterySaver() != 0;
-    }
     if (channelSettingsKeys.contains("gscVoiceTimeout")) {
         settings.m_gscVoiceTimeout = model->getGscVoiceTimeout();
+    }
+    if (channelSettingsKeys.contains("gscAudio")) {
+        settings.m_gscAudio = model->getGscAudio() != 0;
+    }
+    if (channelSettingsKeys.contains("volume")) {
+        settings.m_volume = model->getVolume();
+    }
+    if (channelSettingsKeys.contains("audioDeviceName") && model->getAudioDeviceName()) {
+        settings.m_audioDeviceName = *model->getAudioDeviceName();
     }
     if (channelSettingsKeys.contains("rgbColor")) {
         settings.m_rgbColor = model->getRgbColor();
@@ -413,11 +443,22 @@ void RadioPagingDemod::webapiFormatChannelSettings(SWGSDRangel::SWGChannelSettin
     SWGSDRangel::SWGRadioPagingDemodSettings *model = response.getRadioPagingDemodSettings();
     model->setInputFrequencyOffset(settings.m_inputFrequencyOffset);
     model->setRfBandwidth(settings.m_rfBandwidth);
+    model->setPocsagEnabled(settings.m_pocsagEnabled ? 1 : 0);
     model->setPocsagDeviation(settings.m_pocsagDeviation);
+    model->setFlexEnabled(settings.m_flexEnabled ? 1 : 0);
     model->setFlexDeviation(settings.m_flexDeviation);
+    model->setGscEnabled(settings.m_gscEnabled ? 1 : 0);
     model->setGscDeviation(settings.m_gscDeviation);
-    model->setGscNonBatterySaver(settings.m_gscNonBatterySaver ? 1 : 0);
     model->setGscVoiceTimeout(settings.m_gscVoiceTimeout);
+    model->setGscAudio(settings.m_gscAudio ? 1 : 0);
+    model->setVolume(settings.m_volume);
+
+    if (model->getAudioDeviceName()) {
+        *model->getAudioDeviceName() = settings.m_audioDeviceName;
+    } else {
+        model->setAudioDeviceName(new QString(settings.m_audioDeviceName));
+    }
+
     model->setRgbColor(settings.m_rgbColor);
     model->setTitle(new QString(settings.m_title));
     model->setStreamIndex(settings.m_streamIndex);
@@ -513,20 +554,35 @@ void RadioPagingDemod::webapiFormatChannelSettings(
     if (channelSettingsKeys.contains("rfBandwidth") || force) {
         model->setRfBandwidth(settings.m_rfBandwidth);
     }
+    if (channelSettingsKeys.contains("pocsagEnabled") || force) {
+        model->setPocsagEnabled(settings.m_pocsagEnabled ? 1 : 0);
+    }
     if (channelSettingsKeys.contains("pocsagDeviation") || force) {
         model->setPocsagDeviation(settings.m_pocsagDeviation);
+    }
+    if (channelSettingsKeys.contains("flexEnabled") || force) {
+        model->setFlexEnabled(settings.m_flexEnabled ? 1 : 0);
     }
     if (channelSettingsKeys.contains("flexDeviation") || force) {
         model->setFlexDeviation(settings.m_flexDeviation);
     }
+    if (channelSettingsKeys.contains("gscEnabled") || force) {
+        model->setGscEnabled(settings.m_gscEnabled ? 1 : 0);
+    }
     if (channelSettingsKeys.contains("gscDeviation") || force) {
         model->setGscDeviation(settings.m_gscDeviation);
     }
-    if (channelSettingsKeys.contains("gscNonBatterySaver") || force) {
-        model->setGscNonBatterySaver(settings.m_gscNonBatterySaver ? 1 : 0);
-    }
     if (channelSettingsKeys.contains("gscVoiceTimeout") || force) {
         model->setGscVoiceTimeout(settings.m_gscVoiceTimeout);
+    }
+    if (channelSettingsKeys.contains("gscAudio") || force) {
+        model->setGscAudio(settings.m_gscAudio ? 1 : 0);
+    }
+    if (channelSettingsKeys.contains("volume") || force) {
+        model->setVolume(settings.m_volume);
+    }
+    if (channelSettingsKeys.contains("audioDeviceName") || force) {
+        model->setAudioDeviceName(new QString(settings.m_audioDeviceName));
     }
     if (channelSettingsKeys.contains("rgbColor") || force) {
         model->setRgbColor(settings.m_rgbColor);

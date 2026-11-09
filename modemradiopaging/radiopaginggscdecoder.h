@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "export.h"
+#include "radiopagingberwindow.h"
 #include "radiopaginggsc.h"
 
 // Sequential Golay bit stream decoder for one polarity. It hunts for sync on its own,
@@ -110,6 +111,7 @@ public:
         Polarity m_polarity = Normal;
         bool m_interleaved = false;         //!< Tone only address sent in the alert time of a voice page
         bool m_update = false;              //!< Repeats an earlier voice page with the end of its voice message
+        bool m_duplicate = false;           //!< Set by the receiver: the same page was received shortly before
         VoiceEnd m_voiceEnd = VoiceNotEnded;
         float m_voiceSeconds = 0.0f;        //!< Update: time from the activation code to the end (alert time included)
     };
@@ -123,6 +125,7 @@ public:
         uint32_t m_codewordsUncorrectable;
         uint32_t m_transmissions;           //!< Preamble locks since reset
         uint32_t m_messages;                //!< Messages produced since reset
+        RadioPagingBerWindow m_ber;         //!< Of the current (or last) transmission
     };
 
     explicit RadioPagingGscDecoder(Polarity polarity = Normal);
@@ -219,6 +222,7 @@ private:
     uint32_t m_codewordsCorrected;
     uint32_t m_codewordsUncorrectable;
     uint32_t m_transmissions;
+    RadioPagingBerWindow m_ber;
     uint32_t m_messageCount;
 
     std::deque<Message> m_messages;

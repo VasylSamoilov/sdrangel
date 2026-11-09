@@ -603,6 +603,83 @@ void testPocsagStandardRules()
     check(kept, "POCSAG decoder: one undecodable codeword is kept in the message");
 }
 
+void testBerWindow()
+{
+    RadioPagingBerWindow w;
+    check(!w.valid(), "BER window: no codeword, no value");
+
+    for (int i = 0; i < 10; i++) {
+        w.add(0, 32, false);
+    }
+    check(w.valid() && (w.ber() == 0.0f) && (w.m_uncorrectable == 0), "BER window: clean codewords give 0");
+
+    w.add(2, 32, false);
+    check((w.m_errorBits == 2) && (w.m_uncorrectable == 0), "BER window: corrected bits are counted, nothing uncorrectable");
+
+    w.add(0, 32, true);
+    check((w.m_errorBits == 2 + RadioPagingBerWindow::m_uncorrectableBits) && (w.m_uncorrectable == 1),
+        "BER window: an uncorrectable codeword counts its capped errors and itself");
+
+    for (int i = 0; i < 4 * RadioPagingBerWindow::m_windowCodewords; i++) {
+        w.add(0, 32, false);
+    }
+    check((w.m_uncorrectable == 0) && (w.m_errorBits == 0), "BER window: old errors leave the window");
+
+    // POCSAG decoder: a clean batch gives a valid window without errors
+    RadioPagingPocsagDecoder d(RadioPagingPocsagDecoder::Normal);
+    std::vector<uint32_t> words = { RadioPagingPocsag::m_syncWord };
+    for (int i = 0; i < RadioPagingPocsag::m_codewordsPerBatch; i++) {
+        words.push_back(RadioPagingPocsag::m_idleWord);
+    }
+    words.push_back(RadioPagingPocsag::m_syncWord);
+    for (uint32_t word : words)
+    {
+        for (int b = 31; b >= 0; b--) {
+            d.feed(((word >> b) & 1) ? 0 : 1);  // Binary 1 is a negative deviation for normal polarity
+        }
+    }
+    RadioPagingBerWindow ber = d.getStatus().m_ber;
+    check(ber.valid() && (ber.m_errorBits == 0) && (ber.m_uncorrectable == 0), "POCSAG decoder: BER of a clean batch is 0");
+}
+
+// The same transmission twice: the second copy of each message is marked duplicate; the same
+// transmission on the other polarity is another network: not a duplicate
+void testPocsagDuplicates()
+{
+    std::vector<RadioPagingPocsag::TxMessage> messages = pocsagTestMessages();
+    RadioPagingPocsag::EncodeResult result = RadioPagingPocsag::encode(messages);
+    std::vector<float> first = makeWaveform(result.m_bits, 38400.0, 1200.0, false, 0.08f, 0.12f, 300, 2000, 31);
+    std::vector<float> again = makeWaveform(result.m_bits, 38400.0, 1200.0, false, 0.08f, 0.12f, 300, 2000, 32);
+    std::vector<float> other = makeWaveform(result.m_bits, 38400.0, 1200.0, true, 0.08f, 0.12f, 300, 2000, 33);
+    RadioPagingPocsagReceiver receiver;
+    receiver.create(38400.0, 1200);
+    std::vector<RadioPagingPocsagDecoder::Message> out[3];
+    const std::vector<float> *parts[3] = { &first, &again, &other };
+
+    for (int p = 0; p < 3; p++)
+    {
+        for (float s : *parts[p])
+        {
+            receiver.process(s);
+            while (receiver.hasMessage()) {
+                out[p].push_back(receiver.takeMessage());
+            }
+        }
+    }
+
+    bool firstNew = !out[0].empty();
+    bool againDup = (out[1].size() == out[0].size());
+    bool otherNew = (out[2].size() == out[0].size());
+
+    for (const auto& m : out[0]) { firstNew = firstNew && !m.m_duplicate; }
+    for (const auto& m : out[1]) { againDup = againDup && m.m_duplicate; }
+    for (const auto& m : out[2]) { otherNew = otherNew && !m.m_duplicate && (m.m_polarity == RadioPagingPocsagDecoder::Inverted); }
+
+    check(firstNew, "POCSAG duplicates: first copy is not a duplicate");
+    check(againDup, "POCSAG duplicates: second copy is output again, marked duplicate");
+    check(otherNew, "POCSAG duplicates: the same messages on the other polarity are not duplicates");
+}
+
 } // namespace
 
 int main()
@@ -613,6 +690,8 @@ int main()
     testPocsagStandardRules();
     testPocsagPreambleLock();
     testFsk();
+    testBerWindow();
+    testPocsagDuplicates();
     std::printf("%s (%d failure%s)\n", failures ? "FAILED" : "OK", failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;
 }

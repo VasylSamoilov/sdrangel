@@ -313,6 +313,9 @@ void testReferenceFrames()
         std::vector<Dec::Message> out = decoder.decodeFrame(rx);
         frames++;
 
+        // The reference lists have no retransmissions: duplicates are output, marked, and left out here
+        out.erase(std::remove_if(out.begin(), out.end(), [](const Dec::Message& m) { return m.m_duplicate; }), out.end());
+
         // Messages sent
         bool ok = (out.size() == (size_t) f.m_nexp);
         // Incomplete messages are not reported by the reference receiver
@@ -995,7 +998,11 @@ void testDuplicates()
         Dec d;
         d.decodeFrame(rxOf("duplicates", "original"));
         std::vector<Dec::Message> out = d.decodeFrame(rxOf("duplicates", "retransmission"));
-        check(out.empty() && (d.status().m_duplicates == 3), "duplicates: retransmission (R = 0) of complete messages suppressed");
+        bool marked = (out.size() == 3);
+        for (const Dec::Message& m : out) {
+            marked = marked && m.m_duplicate && !m.m_recovered;
+        }
+        check(marked && (d.status().m_duplicates == 3), "duplicates: retransmission (R = 0) of complete messages output again, marked duplicate");
         out = d.decodeFrame(rxOf("duplicates", "same number other message"));
         check(out.size() == 1, "duplicates: same message number with other content is a new message");
     }
@@ -1036,7 +1043,12 @@ void testDuplicates()
         d.decodeFrame(rxOf("duplicates", "original"));
         Dec::RxFrame inv = rxOf("duplicates", "retransmission");
         inv.m_inverted = true;
-        check(d.decodeFrame(inv).size() == 3, "duplicates: history is kept per polarity");
+        std::vector<Dec::Message> out = d.decodeFrame(inv);
+        bool fresh = (out.size() == 3);
+        for (const Dec::Message& m : out) {
+            fresh = fresh && !m.m_duplicate;
+        }
+        check(fresh, "duplicates: history is kept per polarity (same messages on the other polarity are not duplicates)");
     }
 }
 
@@ -1072,6 +1084,21 @@ void testGroup()
     // Delivery torn down: the next one is not tracked
     delivery = d.decodeFrame(rxOf("group", "delivery alpha"));
     check(delivery.size() == 1 && !delivery[0].m_groupTracked, "group: assignment ends with the group message");
+
+    // The other polarity is another network with its own frame numbering: its frames do not
+    // expire the assignments of this one
+    Dec g;
+    Dec::RxFrame invertedSetup = rxOf("group", "setup");
+    invertedSetup.m_inverted = true;
+    g.decodeFrame(invertedSetup);
+    Dec::RxFrame otherNetwork = rxOf("group", "delivery numeric");
+    otherNetwork.m_cycle = (otherNetwork.m_cycle + 2) % 15;
+    g.decodeFrame(otherNetwork);
+    Dec::RxFrame invertedDelivery = rxOf("group", "delivery alpha");
+    invertedDelivery.m_inverted = true;
+    delivery = g.decodeFrame(invertedDelivery);
+    check(delivery.size() == 1 && delivery[0].m_groupTracked && (delivery[0].m_groupMembers.size() == 3) && delivery[0].m_inverted,
+        "group: a frame of the other polarity 256 frames later does not expire the assignments of this one");
 }
 
 // Multiple transmission: two copies of a subframe in a frame, combined word by word

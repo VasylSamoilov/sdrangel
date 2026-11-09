@@ -293,7 +293,8 @@ bool matches(const D::Message& rx, const G::TxMessage& m)
     if ((rx.m_address.substr(1) != m.m_address.substr(1)) || (rx.m_addressNumber != m.m_addressNumber)) {
         return false;
     }
-    if ((rx.m_address[0] != '?') && (rx.m_address[0] != m.m_address[0])) {
+    // Non battery saver: no preamble, no index digit (N)
+    if ((rx.m_address[0] != 'N') && (rx.m_address[0] != m.m_address[0])) {
         return false;
     }
 
@@ -598,7 +599,7 @@ void testNonBatterySaver()
     Decoded onInverted = decode(enc.m_bits, D::Inverted, true, 0, 1, true);
 
     check(enc.m_ok && off.m_messages.empty(), "Non battery saver pattern is ignored unless enabled");
-    check(allMatch(on, sent) && on.m_messages[0].m_nonBatterySaver && (on.m_messages[0].m_address[0] == '?'), "Non battery saver alphanumeric round trip");
+    check(allMatch(on, sent) && on.m_messages[0].m_nonBatterySaver && (on.m_messages[0].m_address[0] == 'N'), "Non battery saver alphanumeric round trip (index N)");
     check(allMatch(onNoise, sent), "Non battery saver after random noise");
     check(allMatch(onInverted, sent), "Non battery saver, inverted bits, inverted decoder");
 
@@ -1316,10 +1317,56 @@ void testReceiverVoice()
     }
 }
 
+// The same batch twice: the pages of the second copy are marked duplicate; on the other
+// polarity (another network) they are not
+void testReceiverDuplicates()
+{
+    std::vector<G::TxMessage> batch = {
+        tx("219789", 2, G::Numeric, "5551234"),
+        tx("219456", 1, G::Tone),
+        tx("219457", 4, G::Alphanumeric, "BATCH"),
+    };
+    G::EncodeOptions options;
+    options.m_mode = G::Batch;
+    std::vector<uint8_t> bits = G::encode(batch, options).m_bits;
+    std::vector<float> parts[3] = {
+        makeWaveform(bits, 38400.0, false, 0.06f, 0.15f, 300, 3000, 41),
+        makeWaveform(bits, 38400.0, false, 0.06f, 0.15f, 300, 3000, 42),
+        makeWaveform(bits, 38400.0, true, 0.06f, 0.15f, 300, 3000, 43)
+    };
+    RadioPagingGscReceiver receiver;
+    std::vector<D::Message> out[3];
+
+    receiver.create(38400.0);
+    for (int p = 0; p < 3; p++)
+    {
+        for (float s : parts[p])
+        {
+            receiver.process(s);
+            while (receiver.hasMessage()) {
+                out[p].push_back(receiver.takeMessage());
+            }
+        }
+    }
+
+    bool firstNew = (out[0].size() == batch.size());
+    bool againDup = (out[1].size() == batch.size());
+    bool otherNew = (out[2].size() == batch.size());
+
+    for (const auto& m : out[0]) { firstNew = firstNew && !m.m_duplicate; }
+    for (const auto& m : out[1]) { againDup = againDup && m.m_duplicate; }
+    for (const auto& m : out[2]) { otherNew = otherNew && !m.m_duplicate; }
+
+    check(firstNew, "Receiver duplicates: first copy of the batch is new");
+    check(againDup, "Receiver duplicates: second copy of the batch is output again, marked duplicate");
+    check(otherNew, "Receiver duplicates: the same batch on the other polarity is not a duplicate");
+}
+
 void testReceiver()
 {
     testReceiverNonBatterySaver();
     testReceiverVoice();
+    testReceiverDuplicates();
 
     std::vector<G::TxMessage> single = { tx("100123", 3, G::Alphanumeric, "RECEIVED OVER THE AIR") };
     std::vector<G::TxMessage> batch = {

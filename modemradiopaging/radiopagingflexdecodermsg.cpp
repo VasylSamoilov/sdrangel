@@ -673,6 +673,7 @@ void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& 
 
                 fragment.m_fragmented = true;
                 fragment.m_isFragment = true;
+                fragment.m_fragmentCount = slot.m_fragments;    // The how many-th fragment received
                 emitMessage(fragment);
             }
             return;
@@ -710,6 +711,7 @@ void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& 
 
             fragment.m_fragmented = true;
             fragment.m_isFragment = true;
+            fragment.m_fragmentCount = slot.m_fragments;        // The how many-th fragment received
             emitMessage(fragment);
         }
 
@@ -770,6 +772,7 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
 
     // Retransmission of a message with a message number
     bool recovered = false;
+    bool duplicate = false;
     int phaseIndex = m_name - 'A';
 
     if ((hdrF == 3) && !secure && hdrOk)
@@ -778,9 +781,8 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
         int result = checkRetransmission(a.m_capcode, hdrR != 0, hdrN, vecType, phaseIndex, &m_w[mw1], count,
             (hdrC == 0) ? 1 : 0, a.m_long, 0);
 
-        if (result == 1) {
-            return;
-        }
+        // A retransmission is output again, marked as a duplicate
+        duplicate = (result != 0);
 
         if (result == -1)
         {
@@ -900,6 +902,7 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
     msg.m_secureType = secureType;
     msg.m_kanji = kanji;
     msg.m_recovered = recovered;
+    msg.m_duplicate = duplicate;
     msg.m_fragmented = (kind == FragmentFirst) || (kind == FragmentMiddle) || (kind == FragmentLast);
 
     // Signature of the whole message in the first fragment. Checked here for a message in one piece
@@ -1001,6 +1004,7 @@ void RadioPagingFlexDecoder::decodeNumeric(Message& proto, const AddressContext&
     }
 
     bool recovered = false;
+    bool duplicate = false;
 
     if (numbered && (number >= 0))
     {
@@ -1008,9 +1012,8 @@ void RadioPagingFlexDecoder::decodeNumeric(Message& proto, const AddressContext&
         int result = checkRetransmission(a.m_capcode, retrieval != 0, number, vecType, m_name - 'A', &m_w[mw1], count, 1,
             a.m_long, 0);
 
-        if (result == 1) {
-            return;
-        }
+        // A retransmission is output again, marked as a duplicate
+        duplicate = (result != 0);
 
         if (result == -1)
         {
@@ -1145,6 +1148,7 @@ void RadioPagingFlexDecoder::decodeNumeric(Message& proto, const AddressContext&
     msg.m_retrieval = (retrieval != 0);
     msg.m_special = (special != 0) || (vecType == 4);
     msg.m_recovered = recovered;
+    msg.m_duplicate = duplicate;
 
     for (int w : words) {
         msg.m_wordMap += statusChar(m_w[w].m_status);
@@ -1228,6 +1232,7 @@ void RadioPagingFlexDecoder::decodeBinary(Message& proto, const AddressContext& 
     }
 
     bool recovered = false;
+    bool duplicate = false;
     int phaseIndex = m_name - 'A';
 
     if (initial)
@@ -1236,9 +1241,8 @@ void RadioPagingFlexDecoder::decodeBinary(Message& proto, const AddressContext& 
         int result = checkRetransmission(a.m_capcode, hexR != 0, hexN, 6, phaseIndex, &m_w[mw1], count,
             (hexC == 0) ? 1 : 0, a.m_long, blocking);
 
-        if (result == 1) {
-            return;
-        }
+        // A retransmission is output again, marked as a duplicate
+        duplicate = (result != 0);
 
         if (result == -1)
         {
@@ -1414,6 +1418,7 @@ void RadioPagingFlexDecoder::decodeBinary(Message& proto, const AddressContext& 
     msg.m_statusInfo = statusInfo;
     msg.m_signature = signatureCheck;
     msg.m_recovered = recovered;
+    msg.m_duplicate = duplicate;
     msg.m_fragmented = (kind == FragmentFirst) || (kind == FragmentMiddle) || (kind == FragmentLast);
 
     // Continuation fragments take the blocking of the first fragment

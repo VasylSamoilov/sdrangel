@@ -21,6 +21,7 @@
 
 #include "util/simpleserializer.h"
 #include "settings/serializable.h"
+#include "audio/audiodevicemanager.h"
 #include "radiopagingdemodsettings.h"
 
 const int RadioPagingDemodSettings::m_nbPocsagSpeeds;
@@ -46,11 +47,16 @@ void RadioPagingDemodSettings::resetToDefaults()
 {
     m_inputFrequencyOffset = 0;
     m_rfBandwidth = 16000.0f;
+    m_pocsagEnabled = true;
     m_pocsagDeviation = 4500.0f;
+    m_flexEnabled = true;
     m_flexDeviation = 4800.0f;
+    m_gscEnabled = true;
     m_gscDeviation = 4500.0f;
-    m_gscNonBatterySaver = false;
     m_gscVoiceTimeout = 50;
+    m_gscAudio = false;
+    m_volume = 1.0f;
+    m_audioDeviceName = AudioDeviceManager::m_defaultDeviceName;
 
     m_rgbColor = QColor(255, 170, 0).rgb();
     m_title = "Radio Paging Demodulator";
@@ -64,18 +70,22 @@ void RadioPagingDemodSettings::resetToDefaults()
     m_hidden = false;
 }
 
-// Tags 12 to 20 and 27 to 30 are the usual channel tags. New tags are only appended
+// Tags 12 to 20 and 27 to 30 are the usual channel tags, 21 the audio device. New tags are only appended
 QByteArray RadioPagingDemodSettings::serialize() const
 {
     SimpleSerializer s(1);
 
     s.writeS32(1, m_inputFrequencyOffset);
     s.writeFloat(2, m_rfBandwidth);
-    s.writeFloat(3, m_pocsagDeviation);
-    s.writeFloat(4, m_flexDeviation);
-    s.writeFloat(5, m_gscDeviation);
-    s.writeBool(6, m_gscNonBatterySaver);
-    s.writeS32(7, m_gscVoiceTimeout);
+    s.writeBool(3, m_pocsagEnabled);
+    s.writeFloat(4, m_pocsagDeviation);
+    s.writeBool(5, m_flexEnabled);
+    s.writeFloat(6, m_flexDeviation);
+    s.writeBool(7, m_gscEnabled);
+    s.writeFloat(8, m_gscDeviation);
+    s.writeS32(9, m_gscVoiceTimeout);
+    s.writeBool(10, m_gscAudio);
+    s.writeFloat(11, m_volume);
     s.writeU32(12, m_rgbColor);
     s.writeString(13, m_title);
 
@@ -89,6 +99,7 @@ QByteArray RadioPagingDemodSettings::serialize() const
     s.writeU32(18, m_reverseAPIPort);
     s.writeU32(19, m_reverseAPIDeviceIndex);
     s.writeU32(20, m_reverseAPIChannelIndex);
+    s.writeString(21, m_audioDeviceName);
 
     if (m_rollupState) {
         s.writeBlob(27, m_rollupState->serialize());
@@ -118,11 +129,15 @@ bool RadioPagingDemodSettings::deserialize(const QByteArray& data)
 
         d.readS32(1, &m_inputFrequencyOffset, 0);
         d.readFloat(2, &m_rfBandwidth, 16000.0f);
-        d.readFloat(3, &m_pocsagDeviation, 4500.0f);
-        d.readFloat(4, &m_flexDeviation, 4800.0f);
-        d.readFloat(5, &m_gscDeviation, 4500.0f);
-        d.readBool(6, &m_gscNonBatterySaver, false);
-        d.readS32(7, &m_gscVoiceTimeout, 50);
+        d.readBool(3, &m_pocsagEnabled, true);
+        d.readFloat(4, &m_pocsagDeviation, 4500.0f);
+        d.readBool(5, &m_flexEnabled, true);
+        d.readFloat(6, &m_flexDeviation, 4800.0f);
+        d.readBool(7, &m_gscEnabled, true);
+        d.readFloat(8, &m_gscDeviation, 4500.0f);
+        d.readS32(9, &m_gscVoiceTimeout, 50);
+        d.readBool(10, &m_gscAudio, false);
+        d.readFloat(11, &m_volume, 1.0f);
         d.readU32(12, &m_rgbColor, QColor(255, 170, 0).rgb());
         d.readString(13, &m_title, "Radio Paging Demodulator");
 
@@ -147,6 +162,7 @@ bool RadioPagingDemodSettings::deserialize(const QByteArray& data)
         m_reverseAPIDeviceIndex = utmp > 99 ? 99 : utmp;
         d.readU32(20, &utmp, 0);
         m_reverseAPIChannelIndex = utmp > 99 ? 99 : utmp;
+        d.readString(21, &m_audioDeviceName, AudioDeviceManager::m_defaultDeviceName);
 
         if (m_rollupState)
         {
@@ -175,20 +191,35 @@ void RadioPagingDemodSettings::applySettings(const QStringList& settingsKeys, co
     if (settingsKeys.contains("rfBandwidth")) {
         m_rfBandwidth = settings.m_rfBandwidth;
     }
+    if (settingsKeys.contains("pocsagEnabled")) {
+        m_pocsagEnabled = settings.m_pocsagEnabled;
+    }
     if (settingsKeys.contains("pocsagDeviation")) {
         m_pocsagDeviation = settings.m_pocsagDeviation;
+    }
+    if (settingsKeys.contains("flexEnabled")) {
+        m_flexEnabled = settings.m_flexEnabled;
     }
     if (settingsKeys.contains("flexDeviation")) {
         m_flexDeviation = settings.m_flexDeviation;
     }
+    if (settingsKeys.contains("gscEnabled")) {
+        m_gscEnabled = settings.m_gscEnabled;
+    }
     if (settingsKeys.contains("gscDeviation")) {
         m_gscDeviation = settings.m_gscDeviation;
     }
-    if (settingsKeys.contains("gscNonBatterySaver")) {
-        m_gscNonBatterySaver = settings.m_gscNonBatterySaver;
-    }
     if (settingsKeys.contains("gscVoiceTimeout")) {
         m_gscVoiceTimeout = settings.m_gscVoiceTimeout;
+    }
+    if (settingsKeys.contains("gscAudio")) {
+        m_gscAudio = settings.m_gscAudio;
+    }
+    if (settingsKeys.contains("volume")) {
+        m_volume = settings.m_volume;
+    }
+    if (settingsKeys.contains("audioDeviceName")) {
+        m_audioDeviceName = settings.m_audioDeviceName;
     }
     if (settingsKeys.contains("rgbColor")) {
         m_rgbColor = settings.m_rgbColor;
@@ -232,20 +263,35 @@ QString RadioPagingDemodSettings::getDebugString(const QStringList& settingsKeys
     if (settingsKeys.contains("rfBandwidth") || force) {
         ostr << " m_rfBandwidth: " << m_rfBandwidth;
     }
+    if (settingsKeys.contains("pocsagEnabled") || force) {
+        ostr << " m_pocsagEnabled: " << m_pocsagEnabled;
+    }
     if (settingsKeys.contains("pocsagDeviation") || force) {
         ostr << " m_pocsagDeviation: " << m_pocsagDeviation;
+    }
+    if (settingsKeys.contains("flexEnabled") || force) {
+        ostr << " m_flexEnabled: " << m_flexEnabled;
     }
     if (settingsKeys.contains("flexDeviation") || force) {
         ostr << " m_flexDeviation: " << m_flexDeviation;
     }
+    if (settingsKeys.contains("gscEnabled") || force) {
+        ostr << " m_gscEnabled: " << m_gscEnabled;
+    }
     if (settingsKeys.contains("gscDeviation") || force) {
         ostr << " m_gscDeviation: " << m_gscDeviation;
     }
-    if (settingsKeys.contains("gscNonBatterySaver") || force) {
-        ostr << " m_gscNonBatterySaver: " << m_gscNonBatterySaver;
-    }
     if (settingsKeys.contains("gscVoiceTimeout") || force) {
         ostr << " m_gscVoiceTimeout: " << m_gscVoiceTimeout;
+    }
+    if (settingsKeys.contains("gscAudio") || force) {
+        ostr << " m_gscAudio: " << m_gscAudio;
+    }
+    if (settingsKeys.contains("volume") || force) {
+        ostr << " m_volume: " << m_volume;
+    }
+    if (settingsKeys.contains("audioDeviceName") || force) {
+        ostr << " m_audioDeviceName: " << m_audioDeviceName.toStdString();
     }
     if (settingsKeys.contains("rgbColor") || force) {
         ostr << " m_rgbColor: " << m_rgbColor;

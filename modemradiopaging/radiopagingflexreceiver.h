@@ -66,6 +66,12 @@ public:
         uint32_t m_frames;              //!< Frames decoded (frame information word valid)
         uint32_t m_frameInfoFailures;   //!< Sync 1 found but the frame information word failed
         float m_quality;                //!< Of the last frame, 0-1
+        RadioPagingBerWindow m_ber;     //!< Of the recent frames of the polarity of the last frame
+        // Network of the polarity of the last frame
+        RadioPagingFlexDecoder::FrameReport m_frameReport;
+        RadioPagingFlexDecoder::NetworkTime m_networkTime;
+        std::vector<RadioPagingFlexDecoder::GroupSlot> m_groups;
+        int m_reassemblies;
         float m_deviation;              //!< Measured outer deviation, discriminator units
     };
 
@@ -81,6 +87,12 @@ public:
     //!< Enable or disable the network of each polarity. There is no mode enable: the system
     //!< chooses the mode of each frame
     void setPolarities(bool normal, bool inverted) { m_enabled[0] = normal; m_enabled[1] = inverted; }
+    //!< Also output each fragment of a fragmented message, before the reassembled message. Default off
+    void setReportFragments(bool enable)
+    {
+        m_decoder[0].setReportFragments(enable);
+        m_decoder[1].setReportFragments(enable);
+    }
 
     //!< Process one discriminator sample with its magnitude squared (pass 1 if not known)
     void process(float sample, float magsq = 1.0f);

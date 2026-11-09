@@ -44,6 +44,8 @@ void RadioPagingGscReceiver::reset()
     m_nbsPolarity = NbsUndecided;
     m_nbsPending[0].clear();
     m_nbsPending[1].clear();
+    m_dedup.reset();
+    m_time = 0.0;
 }
 
 void RadioPagingGscReceiver::setNonBatterySaver(bool enable)
@@ -65,6 +67,8 @@ void RadioPagingGscReceiver::process(float sample)
     if (!m_demod.process(sample, symbol)) {
         return;
     }
+
+    m_time += 1.0 / RadioPagingGsc::m_dataBitRate;
 
     if (m_normalEnabled) {
         m_normal.feedSoft(symbol.m_soft);
@@ -181,6 +185,16 @@ RadioPagingGscDecoder::Message RadioPagingGscReceiver::takeMessage()
 {
     RadioPagingGscDecoder::Message message = m_messages.front();
     m_messages.pop_front();
+
+    // The same page to the same capcode and function again within the window is a duplicate.
+    // The other polarity is another network. The end of a voice message updates its page
+    if (!message.m_update)
+    {
+        std::string address = message.m_address + (char) ('0' + message.m_addressNumber) + (char) ('0' + (int) message.m_type);
+        int polarity = (message.m_polarity == RadioPagingGscDecoder::Inverted) ? 1 : 0;
+        message.m_duplicate = m_dedup.check(polarity, address, message.m_rawData, message.m_rawBits, m_time);
+    }
+
     return message;
 }
 

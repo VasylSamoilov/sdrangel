@@ -19,7 +19,9 @@
 // FM modulated one after the other into one IQ stream, received through the channel
 // sink with all legs running, and the records are compared with what was sent.
 
+#include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <random>
 #include <set>
@@ -131,7 +133,7 @@ void addPocsag(Modulator& mod, std::set<std::string>& sent, int baud, uint32_t a
     mod.noise(4000);
 
     char a[16];
-    std::snprintf(a, sizeof(a), "%07u", address);
+    std::snprintf(a, sizeof(a), "%07uD", address);     // Function 3 is D
     sent.insert(key("pocsag", std::to_string(baud), a, inverted));
 }
 
@@ -183,10 +185,9 @@ void addGsc(Modulator& mod, std::set<std::string>& sent, const std::vector<Radio
     mod.symbols(levels, 600, 4500.0);
     mod.noise(4000);
 
-    for (const auto& m : messages)
-    {
-        RadioPagingGsc::MessageType type = (m.m_type == RadioPagingGsc::Numeric) ? RadioPagingGsc::Alphanumeric : m.m_type;
-        sent.insert(key("gsc", "600", m.m_address + RadioPagingGsc::suffixDigit(type, m.m_addressNumber), false));
+    // Capcode and function
+    for (const auto& m : messages) {
+        sent.insert(key("gsc", "600", m.m_address + std::to_string(m.m_addressNumber), false));
     }
 }
 
@@ -198,6 +199,116 @@ RadioPagingGsc::TxMessage gsc(const char *address, int number, RadioPagingGsc::M
     m.m_type = type;
     m.m_text = text;
     return m;
+}
+
+// GSC voice page, a voice tone, then the turn-off word if wanted
+std::vector<Sample> voicePage(double toneSeconds, bool turnOff)
+{
+    Modulator mod;
+    RadioPagingGsc::EncodeOptions single;
+    single.m_mode = RadioPagingGsc::Single;
+    std::vector<uint8_t> bits = RadioPagingGsc::encode({ gsc("100123", 3, RadioPagingGsc::Voice, "") }, single).m_bits;
+    std::vector<float> levels;
+
+    mod.noise(3000);
+    for (uint8_t b : bits) {
+        levels.push_back(b ? 1.0f : -1.0f);
+    }
+    mod.symbols(levels, 600, 4500.0);
+
+    // 1 kHz at 3 kHz deviation
+    for (int i = 0; i < (int) (toneSeconds * sampleRate); i++) {
+        mod.sample(3000.0 * std::sin(2.0 * M_PI * 1000.0 * i / sampleRate));
+    }
+
+    if (turnOff)
+    {
+        std::vector<uint8_t> off;
+        std::vector<float> offLevels;
+        RadioPagingGsc::appendActivationCode(off);
+        for (uint8_t b : off) {
+            offLevels.push_back(b ? 1.0f : -1.0f);
+        }
+        mod.symbols(offLevels, 600, 4500.0);
+    }
+
+    mod.noise((int) sampleRate / 2);
+    return mod.m_samples;
+}
+
+struct Audio
+{
+    size_t m_samples = 0;
+    int m_crossings = 0;    //!< Of the middle of the voice: 0.5 s to 2.5 s
+    int m_peak = 0;
+};
+
+// Only GSC on, audio at 48 kHz; the audio FIFO is read as the audio device would
+Audio receiveAudio(const std::vector<Sample>& samples, bool audio, int voiceTimeout)
+{
+    RadioPagingDemodSink sink;
+    RadioPagingDemodSettings settings;
+    MessageQueue queue;
+    settings.m_pocsagEnabled = false;
+    settings.m_flexEnabled = false;
+    settings.m_gscAudio = audio;
+    settings.m_gscVoiceTimeout = voiceTimeout;
+    sink.setMessageQueueToChannel(&queue);
+    sink.applyChannelSettings((int) sampleRate, 0, true);
+    sink.applySettings(QStringList(), settings, true);
+    sink.applyAudioSampleRate(48000);
+
+    Audio out;
+    AudioVector buffer(48000);
+    qint16 last = 0;
+    const size_t chunk = 1024;
+
+    for (size_t i = 0; i < samples.size(); i += chunk)
+    {
+        size_t end = std::min(samples.size(), i + chunk);
+        sink.feed(samples.begin() + i, samples.begin() + end);
+        uint32_t n = sink.getAudioFifo()->read((quint8*) &buffer[0], buffer.size());
+
+        for (uint32_t k = 0; k < n; k++)
+        {
+            qint16 v = buffer[k].l;
+            size_t at = out.m_samples + k;
+
+            // Away from the alert start and from the turn-off word at the end
+            if ((at > 24000) && (at <= 120000))
+            {
+                out.m_crossings += ((v >= 0) != (last >= 0)) ? 1 : 0;
+                out.m_peak = std::max(out.m_peak, (int) std::abs(v));
+            }
+            last = v;
+        }
+        out.m_samples += n;
+    }
+
+    while (queue.size() > 0) {
+        delete queue.pop();
+    }
+
+    return out;
+}
+
+void testVoiceAudio()
+{
+    std::vector<Sample> page = voicePage(3.0, true);
+    Audio on = receiveAudio(page, true, 50);
+    double seconds = on.m_samples / 48000.0;
+    double frequency = on.m_crossings / (2.0 * 2.0);
+    std::printf("      voice audio %.2f s, %.0f Hz, peak %d\n", seconds, frequency, on.m_peak);
+    check((seconds > 2.9) && (seconds < 3.5), "Voice audio: opens on the voice page, closes on the turn-off word");
+    check((frequency > 950.0) && (frequency < 1050.0), "Voice audio: the voice tone at its frequency");
+    const double level = 32767 * 3000.0 / 4500.0;    // 3 kHz of the 4.5 kHz GSC deviation
+    check((on.m_peak > 0.85 * level) && (on.m_peak < 1.15 * level), "Voice audio: level of the deviation at volume 1");
+
+    check(receiveAudio(page, false, 50).m_samples == 0, "Voice audio off: nothing is output");
+
+    Audio timeout = receiveAudio(voicePage(3.0, false), true, 1);
+    std::printf("      voice audio with a 1 s voice timeout %.2f s\n", timeout.m_samples / 48000.0);
+    check((timeout.m_samples > 0.9 * 48000) && (timeout.m_samples < 1.2 * 48000), "Voice audio: closes at the longest voice message");
 }
 
 } // namespace
@@ -273,6 +384,8 @@ int main()
 
     RadioPagingDemodSink::Status status = sink.getStatus();
     check((status.m_messages[0] == 4) && (status.m_messages[1] == 3) && (status.m_messages[2] == 4), "Status counts the records per protocol");
+
+    testVoiceAudio();
 
     std::printf("%d passed, %d failed\n", passes, failures);
     return failures ? 1 : 0;

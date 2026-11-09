@@ -1,5 +1,5 @@
 RadioPagingDemodSettings:
-  description: "Radio paging demodulator: POCSAG, FLEX and GSC, every speed and polarity, always all decoded"
+  description: "Radio paging demodulator: POCSAG, FLEX and GSC; a protocol that is on is decoded at every speed, mode and polarity"
   type: object
   properties:
     inputFrequencyOffset:
@@ -10,26 +10,44 @@ RadioPagingDemodSettings:
       description: Channel filter bandwidth in Hz. Each protocol filters further at its Carson bandwidth
       type: number
       format: float
+    pocsagEnabled:
+      description: "Decode POCSAG (1 for yes, 0 for no)"
+      type: integer
+      format: int32
     pocsagDeviation:
       description: POCSAG frequency deviation in Hz
       type: number
       format: float
+    flexEnabled:
+      description: "Decode FLEX (1 for yes, 0 for no)"
+      type: integer
+      format: int32
     flexDeviation:
       description: FLEX outer symbol frequency deviation in Hz
       type: number
       format: float
+    gscEnabled:
+      description: "Decode GSC (1 for yes, 0 for no)"
+      type: integer
+      format: int32
     gscDeviation:
       description: GSC frequency deviation in Hz
       type: number
       format: float
-    gscNonBatterySaver:
-      description: "Also detect GSC non battery saver transmissions, which have no preamble (1 for yes, 0 for no)"
-      type: integer
-      format: int32
     gscVoiceTimeout:
       description: Maximum length of a GSC voice message in seconds
       type: integer
       format: int32
+    gscAudio:
+      description: "Play the voice of GSC voice pages (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    volume:
+      description: Voice audio gain
+      type: number
+      format: float
+    audioDeviceName:
+      type: string
     rgbColor:
       type: integer
       format: int32

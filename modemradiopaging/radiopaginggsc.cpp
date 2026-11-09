@@ -573,7 +573,8 @@ bool RadioPagingGsc::decodeAddress(uint16_t word1, uint16_t word2, int preamble,
         }
     }
 
-    address.assign(6, '?');
+    // Without a preamble (non battery saver) there is no index digit: N takes its place
+    address.assign(6, 'N');
     if (preamble >= 0) {
         address[0] = (char) ('0' + ((preamble - (group % 10) + 10) % 10));
     }
@@ -584,21 +585,6 @@ bool RadioPagingGsc::decodeAddress(uint16_t word1, uint16_t word2, int preamble,
     address[5] = (char) ('0' + low % 10);
 
     return true;
-}
-
-char RadioPagingGsc::suffixDigit(MessageType type, int addressNumber)
-{
-    int f = (addressNumber - 1) & 3;
-
-    switch (type)
-    {
-    case Voice:
-        return (char) ('1' + f);
-    case Tone:
-        return "9034"[f];
-    default:
-        return (char) ('5' + f);
-    }
 }
 
 void RadioPagingGsc::appendComma(std::vector<uint8_t>& bits, int nbBits, int firstBit)

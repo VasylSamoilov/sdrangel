@@ -63,7 +63,6 @@ RadioPagingFlexDecoder::RadioPagingFlexDecoder() :
     m_kanji(false),
     m_fixedYear(false),
     m_referenceYear(2026),
-    m_lastCollapse(0),
     m_name('A'),
     m_out(nullptr),
     m_block(nullptr)
@@ -76,7 +75,6 @@ void RadioPagingFlexDecoder::reset()
     m_status = Status();
     m_report = FrameReport();
     m_ctx = FrameContext();
-    m_lastCollapse = 0;
     m_lastFrameNumber[0] = 0;
     m_lastFrameNumber[1] = 0;
     m_out = nullptr;
@@ -262,26 +260,63 @@ std::vector<RadioPagingFlexDecoder::Message> RadioPagingFlexDecoder::decodeFrame
 }
 
 // Temporary group assignments that have not been used within 128 frames of the assignment are dropped
+// Only the network of the frame: the other polarity is another network with its own frame
+// numbering, its state expires with its own frames
+std::vector<RadioPagingFlexDecoder::GroupSlot> RadioPagingFlexDecoder::groups(bool inverted) const
+{
+    std::vector<GroupSlot> out;
+    const PolarityState& state = m_pol[inverted ? 1 : 0];
+
+    for (int s = 0; s < m_tempSlots; s++)
+    {
+        const TempSlot& slot = state.m_temp[s];
+
+        if (slot.m_active)
+        {
+            GroupSlot g;
+            g.m_slot = s;
+            g.m_members = slot.m_members;
+            g.m_targetFrame = slot.m_targetFrame;
+            g.m_setupCycle = slot.m_setupCycle;
+            g.m_setupFrame = slot.m_setupFrame;
+            out.push_back(g);
+        }
+    }
+
+    return out;
+}
+
+int RadioPagingFlexDecoder::reassemblies(bool inverted) const
+{
+    int count = 0;
+
+    for (const Reassembly& slot : m_pol[inverted ? 1 : 0].m_reassembly)
+    {
+        if (slot.m_active) {
+            count++;
+        }
+    }
+
+    return count;
+}
+
 void RadioPagingFlexDecoder::expireTempGroups()
 {
     uint32_t current = absFrame();
 
-    for (int p = 0; p < 2; p++)
+    for (int s = 0; s < m_tempSlots; s++)
     {
-        for (int s = 0; s < m_tempSlots; s++)
-        {
-            TempSlot& slot = m_pol[p].m_temp[s];
+        TempSlot& slot = pol().m_temp[s];
 
-            if (!slot.m_active) {
-                continue;
-            }
+        if (!slot.m_active) {
+            continue;
+        }
 
-            uint32_t setup = slot.m_setupCycle * 128 + slot.m_setupFrame;
-            uint32_t elapsed = (current >= setup) ? (current - setup) : (15 * 128 - setup + current);
+        uint32_t setup = slot.m_setupCycle * 128 + slot.m_setupFrame;
+        uint32_t elapsed = (current >= setup) ? (current - setup) : (15 * 128 - setup + current);
 
-            if (elapsed >= (uint32_t) m_tempTimeout) {
-                slot = TempSlot();
-            }
+        if (elapsed >= (uint32_t) m_tempTimeout) {
+            slot = TempSlot();
         }
     }
 }
@@ -317,6 +352,13 @@ void RadioPagingFlexDecoder::decodePhase(const RxPhase& phase)
 
         m_w[i] = decodeWord(raw[i], erased[i]);
         m_status.m_codewords++;
+
+        // Erased words were not received: they tell nothing about the bit errors
+        if (!erased[i])
+        {
+            bool uncorrectable = (m_w[i].m_status != WordClean) && (m_w[i].m_status != WordCorrected);
+            m_status.m_ber.add(m_w[i].m_bits, 32, uncorrectable);
+        }
 
         switch (m_w[i].m_status)
         {
@@ -413,13 +455,14 @@ void RadioPagingFlexDecoder::decodeSubframes(int phaseIndex)
 {
     SubframeStore& store = pol().m_stores[phaseIndex];
 
+    // The collapse is the network's: kept per polarity
     if ((m_w[0].m_status == WordClean) || (m_w[0].m_status == WordCorrected)) {
-        m_lastCollapse = (m_w[0].m_data >> 18) & 7;
+        pol().m_lastCollapse = (m_w[0].m_data >> 18) & 7;
     }
 
     int transmissions = m_ctx.m_transmissions;
     int words = subframeWords(transmissions);
-    uint32_t interval = 1u << ((m_ctx.m_tdCollapse >= 0) ? m_ctx.m_tdCollapse : m_lastCollapse);
+    uint32_t interval = 1u << ((m_ctx.m_tdCollapse >= 0) ? m_ctx.m_tdCollapse : pol().m_lastCollapse);
     uint32_t unit = (uint32_t) transmissions * interval;
     uint32_t abs = absFrame();
 
@@ -1202,36 +1245,29 @@ void RadioPagingFlexDecoder::reassemblyInvalidate(uint64_t capcode, int excludeN
     }
 }
 
-// Fragments more than 64 frames apart: the stream is released as incomplete message
+// Fragments more than 64 frames apart: the stream is released as incomplete message. Only the
+// network of the frame, by its own frame numbering
 void RadioPagingFlexDecoder::reassemblyExpire()
 {
     uint32_t current = absFrame();
 
-    for (int p = 0; p < 2; p++)
+    for (Reassembly& slot : pol().m_reassembly)
     {
-        int saved = m_ctx.m_pol;
-        m_ctx.m_pol = p;
-
-        for (Reassembly& slot : m_pol[p].m_reassembly)
-        {
-            if (!slot.m_active) {
-                continue;
-            }
-
-            int delta = (int) current - (int) (slot.m_lastCycle * 128 + slot.m_lastFrame);
-
-            if (delta < 0) {
-                delta += 15 * 128;
-            }
-
-            if (delta > m_reassemblyTimeout)
-            {
-                emitIncomplete(slot);
-                slot.m_active = false;
-            }
+        if (!slot.m_active) {
+            continue;
         }
 
-        m_ctx.m_pol = saved;
+        int delta = (int) current - (int) (slot.m_lastCycle * 128 + slot.m_lastFrame);
+
+        if (delta < 0) {
+            delta += 15 * 128;
+        }
+
+        if (delta > m_reassemblyTimeout)
+        {
+            emitIncomplete(slot);
+            slot.m_active = false;
+        }
     }
 }
 
@@ -1336,29 +1372,28 @@ RadioPagingFlexDecoder::HistoryEntry *RadioPagingFlexDecoder::historyStore(uint6
     return target;
 }
 
+// Only the network of the frame, by its own frame numbering
 void RadioPagingFlexDecoder::historyExpire()
 {
     uint32_t current = absFrame();
 
-    for (int p = 0; p < 2; p++)
+    for (HistoryEntry& e : pol().m_history)
     {
-        for (HistoryEntry& e : m_pol[p].m_history)
-        {
-            if (!e.m_active) {
-                continue;
-            }
+        if (!e.m_active) {
+            continue;
+        }
 
-            uint32_t age = (current - e.m_frame + framesPerHour) % framesPerHour;
+        uint32_t age = (current - e.m_frame + framesPerHour) % framesPerHour;
 
-            if (age >= (uint32_t) m_historyWindow) {
-                e.m_active = false;
-            }
+        if (age >= (uint32_t) m_historyWindow) {
+            e.m_active = false;
         }
     }
 }
 
-// Returns 0: output the message, 1: suppress it (duplicate or retransmission without gain), -1: the
-// words of the history entry replace uncorrectable words of this copy
+// Returns 0: a new message, 1: a duplicate (retransmission without gain), -1: a duplicate whose
+// words repair the history entry: uncorrectable words of this copy are replaced. A duplicate is
+// output again, marked as such
 int RadioPagingFlexDecoder::checkRetransmission(uint64_t capcode, bool retrieval, int number, int vector, int phase,
     const Word *words, int wordCount, int fragCount, bool isLong, int blocking)
 {

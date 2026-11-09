@@ -94,6 +94,7 @@ void RadioPagingGscDecoder::reset()
     m_codewordsCorrected = 0;
     m_codewordsUncorrectable = 0;
     m_transmissions = 0;
+    m_ber.reset();
     m_messageCount = 0;
     m_messages.clear();
     m_voiceMessage = Message();
@@ -121,6 +122,7 @@ RadioPagingGscDecoder::Status RadioPagingGscDecoder::getStatus() const
     status.m_codewordsUncorrectable = m_codewordsUncorrectable;
     status.m_transmissions = m_transmissions;
     status.m_messages = m_messageCount;
+    status.m_ber = m_ber;
 
     return status;
 }
@@ -356,6 +358,8 @@ void RadioPagingGscDecoder::processVoice()
         message.m_errorsCorrected = e1 + e2;
         m_codewords += 2;
         m_codewordsCorrected += (e1 > 0 ? 1 : 0) + (e2 > 0 ? 1 : 0);
+        m_ber.add(e1, 23, false);
+        m_ber.add(e2, 23, false);
         m_messages.push_back(message);
         m_messageCount++;
         m_voiceHold = pairBits - 1;
@@ -388,6 +392,7 @@ void RadioPagingGscDecoder::startTransmission(int index, bool batch)
     m_slot = 0;
     m_active = false;
     m_transmissions++;
+    m_ber.reset();
 }
 
 void RadioPagingGscDecoder::startNonBatterySaver()
@@ -411,6 +416,7 @@ void RadioPagingGscDecoder::startNonBatterySaver()
     m_slot = 0;
     m_active = false;
     m_transmissions++;
+    m_ber.reset();
 }
 
 // Finishes the message in progress, if any, and returns to hunting.
@@ -680,6 +686,8 @@ bool RadioPagingGscDecoder::processNext()
         m_slot++;
         m_codewords += 2;
         m_codewordsCorrected += (e1 > 0 ? 1 : 0) + (e2 > 0 ? 1 : 0);
+        m_ber.add(e1, 23, false);
+        m_ber.add(e2, 23, false);
         m_pos += pairBits;
         m_parse = Classify;
         return true;
@@ -839,6 +847,7 @@ bool RadioPagingGscDecoder::processData()
         RadioPagingGsc::BchResult b = RadioPagingGsc::bchDecode(codewords[k]);
 
         m_codewords++;
+        m_ber.add(b.m_bitErrors > 0 ? b.m_bitErrors : 0, 15, b.m_bitErrors < 0);
         if (b.m_bitErrors < 0)
         {
             words[k] = 0;

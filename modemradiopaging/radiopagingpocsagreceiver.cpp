@@ -46,6 +46,8 @@ void RadioPagingPocsagReceiver::reset()
     m_preambleLocked = false;
     m_bitsSincePreamble = 0;
     m_messages.clear();
+    m_dedup.reset();
+    m_time = 0.0;
 }
 
 void RadioPagingPocsagReceiver::process(float sample)
@@ -55,6 +57,8 @@ void RadioPagingPocsagReceiver::process(float sample)
     if (!m_demod.process(sample, symbol)) {
         return;
     }
+
+    m_time += 1.0 / m_baud;
 
     // Reversals of the preamble lock the demodulator after a part of the preamble
     if ((m_lastBit >= 0) && (symbol.m_value != m_lastBit)) {
@@ -94,11 +98,22 @@ void RadioPagingPocsagReceiver::process(float sample)
     m_demod.setLocked(m_preambleLocked || synced);
 
     while (m_normal.hasMessage()) {
-        m_messages.push_back(m_normal.takeMessage());
+        collect(m_normal.takeMessage());
     }
     while (m_inverted.hasMessage()) {
-        m_messages.push_back(m_inverted.takeMessage());
+        collect(m_inverted.takeMessage());
     }
+}
+
+// The same message to the same pager (address and function) again within the window is a
+// duplicate. The other polarity is another network
+void RadioPagingPocsagReceiver::collect(RadioPagingPocsagDecoder::Message message)
+{
+    std::string address = std::to_string(message.m_address) + (char) ('A' + (message.m_function & 3));
+    int polarity = (message.m_polarity == RadioPagingPocsagDecoder::Inverted) ? 1 : 0;
+
+    message.m_duplicate = m_dedup.check(polarity, address, message.m_rawData, message.m_rawBits, m_time);
+    m_messages.push_back(message);
 }
 
 RadioPagingPocsagDecoder::Message RadioPagingPocsagReceiver::takeMessage()

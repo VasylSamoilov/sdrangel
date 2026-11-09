@@ -19,6 +19,8 @@
 
 #include "dsp/dspcommands.h"
 #include "dsp/downchannelizer.h"
+#include "dsp/dspengine.h"
+#include "audio/audiodevicemanager.h"
 
 #include "radiopagingdemodbaseband.h"
 
@@ -31,11 +33,17 @@ RadioPagingDemodBaseband::RadioPagingDemodBaseband() :
 
     m_sampleFifo.setSize(SampleSinkFifo::getSizePolicy(48000));
     m_channelizer = new DownChannelizer(&m_sink);
+
+    // GSC voice audio
+    AudioDeviceManager *audioDeviceManager = DSPEngine::instance()->getAudioDeviceManager();
+    audioDeviceManager->addAudioSink(m_sink.getAudioFifo(), getInputMessageQueue());
+    m_sink.applyAudioSampleRate(audioDeviceManager->getOutputSampleRate());
 }
 
 RadioPagingDemodBaseband::~RadioPagingDemodBaseband()
 {
     m_inputMessageQueue.clear();
+    DSPEngine::instance()->getAudioDeviceManager()->removeAudioSink(m_sink.getAudioFifo());
 
     delete m_channelizer;
 }
@@ -158,6 +166,19 @@ void RadioPagingDemodBaseband::applySettings(const QStringList& settingsKeys, co
     {
         m_channelizer->setChannelization(RadioPagingDemodSettings::m_channelSampleRate, settings.m_inputFrequencyOffset);
         m_sink.applyChannelSettings(m_channelizer->getChannelSampleRate(), m_channelizer->getChannelFrequencyOffset());
+    }
+
+    if ((settingsKeys.contains("audioDeviceName") && (settings.m_audioDeviceName != m_settings.m_audioDeviceName)) || force)
+    {
+        AudioDeviceManager *audioDeviceManager = DSPEngine::instance()->getAudioDeviceManager();
+        int audioDeviceIndex = audioDeviceManager->getOutputDeviceIndex(settings.m_audioDeviceName);
+        audioDeviceManager->removeAudioSink(m_sink.getAudioFifo());
+        audioDeviceManager->addAudioSink(m_sink.getAudioFifo(), getInputMessageQueue(), audioDeviceIndex);
+        int audioSampleRate = audioDeviceManager->getOutputSampleRate(audioDeviceIndex);
+
+        if (m_sink.getAudioSampleRate() != audioSampleRate) {
+            m_sink.applyAudioSampleRate(audioSampleRate);
+        }
     }
 
     m_sink.applySettings(settingsKeys, settings, force);

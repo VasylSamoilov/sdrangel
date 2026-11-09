@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "export.h"
+#include "radiopagingberwindow.h"
 #include "radiopagingflex.h"
 
 // FLEX frame decoder: codewords of a received frame to messages.
@@ -240,6 +241,7 @@ public:
         bool m_registrationAck = false;     //!< Secure message with operation code "="
         bool m_kanji = false;               //!< Characters are 16 bit, two bytes each
         bool m_recovered = false;           //!< Words taken from an earlier copy of the message
+        bool m_duplicate = false;           //!< Retransmission of a message already output (with m_recovered: it repaired it)
         Check m_checksum = CheckNone;       //!< K checksum of the message words
         Check m_signature = CheckNone;      //!< Signature of the text of alphanumeric and binary messages
 
@@ -298,10 +300,11 @@ public:
         uint32_t m_codewordsUncorrectable = 0;  //!< Includes erased
         uint32_t m_codewordsErased = 0;
         uint32_t m_messages = 0;
-        uint32_t m_duplicates = 0;              //!< Retransmissions that were suppressed
+        uint32_t m_duplicates = 0;              //!< Retransmissions of messages already output (marked duplicate)
         uint32_t m_recovered = 0;               //!< Messages repaired with words of an earlier copy
         uint32_t m_incomplete = 0;
         uint32_t m_invalidVectors = 0;
+        RadioPagingBerWindow m_ber;             //!< Of the frames received recently
     };
 
     //! Network time and identification, from the block information words. A value is valid
@@ -345,9 +348,23 @@ public:
     //! decoded with the copies received. The message history is kept
     std::vector<Message> flush();
 
+    //! A temporary address (group) assigned and waiting for its group message
+    struct GroupSlot
+    {
+        int m_slot = 0;
+        std::vector<uint64_t> m_members;
+        unsigned m_targetFrame = 0;     //!< Frame of the group message
+        unsigned m_setupCycle = 0;      //!< Cycle and frame of the assignment
+        unsigned m_setupFrame = 0;
+    };
+
     const Status& status() const { return m_status; }
     const FrameReport& lastFrame() const { return m_report; }
     NetworkTime networkTime(bool inverted = false) const;
+    //!< Groups in use on the network of the polarity
+    std::vector<GroupSlot> groups(bool inverted) const;
+    //!< Fragmented messages being reassembled on the network of the polarity
+    int reassemblies(bool inverted) const;
 
     //! Report each fragment as a message too. Default off: the reassembled message only
     void setReportFragments(bool enable) { m_reportFragments = enable; }
@@ -533,6 +550,7 @@ private:
         std::vector<HistoryEntry> m_history;
         SubframeStore m_stores[4];
         BiwState m_biw;
+        int m_lastCollapse = 0;             //!< System collapse of the last BIW 1 that decoded (clean or corrected)
     };
 
     Status m_status;
@@ -543,7 +561,6 @@ private:
     bool m_kanji;
     bool m_fixedYear;
     int m_referenceYear;
-    int m_lastCollapse;
     unsigned m_lastFrameNumber[2];
 
     // Current phase

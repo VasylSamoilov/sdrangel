@@ -18,6 +18,8 @@ set(modemradiopaging_SOURCES
 
 set(modemradiopaging_HEADERS
     radiopagingbch.h
+    radiopagingberwindow.h
+    radiopagingdedup.h
     radiopagingfskdemod.h
     radiopagingpocsag.h
     radiopagingpocsagdecoder.h

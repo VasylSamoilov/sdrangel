@@ -21,10 +21,12 @@
 #include <deque>
 
 #include "export.h"
+#include "radiopagingdedup.h"
 #include "radiopagingfskdemod.h"
 #include "radiopagingpocsagdecoder.h"
 
 // POCSAG receiver for one speed: FM discriminator samples to messages of both polarities.
+// A message received again within the duplicate window is output marked duplicate.
 //
 // The preamble (reversals 1010...) is there to train the bit clock. The demodulator
 // starts with acquisition loop gains; once it has received a part of the preamble
@@ -57,6 +59,8 @@ public:
     void create(double sampleRate, int baud);
     void reset();
     void setPolarities(bool normal, bool inverted) { m_normalEnabled = normal; m_invertedEnabled = inverted; }
+    //!< Messages received again within this time are marked duplicate (default 60 s)
+    void setDuplicateWindow(double seconds) { m_dedup.setWindow(seconds); }
     int getBaud() const { return m_baud; }
 
     void process(float sample);
@@ -77,6 +81,10 @@ private:
     bool m_preambleLocked;
     int m_bitsSincePreamble;            //!< Bits since the last run of m_preambleLockBits reversals
     std::deque<RadioPagingPocsagDecoder::Message> m_messages;
+    RadioPagingDedup m_dedup;
+    double m_time = 0.0;                //!< Seconds of signal received, for the duplicate window
+
+    void collect(RadioPagingPocsagDecoder::Message message);
 };
 
 #endif // MODEMRADIOPAGING_RADIOPAGINGPOCSAGRECEIVER_H

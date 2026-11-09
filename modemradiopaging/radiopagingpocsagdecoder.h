@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "export.h"
+#include "radiopagingberwindow.h"
 
 // POCSAG bit stream decoder for one polarity. It hunts for sync on its own, using
 // nothing but the bits it is fed.
@@ -71,6 +72,7 @@ public:
         bool m_truncated = false;           //!< Ended by sync loss or two undecodable codewords
         int m_batch = 0;                    //!< Batch of the transmission the address was in, from 0
         Polarity m_polarity = Normal;
+        bool m_duplicate = false;           //!< Set by the receiver: the same message was received shortly before
     };
 
     struct Status
@@ -84,6 +86,7 @@ public:
         uint32_t m_codewordsUncorrectable;
         uint32_t m_transmissions;           //!< Transmissions with at least one decoded batch
         uint32_t m_candidatesDropped;       //!< Sync candidates whose batch was not decoded
+        RadioPagingBerWindow m_ber;         //!< Of the current (or last) transmission
     };
 
     explicit RadioPagingPocsagDecoder(Polarity polarity = Normal);
@@ -124,6 +127,7 @@ private:
     uint32_t m_codewordsUncorrectable;
     uint32_t m_transmissions;
     uint32_t m_candidatesDropped;
+    RadioPagingBerWindow m_ber;
 
     std::deque<Message> m_messages;
 

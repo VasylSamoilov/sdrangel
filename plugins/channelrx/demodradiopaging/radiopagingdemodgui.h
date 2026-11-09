@@ -25,6 +25,7 @@
 #include "settings/rollupstate.h"
 
 #include "radiopagingdemodsettings.h"
+#include "radiopagingdemodsink.h"
 
 class PluginAPI;
 class DeviceUISet;
@@ -69,11 +70,13 @@ private:
     enum MessageCol {
         COL_TIME,
         COL_PROTOCOL,
-        COL_MODE,
-        COL_ADDRESS,
+        COL_RATE,
         COL_POLARITY,
+        COL_ADDRESS,
         COL_TYPE,
         COL_MESSAGE,
+        COL_FRAGMENT,
+        COL_INFO,
         COL_ERRORS
     };
 
@@ -106,16 +109,27 @@ private:
     void resizeTable();
     void recordReceived(const MessageRecord& record);
     void updateStatus();
-    static void setStatus(QLabel *label, bool sync, const QString& text, quint32 messages);
+    static void setStatus(QLabel *label, const RadioPagingDemodSink::Status& status, int protocol, bool sync,
+        const QString& state, const QString& detail);
+    static QString polarityHtml(bool inverted);
+    static void recordInfo(const MessageRecord& record, QString& plain, QString& html, QString& tip);
+    static QString flexDetails(const RadioPagingDemodSink::Status& status);
+    QString flexToolTip(const RadioPagingDemodSink::Status& status);
+    static QString qualityHtml(const RadioPagingBerWindow& ber, bool live);
 
 private slots:
     void on_deltaFrequency_changed(qint64 value);
     void on_rfBW_valueChanged(int value);
     void on_pocsagDeviation_valueChanged(int value);
     void on_flexDeviation_valueChanged(int value);
-    void on_gscNonBatterySaver_clicked(bool checked);
+    void on_pocsagEnabled_clicked(bool checked);
+    void on_flexEnabled_clicked(bool checked);
+    void on_gscEnabled_clicked(bool checked);
     void on_gscVoiceTimeout_valueChanged(int value);
     void on_gscDeviation_valueChanged(int value);
+    void on_gscAudio_toggled(bool checked);
+    void on_volume_valueChanged(int value);
+    void audioSelect(const QPoint& p);
     void on_clearTable_clicked();
     void onWidgetRolled(QWidget* widget, bool rollDown);
     void onMenuDialogCalled(const QPoint& p);

@@ -59,6 +59,7 @@ void RadioPagingPocsagDecoder::reset()
     m_codewordsUncorrectable = 0;
     m_transmissions = 0;
     m_candidatesDropped = 0;
+    m_ber.reset();
     m_messages.clear();
 }
 
@@ -75,6 +76,7 @@ RadioPagingPocsagDecoder::Status RadioPagingPocsagDecoder::getStatus() const
     status.m_codewordsUncorrectable = m_codewordsUncorrectable;
     status.m_transmissions = m_transmissions;
     status.m_candidatesDropped = m_candidatesDropped;
+    status.m_ber = m_ber;
 
     return status;
 }
@@ -185,8 +187,10 @@ bool RadioPagingPocsagDecoder::batchValid() const
 
 void RadioPagingPocsagDecoder::decodeBatch()
 {
-    if (m_batch == 0) {
+    if (m_batch == 0)
+    {
         m_transmissions++;
+        m_ber.reset();
     }
 
     for (m_slot = 0; m_slot < RadioPagingPocsag::m_codewordsPerBatch; m_slot++) {
@@ -209,6 +213,7 @@ void RadioPagingPocsagDecoder::processCodeword(uint32_t word)
 {
     RadioPagingBCH::Result result = RadioPagingBCH::decode(word);
     m_codewords++;
+    m_ber.add((result.m_bitErrors > 0 ? result.m_bitErrors : 0) + (result.m_parityError ? 1 : 0), 32, result.m_bitErrors < 0);
 
     if (result.m_bitErrors < 0)
     {

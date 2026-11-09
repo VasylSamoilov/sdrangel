@@ -20,6 +20,9 @@
 #include <QMutexLocker>
 #include <QUuid>
 
+#include <algorithm>
+#include <limits>
+
 #include "dsp/dspengine.h"
 #include "channel/channelapi.h"
 #include "util/messagequeue.h"
@@ -35,6 +38,9 @@ namespace {
 
 const int legFilterTaps = 65;
 const int statusPeriodSamples = RadioPagingDemodSettings::m_channelSampleRate / 10;   // 100 ms
+const double voiceCutoff = 3000.0;      // Hz, upper edge of the voice band
+const Real dcBlockPole = 0.995f;        // About 30 Hz at 38400 Hz
+const int audioBufferSize = 1 << 12;
 
 enum Protocol {
     ProtocolPocsag,
@@ -77,13 +83,25 @@ RadioPagingDemodSink::RadioPagingDemodSink() :
     m_magsqSum(0.0),
     m_magsqPeak(0.0),
     m_magsqCount(0),
+    m_audioBufferFill(0),
+    m_audioSampleRate(48000),
+    m_audioDistance(1.0f),
+    m_audioDistanceRemain(1.0f),
+    m_audioOpen(false),
+    m_dcIn(0.0f),
+    m_dcOut(0.0f),
     m_statusCount(0)
 {
+    m_audioBuffer.resize(audioBufferSize);
+    m_audioInterpolator.create(16, RadioPagingDemodSettings::m_channelSampleRate, voiceCutoff);
+
     for (int i = 0; i < RadioPagingDemodSettings::m_nbPocsagSpeeds; i++) {
         m_pocsag[i].create(RadioPagingDemodSettings::m_channelSampleRate, RadioPagingDemodSettings::m_pocsagSpeeds[i]);
     }
     m_flex.create(RadioPagingDemodSettings::m_channelSampleRate);
     m_gsc.create(RadioPagingDemodSettings::m_channelSampleRate);
+    m_gsc.setNonBatterySaver(true);     // Every GSC transmission is decoded
+    m_flex.setReportFragments(true);    // Each fragment is output, then the reassembled message
 
     m_status = Status();
     applySettings(QStringList(), m_settings, true);
@@ -134,28 +152,42 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
     }
     m_magsqCount++;
 
-    // Every protocol, speed and polarity is always decoded
-    Real fm = m_pocsagLeg.demod(ci);
-
-    for (int i = 0; i < RadioPagingDemodSettings::m_nbPocsagSpeeds; i++)
+    // A protocol that is on is decoded at every speed, mode and polarity
+    if (m_settings.m_pocsagEnabled)
     {
-        m_pocsag[i].process(fm);
+        Real fm = m_pocsagLeg.demod(ci);
 
-        while (m_pocsag[i].hasMessage()) {
-            sendPocsag(m_pocsag[i].takeMessage(), RadioPagingDemodSettings::m_pocsagSpeeds[i]);
+        for (int i = 0; i < RadioPagingDemodSettings::m_nbPocsagSpeeds; i++)
+        {
+            m_pocsag[i].process(fm);
+
+            while (m_pocsag[i].hasMessage()) {
+                sendPocsag(m_pocsag[i].takeMessage(), RadioPagingDemodSettings::m_pocsagSpeeds[i]);
+            }
         }
     }
 
-    m_flex.process(m_flexLeg.demod(ci), magsq);
+    if (m_settings.m_flexEnabled)
+    {
+        m_flex.process(m_flexLeg.demod(ci), magsq);
 
-    while (m_flex.hasMessage()) {
-        sendFlex(m_flex.takeMessage());
+        while (m_flex.hasMessage()) {
+            sendFlex(m_flex.takeMessage());
+        }
     }
 
-    m_gsc.process(m_gscLeg.demod(ci));
+    if (m_settings.m_gscEnabled)
+    {
+        Real fm = m_gscLeg.demod(ci);
+        m_gsc.process(fm);
 
-    while (m_gsc.hasMessage()) {
-        sendGsc(m_gsc.takeMessage());
+        while (m_gsc.hasMessage()) {
+            sendGsc(m_gsc.takeMessage());
+        }
+
+        if (m_settings.m_gscAudio) {
+            processAudio(fm);
+        }
     }
 
     if (++m_statusCount >= statusPeriodSamples)
@@ -213,12 +245,117 @@ void RadioPagingDemodSink::applySettings(const QStringList& settingsKeys, const 
         applyLegs();
     }
 
-    if (settingsKeys.contains("gscNonBatterySaver") || force) {
-        m_gsc.setNonBatterySaver(m_settings.m_gscNonBatterySaver);
+    // A protocol switched off starts from scratch when it is switched on again
+    if (settingsKeys.contains("pocsagEnabled") && !m_settings.m_pocsagEnabled)
+    {
+        for (auto& pocsag : m_pocsag) {
+            pocsag.reset();
+        }
+    }
+    if (settingsKeys.contains("flexEnabled") && !m_settings.m_flexEnabled) {
+        m_flex.reset();
+    }
+    if ((settingsKeys.contains("gscAudio") && !m_settings.m_gscAudio)
+        || (settingsKeys.contains("gscEnabled") && !m_settings.m_gscEnabled)) {
+        closeAudio();
+    }
+    if (settingsKeys.contains("gscEnabled") && !m_settings.m_gscEnabled)
+    {
+        m_gsc.reset();
+        m_gscVoiceId[0].clear();
+        m_gscVoiceId[1].clear();
     }
     if (settingsKeys.contains("gscVoiceTimeout") || force) {
         m_gsc.setVoiceTimeout(m_settings.m_gscVoiceTimeout);
     }
+}
+
+void RadioPagingDemodSink::applyAudioSampleRate(int sampleRate)
+{
+    qDebug("RadioPagingDemodSink::applyAudioSampleRate: %d", sampleRate);
+
+    if (sampleRate <= 0) {
+        return;
+    }
+
+    closeAudio();
+    m_audioFifo.setSize(sampleRate);
+    m_audioDistance = (Real) RadioPagingDemodSettings::m_channelSampleRate / (Real) sampleRate;
+    m_audioDistanceRemain = m_audioDistance;
+    m_audioSampleRate = sampleRate;
+}
+
+// The audio opens when the GSC receiver enters the alert time of a voice page and closes
+// when the page ends: turn-off word, new transmission, signal lost or the voice timeout
+// (the longest voice message)
+void RadioPagingDemodSink::processAudio(Real fm)
+{
+    if (!m_gsc.inVoice())
+    {
+        closeAudio();
+        return;
+    }
+
+    if (!m_audioOpen)
+    {
+        m_audioOpen = true;
+        m_audioDistanceRemain = m_audioDistance;
+        m_dcIn = fm;
+        m_dcOut = 0.0f;
+    }
+
+    Real y = fm - m_dcIn + dcBlockPole * m_dcOut;
+    m_dcIn = fm;
+    m_dcOut = y;
+
+    Complex c(y, 0.0f);
+    Complex out;
+
+    if (m_audioDistance < 1.0f)
+    {
+        while (!m_audioInterpolator.interpolate(&m_audioDistanceRemain, c, &out))
+        {
+            pushAudio(out.real());
+            m_audioDistanceRemain += m_audioDistance;
+        }
+    }
+    else if (m_audioInterpolator.decimate(&m_audioDistanceRemain, c, &out))
+    {
+        pushAudio(out.real());
+        m_audioDistanceRemain += m_audioDistance;
+    }
+}
+
+void RadioPagingDemodSink::pushAudio(Real sample)
+{
+    // The discriminator gives +/-1 at the GSC deviation
+    Real v = sample * m_settings.m_volume * std::numeric_limits<int16_t>::max();
+    qint16 s = (qint16) std::max<Real>(std::numeric_limits<int16_t>::min(), std::min<Real>(std::numeric_limits<int16_t>::max(), v));
+
+    m_audioBuffer[m_audioBufferFill].l = s;
+    m_audioBuffer[m_audioBufferFill].r = s;
+
+    if (++m_audioBufferFill >= m_audioBuffer.size())
+    {
+        m_audioFifo.write((const quint8*) &m_audioBuffer[0], m_audioBufferFill);
+        m_audioBufferFill = 0;
+    }
+}
+
+// The rest of the voice is output, then nothing until the next voice page
+void RadioPagingDemodSink::closeAudio()
+{
+    if (!m_audioOpen) {
+        return;
+    }
+
+    if (m_audioBufferFill > 0)
+    {
+        m_audioFifo.write((const quint8*) &m_audioBuffer[0], m_audioBufferFill);
+        m_audioBufferFill = 0;
+    }
+
+    m_audioOpen = false;
 }
 
 // The filters are rebuilt when the bandwidth or a deviation changes. All POCSAG speeds
@@ -255,20 +392,63 @@ void RadioPagingDemodSink::updateStatus()
 
         status.m_pocsagSync[i] = normal || inverted;
         status.m_pocsagInverted[i] = inverted && !normal;
+
+        // The BER of a synchronised decoder is the live one; the last one is kept after
+        if (normal || inverted)
+        {
+            const RadioPagingBerWindow& ber = inverted && !normal ? s.m_inverted.m_ber : s.m_normal.m_ber;
+            if (ber.valid()) {
+                m_lastBer[0] = ber;
+            }
+            m_lastPocsagBatches = inverted && !normal ? s.m_inverted.m_batches : s.m_normal.m_batches;
+        }
     }
+
+    bool pocsagSync = status.m_pocsagSync[0] || status.m_pocsagSync[1] || status.m_pocsagSync[2];
 
     RadioPagingFlexReceiver::Status flex = m_flex.getStatus();
     status.m_flexSync = flex.m_state != RadioPagingFlexReceiver::Hunting;
     status.m_flexMode = RadioPagingFlex::modeName(flex.m_mode);
     status.m_flexInverted = flex.m_inverted;
     status.m_flexQuality = flex.m_quality;
+    if (status.m_flexSync && flex.m_ber.valid()) {
+        m_lastBer[1] = flex.m_ber;
+    }
+    status.m_flexFrame = flex.m_frameReport;
+    status.m_flexTime = flex.m_networkTime;
+    status.m_flexGroups = flex.m_groups;
+    status.m_flexReassemblies = flex.m_reassemblies;
+    status.m_pocsagBatches = m_lastPocsagBatches;
+    status.m_gscPreamble = m_lastGscPreamble;
+    status.m_gscBatch = m_lastGscBatch;
+    status.m_gscNbs = m_lastGscNbs;
+    status.m_gscSlot = m_lastGscSlot;
 
     RadioPagingGscReceiver::Status gsc = m_gsc.getStatus();
     bool gscNormal = gsc.m_normal.m_state != RadioPagingGscDecoder::Hunting;
     bool gscInverted = gsc.m_inverted.m_state != RadioPagingGscDecoder::Hunting;
     status.m_gscSync = gscNormal || gscInverted;
+    if (status.m_gscSync)
+    {
+        const RadioPagingBerWindow& ber = gscInverted && !gscNormal ? gsc.m_inverted.m_ber : gsc.m_normal.m_ber;
+        if (ber.valid()) {
+            m_lastBer[2] = ber;
+        }
+    }
+
+    bool sync[3] = { pocsagSync, status.m_flexSync, status.m_gscSync };
+
+    for (int p = 0; p < 3; p++)
+    {
+        status.m_ber[p] = m_lastBer[p];
+        status.m_berLive[p] = sync[p] && m_lastBer[p].valid();
+    }
     status.m_gscVoice = (gsc.m_normal.m_state == RadioPagingGscDecoder::Voice) || (gsc.m_inverted.m_state == RadioPagingGscDecoder::Voice);
     status.m_gscInverted = gscInverted && !gscNormal;
+
+    status.m_enabled[0] = m_settings.m_pocsagEnabled;
+    status.m_enabled[1] = m_settings.m_flexEnabled;
+    status.m_enabled[2] = m_settings.m_gscEnabled;
 
     QMutexLocker mutexLocker(&m_statusMutex);
     std::copy(m_status.m_messages, m_status.m_messages + 3, status.m_messages);
@@ -303,7 +483,8 @@ void RadioPagingDemodSink::sendPocsag(const RadioPagingPocsagDecoder::Message& m
     record.m_protocol = "pocsag";
     record.m_mode = QString::number(baud);
     record.m_speed = baud;
-    record.m_address = QString("%1").arg(message.m_address, 7, 10, QChar('0'));
+    // RIC and function (sub-address A-D): the address of the pager
+    record.m_address = QString("%1%2").arg(message.m_address, 7, 10, QChar('0')).arg(QChar('A' + (message.m_function & 3)));
     record.m_polarity = polarity(message.m_polarity == RadioPagingPocsagDecoder::Inverted);
     record.m_msgType = QString::fromStdString(interpretation.m_type);
     if (message.m_rawBits > 0) {
@@ -320,6 +501,7 @@ void RadioPagingDemodSink::sendPocsag(const RadioPagingPocsagDecoder::Message& m
     record.m_protocolData.insert("alt_type", QString::fromStdString(interpretation.m_altType));
     record.m_protocolData.insert("alt_text", escapeText(interpretation.m_altText));
     record.m_protocolData.insert("alt_score", interpretation.m_altScore);
+    record.m_duplicate = message.m_duplicate ? MessageRecord::DuplicateDup : MessageRecord::DuplicateNone;
 
     sendRecord(record, ProtocolPocsag);
 }
@@ -341,7 +523,6 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
     record.m_rawBits = message.m_rawBits;
     record.m_errorsCorrected = message.m_bitErrors;
     record.m_errorsUncorrectable = message.m_wordsUncorrectable;
-    record.m_partial = message.m_isFragment;
     record.m_protocolData.insert("capcode", (qulonglong) message.m_capcode);
     record.m_protocolData.insert("long_address", message.m_longAddress);
     record.m_protocolData.insert("priority", message.m_priority);
@@ -356,6 +537,36 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
     record.m_protocolData.insert("word_map", QString::fromStdString(message.m_wordMap));
     record.m_protocolData.insert("words_corrected", message.m_wordsCorrected);
     record.m_protocolData.insert("quality", message.m_quality);
+    record.m_protocolData.insert("addr_type", RadioPagingFlexDecoder::addressTypeName(message.m_addressType));
+    record.m_protocolData.insert("maildrop", message.m_mailDrop);
+    record.m_protocolData.insert("retrieval", message.m_retrieval);
+    record.m_protocolData.insert("checksum", checkName(message.m_checksum));
+    record.m_protocolData.insert("signature", checkName(message.m_signature));
+    record.m_protocolData.insert("is_fragment", message.m_isFragment);
+    record.m_protocolData.insert("fragment_gap", message.m_fragmentGap);
+
+    if (message.m_tempSlot >= 0)
+    {
+        QVariantList members;
+
+        for (uint64_t capcode : message.m_groupMembers) {
+            members.append(QString("%1").arg((qulonglong) capcode, 10, 10, QChar('0')));
+        }
+
+        record.m_protocolData.insert("group_slot", message.m_tempSlot);
+        record.m_protocolData.insert("group_tracked", message.m_groupTracked);
+        record.m_protocolData.insert("group_capcodes", members);
+    }
+
+    if (message.m_type == RadioPagingFlexDecoder::TypeShortInstruction)
+    {
+        record.m_protocolData.insert("instruction_type", message.m_instructionType);
+        record.m_protocolData.insert("instruction_slot", message.m_instructionSlot);
+        record.m_protocolData.insert("instruction_frame", message.m_instructionFrame);
+    }
+
+    record.m_duplicate = !message.m_duplicate ? MessageRecord::DuplicateNone
+        : message.m_recovered ? MessageRecord::DuplicateDupPlus : MessageRecord::DuplicateDup;
 
     sendRecord(record, ProtocolFlex);
 }
@@ -364,12 +575,12 @@ void RadioPagingDemodSink::sendGsc(const RadioPagingGscDecoder::Message& message
 {
     MessageRecord record;
     int pol = (message.m_polarity == RadioPagingGscDecoder::Inverted) ? 1 : 0;
-    RadioPagingGsc::MessageType suffixType = (message.m_type == RadioPagingGsc::Data) ? RadioPagingGsc::Alphanumeric : message.m_type;
 
+    // Capcode and function (address number 1-4); the page type is in the message type
     record.m_protocol = "gsc";
     record.m_mode = "600";
     record.m_speed = 600;
-    record.m_address = QString::fromStdString(message.m_address) + QChar(RadioPagingGsc::suffixDigit(suffixType, message.m_addressNumber));
+    record.m_address = QString::fromStdString(message.m_address) + QChar('0' + message.m_addressNumber);
     record.m_polarity = polarity(pol == 1);
     record.m_rawData = toByteArray(message.m_rawData);
     record.m_rawBits = message.m_rawBits;
@@ -381,6 +592,13 @@ void RadioPagingDemodSink::sendGsc(const RadioPagingGscDecoder::Message& message
     record.m_protocolData.insert("slot", message.m_slot);
     record.m_protocolData.insert("non_battery_saver", message.m_nonBatterySaver);
     record.m_protocolData.insert("truncated", message.m_truncated);
+    record.m_protocolData.insert("function", message.m_addressNumber);
+
+    m_lastGscPreamble = message.m_preamble;
+    m_lastGscBatch = message.m_batch;
+    m_lastGscNbs = message.m_nonBatterySaver;
+    m_lastGscSlot = message.m_slot;
+    record.m_duplicate = message.m_duplicate ? MessageRecord::DuplicateDup : MessageRecord::DuplicateNone;
 
     if (message.m_type == RadioPagingGsc::Data)
     {
@@ -424,6 +642,17 @@ void RadioPagingDemodSink::sendGsc(const RadioPagingGscDecoder::Message& message
     }
 
     sendRecord(record, ProtocolGsc);
+}
+
+QString RadioPagingDemodSink::checkName(int check)
+{
+    switch (check)
+    {
+    case RadioPagingFlexDecoder::CheckOk: return "ok";
+    case RadioPagingFlexDecoder::CheckFailed: return "failed";
+    case RadioPagingFlexDecoder::CheckIncomplete: return "incomplete";
+    default: return "";
+    }
 }
 
 MessageRecord::Polarity RadioPagingDemodSink::polarity(bool inverted)

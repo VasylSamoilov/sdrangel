@@ -124,6 +124,12 @@ RadioPagingFlexReceiver::Status RadioPagingFlexReceiver::getStatus() const
     status.m_frameInfoFailures = m_frameInfoFailures;
     status.m_quality = m_lastQuality;
     status.m_deviation = m_syncDemod.getDeviation();
+    const RadioPagingFlexDecoder& decoder = m_decoder[m_inverted ? 1 : 0];
+    status.m_ber = decoder.status().m_ber;
+    status.m_frameReport = decoder.lastFrame();
+    status.m_networkTime = decoder.networkTime(m_inverted);
+    status.m_groups = decoder.groups(m_inverted);
+    status.m_reassemblies = decoder.reassemblies(m_inverted);
 
     return status;
 }

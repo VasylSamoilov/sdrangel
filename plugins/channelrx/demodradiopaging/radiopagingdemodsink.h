@@ -26,6 +26,7 @@
 #include "dsp/nco.h"
 #include "dsp/interpolator.h"
 #include "dsp/firfilter.h"
+#include "audio/audiofifo.h"
 #include "util/movingaverage.h"
 #include "util/messagerecord.h"
 
@@ -47,6 +48,20 @@ class RadioPagingDemodSink : public ChannelSampleSink {
 public:
     struct Status
     {
+        bool m_enabled[3];              //!< POCSAG, FLEX, GSC decoding on
+        RadioPagingBerWindow m_ber[3];  //!< Of the reception in progress, or the last one
+        bool m_berLive[3];              //!< m_ber is of a reception in progress
+        int m_pocsagBatches;            //!< Batches of the POCSAG transmission in progress (or last)
+        // FLEX: the network of the last frame
+        RadioPagingFlexDecoder::FrameReport m_flexFrame;
+        RadioPagingFlexDecoder::NetworkTime m_flexTime;
+        std::vector<RadioPagingFlexDecoder::GroupSlot> m_flexGroups;
+        int m_flexReassemblies;
+        // GSC: the last page received
+        int m_gscPreamble;              //!< Preamble value index, -1 non battery saver or none yet
+        bool m_gscBatch;
+        bool m_gscNbs;
+        int m_gscSlot;
         bool m_pocsagSync[RadioPagingDemodSettings::m_nbPocsagSpeeds];      //!< A decoder of the speed is synchronised
         bool m_pocsagInverted[RadioPagingDemodSettings::m_nbPocsagSpeeds];  //!< ... and it is the inverted one
         bool m_flexSync;
@@ -70,6 +85,10 @@ public:
     void setChannel(ChannelAPI *channel) { m_channel = channel; }
 
     double getMagSq() const { return m_magsq; }
+    AudioFifo *getAudioFifo() { return &m_audioFifo; }
+    void setAudioFifoLabel(const QString& label) { m_audioFifo.setLabel(label); }
+    void applyAudioSampleRate(int sampleRate);
+    int getAudioSampleRate() const { return m_audioSampleRate; }
     Status getStatus() const;
 
     void getMagSqLevels(double& avg, double& peak, int& nbSamples)
@@ -137,6 +156,25 @@ private:
     RadioPagingFlexReceiver m_flex;
     RadioPagingGscReceiver m_gsc;
     QString m_gscVoiceId[2];            //!< Record id of the voice page in progress, by polarity
+    RadioPagingBerWindow m_lastBer[3];  //!< BER of the last reception of each protocol
+    int m_lastPocsagBatches = 0;
+    int m_lastGscPreamble = -1;
+    bool m_lastGscBatch = false;
+    bool m_lastGscNbs = false;
+    int m_lastGscSlot = 0;
+
+    // GSC voice audio: the GSC leg discriminator, DC blocked, low pass filtered and
+    // resampled to the audio rate, only while a voice page is open
+    AudioFifo m_audioFifo;
+    AudioVector m_audioBuffer;
+    std::size_t m_audioBufferFill;
+    int m_audioSampleRate;
+    Interpolator m_audioInterpolator;
+    Real m_audioDistance;
+    Real m_audioDistanceRemain;
+    bool m_audioOpen;
+    Real m_dcIn;
+    Real m_dcOut;
 
     mutable QMutex m_statusMutex;
     Status m_status;
@@ -144,12 +182,16 @@ private:
 
     void processOneSample(Complex& ci);
     void applyLegs();
+    void processAudio(Real fm);
+    void pushAudio(Real sample);
+    void closeAudio();
     void updateStatus();
     void sendRecord(MessageRecord& record, int protocol);
     void sendPocsag(const RadioPagingPocsagDecoder::Message& message, int baud);
     void sendFlex(const RadioPagingFlexDecoder::Message& message);
     void sendGsc(const RadioPagingGscDecoder::Message& message);
     static MessageRecord::Polarity polarity(bool inverted);
+    static QString checkName(int check);
     //!< Characters below 0x20 and 0x7f as <0xNN>, other bytes kept (UTF-8 passes)
     static QString escapeText(const std::string& text);
     static QByteArray toByteArray(const std::vector<uint8_t>& data);
