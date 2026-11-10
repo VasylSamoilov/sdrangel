@@ -125,7 +125,8 @@ MODEMNMT_API std::vector<uint8_t> smsRpAckToPhone(uint8_t rpRef);
 MODEMNMT_API std::vector<uint8_t> smsRpErrorToPhone(uint8_t rpRef, uint8_t cause);
 MODEMNMT_API std::vector<uint8_t> smsRpNoMessages(uint8_t rpRef);
 
-// One message from the phone at the start of the octets. consumed tells how many octets it took.
+// One message from the phone at the start of the octets. consumed tells how many octets it took; for
+// Error it is all of them (the octets are not a message, the caller drops them), for NeedMore 0.
 MODEMNMT_API SmsParse smsParseFromPhone(const uint8_t* data, size_t length, SmsFromPhone& out, size_t& consumed);
 
 // The pieces, public for the tests.

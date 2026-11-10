@@ -58,17 +58,45 @@ std::vector<uint32_t> utf8Decode(const std::string& text)
         const uint8_t c = static_cast<uint8_t>(text[i]);
         uint32_t code = 0x3f;
         size_t n = 1;
+        size_t need = 0;
+        uint32_t minimum = 0;
 
         if (c < 0x80) {
             code = c;
-        } else if ((c & 0xe0) == 0xc0 && i + 1 < text.size()) {
-            code = ((c & 0x1fu) << 6) | (static_cast<uint8_t>(text[i + 1]) & 0x3f);
-            n = 2;
-        } else if ((c & 0xf0) == 0xe0 && i + 2 < text.size()) {
-            code = ((c & 0x0fu) << 12) | ((static_cast<uint8_t>(text[i + 1]) & 0x3fu) << 6) | (static_cast<uint8_t>(text[i + 2]) & 0x3f);
-            n = 3;
-        } else if ((c & 0xf8) == 0xf0 && i + 3 < text.size()) {
-            n = 4;                                  // no character of the alphabet is that high
+        } else if ((c & 0xe0) == 0xc0) {
+            need = 1;
+            minimum = 0x80;
+            code = c & 0x1fu;
+        } else if ((c & 0xf0) == 0xe0) {
+            need = 2;
+            minimum = 0x800;
+            code = c & 0x0fu;
+        } else if ((c & 0xf8) == 0xf0) {
+            need = 3;
+            minimum = 0x10000;
+            code = c & 0x07u;
+        }
+        if (need)
+        {
+            bool good = true;
+
+            for (size_t k = 1; k <= need && good; k++)
+            {
+                if (i + k >= text.size() || (static_cast<uint8_t>(text[i + k]) & 0xc0) != 0x80) {
+                    good = false;
+                } else {
+                    code = (code << 6) | (static_cast<uint8_t>(text[i + k]) & 0x3fu);
+                }
+            }
+            // overlong forms and surrogates are broken input: one question mark, one byte on
+            if (good && code >= minimum && !(code >= 0xd800 && code < 0xe000) && code <= 0x10ffff) {
+                n = need + 1;
+            } else {
+                code = 0x3f;
+            }
+        }
+        else if (c >= 0x80) {
+            code = 0x3f;
         }
         out.push_back(code);
         i += n;
@@ -140,6 +168,7 @@ char semiOctetChar(int nibble)
 // two decimal digits as a swapped semi-octet pair; a zero is 1010
 uint8_t twoDigits(int value)
 {
+    value = std::max(0, std::min(value, 99));
     const int tens = (value / 10) % 10;
     const int units = value % 10;
 
@@ -148,8 +177,9 @@ uint8_t twoDigits(int value)
 
 int twoDigitsValue(uint8_t byte)
 {
-    const int tens = (byte & 0xf) == 0xa ? 0 : (byte & 0xf);
-    const int units = (byte >> 4) == 0xa ? 0 : (byte >> 4);
+    // a digit above 9 (not 1010) is no digit: it counts as 0
+    const int tens = (byte & 0xf) > 9 ? 0 : (byte & 0xf);
+    const int units = (byte >> 4) > 9 ? 0 : (byte >> 4);
 
     return tens * 10 + units;
 }
@@ -204,10 +234,17 @@ std::string smsGsmDecode(const std::vector<uint8_t>& septets)
     {
         const uint8_t c = septets[i] & 0x7f;
 
-        if (c == 0x1b && i + 1 < septets.size())
+        if (c == 0x1b)
         {
+            // the escape: the next character is taken from the extension table; one that is not
+            // in it shows as the character of the default table, a lone escape as a blank
+            if (i + 1 >= septets.size())
+            {
+                utf8Append(out, 0x20);
+                continue;
+            }
             const uint8_t next = septets[++i] & 0x7f;
-            uint32_t code = 0x20;                   // an unknown escape is a blank
+            uint32_t code = (next == 0x1b) ? 0x20 : kGsm[next];
 
             for (const Extension& e : kExtension)
             {
@@ -246,6 +283,9 @@ std::vector<uint8_t> smsUnpackSeptets(const uint8_t* data, size_t length, size_t
 {
     std::vector<uint8_t> out;
 
+    // only complete characters: there are no more than the octets hold
+    count = std::min(count, length * 8 / 7);
+    out.reserve(count);
     for (size_t i = 0; i < count; i++)
     {
         const size_t bit = i * 7;
@@ -265,7 +305,7 @@ std::vector<uint8_t> smsUnpackSeptets(const uint8_t* data, size_t length, size_t
 
 bool smsEncodeAddress(const std::string& number, std::vector<uint8_t>& out)
 {
-    if (number.empty() || number.size() > kMaxAddressDigits) {
+    if (number.empty() || number.size() > kMaxAddressDigits || number == "+") {
         return false;
     }
     for (size_t i = 0; i < number.size(); i++)
@@ -300,7 +340,8 @@ SmsParse smsDecodeAddress(const uint8_t* data, size_t length, std::string& numbe
     const size_t digits = data[0];
     const size_t octets = (digits + 1) / 2;
 
-    if (digits > 24 || !(data[1] & 0x80)) {
+    // the type has its first bit set; names in letters (type 5) are no numbers
+    if (!(data[1] & 0x80) || ((data[1] >> 4) & 7) == 5) {
         return SmsParse::Error;
     }
     if (length < 2 + octets) {
@@ -309,8 +350,15 @@ SmsParse smsDecodeAddress(const uint8_t* data, size_t length, std::string& numbe
     for (size_t i = 0; i < digits; i++)
     {
         const uint8_t byte = data[2 + i / 2];
+        const int nibble = (i & 1) ? (byte >> 4) : (byte & 0xf);
 
-        number.push_back(semiOctetChar((i & 1) ? (byte >> 4) : (byte & 0xf)));
+        // no filler or unused code inside the number, a plus only at the start
+        if (nibble == 0xe || nibble == 0xf || (nibble == 0xd && i != 0))
+        {
+            number.clear();
+            return SmsParse::Error;
+        }
+        number.push_back(semiOctetChar(nibble));
     }
     // a number in international format is shown with its plus sign if the digits lack it
     if (((data[1] >> 4) & 7) == 1 && !number.empty() && number[0] != '+') {
@@ -324,7 +372,7 @@ SmsParse smsDecodeAddress(const uint8_t* data, size_t length, std::string& numbe
 std::vector<uint8_t> smsEncodeTime(const SmsTime& time)
 {
     std::vector<uint8_t> out;
-    const int zone = std::abs(time.zoneQuarters) % 100;
+    const int zone = std::min(std::abs(std::max(time.zoneQuarters, -79)), 79);
 
     out.push_back(twoDigits(time.year));
     out.push_back(twoDigits(time.month));
@@ -348,7 +396,7 @@ SmsTime smsDecodeTime(const uint8_t* data)
     time.hour = twoDigitsValue(data[3]);
     time.minute = twoDigitsValue(data[4]);
     time.second = twoDigitsValue(data[5]);
-    time.zoneQuarters = ((data[6] & 7) * 10) + (data[6] >> 4);
+    time.zoneQuarters = ((data[6] & 7) * 10) + std::min(data[6] >> 4, 9);
     if (data[6] & 8) {
         time.zoneQuarters = -time.zoneQuarters;
     }
@@ -361,7 +409,9 @@ std::vector<uint8_t> smsHeader(const std::string& destination)
     std::vector<uint8_t> out = {0x01, 0x18, 'S', 'M', 'S', 'H', 0x18, 'A', 'B', 'C'};
     std::vector<uint8_t> address;
 
-    if (!destination.empty() && smsEncodeAddress(destination, address))
+    // the header ends at the first 02h: an address that has one in it cannot go in
+    if (!destination.empty() && smsEncodeAddress(destination, address)
+     && std::find(address.begin(), address.end(), 0x02) == address.end())
     {
         out.push_back(0x01);
         out.push_back(0x41);
@@ -378,6 +428,12 @@ bool smsBuildDeliver(const SmsDeliver& message, uint8_t rpRef, std::vector<uint8
     std::vector<uint8_t> septets;
 
     if (!textSeptets(message.text, septets)) {
+        return false;
+    }
+    const SmsTime& t = message.time;
+
+    if (t.year < 0 || t.year > 99 || t.month < 0 || t.month > 12 || t.day < 0 || t.day > 31 || t.hour < 0 || t.hour > 23
+     || t.minute < 0 || t.minute > 59 || t.second < 0 || t.second > 60 || t.zoneQuarters < -79 || t.zoneQuarters > 79) {
         return false;
     }
     // first octet: SMS-DELIVER, bit 2 is 0 when more messages wait (the other way round than GSM)
@@ -434,8 +490,8 @@ SmsParse parseSubmitTpdu(const uint8_t* data, size_t length, SmsSubmit& out, siz
     }
     const uint8_t first = data[pos++];
 
-    if ((first & 3) != 1) {
-        return SmsParse::Error;                     // not an SMS-SUBMIT
+    if ((first & 3) != 1 || (first & 0x40)) {
+        return SmsParse::Error;                     // not an SMS-SUBMIT, or one with a user data header (not defined)
     }
     out.messageRef = data[pos++];
 
@@ -492,13 +548,24 @@ SmsParse parseSubmitTpdu(const uint8_t* data, size_t length, SmsSubmit& out, siz
     }
     else
     {
-        // 8-bit set: the first 128 characters are those of the GSM alphabet
+        // 8-bit set: the first 128 characters are those of the GSM alphabet (with the escape), the
+        // national ones are not known here
         std::string text;
+        std::vector<uint8_t> run;
 
-        for (size_t i = 0; i < udl; i++) {
-            utf8Append(text, (data[pos + i] & 0x80) ? 0x3f : kGsm[data[pos + i]]);
+        for (size_t i = 0; i < udl; i++)
+        {
+            if (data[pos + i] & 0x80)
+            {
+                text += smsGsmDecode(run);
+                run.clear();
+                text.push_back('?');
+            }
+            else {
+                run.push_back(data[pos + i]);
+            }
         }
-        out.text = text;
+        out.text = text + smsGsmDecode(run);
     }
     pos += udOctets;
     consumed = pos;
@@ -508,44 +575,78 @@ SmsParse parseSubmitTpdu(const uint8_t* data, size_t length, SmsSubmit& out, siz
 
 } // namespace
 
-SmsParse smsParseFromPhone(const uint8_t* data, size_t length, SmsFromPhone& out, size_t& consumed)
+namespace
 {
-    out = SmsFromPhone();
-    consumed = 0;
+
+// An optional user data element (41h, length, TPDU) after an RP-ACK or RP-ERROR is skipped.
+SmsParse skipUserData(const uint8_t* data, size_t length, size_t& pos)
+{
+    if (pos < length && data[pos] == 0x41)
+    {
+        if (length < pos + 2) {
+            return SmsParse::NeedMore;
+        }
+        const size_t n = data[pos + 1];
+
+        if (length < pos + 2 + n) {
+            return SmsParse::NeedMore;
+        }
+        pos += 2 + n;
+    }
+
+    return SmsParse::Ok;
+}
+
+SmsParse parseFromPhone(const uint8_t* data, size_t length, SmsFromPhone& out, size_t& consumed)
+{
     if (length < 2) {
         return SmsParse::NeedMore;
     }
 
+    // bits 7..3 are spare
     const unsigned mti = data[0] & 7;
 
     out.rpRef = data[1];
-    if (data[0] & 0xf8) {
-        return SmsParse::Error;
-    }
 
     switch (mti)
     {
     case 2:                                         // RP-ACK
+    {
+        size_t pos = 2;
+
         out.kind = SmsRpKind::Ack;
-        consumed = 2;
-        return SmsParse::Ok;
+        const SmsParse r = skipUserData(data, length, pos);
+
+        consumed = pos;
+        return r;
+    }
 
     case 4:                                         // RP-ERROR with a cause
+    {
+        size_t pos = 2;
+
         out.kind = SmsRpKind::Error;
-        if (length < 3) {
-            return SmsParse::NeedMore;
-        }
-        if (data[2] != 0x42)
+        if (length >= 3 && data[2] == 0x42)
         {
-            consumed = 2;                           // no cause
-            return SmsParse::Ok;
+            if (length < 4) {
+                return SmsParse::NeedMore;
+            }
+            const size_t n = data[3];
+
+            if (length < 4 + n) {
+                return SmsParse::NeedMore;
+            }
+            out.cause = (n > 0) ? (data[4] & 0x7f) : 0;
+            pos = 4 + n;
         }
-        if (length < 5) {
+        else if (length < 3) {
             return SmsParse::NeedMore;
         }
-        out.cause = data[4] & 0x7f;
-        consumed = 5;
-        return SmsParse::Ok;
+        const SmsParse r = skipUserData(data, length, pos);
+
+        consumed = pos;
+        return r;
+    }
 
     case 6:                                         // memory available
     case 7:                                         // ready to receive
@@ -580,7 +681,8 @@ SmsParse smsParseFromPhone(const uint8_t* data, size_t length, SmsFromPhone& out
         if (data[pos] != 0x41) {
             return SmsParse::Error;
         }
-        // The length byte is not trusted (it is 255 for a long one); the fields of the transfer layer say where it ends.
+        // The length byte is not trusted (it is 255 for a long one, and wrong in the example of the
+        // standard); the fields of the transfer layer say where it ends.
         pos += 2;
         result = parseSubmitTpdu(data + pos, length - pos, out.submit, used);
         if (result != SmsParse::Ok) {
@@ -593,6 +695,28 @@ SmsParse smsParseFromPhone(const uint8_t* data, size_t length, SmsFromPhone& out
     default:
         return SmsParse::Error;
     }
+}
+
+} // namespace
+
+SmsParse smsParseFromPhone(const uint8_t* data, size_t length, SmsFromPhone& out, size_t& consumed)
+{
+    out = SmsFromPhone();
+    consumed = 0;
+
+    const SmsParse result = parseFromPhone(data, length, out, consumed);
+
+    // What is not a message cannot be skipped piece by piece: the caller drops what it has.
+    if (result == SmsParse::Error)
+    {
+        out = SmsFromPhone();
+        consumed = length;
+    }
+    else if (result == SmsParse::NeedMore) {
+        consumed = 0;
+    }
+
+    return result;
 }
 
 } // namespace modemnmt

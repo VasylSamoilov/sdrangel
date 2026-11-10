@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <exception>
 
 namespace modemnmt
 {
@@ -148,12 +149,11 @@ NmtDmsLink::NmtDmsLink(bool eightBits) :
     m_eightBits(eightBits),
     m_eightBitsDefault(eightBits),
     m_randomSet(false),
-    m_ready(true),
+    m_epoch(0),
     m_minQuality(0.65)
 {
     reset();
     std::memcpy(m_identity, "F000000", 8);
-    m_haveIdentity = false;
     m_random[0] = 0x5a;
     m_random[1] = 0xa5;
     m_random[2] = 0x3c;
@@ -162,6 +162,11 @@ NmtDmsLink::NmtDmsLink(bool eightBits) :
 void NmtDmsLink::reset()
 {
     m_eightBits = m_eightBitsDefault;
+    m_epoch++;
+    m_ready = true;
+    m_nrSent = false;
+    m_gapPending = false;
+    m_maskedBytes = 0;
     m_peerData = false;
     m_positiveResponse = false;
     m_pending.clear();
@@ -191,9 +196,10 @@ void NmtDmsLink::reset()
     m_dataQueued = false;
     m_nRx = 0;
     m_shift = 0;
-    std::fill(m_qualitySum, m_qualitySum + 16, 0.0);
+    // before the first bits there is no bad news
+    std::fill(m_qualitySum, m_qualitySum + 16, 1.0);
     m_qualityPos = 0;
-    m_qualityTotal = 0.0;
+    m_qualityTotal = 16.0;
     m_inFrame = false;
     m_rxBits.clear();
     m_rxNeed = 0;
@@ -208,7 +214,6 @@ void NmtDmsLink::setIdentity(const char* id7)
     }
     std::memset(m_identity, 0, sizeof(m_identity));
     std::strncpy(m_identity, id7, 7);
-    m_haveIdentity = true;
 }
 
 void NmtDmsLink::queueFrame(bool control, const uint8_t data[kDataWords])
@@ -228,10 +233,20 @@ void NmtDmsLink::queueRand()
 
     if (!m_randomSet)
     {
-        std::random_device device;
+        try
+        {
+            std::random_device device;
 
-        for (uint8_t& r : m_random) {
-            r = static_cast<uint8_t>(device());
+            for (uint8_t& r : m_random) {
+                r = static_cast<uint8_t>(device());
+            }
+        }
+        catch (const std::exception&)
+        {
+            // no entropy source: the numbers of the last call move on
+            for (uint8_t& r : m_random) {
+                r = static_cast<uint8_t>(r * 37 + 11);
+            }
         }
     }
 
@@ -272,7 +287,7 @@ bool NmtDmsLink::queueData(const uint8_t* data, size_t length)
     if (length == 0) {
         return true;
     }
-    if (!data || m_pending.size() + length + m_txList.size() * 8 > kMaxQueued) {
+    if (!data || length > kMaxQueued || m_pending.size() + m_txList.size() * 8 > kMaxQueued - length) {
         return false;
     }
 
@@ -302,6 +317,12 @@ void NmtDmsLink::flushPending()
             count--;
         }
         std::memset(words, 0, sizeof(words));
+        if (!m_eightBits)
+        {
+            for (size_t i = 0; i < count; i++) {
+                m_maskedBytes += (m_pending[pos + i] & 0x80) ? 1 : 0;
+            }
+        }
         if (m_eightBits)
         {
             for (size_t i = 0; i < count; i++)
@@ -320,6 +341,17 @@ void NmtDmsLink::flushPending()
         pos += count;
     }
     m_pending.clear();
+}
+
+void NmtDmsLink::setReady(bool ready)
+{
+    // a receiver that was full says so when it can take data again
+    if (ready && !m_ready && m_nrSent && m_dKnown)
+    {
+        m_rrPending = true;
+        m_rrNr = false;
+    }
+    m_ready = ready;
 }
 
 // The data may go when our random number is acknowledged and the other side's is known (or it
@@ -350,6 +382,8 @@ bool NmtDmsLink::ack(int n)
     if (distance == 0 || distance > static_cast<size_t>(kWindow) || distance > m_sentCount || distance > m_txList.size()) {
         return false;
     }
+    const uint32_t epoch = m_epoch;
+
     for (size_t i = 0; i < distance; i++)
     {
         if (m_txList.front().control && m_txList.front().data[0] == kCtRand) {
@@ -361,8 +395,12 @@ bool NmtDmsLink::ack(int n)
     m_txIndex = 0;
     m_passes = 0;
     m_gapTime = 0.0;
+    m_gapPending = false;
 
     checkEstablished();
+    if (epoch != m_epoch) {
+        return true;                    // a callback reset the link
+    }
     if (m_txList.empty() && m_pending.empty() && m_dataQueued && m_established)
     {
         m_dataQueued = false;
@@ -435,7 +473,7 @@ bool NmtDmsLink::scheduleFrame()
         // all frames went out; if they go out again they were not acknowledged: a pause between
         m_txIndex = 0;
         if (m_passes++ >= 1) {
-            m_gapTime = kGapTime;
+            m_gapPending = true;
         }
     }
 
@@ -456,6 +494,12 @@ bool NmtDmsLink::pullBit(int& bit)
     }
 
     bit = m_txBits[m_txPos++];
+    // the pause begins when the last bit of the frame is out
+    if (m_txPos >= m_txBits.size() && m_gapPending)
+    {
+        m_gapPending = false;
+        m_gapTime = kGapTime;
+    }
     return true;
 }
 
@@ -549,6 +593,20 @@ void NmtDmsLink::rxFrameDone()
         }
         return value;
     };
+    // the 1 1 after every 7 bits are part of the frame
+    const bool dt = (((word(0) >> 3) & 3) == 3);
+    const int guards = dt ? 11 : 2;
+
+    for (int g = 0; g < guards; g++)
+    {
+        const size_t at = static_cast<size_t>(g) * 9 + 7;
+
+        if (!m_rxBits[at] || !m_rxBits[at + 1])
+        {
+            m_framesRejected++;
+            return;
+        }
+    }
     const unsigned label = word(0);
     const bool d = ((label >> 6) & 1) != 0;
     const bool control = ((label >> 5) & 1) == 0;
@@ -614,6 +672,7 @@ void NmtDmsLink::rxDt(bool d, bool control, int n, const uint8_t* words)
     // request for the one that got lost; NR if this side cannot take it
     m_rrPending = true;
     m_rrNr = false;
+    m_nrSent = false;
 
     if (n != m_nRx) {
         return;
@@ -621,9 +680,13 @@ void NmtDmsLink::rxDt(bool d, bool control, int n, const uint8_t* words)
     if (!m_ready)
     {
         m_rrNr = true;
+        m_nrSent = true;
         return;
     }
     m_nRx = (m_nRx + 1) & 7;
+
+    // a callback may reset the link: nothing of the old session is used after it
+    const uint32_t epoch = m_epoch;
 
     if (control)
     {
@@ -645,7 +708,7 @@ void NmtDmsLink::rxDt(bool d, bool control, int n, const uint8_t* words)
             }
             checkEstablished();
         }
-        if (m_onControl) {
+        if (epoch == m_epoch && m_onControl) {
             m_onControl(type, words + 1);
         }
         return;
@@ -653,7 +716,9 @@ void NmtDmsLink::rxDt(bool d, bool control, int n, const uint8_t* words)
 
     m_peerData = true;
     checkEstablished();
-    deliver(words);
+    if (epoch == m_epoch) {
+        deliver(words);
+    }
 }
 
 void NmtDmsLink::deliver(const uint8_t* words)
