@@ -666,6 +666,10 @@ void NmtChannel::failCall(modemcellular::Cause cause)
 {
     NmtTransaction* const transaction = m_transaction;
 
+    // a message call has no call in the exchange; the phone is not there
+    if (transaction && transaction->messageCall && cause == modemcellular::Cause::TempFail) {
+        transaction->mwiResult = NmtServiceEnd::Unreachable;
+    }
     if (transaction && transaction->callUp)
     {
         transaction->callUp = false;
@@ -1993,7 +1997,7 @@ void NmtChannel::rxMwiClear(const Frame& frame)
 
     // The phone clears before the indicators went out (the user hung up the short call): it is
     // released like for any clearing, and nothing was delivered.
-    if (m_txFrameCount <= m_mwiLead && !m_mwiAcked)
+    if (m_transaction->messageCall && m_txFrameCount <= m_mwiLead && !m_mwiAcked)
     {
         m_state = State::MoRelease;
         m_txFrameCount = 0;
@@ -2197,8 +2201,12 @@ void NmtChannel::onTimer()
     // is released
     if (m_state == State::MtRinging || m_state == State::MtQueue)
     {
-        if (m_state == State::MtQueue && m_transaction->messageCall) {
+        if (m_state == State::MtQueue && m_transaction->messageCall)
+        {
+            // the phone never left the calling channel: nothing to release
             m_transaction->mwiResult = NmtServiceEnd::NoChannel;
+            m_host->destroyTransaction(m_transaction);
+            return;
         }
         // no answer is a plain release for the caller, no free channel is congestion
         failCall(m_state == State::MtRinging ? modemcellular::Cause::Normal : modemcellular::Cause::NoChannel);

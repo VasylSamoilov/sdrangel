@@ -70,16 +70,22 @@ void NmtSystem::forEachRegistered(const std::function<void(const NmtSubscriber&)
 
 NmtSystem::~NmtSystem()
 {
-    // transactions that no channel is bound to would end without a word: tell the handler
+    // transactions that no channel is bound to would end without a word: tell the handler (the
+    // handler may do anything, so the list is left alone while it runs)
+    std::vector<MwiReport> reports;
+
     for (NmtTransaction& transaction : m_transactions) {
-        sendMwiReport(mwiReport(transaction));
+        reports.push_back(mwiReport(transaction));
+    }
+    for (const MwiReport& report : reports) {
+        sendMwiReport(report);
     }
 }
 
 // A message call that has not got to a traffic channel yet gives way to anything the phone does or
 // is called for: it ends as undelivered (the flags can be sent again). Once the phone is on a
 // traffic channel the call is short and runs to its end.
-bool NmtSystem::cancelMessageCall(char country, const std::string& number)
+bool NmtSystem::cancelMessageCall(char country, const std::string& number, uint8_t* carried)
 {
     for (NmtTransaction& transaction : m_transactions)
     {
@@ -98,6 +104,13 @@ bool NmtSystem::cancelMessageCall(char country, const std::string& number)
                 return false;
             }
         }
+        // For a call or a seizure of the phone the indicators go on with that call, no word to the
+        // handler (it would send them again while the new call is being made).
+        if (carried)
+        {
+            *carried = transaction.mwiFlags;
+            transaction.mwiReported = true;
+        }
         destroyTransaction(&transaction);
         return true;
     }
@@ -107,7 +120,9 @@ bool NmtSystem::cancelMessageCall(char country, const std::string& number)
 
 NmtTransaction* NmtSystem::createTransaction(const NmtSubscriber& subscriber, NmtChannel& channel)
 {
-    cancelMessageCall(subscriber.country, subscriber.number);
+    uint8_t carried = 0;
+
+    cancelMessageCall(subscriber.country, subscriber.number, &carried);
 
     // one transaction per subscriber
     for (const NmtTransaction& transaction : m_transactions)
@@ -121,6 +136,7 @@ NmtTransaction* NmtSystem::createTransaction(const NmtSubscriber& subscriber, Nm
     m_transactions.emplace_back();
     m_transactions.back().subscriber = subscriber;
     m_transactions.back().channels.push_back(&channel);
+    m_transactions.back().mwiFlags = carried;
 
     return &m_transactions.back();
 }
@@ -183,7 +199,9 @@ bool NmtSystem::sendMwi(char country, const std::string& number, uint8_t flags)
             continue;
         }
         // a phone in a call hears it when the call is cleared; one that is doing anything else is busy
-        if (!transaction.callUp || transaction.channels.size() != 1
+        const bool switching = transaction.channels.size() == 2 && transaction.scipTarget;
+
+        if (!transaction.callUp || (transaction.channels.size() != 1 && !switching)
          || !transaction.channels.front()->inCall()) {
             return false;
         }
@@ -341,8 +359,10 @@ bool NmtSystem::startCall(char country, const std::string& number, const std::st
         return false;
     }
 
-    // a call waits for nothing a message call could still do
-    cancelMessageCall(country, number);
+    // a call waits for nothing a message call could still do; its indicators go with the call
+    uint8_t carried = 0;
+
+    cancelMessageCall(country, number, &carried);
 
     // a phone has one transaction
     for (const NmtTransaction& transaction : m_transactions)
@@ -354,6 +374,7 @@ bool NmtSystem::startCall(char country, const std::string& number, const std::st
 
     NmtTransaction& transaction = newPagedTransaction(country, number);
 
+    transaction.mwiFlags = carried;
     transaction.callUp = true;
     // the phone does not add the '+' of an international number
     transaction.callerId = (callerType == modemcellular::NumberType::International && !callerId.empty() && callerId[0] != '+')
@@ -591,7 +612,7 @@ bool NmtSystem::releaseCall(char country, const std::string& number)
             continue;
         }
         if (transaction.messageCall) {
-            return cancelMessageCall(country, number);
+            return cancelMessageCall(country, number, nullptr);
         }
         // a call that is still paging has no phone on a channel: it just stops
         if (transaction.paging && transaction.callUp)
