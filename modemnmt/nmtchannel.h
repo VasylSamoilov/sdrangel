@@ -26,6 +26,7 @@
 #include <utility>
 #include <vector>
 
+#include "compandor.h"
 #include "nmtframe.h"
 #include "nmtmodem.h"
 #include "nmtmwi.h"
@@ -222,6 +223,10 @@ struct ChannelConfig
     int tcBandStart = 0;
     int tcBandEnd = 0;
     bool loopback = false;          // listen to our own frames (the receiver sees the exchange direction)
+    // Compandor of the speech path, an option (NMT Doc 450-1 4.1.1.2 "switch compander in", L(5);
+    // addendum Annex 3): ordered when the call is connected, then speech towards the phone is
+    // compressed and from it expanded. Off: idle frames instead of L(5), plain speech.
+    bool compandor = true;
 };
 
 // Hour and minute of the local time.
@@ -266,7 +271,8 @@ public:
         RecallDigits,       // call: register recall, dial tone, receiving digits
         RecallEnd,          // call: register recall over, back to the conversation
         MtAutoanswer,       // traffic channel: asking the phone to answer without ringing
-        MwiClear            // clearing: the message indicators (5c), then the release
+        MwiClear,           // clearing: the message indicators (5c), then the release
+        MwiInCall           // call: the message indicators (5c) twice, then the conversation
     };
 
     struct ReceivedFrame
@@ -298,6 +304,9 @@ public:
     // The connected call orders the phone to another power level 0..3 (NMT Doc 450-1 4.4.1.8).
     // False if the channel is not in a connected call, or the level is no change.
     bool beginPowerChange(int level);
+    // In the conversation: the message indicators of the call (frame 5c) go out twice, the
+    // conversation goes on. False if the call is not in the conversation.
+    bool beginMwiInCall();
     // Switching the call in progress: this connected channel orders the phone to the target
     // (transaction.scipTarget), which waits for it.
     void beginScipOrder();
@@ -363,6 +372,8 @@ private:
     Frame txMftIn();
     Frame txMftOut();
     Frame txPowerChange();
+    Frame txMwiInCall();
+    Frame mwiFrame() const;
     Frame txRecallProceed();
     Frame txRecallEnd();
     Frame txMtAutoanswer();
@@ -403,6 +414,7 @@ private:
     int renderTone(float* samples, int length, bool add);
     void onSupervisory(bool detected);
     bool callAudioUp() const;
+    void startCompandor(bool on);
     bool matchChannel(const Frame& frame) const;
     bool matchArea(const Frame& frame) const;
     bool matchSubscriber(const Frame& frame) const;
@@ -448,11 +460,12 @@ private:
     int m_newPower;                 // power level that is ordered
     bool m_haveLastDigit;           // MFT / register recall: a digit was taken
     bool m_lastDigitOdd;            // ... in a frame 14a
-    bool m_mftIdleSeen;             // conversation: an idle frame of the phone came since the last MFT state
     bool m_autoanswerGo;            // message call: the idle frames after the identity are out, the order goes out
     bool m_autoanswerAcked;         // message call: the phone answered while the order went out
     int m_mwiLead;                  // idle frames before the indicators
     bool m_mwiAcked;                // the phone cleared / acknowledged already: nothing to wait for after the sequence
+    modemcellular::Compandor m_compandor;   // speech path at 8 kHz
+    bool m_compandorOn;             // the phone was ordered to switch its compandor in for this call
 };
 
 } // namespace modemnmt

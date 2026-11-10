@@ -455,6 +455,17 @@ static void testClearingInOtherStates()
     seize(tc, phone);
     phoneSends(tc, lineSignalFrame(tc, phone, 0x11145), 1);
     CHECK(tc.state() == NmtChannel::State::MoRelease);
+
+    // the channel number of a clearing is not checked, the identity is (NMT Doc 450-1 4.7.2.3b)
+    for (int i = 0; i < 4; i++) {
+        pull(tc);
+    }
+    CHECK(tc.state() == NmtChannel::State::Idle);
+    seize(tc, phone);
+    Frame clearing = lineSignalFrame(tc, phone, 0x11111);
+    clearing.channelNo ^= 0x001;
+    phoneSends(tc, clearing, 1);
+    CHECK(tc.state() == NmtChannel::State::MoRelease);
 }
 
 static void testDamagedFrames()
@@ -463,20 +474,17 @@ static void testDamagedFrames()
     NmtSystem system(clock);
     NmtChannel& tc = system.addChannel(config(System::Nmt450, ChannelType::Tc, 100), kRate, 1.0);
 
-    // digit values that are no digit of a subscriber number (0 and 11 .. 15)
+    // digit values that are no digit of a subscriber number (0 and 11 .. 15) are taken as
+    // letters, the identity request returns them as received
     Phone damaged;
     Frame f = roamingFrame(tc, damaged);
-    f.msNumber = 0xb23456;
-    phoneSends(tc, f, 40);
-    CHECK(tc.state() == NmtChannel::State::Idle);
-    f.msNumber = 0x023456;
-    phoneSends(tc, f, 40);
-    CHECK(tc.state() == NmtChannel::State::Idle);
-    f = roamingFrame(tc, damaged);
+    f.msNumber = 0xb23450;
     f.msCountry = 12;
     phoneSends(tc, f, 40);
-    CHECK(tc.state() == NmtChannel::State::Idle);
-    CHECK(system.transactionCount() == 0);
+    CHECK(tc.state() == NmtChannel::State::RoamingIdent);
+    CHECK(system.transactionCount() == 1);
+    const Frame request = pull(tc);
+    CHECK(request.msNumber == 0xb23450u && request.msCountry == 12u);
 
     // the number 000000 and the country 0 are valid
     NmtChannel& other = system.addChannel(config(System::Nmt450, ChannelType::Tc, 101), kRate, 1.0);

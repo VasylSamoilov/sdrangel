@@ -89,6 +89,7 @@ struct Station
     {
         ChannelConfig c = config(System::Nmt450, ChannelType::Tc, 100);
         c.supervisory = 2;
+        c.compandor = false;            // the levels below are those of the plain speech path
         a = &nmt.addChannel(c, kRate, 1.0);
         c.channel = 101;
         b = &nmt.addChannel(c, kRate, 1.0);

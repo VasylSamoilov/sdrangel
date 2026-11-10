@@ -148,12 +148,12 @@ static void testCallFlow()
     }
     CHECK(isLineSignal(pull(tc), 9));
 
-    // answer: L(14)
+    // answer: L(14), then compandor in L(5)
     phoneSends(tc, lineSignalFrame(tc, phone, 0xeeeee), 1);
     CHECK(events.answered == 1);
     CHECK(tc.state() == NmtChannel::State::MtComplete);
     for (int i = 0; i < 3; i++) {
-        CHECK(pull(tc).mt == MessageType::Frame6);
+        CHECK(isLineSignal(pull(tc), 5));
     }
     FrameBits bits;
     CHECK(!tc.nextFrame(bits));
@@ -214,6 +214,36 @@ static void testCallerId()
     f = pull(tc);
     CHECK(f.mt == MessageType::Frame8);
     CHECK(f.seqNumber == 0);
+}
+
+// Without the compandor the answer is followed by idle frames, four frames, then speech.
+static void testCompandorOff()
+{
+    modemcellular::SampleClock clock(kRate);
+    NmtSystem system(clock);
+    ChannelConfig tcConfig = config(System::Nmt450, ChannelType::Tc, 100);
+    CHECK(tcConfig.compandor);                                          // on by default
+    tcConfig.compandor = false;
+    NmtChannel& cc = system.addChannel(callingConfig(50), kRate, 1.0);
+    NmtChannel& tc = system.addChannel(tcConfig, kRate, 1.0);
+    Events events;
+    listen(system, events);
+    const Phone phone;
+
+    toRinging(system, cc, tc, phone);
+    CHECK(tc.state() == NmtChannel::State::MtRinging);
+    pull(tc);
+    phoneSends(tc, lineSignalFrame(tc, phone, 0xeeeee), 1);
+    CHECK(events.answered == 1);
+    for (int i = 0; i < 3; i++)
+    {
+        CHECK(pull(tc).mt == MessageType::Frame6);
+        CHECK(tc.state() == NmtChannel::State::MtComplete);
+    }
+    FrameBits bits;
+    CHECK(!tc.nextFrame(bits));
+    CHECK(tc.state() == NmtChannel::State::Active);
+    CHECK(tc.dspMode() == DspMode::Audio);
 }
 
 static void testPagingFails()
@@ -1289,6 +1319,7 @@ int main()
     testCallIsNotLost();
     testCallFlow();
     testCallerId();
+    testCompandorOff();
     testPagingFails();
     testTwoCallingChannels();
     testQueue();
