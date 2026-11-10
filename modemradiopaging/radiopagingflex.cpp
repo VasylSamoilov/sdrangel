@@ -253,6 +253,8 @@ int estimateBody(const RadioPagingFlex::PhaseMessage& message)
         int words = ((int) len * 4 + numericOverheadBits + 20) / 21;
         return std::max(1, std::min(words, maxNumericWords));
     }
+    case RadioPagingFlex::ShortMessage:
+        return 0;
     }
 
     return -1;
@@ -473,6 +475,36 @@ uint32_t RadioPagingFlex::numericVector(unsigned start, unsigned words, unsigned
     return encodeWord(addChecksum(data));
 }
 
+void RadioPagingFlex::shortMessageVector(ShortType type, const std::string& digits, int source, int number, bool retrieval,
+    bool longAddress, uint32_t words[2])
+{
+    uint32_t d = 0;     // d0-d11
+    uint32_t d2 = 0;    // d12-d32
+
+    if (type == ShortNumeric)
+    {
+        uint32_t nibbles[m_maxShortDigitsLong];
+
+        for (int i = 0; i < m_maxShortDigitsLong; i++) {
+            nibbles[i] = (i < (int) digits.size()) ? (uint32_t) numericValue(digits[i]) : 0x0cu;
+        }
+
+        d = nibbles[0] | (nibbles[1] << 4) | (nibbles[2] << 8);
+        d2 = nibbles[3] | (nibbles[4] << 4) | (nibbles[5] << 8) | (nibbles[6] << 12) | (nibbles[7] << 16);
+    }
+    else if (type == ShortSource)
+    {
+        d = (uint32_t) source & 7;
+    }
+    else
+    {
+        d = ((uint32_t) source & 7) | (((uint32_t) number & 0x3f) << 3) | ((retrieval ? 1u : 0u) << 9);
+    }
+
+    words[0] = encodeWord(addChecksum((m_vectorTone << 4) | (((uint32_t) type & 3) << 7) | (d << 9)));
+    words[1] = longAddress ? encodeWord(d2) : 0;
+}
+
 void RadioPagingFlex::fillIdle(uint32_t *words, int phase, Mode mode)
 {
     bool lsbPhase = false;
@@ -558,6 +590,25 @@ bool RadioPagingFlex::validateMessage(uint64_t capcode, MessageType type, const 
             }
         }
     }
+    else if (type == ShortMessage)
+    {
+        // Empty: every digit a space, the tone only payload
+        size_t maxDigits = isLongAddress(capcode) ? m_maxShortDigitsLong : m_maxShortDigits;
+
+        if (text.size() > maxDigits)
+        {
+            error = "Short message too long: " + std::to_string(maxDigits) + " digits at most";
+            return false;
+        }
+        for (char c : text)
+        {
+            if (!numericCharValid(c))
+            {
+                error = std::string("Character not allowed in short message: ") + c;
+                return false;
+            }
+        }
+    }
     else if (type == Alphanumeric)
     {
         if (text.empty())
@@ -603,6 +654,21 @@ int RadioPagingFlex::messageCost(const PhaseMessage& message, std::string *error
     }
 
     int vectorWords = isLong ? 2 : 1;
+
+    if (message.m_type == ShortMessage)
+    {
+        if (((message.m_shortType != ShortNumeric) && (message.m_shortType != ShortSource) && (message.m_shortType != ShortNumbered))
+            || (message.m_source < 0) || (message.m_source > 7) || ((message.m_shortType != ShortNumeric) && !message.m_text.empty()))
+        {
+            if (error) {
+                *error = "Short message: type numeric, source or numbered, source 0 to 7, digits only in the numeric type";
+            }
+            return -1;
+        }
+
+        return addressWords + vectorWords;
+    }
+
     int body = estimateBody(message);
 
     // The first message word of a long address is in the second vector word
@@ -653,7 +719,7 @@ RadioPagingFlex::PhaseResult RadioPagingFlex::buildPhase(const PhaseParams& para
             in.m_addressWords = in.m_long ? 2 : 1;
             in.m_vectorWords = isTone ? 0 : (in.m_long ? 2 : 1);
 
-            if (!isTone)
+            if (!isTone && (m.m_type != ShortMessage))
             {
                 int body = estimateBody(m);
                 if (body < 0) {
@@ -775,6 +841,22 @@ RadioPagingFlex::PhaseResult RadioPagingFlex::buildPhase(const PhaseParams& para
 
         std::vector<uint32_t> body;
         uint32_t vector;
+
+        if (m.m_type == ShortMessage)
+        {
+            // No message field: the vector word(s) only
+            uint32_t vw[2];
+            // Numbered: the retrieval flag is set, as in alphanumeric messages (the pager checks the numbers)
+            shortMessageVector(m.m_shortType, m.m_text, m.m_source, m.m_number, true, in.m_long, vw);
+
+            if (vecCursor < (unsigned) m_wordsPerFrame) {
+                words[vecCursor++] = vw[0];
+            }
+            if (in.m_long && (vecCursor < (unsigned) m_wordsPerFrame)) {
+                words[vecCursor++] = vw[1];
+            }
+            continue;
+        }
 
         if (m.m_type == Alphanumeric)
         {

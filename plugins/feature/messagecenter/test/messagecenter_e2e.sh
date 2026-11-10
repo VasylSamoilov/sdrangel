@@ -43,9 +43,9 @@ sleep 7
 R=$(report)
 check "the modulator is registered under its alias, idle" '[[ "$R" == *"\"alias\":\"t1\""*"\"role\":\"tx\""*"\"status\":\"idle\""* ]]'
 
-check "a page is accepted" '[ "$(post "{\"id\":\"p-tone\",\"transmitter\":\"t1\",\"protocol\":\"gsc\",\"address\":\"123456\",\"function\":1,\"type\":\"tone_only\"}")" = 202 ]'
+check "a page is accepted" '[ "$(post "{\"id\":\"p-tone\",\"transmitter\":\"t1\",\"protocol\":\"gsc\",\"address\":\"123456\",\"function\":1,\"type\":\"tone\"}")" = 202 ]'
 check "a page with text is accepted" '[ "$(post "{\"id\":\"p-alpha\",\"transmitter\":\"t1\",\"protocol\":\"gsc\",\"address\":\"123456\",\"function\":2,\"type\":\"alphanumeric\",\"text\":\"FROM THE CENTER\"}")" = 202 ]'
-check "a page for a transmitter that is not there is accepted" '[ "$(post "{\"id\":\"p-nobody\",\"transmitter\":\"nobody\",\"protocol\":\"gsc\",\"address\":\"123456\",\"function\":0,\"type\":\"tone_only\"}")" = 202 ]'
+check "a page for a transmitter that is not there is accepted" '[ "$(post "{\"id\":\"p-nobody\",\"transmitter\":\"nobody\",\"protocol\":\"gsc\",\"address\":\"123456\",\"function\":0,\"type\":\"tone\"}")" = 202 ]'
 check "a page with a bad address is refused" '[ "$(post "{\"id\":\"p-bad\",\"transmitter\":\"t1\",\"protocol\":\"flex\",\"address\":\"abc\"}")" = 400 ]'
 check "a voice page needs a file" '[ "$(post "{\"id\":\"p-voice\",\"transmitter\":\"t1\",\"protocol\":\"gsc\",\"address\":\"123456\",\"type\":\"voice\"}")" = 400 ]'
 

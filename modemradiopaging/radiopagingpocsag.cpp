@@ -321,7 +321,7 @@ RadioPagingPocsag::Interpretation RadioPagingPocsag::interpret(const std::vector
 
     if (nbBits <= 0)
     {
-        result.m_type = "tone_only";
+        result.m_type = "tone";
         return result;
     }
 

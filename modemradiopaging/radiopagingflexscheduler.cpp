@@ -207,6 +207,8 @@ RadioPagingFlexEncoder::EnqueueResult RadioPagingFlexEncoder::enqueue(const TxMe
     pm.m_type = message.m_type;
     pm.m_text = (message.m_type == RadioPagingFlex::Tone) ? std::string() : message.m_text;
     pm.m_priority = message.m_priority;
+    pm.m_shortType = message.m_shortType;
+    pm.m_source = message.m_source;
 
     int cost = RadioPagingFlex::messageCost(pm, &result.m_error);
 
@@ -311,7 +313,13 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
     };
 
     std::vector<Candidate> candidates[RadioPagingFlex::m_maxPhases];
+    // The system ID words of roaming (block information words 2 to 4) take words of the phase that carries them
+    const int ssidPhase = m_roaming.m_enabled ? RadioPagingFlex::ssidPhase(m_mode, time.m_frame) : -1;
+    const int ssidWords = (time.m_frame <= 3) ? 2 : 1;
     int used[RadioPagingFlex::m_maxPhases] = {0, 0, 0, 0};
+    if ((ssidPhase >= 0) && (ssidPhase < RadioPagingFlex::m_maxPhases)) {
+        used[ssidPhase] = ssidWords;
+    }
     int priorityWords[RadioPagingFlex::m_maxPhases] = {0, 0, 0, 0};
     std::vector<std::pair<uint64_t, int>> usage;
 
@@ -349,6 +357,8 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
             pm.m_type = m.m_type;
             pm.m_text = m.m_text;
             pm.m_priority = m.m_priority;
+            pm.m_shortType = m.m_shortType;
+            pm.m_source = m.m_source;
 
             int cost = RadioPagingFlex::messageCost(pm);
             if (cost < 0) {
@@ -460,6 +470,10 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
         for (const Candidate& c : candidates[p]) {
             addressWords[p] += c.m_addressWords;
         }
+        // The flag tells that the address field ends in block 0 (STD-43A 3.6): the system ID words come first
+        if (p == ssidPhase) {
+            addressWords[p] += ssidWords;
+        }
     }
     frame.m_traffic = RadioPagingFlex::lowTrafficFlags(addressWords, phases);
 
@@ -503,6 +517,8 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
                 pm.m_text = item.m_message.m_text;
                 pm.m_priority = item.m_message.m_priority;
                 pm.m_number = item.m_number;
+                pm.m_shortType = item.m_message.m_shortType;
+                pm.m_source = item.m_message.m_source;
                 messages.push_back(pm);
             }
 

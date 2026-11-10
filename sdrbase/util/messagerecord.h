@@ -70,7 +70,7 @@ struct SDRBASE_API MessageRecord
     QString m_protocol;             //!< Lower case protocol name: pocsag, flex, gsc, rds, ...
     QString m_mode;                 //!< Protocol mode, e.g. "1200" or "3200/4"
     Kind m_kind;
-    QString m_msgType;              //!< e.g. alphanumeric, numeric, tone_only
+    QString m_msgType;              //!< e.g. alphanumeric, numeric, tone
     QString m_address;              //!< Protocol formatted address, null for events
     Polarity m_polarity;
     int m_speed;                    //!< Bits per second, -1 if not applicable

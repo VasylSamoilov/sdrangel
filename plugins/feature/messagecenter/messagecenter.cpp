@@ -216,7 +216,8 @@ int MessageCenter::postToTransmitter(const MessageCenterPage& page, QString& err
     SWGSDRangel::SWGChannelActions query;
     SWGSDRangel::SWGRadioPagingModActions *actions = new SWGSDRangel::SWGRadioPagingModActions();
     SWGSDRangel::SWGRadioPagingModTx *tx = new SWGSDRangel::SWGRadioPagingModTx();
-    QString type = (r.m_msgType == "tone_only") ? "tone" : (r.m_msgType.isEmpty() ? QString("alphanumeric") : r.m_msgType);
+    // The modulator takes the record types (FLEX tone: the address alone; short_message: digits, none for tone only)
+    QString type = r.m_msgType.isEmpty() ? QString("alphanumeric") : r.m_msgType;
 
     tx->setId(new QString(r.m_id));
     tx->setProtocol(new QString(r.m_protocol));
@@ -234,6 +235,12 @@ int MessageCenter::postToTransmitter(const MessageCenterPage& page, QString& err
     {
         tx->setCapcode(d.value("capcode").toLongLong());
         tx->setPriority(d.value("priority").toInt());
+
+        if (type == "short_message")
+        {
+            tx->setShortType(d.value("short_type").toInt());
+            tx->setSource(d.value("short_source").toInt());
+        }
     }
     else {
         tx->setCapcode(d.value("address").toLongLong());       // GSC: the address as an integer of up to 6 digits
@@ -261,7 +268,7 @@ MessageRecord MessageCenter::pageRecord(const QString& transmitter, const QStrin
     r.m_kind = MessageRecord::KindMessage;
     r.m_protocol = protocol;
     r.m_msgType = type.isEmpty() ? QString("alphanumeric") : type;
-    r.m_text = ((r.m_msgType == "tone_only") || (r.m_msgType == "voice")) ? QString() : text;
+    r.m_text = ((r.m_msgType == "tone") || (r.m_msgType == "voice")) ? QString() : text;
     r.m_polarity = (polarity == "normal") ? MessageRecord::PolarityNormal
         : (polarity == "inverted") ? MessageRecord::PolarityInverted : MessageRecord::PolarityUnknown;
     r.m_speed = (speed > 0) ? speed : -1;
@@ -560,9 +567,10 @@ int MessageCenter::webapiActionsPost(const QStringList& featureActionsKeys, SWGS
             errorMessage = "Protocol must be pocsag, flex or gsc";
             return 400;
         }
-        if (!type.isEmpty() && (type != "alphanumeric") && (type != "numeric") && (type != "tone_only") && (type != "voice"))
+        if (!type.isEmpty() && (type != "alphanumeric") && (type != "numeric") && (type != "tone") && (type != "voice")
+         && !((type == "short_message") && (protocol == "flex")))
         {
-            errorMessage = "Type must be alphanumeric, numeric, tone_only or voice";
+            errorMessage = "Type must be alphanumeric, numeric, tone or voice (FLEX: or short_message)";
             return 400;
         }
         if ((type == "voice") && ((protocol != "gsc") || text(post->getVoiceFile()).isEmpty()))
@@ -589,9 +597,22 @@ int MessageCenter::webapiActionsPost(const QStringList& featureActionsKeys, SWGS
             return 400;
         }
 
+        if ((type == "short_message")
+         && ((post->getShortType() < 0) || (post->getShortType() > 2) || (post->getSource() < 0) || (post->getSource() > 7)))
+        {
+            errorMessage = "FLEX short message: shortType 0 (numeric), 1 (source) or 2 (numbered), source 0 to 7";
+            return 400;
+        }
+
         MessageRecord record = pageRecord(transmitter, protocol, address, post->getFunction(), post->getPriority(), type,
             text(post->getText()), text(post->getVoiceFile()), post->getSpeed(), polarity);
         record.m_id = text(post->getId());
+
+        if (type == "short_message")
+        {
+            record.m_protocolData.insert("short_type", post->getShortType());
+            record.m_protocolData.insert("short_source", post->getSource());
+        }
         m_inputMessageQueue.push(MsgPostPage::create(record));
         return 202;
     }

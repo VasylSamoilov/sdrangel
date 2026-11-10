@@ -31,6 +31,8 @@ void SWGMessageCenterPost::init()
     m_voiceFile = new QString(); m_voiceFileIsSet = false;
     m_speed = 0; m_speedIsSet = false;
     m_polarity = new QString(); m_polarityIsSet = false;
+    m_shortType = 0; m_shortTypeIsSet = false;
+    m_source = 0; m_sourceIsSet = false;
 }
 SWGMessageCenterPost* SWGMessageCenterPost::fromJson(QString& json)
 {
@@ -49,6 +51,8 @@ void SWGMessageCenterPost::fromJsonObject(QJsonObject& json)
     if (json.contains("voiceFile")) { ::SWGSDRangel::setValue(&m_voiceFile,json["voiceFile"],"QString","QString"); m_voiceFileIsSet = true; }
     if (json.contains("speed")) { ::SWGSDRangel::setValue(&m_speed,json["speed"],"qint32",""); m_speedIsSet = true; }
     if (json.contains("polarity")) { ::SWGSDRangel::setValue(&m_polarity,json["polarity"],"QString","QString"); m_polarityIsSet = true; }
+    if (json.contains("shortType")) { ::SWGSDRangel::setValue(&m_shortType,json["shortType"],"qint32",""); m_shortTypeIsSet = true; }
+    if (json.contains("source")) { ::SWGSDRangel::setValue(&m_source,json["source"],"qint32",""); m_sourceIsSet = true; }
 }
 QString SWGMessageCenterPost::asJson()
 {
@@ -68,12 +72,14 @@ QJsonObject* SWGMessageCenterPost::asJsonObject()
     if (m_voiceFile && (m_voiceFileIsSet || !m_voiceFile->isEmpty())) { toJsonValue(QString("voiceFile"),m_voiceFile,object,QString("QString")); }
     if (m_speedIsSet) { object->insert("speed",QJsonValue(m_speed)); }
     if (m_polarity && (m_polarityIsSet || !m_polarity->isEmpty())) { toJsonValue(QString("polarity"),m_polarity,object,QString("QString")); }
+    if (m_shortTypeIsSet) { object->insert("shortType",QJsonValue(m_shortType)); }
+    if (m_sourceIsSet) { object->insert("source",QJsonValue(m_source)); }
     return object;
 }
 bool SWGMessageCenterPost::isSet()
 {
     return m_idIsSet || m_transmitterIsSet || m_protocolIsSet || m_addressIsSet || m_functionIsSet || m_priorityIsSet || m_typeIsSet
-        || m_textIsSet || m_voiceFileIsSet || m_speedIsSet || m_polarityIsSet;
+        || m_textIsSet || m_voiceFileIsSet || m_speedIsSet || m_polarityIsSet || m_shortTypeIsSet || m_sourceIsSet;
 }
 QString* SWGMessageCenterPost::getId() { return m_id; }
 void SWGMessageCenterPost::setId(QString* value) { if (m_id != value) { delete m_id; m_id = value; } m_idIsSet = true; }
@@ -97,4 +103,8 @@ qint32 SWGMessageCenterPost::getSpeed() { return m_speed; }
 void SWGMessageCenterPost::setSpeed(qint32 value) { m_speed = value; m_speedIsSet = true; }
 QString* SWGMessageCenterPost::getPolarity() { return m_polarity; }
 void SWGMessageCenterPost::setPolarity(QString* value) { if (m_polarity != value) { delete m_polarity; m_polarity = value; } m_polarityIsSet = true; }
+qint32 SWGMessageCenterPost::getShortType() { return m_shortType; }
+void SWGMessageCenterPost::setShortType(qint32 value) { m_shortType = value; m_shortTypeIsSet = true; }
+qint32 SWGMessageCenterPost::getSource() { return m_source; }
+void SWGMessageCenterPost::setSource(qint32 value) { m_source = value; m_sourceIsSet = true; }
 }

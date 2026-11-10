@@ -990,7 +990,7 @@ RadioPagingGsc::Interpretation RadioPagingGsc::interpret(const std::vector<uint8
 
     if (nbBits <= 0)
     {
-        result.m_type = "tone_only";
+        result.m_type = "tone";
         return result;
     }
 

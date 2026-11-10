@@ -42,7 +42,15 @@ public:
     void setSpeed(qint32 value);
     QString* getPolarity();
     void setPolarity(QString* value);
+    qint32 getShortType();
+    void setShortType(qint32 value);
+    qint32 getSource();
+    void setSource(qint32 value);
 private:
+    qint32 m_shortType = 0;
+    bool m_shortTypeIsSet = false;
+    qint32 m_source = 0;
+    bool m_sourceIsSet = false;
     QString* m_id = nullptr;
     bool m_idIsSet = false;
     QString* m_transmitter = nullptr;

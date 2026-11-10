@@ -381,7 +381,7 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
         record.m_mode = QString::number(sourceRequest.m_pocsagBaud);
         record.m_speed = sourceRequest.m_pocsagBaud;
         record.m_address = QString("%1%2").arg(m.m_address, 7, 10, QChar('0')).arg(QChar('A' + (m.m_function & 3)));
-        record.m_msgType = (m.m_type == RadioPagingPocsag::Tone) ? "tone_only"
+        record.m_msgType = (m.m_type == RadioPagingPocsag::Tone) ? "tone"
             : (m.m_type == RadioPagingPocsag::Numeric) ? "numeric" : "alphanumeric";
         record.m_text = QString::fromStdString(m.m_text);
         inverted = sourceRequest.m_pocsagInverted;
@@ -394,9 +394,20 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
         record.m_mode = RadioPagingFlex::modeName(mode);
         record.m_speed = RadioPagingFlex::bitRate(mode);
         record.m_address = QString::number((qulonglong) m.m_capcode);
-        record.m_msgType = (m.m_type == RadioPagingFlex::Tone) ? "tone_only"
+        // FLEX names as the decoder: tone is the address alone; a short message without digits has the tone only payload
+        record.m_msgType = (m.m_type == RadioPagingFlex::Tone) ? "tone" : (m.m_type == RadioPagingFlex::ShortMessage) ? "short_message"
             : (m.m_type == RadioPagingFlex::Numeric) ? "numeric" : "alphanumeric";
-        record.m_text = QString::fromStdString(m.m_text);
+        record.m_text = (m.m_type == RadioPagingFlex::Tone) ? QString() : QString::fromStdString(m.m_text);
+
+        if (m.m_type == RadioPagingFlex::ShortMessage)
+        {
+            record.m_protocolData.insert("short_type", (int) m.m_shortType);
+            record.m_protocolData.insert("tone_only", (m.m_shortType == RadioPagingFlex::ShortNumeric)
+                && (m.m_text.find_first_not_of(' ') == std::string::npos));
+            if (m.m_shortType != RadioPagingFlex::ShortNumeric) {
+                record.m_protocolData.insert("short_source", m.m_source);
+            }
+        }
         inverted = sourceRequest.m_flexInverted;
     }
     else
@@ -406,7 +417,7 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
         record.m_mode = "600";
         record.m_speed = 600;
         record.m_address = QString::fromStdString(m.m_address) + QChar('0' + m.m_addressNumber);
-        record.m_msgType = (m.m_type == RadioPagingGsc::Voice) ? "voice" : (m.m_type == RadioPagingGsc::Tone) ? "tone_only"
+        record.m_msgType = (m.m_type == RadioPagingGsc::Voice) ? "voice" : (m.m_type == RadioPagingGsc::Tone) ? "tone"
             : (m.m_type == RadioPagingGsc::Numeric) ? "numeric" : "alphanumeric";
         record.m_text = QString::fromStdString(m.m_text);
         inverted = sourceRequest.m_gscInverted;
@@ -1169,11 +1180,15 @@ int RadioPagingMod::webapiActionsPost(
         }
 
         if (!type.isEmpty() && (type != "tone") && (type != "numeric") && (type != "alphanumeric")
-         && !((type == "voice") && (protocol == RadioPagingModSettings::Gsc)))
+         && !((type == "voice") && (protocol == RadioPagingModSettings::Gsc))
+         && !((type == "short_message") && (protocol == RadioPagingModSettings::Flex)))
         {
-            errorMessage = "Message type must be tone, numeric or alphanumeric (GSC: or voice)";
+            errorMessage = "Message type must be tone, numeric or alphanumeric (GSC: or voice; FLEX: or short_message)";
             return 400;
         }
+
+        // FLEX short_message: digits in the vector, an empty text is the tone only payload
+        const bool tone = (type == "tone");
 
         if (polarity.isEmpty()) {
             request.m_polarity = -1;
@@ -1205,7 +1220,7 @@ int RadioPagingMod::webapiActionsPost(
 
             request.m_pocsag.m_address = (uint32_t) swgTx->getAddress();
             request.m_pocsag.m_function = swgTx->getFunction();
-            request.m_pocsag.m_type = (type == "tone") ? RadioPagingPocsag::Tone
+            request.m_pocsag.m_type = tone ? RadioPagingPocsag::Tone
                 : (type == "numeric") ? RadioPagingPocsag::Numeric : RadioPagingPocsag::Alphanumeric;
             request.m_pocsag.m_text = text;
             request.m_speed = swgTx->getSpeed();
@@ -1219,10 +1234,23 @@ int RadioPagingMod::webapiActionsPost(
             }
 
             request.m_flex.m_capcode = (uint64_t) swgTx->getCapcode();
-            request.m_flex.m_type = (type == "tone") ? RadioPagingFlex::Tone
+            request.m_flex.m_type = tone ? RadioPagingFlex::Tone : (type == "short_message") ? RadioPagingFlex::ShortMessage
                 : (type == "numeric") ? RadioPagingFlex::Numeric : RadioPagingFlex::Alphanumeric;
             request.m_flex.m_text = text;
             request.m_flex.m_priority = swgTx->getPriority() != 0;
+
+            if (type == "short_message")
+            {
+                // STD-43A Table 3.9.2-1: 0 numeric (digits, none for the tone only payload), 1 source, 2 numbered
+                if ((swgTx->getShortType() < 0) || (swgTx->getShortType() > 2) || (swgTx->getSource() < 0) || (swgTx->getSource() > 7))
+                {
+                    errorMessage = "FLEX short message: shortType 0 (numeric), 1 (source) or 2 (numbered), source 0 to 7";
+                    return 400;
+                }
+
+                request.m_flex.m_shortType = (RadioPagingFlex::ShortType) swgTx->getShortType();
+                request.m_flex.m_source = swgTx->getSource();
+            }
         }
         else if (protocol == RadioPagingModSettings::Gsc)
         {
@@ -1241,10 +1269,10 @@ int RadioPagingMod::webapiActionsPost(
 
             request.m_gsc.m_address = QString("%1").arg((qlonglong) swgTx->getCapcode(), 6, 10, QChar('0')).toStdString();
             request.m_gsc.m_addressNumber = swgTx->getFunction() + 1;
-            request.m_gsc.m_type = (type == "tone") ? RadioPagingGsc::Tone
+            request.m_gsc.m_type = tone ? RadioPagingGsc::Tone
                 : (type == "voice") ? RadioPagingGsc::Voice
                 : (type == "numeric") ? RadioPagingGsc::Numeric : RadioPagingGsc::Alphanumeric;
-            request.m_gsc.m_text = ((type == "tone") || (type == "voice")) ? std::string() : text;
+            request.m_gsc.m_text = (tone || (type == "voice")) ? std::string() : text;
             request.m_voiceFile = (type == "voice") ? QString::fromStdString(text) : QString();
         }
 

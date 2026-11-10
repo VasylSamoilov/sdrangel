@@ -263,8 +263,13 @@ public:
 
         // Short message (vector type 2)
         int m_shortType = -1;               //!< t: 0 digits, 1 source, 2 source with number, 3 reserved
-        int m_shortSource = -1;
-        bool m_toneOnly = false;            //!< Short message without digits
+        int m_shortSource = -1;             //!< S2-S0 of types 1 and 2
+        bool m_toneOnly = false;            //!< Type 0, every digit a space: the tone only payload
+        // Type 0 for a network address (STD-43A Table 3.9.2-1, 6.1.2): the network ID, no digits
+        bool m_networkId = false;
+        int m_nidServiceArea = -1;          //!< A4-A0
+        int m_nidMultiplier = -1;           //!< M2-M0
+        int m_nidTrafficFlags = -1;         //!< F3-F0
 
         // Short instruction
         int m_instructionType = -1;         //!< 0 temporary address, 1 system event

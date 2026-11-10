@@ -101,8 +101,10 @@ public:
     {
         uint64_t m_capcode = 0;
         RadioPagingFlex::MessageType m_type = RadioPagingFlex::Alphanumeric;
-        std::string m_text;         //!< Ignored for tone
+        std::string m_text;         //!< Ignored for tone; short message: the digits of the numeric type
         bool m_priority = false;
+        RadioPagingFlex::ShortType m_shortType = RadioPagingFlex::ShortNumeric;    //!< Short message only
+        int m_source = 0;           //!< Short message source and numbered types: source code 0-7
     };
 
     struct EnqueueResult

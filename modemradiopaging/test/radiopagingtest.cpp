@@ -333,7 +333,7 @@ bool sameMessages(const std::vector<RadioPagingPocsagDecoder::Message>& rx, cons
         const auto& r = rx[i];
         const auto& t = tx[i];
         RadioPagingPocsag::Interpretation interp = RadioPagingPocsag::interpret(r.m_rawData, r.m_rawBits);
-        std::string expectedType = (t.m_type == RadioPagingPocsag::Tone) ? "tone_only"
+        std::string expectedType = (t.m_type == RadioPagingPocsag::Tone) ? "tone"
             : (t.m_type == RadioPagingPocsag::Numeric ? "numeric" : "alphanumeric");
 
         if ((r.m_address != t.m_address) || (r.m_function != t.m_function)

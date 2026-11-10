@@ -646,7 +646,7 @@ void testInterpretation()
     std::printf("      alpha: %s %d / %s %d, numeric: %s %d / %s %d\n", ia.m_type.c_str(), ia.m_score, ia.m_altType.c_str(), ia.m_altScore,
         in.m_type.c_str(), in.m_score, in.m_altType.c_str(), in.m_altScore);
 
-    check(G::interpret(std::vector<uint8_t>(), 0).m_type == "tone_only", "Interpretation without bits is tone only");
+    check(G::interpret(std::vector<uint8_t>(), 0).m_type == "tone", "Interpretation without bits is tone only");
 
     // A full block of alphanumeric text has no padding
     std::vector<G::TxMessage> full = { tx("100123", 1, G::Alphanumeric, "ABCDEFGH") };

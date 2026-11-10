@@ -1453,6 +1453,29 @@ void testRoaming()
         check(a == b, buf);
     }
 
+    // Low traffic flags (STD-43A 3.6): the address field ends in block 0. Frame 0 of 1600/2 with 6 tone only
+    // addresses: BIW1 + 6 = 7 words fit in block 0; with roaming BIW1 + SSID1 + SSID2 + 6 = 9 do not
+    for (bool roam : {false, true})
+    {
+        Enc enc;
+        Dec dec;
+        Enc::Roaming r;
+        r.m_enabled = roam;
+        enc.setRoaming(r);
+        for (int i = 0; i < 6; i++)
+        {
+            Enc::TxMessage m;
+            m.m_capcode = 1000 + i;
+            m.m_type = Flex::Tone;
+            enc.enqueue(m);
+        }
+        Enc::Frame f = enc.buildFrame(0);
+        dec.decodeFrame(toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data));
+        bool ok = (f.m_sentIds.size() == 6) && (dec.lastFrame().m_traffic == (roam ? 0u : 0xfu));
+        check(ok, roam ? "low traffic flags: SSID words count in block 0, flags clear"
+                       : "low traffic flags: 6 tone addresses in block 0, flags set");
+    }
+
     // Off by default: no flag, no extra words
     Enc enc;
     Dec dec;
@@ -1461,10 +1484,162 @@ void testRoaming()
     check(!dec.lastFrame().m_roaming && dec.lastFrame().m_blocks[0].m_extra.empty(), "roaming off: no flag and no extra words");
 }
 
+// ---------------------------------------------------------------------------
+// Short message vector (STD-43A 3.9.2): digits in the vector, no digits = tone only payload
+// ---------------------------------------------------------------------------
+
+void testShortMessage()
+{
+    // Layout of Fig. 3.9.2-1: type 010, t = 00, digits a b c in d0-d11 (bits 9-20); second word d12-d31, d32 = 0
+    uint32_t vw[2];
+    Flex::shortMessageVector(Flex::ShortNumeric, "12", 0, 0, false, false, vw);
+    uint32_t d = Flex::wordData(vw[0]);
+    check(((d >> 4) & 7) == 2 && ((d >> 7) & 3) == 0 && ((d >> 9) & 0xfff) == 0xc21 && Flex::checksumValid(d),
+        "short message vector layout: 1 2 space");
+    Flex::shortMessageVector(Flex::ShortNumeric, "", 0, 0, false, true, vw);
+    check(((Flex::wordData(vw[0]) >> 9) & 0xfff) == 0xccc && Flex::wordData(vw[1]) == 0xccccc,
+        "short message vector, long address, no digits: all spaces, d32 = 0");
+    Flex::shortMessageVector(Flex::ShortSource, "", 5, 0, false, true, vw);
+    d = Flex::wordData(vw[0]);
+    check(((d >> 7) & 3) == 1 && ((d >> 9) & 0xfff) == 5 && Flex::checksumValid(d) && (Flex::wordData(vw[1]) == 0),
+        "short message vector, source: t = 01, S in d0-d2, not used bits 0");
+    Flex::shortMessageVector(Flex::ShortNumbered, "", 6, 45, true, false, vw);
+    d = Flex::wordData(vw[0]);
+    check(((d >> 7) & 3) == 2 && ((d >> 9) & 0xfff) == (6u | (45u << 3) | (1u << 9)) && Flex::checksumValid(d),
+        "short message vector, numbered: t = 10, S d0-d2, N d3-d8, R d9");
+
+    struct Case { uint64_t m_capcode; const char *m_text; bool m_toneOnly; const char *m_digits; };
+    const Case cases[] = {
+        { 1234567, "", true, "   " },
+        { 1234567, "42", false, "42 " },
+        { 1234567, "020", false, "020" },     // bits 7-20 read as a start and a length give 0 and 0
+        { 2101300, "", true, "        " },
+        { 2101300, "12345678", false, "12345678" },
+    };
+    const Flex::Mode modes[] = {Flex::Mode1600_2, Flex::Mode6400_4};
+
+    for (Flex::Mode mode : modes)
+    {
+        for (const Case& c : cases)
+        {
+            Enc enc;
+            Dec dec;
+            Enc::TxMessage m;
+            m.m_capcode = c.m_capcode;
+            m.m_type = Flex::ShortMessage;
+            m.m_text = c.m_text;
+            enc.setMode(mode);
+            Enc::EnqueueResult er = enc.enqueue(m);
+            std::vector<Dec::Message> out = runEncoder(enc, dec);
+            bool ok = er.m_ok && (out.size() == 1);
+
+            if (ok)
+            {
+                const Dec::Message& r = out[0];
+                ok = (r.m_capcode == c.m_capcode) && (r.m_type == Dec::TypeShortMessage) && (r.m_shortType == 0)
+                    && (r.m_toneOnly == c.m_toneOnly) && (r.m_text == c.m_digits);
+            }
+
+            char buf[128];
+            std::snprintf(buf, sizeof(buf), "short message %s capcode %llu \"%s\": decoded, tone only %d", Flex::modeName(mode),
+                (unsigned long long) c.m_capcode, c.m_text, c.m_toneOnly ? 1 : 0);
+            check(ok, buf);
+        }
+    }
+
+    // Source and numbered types, short and long address: the number is the one of the message numbering
+    for (uint64_t capcode : {(uint64_t) 1234567, (uint64_t) 2101300})
+    {
+        for (Flex::ShortType type : {Flex::ShortSource, Flex::ShortNumbered})
+        {
+            Enc enc;
+            Dec dec;
+            Enc::TxMessage m;
+            m.m_capcode = capcode;
+            m.m_type = Flex::ShortMessage;
+            m.m_shortType = type;
+            m.m_source = 3;
+            bool ok = enc.enqueue(m).m_ok;
+            std::vector<Dec::Message> out;
+            int number = -1;
+
+            for (uint64_t index = 0; ok && (index < 200) && out.empty(); index++)
+            {
+                Enc::Frame f = enc.buildFrame(index);
+                if (f.m_reserved) {
+                    continue;
+                }
+                if (!f.m_sentNumbers.empty()) {
+                    number = (int) f.m_sentNumbers[0];
+                }
+                out = dec.decodeFrame(toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data));
+            }
+
+            ok = ok && (out.size() == 1) && (out[0].m_type == Dec::TypeShortMessage) && (out[0].m_shortType == (int) type)
+                && (out[0].m_shortSource == 3) && out[0].m_text.empty() && !out[0].m_toneOnly;
+            if (ok && (type == Flex::ShortNumbered)) {
+                ok = (out[0].m_messageNumber == number) && out[0].m_retrieval;
+            }
+
+            char buf[128];
+            std::snprintf(buf, sizeof(buf), "short message %s, capcode %llu: decoded", (type == Flex::ShortSource) ? "source" : "numbered",
+                (unsigned long long) capcode);
+            check(ok, buf);
+        }
+    }
+
+    // Network address with a short message vector t = 00: the network ID F3-F0 M2-M0 A4-A0 (Table 3.9.2-1 (1), 6.1.2)
+    {
+        uint32_t words[Flex::m_wordsPerFrame];
+        Flex::fillIdle(words, 0, Flex::Mode1600_2);
+        const uint32_t sa = 21, mult = 5, tmf = 0xa;
+        words[0] = Flex::blockInfoWord(0, 0, 2, 0, 0);
+        words[1] = Flex::encodeWord(0x1F6800u + 7);
+        words[2] = Flex::encodeWord(Flex::addChecksum((Flex::m_vectorTone << 4) | ((sa | (mult << 5) | (tmf << 8)) << 9)));
+        for (int b = 0; b < Flex::m_blocksPerFrame; b++) {
+            Flex::interleaveBlock(words + b * Flex::m_wordsPerBlock);
+        }
+        Flex::FrameParams fp;
+        Flex::FrameBytes bytes = Flex::assemble(fp, {std::vector<uint32_t>(words, words + Flex::m_wordsPerFrame)});
+        Dec dec;
+        std::vector<Dec::Message> out = dec.decodeFrame(toRxFrame(Flex::Mode1600_2, false, bytes.m_sync, bytes.m_data));
+        bool ok = (out.size() == 1) && (out[0].m_type == Dec::TypeShortMessage) && out[0].m_networkId
+            && (out[0].m_nidServiceArea == (int) sa) && (out[0].m_nidMultiplier == (int) mult)
+            && (out[0].m_nidTrafficFlags == (int) tmf) && out[0].m_text.empty() && !out[0].m_toneOnly;
+        check(ok, "short message on a network address: network ID, service area, multiplier, traffic flags");
+    }
+
+    // Too many digits, characters that are not numeric, digits in the source type, source out of range
+    {
+        Enc enc;
+        Enc::TxMessage m;
+        m.m_capcode = 1234567;
+        m.m_type = Flex::ShortMessage;
+        m.m_shortType = Flex::ShortSource;
+        m.m_text = "1";
+        bool digitsRefused = !enc.enqueue(m).m_ok;
+        m.m_text.clear();
+        m.m_source = 8;
+        bool sourceRefused = !enc.enqueue(m).m_ok;
+        check(digitsRefused && sourceRefused, "short message source: digits and source 8 refused");
+    }
+
+    Enc enc;
+    Enc::TxMessage m;
+    m.m_capcode = 1234567;
+    m.m_type = Flex::ShortMessage;
+    m.m_text = "1234";
+    bool tooLong = !enc.enqueue(m).m_ok;
+    m.m_text = "1A";
+    bool notNumeric = !enc.enqueue(m).m_ok;
+    check(tooLong && notNumeric, "short message: 4 digits on a short address and letters refused");
+}
+
 int main()
 {
     testReferenceFrames();
     testRoaming();
+    testShortMessage();
     testBiw();
     testRoundTrip();
     testErrors();

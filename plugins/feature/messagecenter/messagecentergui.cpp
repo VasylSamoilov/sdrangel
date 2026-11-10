@@ -124,7 +124,7 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     m_polarity = new QComboBox(this);
     m_polarity->addItems({"Any polarity", "Normal", "Inverted"});
     m_type = new QComboBox(this);
-    m_type->addItems({"Any type", "alphanumeric", "numeric", "tone_only", "voice"});
+    m_type->addItems({"Any type", "alphanumeric", "numeric", "tone", "voice", "short_message"});
     m_alias = new QLineEdit(this);
     m_alias->setPlaceholderText("channel alias");
     m_address = new QLineEdit(this);
@@ -351,7 +351,7 @@ void MessageCenterGUI::buildCompose(QWidget *container)
     m_function->addItems({"1 (A)", "2 (B)", "3 (C)", "4 (D)"});
     m_function->setToolTip("POCSAG function A to D, GSC address number 1 to 4");
     m_type = new QComboBox(container);
-    m_type->addItems({"alphanumeric", "numeric", "tone_only", "voice"});
+    m_type->addItems({"alphanumeric", "numeric", "tone", "voice", "short_message"});
     m_text = new QLineEdit(container);
     m_voiceFile = new QLineEdit(container);
     m_voiceFile->setPlaceholderText("WAV file");
@@ -732,7 +732,7 @@ void MessageCenterGUI::transmitterChanged()
 void MessageCenterGUI::typeChanged()
 {
     bool voice = (m_type->currentText() == "voice");
-    bool tone = (m_type->currentText() == "tone_only");
+    bool tone = (m_type->currentText() == "tone");
     m_text->setEnabled(!voice && !tone);
     m_voiceFile->setEnabled(voice);
 }

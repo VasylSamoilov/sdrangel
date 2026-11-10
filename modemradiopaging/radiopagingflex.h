@@ -59,7 +59,16 @@ public:
     enum MessageType {
         Tone,           //!< Address only
         Numeric,        //!< 0-9 U space - ] [ . (and _ as - and u as U)
-        Alphanumeric    //!< 7-bit characters
+        Alphanumeric,   //!< 7-bit characters
+        ShortMessage    //!< Short message vector (STD-43A 3.9.2), all the data in the vector, see ShortType
+    };
+
+    //! Types of short messages (STD-43A Table 3.9.2-1, t1 t0)
+    enum ShortType {
+        ShortNumeric = 0,   //!< 00: 3 digits (8 for a long address), numeric characters, the unused ones spaces.
+                            //!< Every digit a space: the tone only payload
+        ShortSource = 1,    //!< 01: source code S2-S0 (8.5 Source Indication), the other bits not used (0)
+        ShortNumbered = 2   //!< 10: source code, message number N5-N0, retrieval flag R0 (8.4 Message Numbering)
     };
 
     static const int m_wordsPerBlock = 8;
@@ -83,7 +92,9 @@ public:
         MessageType m_type = Alphanumeric;
         std::string m_text;
         bool m_priority = false;    //!< Address in the priority part of the address field
-        int m_number = 0;           //!< Message number 0-63, sent in alphanumeric messages
+        int m_number = 0;           //!< Message number 0-63, sent in alphanumeric and numbered short messages
+        ShortType m_shortType = ShortNumeric;   //!< Short message only
+        int m_source = 0;           //!< Short message source and numbered types: source code S2-S0, 0-7
     };
 
     struct PhaseParams
@@ -162,6 +173,15 @@ public:
 
     static uint32_t alphaVector(unsigned start, unsigned words);
     static uint32_t numericVector(unsigned start, unsigned words, unsigned kBits);
+    //!< Short message vector (STD-43A Fig. 3.9.2-1, Table 3.9.2-1): t1 t0 in bits 7-8, d0-d11 in bits 9-20.
+    //!< Numeric: digits a to c in d0-d11, d to h in d12-d31 of the second word of a long address (d32 = 0),
+    //!< unused digits are spaces (HEX C). Source: S2-S0 in d0-d2. Numbered: S2-S0 in d0-d2, N5-N0 in d3-d8,
+    //!< R0 in d9. Bits not used and idle bits are 0. words[0] the vector, words[1] the second word (long
+    //!< address only; the check character does not cover it)
+    static void shortMessageVector(ShortType type, const std::string& digits, int source, int number, bool retrieval,
+        bool longAddress, uint32_t words[2]);
+    static const int m_maxShortDigits = 3;
+    static const int m_maxShortDigitsLong = 8;
     static const unsigned m_vectorTone = 2;
     static const unsigned m_vectorNumeric = 3;
     static const unsigned m_vectorAlpha = 5;

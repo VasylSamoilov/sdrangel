@@ -406,6 +406,19 @@ void RadioPagingFlexDecoder::processVector(const AddressContext& a, int j)
         return;
     }
 
+    // A short message vector has no message field: bits 7-20 are its data, not a start and a length
+    if (vecType == 2)
+    {
+        if (a.m_type == AddressReserved) {
+            return;
+        }
+        if (a.m_type == AddressTemporary) {
+            handleTemporaryAddress(a, j, vecType, mw1, proto);
+        }
+        decodeShortMessage(proto, a, j);
+        return;
+    }
+
     if ((mw1 == 0) && (mw2 == 0)) {
         return;
     }
@@ -452,9 +465,6 @@ void RadioPagingFlexDecoder::processVector(const AddressContext& a, int j)
     case 4:
     case 7:
         decodeNumeric(proto, a, j, vecType, mw1, mw2);
-        break;
-    case 2:
-        decodeShortMessage(proto, a, j);
         break;
     case 6:
         decodeBinary(proto, a, j, mw1, mw2);
@@ -523,19 +533,33 @@ void RadioPagingFlexDecoder::decodeShortMessage(Message& proto, const AddressCon
     proto.m_type = TypeShortMessage;
     proto.m_shortType = (int) t;
 
-    if (t == 0)
+    // The second vector word of a long address carries d12-d32 (digits, or bits not used / idle)
+    const bool second = a.m_long && (j + 1 < wordsPerFrame);
+    const uint32_t v2 = second ? m_w[j + 1].m_data : 0;
+
+    if (second) {
+        raw.push_back(v2);
+    }
+
+    if ((t == 0) && (a.m_type == AddressNetwork))
     {
+        // Network ID: F3-F0 M2-M0 A4-A0 (STD-43A Table 3.9.2-1 (1), Table 6.1.2-1)
+        proto.m_networkId = true;
+        proto.m_nidServiceArea = (int) (d & 0x1f);
+        proto.m_nidMultiplier = (int) ((d >> 5) & 7);
+        proto.m_nidTrafficFlags = (int) ((d >> 8) & 0xf);
+    }
+    else if (t == 0)
+    {
+        // Digits a b c in d0-d11, d to h in d12-d31 of a long address; unused digits are spaces
         std::string digits;
 
         digits += bcdChars[d & 0xf];
         digits += bcdChars[(d >> 4) & 0xf];
         digits += bcdChars[(d >> 8) & 0xf];
 
-        if (a.m_long && (j + 1 < wordsPerFrame))
+        if (second)
         {
-            uint32_t v2 = m_w[j + 1].m_data;
-
-            raw.push_back(v2);
             digits += bcdChars[v2 & 0xf];
             digits += bcdChars[(v2 >> 4) & 0xf];
             digits += bcdChars[(v2 >> 8) & 0xf];
@@ -546,15 +570,17 @@ void RadioPagingFlexDecoder::decodeShortMessage(Message& proto, const AddressCon
         proto.m_text = digits;
         proto.m_toneOnly = (digits.find_first_not_of(' ') == std::string::npos);
     }
-    else if ((t == 1) || (t == 2))
+    else if (t == 1)
     {
+        // Source S2-S0 in d0-d2, the other bits are not used
         proto.m_shortSource = (int) (d & 7);
-
-        if (t == 2)
-        {
-            proto.m_messageNumber = (int) ((d >> 3) & 0x3f);
-            proto.m_retrieval = ((d >> 9) & 1) != 0;
-        }
+    }
+    else if (t == 2)
+    {
+        // Source S2-S0 in d0-d2, message number N5-N0 in d3-d8, retrieval flag R0 in d9
+        proto.m_shortSource = (int) (d & 7);
+        proto.m_messageNumber = (int) ((d >> 3) & 0x3f);
+        proto.m_retrieval = ((d >> 9) & 1) != 0;
     }
 
     setRaw(proto, raw);

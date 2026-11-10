@@ -159,7 +159,6 @@ QString typeChip(const QString& type)
     static const QMap<QString, QPair<QString, QString>> labels = {
         {"alphanumeric", {"ALPHA", "#a5d6a7|#1b5e20"}},
         {"numeric", {"NUM", "#90caf9|#1a237e"}},
-        {"tone_only", {"TONE", "#ce93d8|#4a148c"}},
         {"tone", {"TONE", "#ce93d8|#4a148c"}},
         {"voice", {"VOICE", "#81d4fa|#01579b"}},
         {"secure", {"SEC", "#cfd8dc|#37474f"}},
@@ -414,7 +413,7 @@ void RadioPagingDemodGUI::recordReceived(const MessageRecord& record)
 
     // Message, with the alternative decode in grey italics
     QString message = text;
-    if (message.isEmpty() && record.m_msgType.startsWith("tone")) {
+    if (message.isEmpty() && ((record.m_msgType == "tone") || d.value("tone_only").toBool())) {
         message = tr("(tone only)");
     }
     QString messageHtml = message.toHtmlEscaped();

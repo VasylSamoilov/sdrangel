@@ -803,7 +803,8 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
     record.m_address = QString::fromStdString(message.m_address);
     record.m_polarity = polarity(message.m_inverted);
     record.m_msgType = QString::fromStdString(message.m_typeName);
-    if (!message.m_text.empty()) {
+    // A short message with every digit a space is the tone only payload: no text
+    if (!message.m_text.empty() && !message.m_toneOnly) {
         record.m_text = escapeText(message.m_text);
     }
     record.m_rawData = toByteArray(message.m_rawData);
@@ -843,6 +844,20 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
         record.m_protocolData.insert("group_slot", message.m_tempSlot);
         record.m_protocolData.insert("group_tracked", message.m_groupTracked);
         record.m_protocolData.insert("group_capcodes", members);
+    }
+
+    if (message.m_type == RadioPagingFlexDecoder::TypeShortMessage)
+    {
+        record.m_protocolData.insert("short_type", message.m_shortType);
+        record.m_protocolData.insert("tone_only", message.m_toneOnly);
+        record.m_protocolData.insert("short_source", message.m_shortSource);
+
+        if (message.m_networkId)
+        {
+            record.m_protocolData.insert("nid_service_area", message.m_nidServiceArea);
+            record.m_protocolData.insert("nid_multiplier", message.m_nidMultiplier);
+            record.m_protocolData.insert("nid_traffic_flags", message.m_nidTrafficFlags);
+        }
     }
 
     if (message.m_type == RadioPagingFlexDecoder::TypeShortInstruction)
@@ -933,7 +948,7 @@ void RadioPagingDemodSink::sendGsc(const RadioPagingGscDecoder::Message& message
     }
     else
     {
-        record.m_msgType = "tone_only";
+        record.m_msgType = "tone";
         record.m_protocolData.insert("interleaved", message.m_interleaved);
     }
 

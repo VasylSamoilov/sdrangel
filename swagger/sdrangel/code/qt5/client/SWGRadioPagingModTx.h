@@ -40,7 +40,15 @@ public:
     void setId(QString* value);
     QString* getPolarity();
     void setPolarity(QString* value);
+    qint32 getShortType();
+    void setShortType(qint32 value);
+    qint32 getSource();
+    void setSource(qint32 value);
 private:
+    qint32 m_shortType = 0;
+    bool m_shortTypeIsSet = false;
+    qint32 m_source = 0;
+    bool m_sourceIsSet = false;
     qint32 m_address = 0;
     bool m_addressIsSet = false;
     qint32 m_function = 0;
