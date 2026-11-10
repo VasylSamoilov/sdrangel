@@ -21,15 +21,98 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "nmtframe.h"
 #include "nmtmodem.h"
 #include "nmtnumbers.h"
+#include "nmtvoice.h"
+#include "timer.h"
 #include "export.h"
 
 namespace modemnmt
 {
+
+class NmtChannel;
+
+// A mobile station as the exchange knows it: country digit, six digit number, password.
+struct NmtSubscriber
+{
+    char country = '0';
+    std::string number;         // six digits
+    std::string password;       // three digits, as sent by the phone at roaming
+    bool coinbox = false;       // the phone is a coin-box phone
+};
+
+// What a subscriber is doing on the channels of the base station.
+struct NmtTransaction
+{
+    NmtSubscriber subscriber;
+    std::vector<NmtChannel*> channels;      // channels the transaction is bound to
+    bool callUp = false;                    // a call exists in the exchange for the transaction
+
+    // call to the phone
+    bool mobileTerminated = false;
+    bool paging = false;                    // the phone has not answered the page yet
+    int pageTry = 0;
+    bool pageDeferred = false;              // waiting for the wake-up window of battery saving
+    bool pageWaited = false;                // the wake-up window was waited for
+    bool priority = false;                  // the phone answered as a priority phone
+    std::string callerId;
+    modemcellular::NumberType callerType = modemcellular::NumberType::NotAvailable;
+    std::unique_ptr<modemcellular::Timer> timer;        // paging
+};
+
+// What a channel needs from the base station it belongs to (implemented by NmtSystem).
+class NmtHost
+{
+public:
+    virtual ~NmtHost() = default;
+    virtual modemcellular::TimerService& timers() = 0;
+    // Binds a new transaction of the subscriber to the channel. Null if the subscriber has one.
+    virtual NmtTransaction* createTransaction(const NmtSubscriber& subscriber, NmtChannel& channel) = 0;
+    // Ends the transaction; every channel bound to it goes idle.
+    virtual void destroyTransaction(NmtTransaction* transaction) = 0;
+    // The channel is going away while it is bound to the transaction: the transaction ends
+    // when no other channel is bound to it.
+    virtual void detachChannel(NmtChannel& channel, NmtTransaction* transaction) = 0;
+    // The phone has identified itself on a roaming update.
+    virtual void roamingConfirmed(const NmtSubscriber& subscriber) = 0;
+    // The phone has dialled a number. True if the call was taken, the phone then gets the
+    // address complete signal. False if it cannot be placed, the phone is released.
+    virtual bool callDialled(NmtTransaction& transaction, const std::string& dialled) = 0;
+    // The phone cleared a call that was taken with callDialled().
+    virtual void callCleared(NmtTransaction& transaction) = 0;
+    // Speech of a connected call, 8 kHz mono: from the phone, and for the phone (the host
+    // fills the samples, silence if it has none). Called from the audio path of the channel.
+    virtual void audioFromMobile(NmtTransaction& transaction, const float* samples, int count) = 0;
+    virtual void audioToMobile(NmtTransaction& transaction, float* samples, int count) = 0;
+
+    // Calls to the phone
+    // The best free traffic channel for a call that is on the calling channel `from`: a traffic
+    // channel, or a combined one (the calling channel itself counts as free). Null if none.
+    virtual NmtChannel* findTrafficChannel(NmtChannel& from) = 0;
+    // The phone answered the page on this channel: the other channels that page it stop.
+    virtual void pagingAnswered(NmtTransaction& transaction, NmtChannel& channel) = 0;
+    // The call moves from the calling channel to the traffic channel.
+    virtual void moveToTrafficChannel(NmtTransaction& transaction, NmtChannel& from, NmtChannel& to) = 0;
+    // The phone rings, and it was answered.
+    virtual void callAlerting(NmtTransaction& transaction) = 0;
+    virtual void callAnswered(NmtTransaction& transaction) = 0;
+    // The call to the phone failed before it was answered (no answer, no channel, ...).
+    virtual void callFailed(NmtTransaction& transaction, modemcellular::Cause cause) = 0;
+};
+
+// What the transmitter of a channel sends instead of frames.
+enum class DspMode
+{
+    Frame,          // signalling frames
+    DialTone,       // dial tone, 425 Hz
+    Audio           // speech; silence until the voice path is connected
+};
 
 enum class ChannelType
 {
@@ -53,6 +136,8 @@ struct ChannelConfig
     bool sendClock = false;         // send the time with the calling channel
     int batteryPeriod = 0;          // battery saving period code 0..9, 0 for none (phones never sleep)
     int batteryGroup = 8;           // battery saving group 0..8, 8 addresses all phones
+    int supervisory = 0;            // supervisory tone 1..4 on a traffic channel, 0 for none
+    bool sendCallerId = false;      // send the number of the caller while the phone rings
     // NMT-900 channel band advertisement; channel numbers, 0 for none
     int ccBandStart = 0;
     int ccBandEnd = 0;
@@ -64,12 +149,38 @@ struct ChannelConfig
 // Hour and minute of the local time.
 using TimeOfDay = std::function<std::pair<int, int>()>;
 
-// One NMT radio channel of a base station: the FFSK modem and the signalling of the channel. This
-// is the idle channel only: it sends the idle frame of the channel type and passes everything it
-// receives to the listener.
+// One NMT radio channel of a base station: the FFSK modem and the signalling of the channel.
+// Without a host the channel only sends the idle frame of its type and passes everything it
+// receives to the listener. With a host (attach) it also runs the call states: roaming update,
+// calls from the phone with speech and supervision, and release.
+//
+// Not thread safe, the caller serialises all calls including the timers. In particular render()
+// and receive() must not run at the same time: they share the state, the transaction, the
+// timer, the supervisory detector and the modem. An audio handler runs inside one of them and
+// must not block; it may call NmtSystem::releaseCall.
 class MODEMNMT_API NmtChannel
 {
 public:
+    enum class State
+    {
+        Idle,               // channel is not in use
+        RoamingIdent,       // seizure received, waiting for the identity
+        RoamingConfirm,     // identity received, sending the confirmation
+        MoIdent,            // call seizure received, waiting for the identity
+        MoConfirm,          // identity received, sending proceed to send
+        MoDialling,         // receiving the digits, dial tone until the first one
+        MoComplete,         // all digits received, sending address complete
+        Active,             // call connected
+        MtPaging,           // calling channel: paging the phone
+        MtQueue,            // calling channel: the phone waits for a free traffic channel
+        MtChannel,          // calling channel: assigning the traffic channel
+        MtIdent,            // traffic channel: waiting for the identity of the phone
+        MtRinging,          // traffic channel: the phone rings
+        MtComplete,         // traffic channel: the phone answered, connecting
+        MoRelease,          // acknowledging a release from the phone
+        MtRelease           // sending a release towards the phone
+    };
+
     struct ReceivedFrame
     {
         Frame frame;
@@ -82,6 +193,7 @@ public:
 
     // sampleRate of the audio, deviationFactor scales the signalling level to the transmitter.
     NmtChannel(const ChannelConfig& config, double sampleRate, double deviationFactor);
+    ~NmtChannel();
     NmtChannel(const NmtChannel&) = delete;
     NmtChannel& operator=(const NmtChannel&) = delete;
 
@@ -89,26 +201,90 @@ public:
     bool valid() const { return m_valid; }
     const ChannelConfig& config() const { return m_config; }
 
+    // Connects the channel to its base station, once. The host must outlive the channel.
+    void attach(NmtHost& host);
+    // Called by the host when the transaction of the channel ended.
+    void transactionEnded();
+    // The calling channel pages the phone of the transaction (again, if it did before).
+    void startPaging(NmtTransaction& transaction);
+    // The traffic channel takes over a call to the phone: identity request, then ringing.
+    void beginMtIdent(NmtTransaction& transaction);
+    // The channel is a calling channel (also a combined one).
+    bool isCallingChannel() const;
+    State state() const { return m_state; }
+
     void setTimeOfDay(TimeOfDay timeOfDay) { m_timeOfDay = std::move(timeOfDay); }
     void setFrameListener(FrameListener listener) { m_listener = std::move(listener); }
 
-    // Next frame of the idle channel, counts the frames sent. The additional information
+    // Next idle frame of the channel, counts the idle frames sent. The additional information
     // alternates between channel band advertisement and battery saving if both are configured.
     Frame idleFrame();
     uint64_t framesSent() const { return m_framesSent; }
 
-    // Audio towards the radio: frames back to back. Audio from the radio: frames are decoded and
-    // given to the listener.
-    int render(float* samples, int length, bool add) { return m_modem.render(samples, length, add); }
-    void receive(const float* samples, int length) { m_modem.receive(samples, length); }
+    // Audio towards the radio: frames back to back, or the dial tone, or speech. Renders the
+    // whole buffer; returns the number of samples that carried frames. Audio from the radio:
+    // frames are decoded and given to the listener.
+    int render(float* samples, int length, bool add);
+    void receive(const float* samples, int length);
+    DspMode dspMode() const { return m_dspMode; }
+    // Whether the supervisory tone of the phone is heard (during a call).
+    bool supervisoryDetected() const { return m_superDetector.detected(); }
+
+    // The call ended on the far end: releases the phone. False if the phone is not in a state
+    // that can be released.
+    bool networkRelease();
+    // The number the phone dialled so far.
+    const std::string& dialled() const { return m_dialled; }
 
     // The frame as it came from the modem, for use without audio.
     void receiveFrame(const RxFrame& rx);
+    // The next frame to send, as the modem asks for it. False if the channel cannot be used.
+    bool nextFrame(FrameBits& bits);
 
 private:
-    bool nextFrame(FrameBits& bits);
     bool bandAdvertisement() const;
     uint64_t additionalInfo(MessageType type);
+
+    // frames to the phone
+    Frame baseFrame(MessageType type) const;
+    Frame lineSignalFrame(int signal) const;
+    Frame txIdentRequest();
+    Frame txRoamingConfirm();
+    Frame txMoConfirm();
+    Frame txMoComplete();
+    Frame txMtPaging();
+    Frame txMtQueue();
+    Frame txMtChannel();
+    Frame txMtRinging();
+    Frame txMtComplete();
+    void enterActive();
+    void failCall(modemcellular::Cause cause);
+    Frame txMoRelease();
+    Frame txMtRelease();
+
+    // frames from the phone
+    void process(const Frame& frame);
+    void rxIdle(const Frame& frame);
+    void rxIdent(const Frame& frame);
+    void rxMoDialling(const Frame& frame);
+    void rxMtPaging(const Frame& frame);
+    void rxMtIdent(const Frame& frame);
+    void rxMtRinging(const Frame& frame);
+    void completeDialling();
+    void rxMtRelease(const Frame& frame);
+    void setDspMode(DspMode mode);
+    int renderTone(float* samples, int length, bool add);
+    void onSupervisory(bool detected);
+    bool callAudioUp() const;
+    bool matchChannel(const Frame& frame) const;
+    bool matchArea(const Frame& frame) const;
+    bool matchSubscriber(const Frame& frame) const;
+    static NmtSubscriber subscriberOf(const Frame& frame);
+    bool isTrafficChannel() const;
+
+    void release();
+    void goIdle();
+    void onTimer();
 
     ChannelConfig m_config;
     bool m_valid;
@@ -116,6 +292,28 @@ private:
     FrameListener m_listener;
     NmtModem m_modem;
     uint64_t m_framesSent;
+
+    NmtHost* m_host;
+    std::unique_ptr<modemcellular::Timer> m_timer;
+    State m_state;
+    NmtTransaction* m_transaction;
+    uint64_t m_rxFrameCount;        // frame periods since the seizure
+    int m_txFrameCount;             // frames sent in the current state
+
+    double m_sampleRate;
+    double m_deviationFactor;
+    DspMode m_dspMode;
+    double m_tonePhase;             // cycles of the dial tone
+    std::string m_dialled;
+
+    // speech path
+    SupervisoryDetector m_superDetector;
+    SupervisoryTone m_superTone;
+    RxAudioChain m_rxAudio;
+    TxAudioSource m_txAudio;
+    int m_rxMute;                   // samples of received audio still to be muted
+    bool m_alarmRunning;            // the supervisory tone was lost and the alarm timer runs
+    int m_callerIdCount;            // 0: no number while ringing, 1: before the first ring, 2: after
 };
 
 } // namespace modemnmt

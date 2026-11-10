@@ -161,11 +161,22 @@ bool isTowardsMtx(Direction direction)
     return (direction == Direction::MsToMtx) || (direction == Direction::BsToMtx) || (direction == Direction::XxToMtx);
 }
 
-// H8H9H10 (digits 13..15) of the frames of a calling channel: 000 and the area numbers 3F3..3F6
-// are no queueing or scanning information.
-bool isAreaCode(const FrameDigits& d)
+// H8H9H10 (digits 13..15). NMT-900 codes the fictitious channels 1008..1014 like a channel
+// number (bit 9 moves to bit 11), so 3F0..3F6 are 9F0..9F6 there. Neither range is a valid
+// traffic channel number in the other system (BCD digit F, bit above the 11 bit channel), so
+// both are accepted whatever the system.
+int specialCode(const FrameDigits& d)
 {
     const int h = (d[13] << 8) + (d[14] << 4) + d[15];
+
+    return (h >= 0x9f0 && h <= 0x9f6) ? h - 0x600 : h;
+}
+
+// H8H9H10 of the frames of a calling channel: 000 and the area numbers 3F3..3F6 are no queueing
+// or scanning information.
+bool isAreaCode(const FrameDigits& d)
+{
+    const int h = specialCode(d);
 
     return (h == 0x3f3) || (h == 0x3f4) || (h == 0x3f5) || (h == 0x3f6) || (h == 0x000);
 }
@@ -193,7 +204,7 @@ MessageType callingChannelFrame(const FrameDigits& d)
         return MT::Frame2a;
     }
 
-    switch ((d[13] << 8) + (d[14] << 4) + d[15])
+    switch (specialCode(d))
     {
     case 0x3f0:
         return MT::Frame2f;

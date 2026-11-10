@@ -22,6 +22,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <utility>
 
 #include "ffsk.h"
 #include "hagelbarger.h"
@@ -66,11 +67,15 @@ public:
 
     FrameReceiver();
     void setFrameSink(FrameSink sink) { m_sink = std::move(sink); }
+    // Called when a frame sync was accepted, before the frame itself is complete.
+    using SyncHandler = std::function<void()>;
+    void setSyncHandler(SyncHandler handler) { m_syncHandler = std::move(handler); }
     // quality and level as given by FfskDemodulator
     void receiveBit(int bit, double quality, double level);
 
 private:
     FrameSink m_sink;
+    SyncHandler m_syncHandler;
     uint32_t m_sync;
     bool m_inSync;
     int m_count;
@@ -95,10 +100,13 @@ public:
 
     void setFrameSource(FrameSource source) { m_source = std::move(source); }
     void setFrameSink(FrameReceiver::FrameSink sink) { m_receiver.setFrameSink(std::move(sink)); }
+    void setSyncHandler(FrameReceiver::SyncHandler handler) { m_receiver.setSyncHandler(std::move(handler)); }
 
     // Renders the frame stream into the buffer, silence in the gaps. Returns the number of
     // samples that carried signalling.
     int render(float* samples, int length, bool add);
+    // Like render() but leaves the rest of the buffer alone if the source ran dry.
+    int renderFrames(float* samples, int length, bool add) { return m_modulator.render(samples, length, add); }
     void receive(const float* samples, int length);
     void resetTransmitter();
 

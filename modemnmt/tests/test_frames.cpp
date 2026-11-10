@@ -517,6 +517,13 @@ static void testDecodeFromTheExchange()
     // prefix 4: combined calling and traffic channel indication, or an alternative type of call
     CHECK(typeOf("1354640000000000", from) == MT::Frame1b);
     CHECK(typeOf("1354645123456000", from) == MT::Frame2e);
+    // NMT-900 area numbers and queue codes: 9F3..9F6 and 9F0..9F2 like 3F3..3F6 and 3F0..3F2
+    CHECK(typeOf("13556411234569f5", from) == MT::Frame3b);
+    CHECK(typeOf("13556411234569f3", from) == MT::Frame3b);
+    CHECK(typeOf("13556411234569f7", from) == MT::Frame3a);
+    CHECK(typeOf("13556411234563f5", from) == MT::Frame3b);
+    CHECK(typeOf("13576411234569f6", from) == MT::Frame4b);
+    CHECK(typeOf("13576411234569f2", from) == MT::Frame3d);
     // H1 = 14 (additional information) is 1b, battery saving as on every idle 1b
     CHECK(typeOf("135464eb30028000", from) == MT::Frame1b);
 

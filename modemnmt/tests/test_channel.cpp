@@ -162,10 +162,10 @@ static void testBandAdvertisement()
     c.ccBandStart = 4;
     c.ccBandEnd = 124;          // limits 0x01 and 0x1f
     c.tcBandStart = 200;
-    c.tcBandEnd = 1000;         // limits 0x32 and 0xfa
+    c.tcBandEnd = 990;          // limits 0x32 and 0xf7
     {
         NmtChannel ch(c, 48000.0, 1.0);
-        CHECK(ch.idleFrame().additionalInfo == 0xe0011f32faULL);
+        CHECK(ch.idleFrame().additionalInfo == 0xe0011f32f7ULL);
     }
 
     // combined channel: no traffic channel band, no overdecadic bit, area number stays
@@ -176,9 +176,8 @@ static void testBandAdvertisement()
         CHECK(ch.idleFrame().additionalInfo == 0xe0011f0000ULL + 0x9f6);
     }
 
-    // a band with only one limit is not sent
+    // a traffic channel band alone: no calling channel band
     c = baseConfig(System::Nmt900, ChannelType::Ccb);
-    c.ccBandStart = 4;
     c.tcBandStart = 8;
     c.tcBandEnd = 12;
     CHECK(NmtChannel(c, 48000.0, 1.0).idleFrame().additionalInfo == 0xe000000203ULL);
