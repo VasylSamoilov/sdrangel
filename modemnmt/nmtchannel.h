@@ -58,7 +58,16 @@ struct NmtTransaction
 
     // call to the phone
     bool mobileTerminated = false;
-    bool paging = false;                    // the phone has not answered the page yet
+    // Where a call to the phone is while it is on the calling channels (the calling channel
+    // carousel of NmtSystem): the phone is paged (2a), answered and gets the traffic channel
+    // (2b), or answered and waits for a free one (2f / 2c, then standby).
+    enum class CcPhase { None, Deferred, Page, Order, Queue };
+    CcPhase ccPhase = CcPhase::None;
+    std::vector<NmtChannel*> pageChannels;  // calling channels that page the phone
+    std::vector<NmtChannel*> pageDue;       // ... whose 2a of this try is still to go out
+    NmtChannel* ccChannel = nullptr;        // calling channel of the answer (Order, Queue)
+    int queueInfoLeft = 0;                  // 2f / 2c frames still to send
+    bool repaged = false;                   // paged again: a traffic channel became free for it
     int pageTry = 0;
     bool pageDeferred = false;              // waiting for the wake-up window of battery saving
     bool pageWaited = false;                // the wake-up window was waited for
@@ -69,7 +78,7 @@ struct NmtTransaction
     bool priorityMo = false;
     std::string callerId;
     modemcellular::NumberType callerType = modemcellular::NumberType::NotAvailable;
-    std::unique_ptr<modemcellular::Timer> timer;        // paging
+    std::unique_ptr<modemcellular::Timer> timer;        // page tries, battery saving wait, queue
 
     // switching the call to another traffic channel: the channel the phone is sent to
     NmtChannel* scipTarget = nullptr;
@@ -118,17 +127,32 @@ public:
     // A priority phone seized the calling channel (frame 11b) to place a call: a transaction for
     // it is paged on the calling channels. Null if the phone has a transaction already.
     virtual NmtTransaction* startPriorityCall(const NmtSubscriber& subscriber, NmtChannel& channel) = 0;
-    // The paging of the transaction starts again from the first try (a traffic channel became
-    // free for a queued priority phone and it is asked to confirm).
-    virtual void pageAgain(NmtTransaction& transaction) = 0;
     // A phone seized the traffic channel as the called phone (frame 10c): the transaction that
-    // pages it is bound to this channel and the channels it was on go idle. Null if no call to the
+    // pages it is bound to this channel and leaves the calling channels. Null if no call to the
     // phone is waiting.
     virtual NmtTransaction* calledPhoneSeized(const NmtSubscriber& subscriber, NmtChannel& channel) = 0;
-    // The phone answered the page on this channel: the other channels that page it stop.
-    virtual void pagingAnswered(NmtTransaction& transaction, NmtChannel& channel) = 0;
-    // The call moves from the calling channel to the traffic channel.
-    virtual void moveToTrafficChannel(NmtTransaction& transaction, NmtChannel& from, NmtChannel& to) = 0;
+
+    // The calling channel carousel. An idle calling channel sends, between its idle frames, the
+    // frames of the calls to phones that are on the calling channels.
+    struct CarouselItem
+    {
+        enum class Kind { None, Page, Order, Queue };
+        Kind kind = Kind::None;
+        NmtTransaction* transaction = nullptr;
+        NmtChannel* trafficChannel = nullptr;   // Order: the channel the phone is sent to
+    };
+    // The next frame for the calling channel; the item counts as sent.
+    virtual CarouselItem carouselItem(NmtChannel& callingChannel) = 0;
+    // A page of this calling channel waits for its answer (a frame 10a / 10d is expected).
+    virtual bool awaitsAnswer(const NmtChannel& callingChannel) const = 0;
+    // The phone answered a page on the calling channel (10a, 10d; 11b from a priority phone).
+    // False if no page of that phone is going on there.
+    virtual bool callingChannelAnswer(const NmtSubscriber& subscriber, NmtChannel& callingChannel, bool priority) = 0;
+    // The channel order (2b) went out: the call is on the traffic channel now.
+    virtual void orderSent(NmtTransaction& transaction, NmtChannel& trafficChannel) = 0;
+    // The phone of a call that is on the calling channels clears on this calling channel (L(1)):
+    // the transaction is bound to the channel, which acknowledges. Null if there is no such call.
+    virtual NmtTransaction* callingChannelCleared(const NmtSubscriber& subscriber, NmtChannel& callingChannel) = 0;
     // The phone rings, and it was answered.
     virtual void callAlerting(NmtTransaction& transaction) = 0;
     virtual void callAnswered(NmtTransaction& transaction) = 0;
@@ -181,12 +205,18 @@ struct ChannelConfig
     int msPower = 1;                // power level of the mobile stations, 0..3
     uint8_t trafficArea = 0;        // two digits Y1Y2, region digit in the high nibble
     int areaNo = 0;                 // area number 1..4, 0 for none
-    bool sendClock = false;         // send the time with the calling channel
-    int batteryPeriod = 0;          // battery saving period code 0..9, 0 for none (phones never sleep)
-    int batteryGroup = 8;           // battery saving group 0..8, 8 addresses all phones
+    // Send the time with the calling channel. It is part of the battery saving frame (NMT Doc
+    // 450-1 4.3.3.12.5), also with period 0, and not on a combined channel.
+    bool sendClock = false;
+    // Battery saving (NMT Doc 450-1 4.3.3.12, 900-1 4.3.3.14): period code 0..9 (24 .. 280 frames),
+    // 0 for none (phones never sleep, the default); group 0..8, 8 addresses all phones.
+    int batteryPeriod = 0;
+    int batteryGroup = 8;
     int supervisory = 0;            // supervisory tone 1..4 on a traffic channel, 0 for none
     bool sendCallerId = false;      // send the number of the caller while the phone rings
-    // NMT-900 channel band advertisement; channel numbers, 0 for none
+    // NMT-900 channel band advertisement (900-1 4.3.3.13); channel numbers, 0 for none, sent in
+    // steps of 4 channels. It and the battery saving frame are one per frame: with a battery saving
+    // period they take turns, with period 0 only the advertisement is sent (no clock then).
     int ccBandStart = 0;
     int ccBandEnd = 0;
     int tcBandStart = 0;
@@ -219,9 +249,6 @@ public:
         MoDialling,         // receiving the digits, dial tone until the first one
         MoComplete,         // all digits received, sending address complete
         Active,             // call connected
-        MtPaging,           // calling channel: paging the phone
-        MtQueue,            // calling channel: the phone waits for a free traffic channel
-        MtChannel,          // calling channel: assigning the traffic channel
         MtIdent,            // traffic channel: waiting for the identity of the phone
         MtRinging,          // traffic channel: the phone rings
         MtComplete,         // traffic channel: the phone answered, connecting
@@ -266,8 +293,6 @@ public:
     void attach(NmtHost& host);
     // Called by the host when the transaction of the channel ended.
     void transactionEnded();
-    // The calling channel pages the phone of the transaction (again, if it did before).
-    void startPaging(NmtTransaction& transaction);
     // The traffic channel takes over a call to the phone: identity request, then ringing.
     void beginMtIdent(NmtTransaction& transaction);
     // The connected call orders the phone to another power level 0..3 (NMT Doc 450-1 4.4.1.8).
@@ -325,9 +350,10 @@ private:
     Frame txRoamingConfirm();
     Frame txMoConfirm();
     Frame txMoComplete();
-    Frame txMtPaging();
-    Frame txMtQueue();
-    Frame txMtChannel();
+    Frame txCalling();
+    Frame txPage(const NmtTransaction& transaction) const;
+    Frame txQueueInfo(const NmtTransaction& transaction) const;
+    Frame txOrder(NmtTransaction& transaction, NmtChannel& trafficChannel);
     Frame txMtRinging();
     Frame txMtComplete();
     void enterActive();
@@ -369,7 +395,6 @@ private:
     void rxIdle(const Frame& frame);
     void rxIdent(const Frame& frame);
     void rxMoDialling(const Frame& frame);
-    void rxMtPaging(const Frame& frame);
     void rxMtIdent(const Frame& frame);
     void rxMtRinging(const Frame& frame);
     void completeDialling();
@@ -401,6 +426,7 @@ private:
     NmtTransaction* m_transaction;
     uint64_t m_rxFrameCount;        // frame periods since the seizure
     int m_txFrameCount;             // frames sent in the current state
+    uint64_t m_callingSlot;         // idle calling channel: slots sent (even: idle frame, odd: carousel)
 
     double m_sampleRate;
     double m_deviationFactor;
