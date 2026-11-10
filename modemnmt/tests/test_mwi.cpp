@@ -522,9 +522,11 @@ static void testPreemption()
 
         CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiSms));
         CHECK(s.system.startCall(s.phone.country, s.phone.number, "5551234", modemcellular::NumberType::National));
-        CHECK(s.reports.size() == 1 && s.reports[0].result == NmtServiceEnd::Undelivered);
+        CHECK(s.reports.empty());                       // the indicators go with the call
         CHECK(s.system.transactionCount() == 1);
         CHECK(s.cc->state() == State::MtPaging);
+        CHECK(s.system.releaseCall(s.phone.country, s.phone.number));
+        CHECK(s.reports.size() == 1 && s.reports[0].flags == MwiSms && s.reports[0].result == NmtServiceEnd::Undelivered);
     }
     // the phone calls itself
     {
@@ -533,7 +535,7 @@ static void testPreemption()
         CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiSms));
         phoneSends(*s.tc, seizureFrame(*s.tc, s.phone, MessageType::Frame10b), 40);
         CHECK(s.tc->state() == State::MoIdent);
-        CHECK(s.reports.size() == 1 && s.reports[0].result == NmtServiceEnd::Undelivered);
+        CHECK(s.reports.empty());
         CHECK(s.cc->state() == State::Idle);
     }
     // the far end of the exchange stops it
@@ -555,6 +557,183 @@ static void testPreemption()
         CHECK(!s.system.releaseCall(s.phone.country, s.phone.number));
         CHECK(s.reports.empty());
     }
+}
+
+// The indicators of a cancelled message call go out with the call that took its place.
+static void testIndicatorsCarried()
+{
+    // a call to the phone: answered, then cleared by the far end
+    {
+        Station s;
+
+        CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiSms | MwiFax));
+        CHECK(s.system.startCall(s.phone.country, s.phone.number, "5551234", modemcellular::NumberType::National));
+        CHECK(s.reports.empty());
+        pull(*s.cc);
+        phoneSends(*s.cc, s.acknowledgement(), 1);
+        pull(*s.cc);
+        pull(*s.tc);
+        phoneSends(*s.tc, seizureFrame(*s.tc, s.phone, MessageType::Frame10b), 3);
+        phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0xeeeee), 1);
+        for (int i = 0; i < 4; i++) {
+            moreFrames(*s.tc);
+        }
+        CHECK(s.tc->state() == State::Active);
+        CHECK(s.system.releaseCall(s.phone.country, s.phone.number));
+        checkIndicators(pull(*s.tc), s.phone, MwiSms | MwiFax);
+        checkIndicators(pull(*s.tc), s.phone, MwiSms | MwiFax);
+        for (int i = 0; i < 4; i++) {
+            CHECK(isLineSignal(pull(*s.tc), 15));
+        }
+        phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0x11111), 1);
+        CHECK(s.reports.size() == 1 && s.reports[0].flags == (MwiSms | MwiFax) && s.reports[0].result == NmtServiceEnd::Ok);
+    }
+
+    // a handler that sends the flags again does not stop a call
+    {
+        Station s;
+        int resends = 0;
+
+        s.system.setMwiHandler([&s, &resends](const NmtSubscriber& sub, uint8_t flags, NmtServiceEnd result) {
+            s.reports.push_back({flags, result});
+            if (result == NmtServiceEnd::Undelivered) {
+                resends++;
+                s.system.sendMwi(sub.country, sub.number, flags);
+            }
+        });
+        CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiSms));
+        CHECK(s.system.startCall(s.phone.country, s.phone.number, "5551234", modemcellular::NumberType::National));
+        CHECK(s.system.transactionCount() == 1);
+        CHECK(resends == 0);
+    }
+
+    // the same on a combined channel that receives the phone's own call: no crash, the call is taken
+    {
+        modemcellular::SampleClock clock(kRate);
+        NmtSystem system(clock);
+        NmtChannel& cctc = system.addChannel(config(System::Nmt450, ChannelType::CcTc, 60), kRate, 1.0);
+        Calls calls;
+        const Phone phone;
+        int reports = 0;
+
+        connect(system, calls);
+        system.setMwiHandler([&](const NmtSubscriber& sub, uint8_t flags, NmtServiceEnd) {
+            reports++;
+            system.sendMwi(sub.country, sub.number, flags);
+        });
+        CHECK(system.sendMwi(phone.country, phone.number, MwiSms));
+        CHECK(cctc.state() == State::MtPaging);
+        // the phone's call comes in on another channel: here a second combined channel
+        NmtChannel& other = system.addChannel(config(System::Nmt450, ChannelType::CcTc, 62), kRate, 1.0);
+        phoneSends(other, seizureFrame(other, phone, MessageType::Frame10b), 40);
+        CHECK(other.state() == State::MoIdent);
+        CHECK(system.transactionCount() == 1);
+        CHECK(reports == 0);
+        pull(other);
+        system.setMwiHandler(nullptr);
+        system.setCallHandler(nullptr);
+        system.setClearHandler(nullptr);
+    }
+}
+
+// A call (not a message call) is cleared while the phone hangs up at the same moment: the indicators go.
+static void testClearingRace()
+{
+    Station s;
+
+    s.connectCall();
+    CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiSms));
+    CHECK(s.system.releaseCall(s.phone.country, s.phone.number));
+    CHECK(s.tc->state() == State::MwiClear);
+    phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0x11111), 1);
+    CHECK(s.tc->state() == State::MwiClear);
+    phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0x11111), 1);     // and again
+    CHECK(s.tc->state() == State::MwiClear);
+    for (int i = 0; i < 2; i++) {
+        checkIndicators(pull(*s.tc), s.phone, MwiSms);
+    }
+    for (int i = 0; i < 4; i++) {
+        CHECK(isLineSignal(pull(*s.tc), 15));
+    }
+    CHECK(s.reports.size() == 1 && s.reports[0].result == NmtServiceEnd::Ok);
+}
+
+// The phone does not show up on the traffic channel; the queue of a message call is short.
+static void testNotThere()
+{
+    {
+        Station s;
+
+        CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiSms));
+        pull(*s.cc);
+        phoneSends(*s.cc, s.acknowledgement(), 1);
+        pull(*s.cc);
+        for (int i = 0; i < 8; i++) {
+            moreFrames(*s.tc);
+        }
+        CHECK(s.tc->state() == State::Idle);
+        CHECK(s.system.transactionCount() == 0);
+        CHECK(s.reports.size() == 1 && s.reports[0].result == NmtServiceEnd::Unreachable);
+    }
+    {
+        Station s(false);
+
+        CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiSms));
+        pull(*s.cc);
+        phoneSends(*s.cc, s.acknowledgement(), 1);
+        pull(*s.cc);
+        CHECK(s.cc->state() == State::MtQueue);
+        s.wait(9.5);
+        CHECK(s.cc->state() == State::MtQueue);
+        s.wait(1.0);
+        CHECK(s.cc->state() == State::Idle);                    // nothing to release
+        CHECK(s.system.transactionCount() == 0);
+        CHECK(s.reports.size() == 1 && s.reports[0].result == NmtServiceEnd::NoChannel);
+    }
+}
+
+// A switch to another channel does not keep the indicators back.
+static void testIndicatorsDuringSwitch()
+{
+    modemcellular::SampleClock clock(kRate);
+    NmtSystem system(clock);
+    Calls calls;
+    Phone phone;
+    ChannelConfig c1 = config(System::Nmt450, ChannelType::Tc, 100);
+    ChannelConfig c2 = config(System::Nmt450, ChannelType::Tc, 102);
+    std::vector<Station::Report> reports;
+
+    c1.supervisory = 2;
+    c2.supervisory = 2;
+    NmtChannel& a = system.addChannel(c1, kRate, 1.0);
+    NmtChannel& b = system.addChannel(c2, kRate, 1.0);
+    connect(system, calls);
+    system.setMwiHandler([&reports](const NmtSubscriber&, uint8_t flags, NmtServiceEnd result) {
+        reports.push_back({flags, result});
+    });
+    toDialTone(a, phone);
+    dial(a, phone, "99");
+    phoneSends(a, idleFromPhone(), 1);
+    for (int i = 0; i < 12 && a.state() != State::Active; i++) {
+        moreFrames(a);
+    }
+    CHECK(system.moveCall(phone.country, phone.number));
+    CHECK(system.sendMwi(phone.country, phone.number, MwiSms));
+    for (int i = 0; i < 9; i++) {
+        moreFrames(a);
+    }
+    phoneSends(b, seizureFrame(b, phone, MessageType::Frame10b), 1);
+    CHECK(b.state() == State::Active);
+    phoneSends(b, lineSignalFrame(b, phone, 0x11111), 1);
+    checkIndicators(pull(b), phone, MwiSms);
+    checkIndicators(pull(b), phone, MwiSms);
+    for (int i = 0; i < 4; i++) {
+        CHECK(isLineSignal(pull(b), 15));
+    }
+    CHECK(reports.size() == 1 && reports[0].result == NmtServiceEnd::Ok);
+    system.setMwiHandler(nullptr);
+    system.setCallHandler(nullptr);
+    system.setClearHandler(nullptr);
 }
 
 // The phone hangs up before the indicators went out; the phone is gone, so the host is told so.
@@ -616,12 +795,29 @@ static void testTeardown()
 {
     // the system goes away in a message call, in a clearing with indicators and while paging
     {
-        Station s;
+        std::vector<Station::Report> reports;
+        {
+            modemcellular::SampleClock clock(kRate);
+            NmtSystem system(clock);
+            NmtChannel& cc = system.addChannel(config(System::Nmt450, ChannelType::Cc, 50), kRate, 1.0);
+            ChannelConfig tcConfig = config(System::Nmt450, ChannelType::Tc, 100);
+            const Phone phone;
 
-        s.toAutoanswer();
-        s.system.setMwiHandler([&s](const NmtSubscriber&, uint8_t flags, NmtServiceEnd result) {
-            s.reports.push_back({flags, result});
-        });
+            NmtChannel& tc = system.addChannel(tcConfig, kRate, 1.0);
+            system.setMwiHandler([&reports](const NmtSubscriber&, uint8_t flags, NmtServiceEnd result) {
+                reports.push_back({flags, result});
+            });
+            CHECK(system.sendMwi(phone.country, phone.number, MwiSms));
+            pull(cc);
+            Frame ack = seizureFrame(cc, phone, MessageType::Frame10a);
+            ack.msPassword = 0;
+            phoneSends(cc, ack, 1);
+            pull(cc);
+            pull(tc);
+            phoneSends(tc, seizureFrame(tc, phone, MessageType::Frame10b), 3);
+            CHECK(tc.state() == State::MtAutoanswer);
+        }
+        CHECK(reports.size() == 1 && reports[0].flags == MwiSms && reports[0].result == NmtServiceEnd::Undelivered);
     }
     {
         std::vector<Station::Report> reports;
@@ -664,6 +860,10 @@ int main()
     testNotDelivered();
     testIndicatorsAtClearing();
     testPreemption();
+    testIndicatorsCarried();
+    testClearingRace();
+    testNotThere();
+    testIndicatorsDuringSwitch();
     testPhoneHangsUp();
     testFlagsAcrossProcedures();
     testTeardown();
