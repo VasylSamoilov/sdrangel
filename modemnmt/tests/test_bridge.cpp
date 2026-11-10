@@ -528,8 +528,85 @@ static void testTwoCallsInARow()
     }
 }
 
+// A connected call is switched to another traffic channel: the router never notices, the
+// speech goes on on the new channel, and the phone can end the call there.
+static void testMovedCall()
+{
+    Station s;
+    const Phone phone;
+
+    s.cellular.setFallback(modemcellular::CallRouter::Fallback::Echo);
+    s.cellular.setAnswerDelay(0.1);
+    s.roam(*s.a, phone);
+    s.callFrom(*s.a, phone, "5551234");
+    s.airBoth(1.0, *s.a, microphone({}), *s.b, nullptr);
+    CHECK(s.cellular.callCount() == 1);
+
+    // the order goes out for a while, then the phone is on the new channel
+    CHECK(s.nmt.moveCall(phone.country, phone.number));
+    s.airBoth(0.3, *s.a, microphone({}), *s.b, microphone({}));
+    CHECK(s.a->state() == NmtChannel::State::ScipOrder);
+    phoneSends(*s.b, seizureFrame(*s.b, phone, MessageType::Frame10b), 1);
+    CHECK(s.b->state() == NmtChannel::State::Active);
+    CHECK(s.a->state() == NmtChannel::State::Idle);
+    CHECK(s.cellular.callCount() == 1);
+
+    // the phone speaks on the new channel from 0.5 s to 1.5 s and hears itself one second later
+    const double start = static_cast<double>(s.m_samples) / kRate;
+    auto out = s.airBoth(4.0, *s.a, nullptr, *s.b, microphone({{start + 0.5, start + 1.5}}));
+    auto slot = [&](double from, double to, double hz) {
+        return toneAmplitude(out.second, static_cast<size_t>(kRate * from), static_cast<size_t>(kRate * to), hz, kRate);
+    };
+
+    CHECK(slot(0.0, 1.4, 1000.0) < 0.01);                      // nothing before the speech comes back
+    CHECK(std::fabs(slot(1.7, 2.3, 1000.0) - 0.4) < 0.03);     // the echo
+    CHECK(s.b->supervisoryDetected());
+    CHECK(s.cellular.callCount() == 1);
+
+    // the old channel is free for the next phone
+    CHECK(pull(*s.a).mt == MessageType::Frame4);
+
+    // the phone clears on the new channel
+    phoneSends(*s.b, lineSignalFrame(*s.b, phone, 0x11111), 1);
+    CHECK(s.cellular.callCount() == 0);
+    for (int i = 0; i < 4; i++) {
+        pull(*s.b);
+    }
+    CHECK(s.b->state() == NmtChannel::State::Idle);
+    CHECK(s.nmt.transactionCount() == 0);
+}
+
+// The far end hangs up while the phone is on its way.
+static void testFarEndReleasesDuringMove()
+{
+    Station s(true);
+    Phone caller, callee;
+    callee.number = "654321";
+
+    s.cellular.setFallback(modemcellular::CallRouter::Fallback::Echo);
+    s.roam(*s.a, caller);
+    s.callFrom(*s.a, caller, "5551234");
+    s.airBoth(1.0, *s.a, microphone({}), *s.b, nullptr);
+    CHECK(s.nmt.moveCall(caller.country, caller.number));
+    s.airBoth(0.2, *s.a, microphone({}), *s.b, microphone({}));
+
+    // the router ends the call
+    CHECK(s.nmt.releaseCall(caller.country, caller.number));
+    CHECK(s.a->state() == NmtChannel::State::MtRelease);
+    CHECK(s.b->state() == NmtChannel::State::ScipRelease);
+    for (int i = 0; i < 4; i++) {
+        CHECK(isLineSignal(pull(*s.b), 15));
+    }
+    CHECK(s.b->state() == NmtChannel::State::Idle);
+    phoneSends(*s.a, lineSignalFrame(*s.a, caller, 0x11111), 1);
+    CHECK(s.a->state() == NmtChannel::State::Idle);
+    CHECK(s.nmt.transactionCount() == 0);
+}
+
 int main()
 {
+    testMovedCall();
+    testFarEndReleasesDuringMove();
     testRoamingRegisters();
     testCallToEcho();
     testCallToMusic();

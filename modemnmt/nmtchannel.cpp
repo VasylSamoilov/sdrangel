@@ -124,6 +124,18 @@ const int kScipIdleFrames = 4;
 const int kScipRequestFrames = 4;
 const double kScipIdentTime = 0.553;
 const double kScipRequestTime = 0.553 + 0.3;
+// In-call procedures. Frame counts (NMT Doc 450-1 4.4.1.8-4.4.1.10): 3 idle frames, then the
+// acknowledgement 4 times (T'); to leave: the acknowledgement 4 times, then 4 idle frames; the
+// power order is repeated for at most T = 8 frames. The standard gives no time for the phone to
+// be silent in the MFT state or to dial after a register recall; these are our limits.
+const int kAckIdleFrames = 3;
+const int kAckFrames = 4;
+const int kLeaveIdleFrames = 4;
+const int kPowerOrderFrames = 8;
+const double kMftSilence = 10.0;
+const double kRecallFirstDigit = 30.0;
+const double kRecallNextDigit = 8.0;
+const size_t kMaxRecallDigits = 32;
 // Frames of L(3), the roaming updating confirmation (NMT Doc 450-1 scheme D, T''' = 2 frames).
 const int kConfirmFrames = 2;
 // The phone dials digit by digit; a pause longer than this ends the call.
@@ -175,7 +187,12 @@ NmtChannel::NmtChannel(const ChannelConfig& config, double sampleRate, double de
     m_rxMute(0),
     m_alarmRunning(false),
     m_callerIdCount(0),
-    m_scipOrdered(false)
+    m_scipOrdered(false),
+    m_digitCount(0),
+    m_newPower(0),
+    m_haveLastDigit(false),
+    m_lastDigitOdd(false),
+    m_mftIdleSeen(false)
 {
     m_modem.setFrameSource([this](FrameBits& bits) { return nextFrame(bits); });
     m_modem.setFrameSink([this](const RxFrame& rx) { receiveFrame(rx); });
@@ -321,7 +338,11 @@ Frame NmtChannel::idleFrame()
 NmtChannel::~NmtChannel()
 {
     // the transaction must not keep a pointer to a channel that is gone
-    if (m_host && m_transaction) {
+    if (m_host && m_transaction)
+    {
+        // a power change or recall that is going on is over (the handlers are alive until the
+        // system is gone)
+        abortInCall(m_state);
         m_host->detachChannel(*this, m_transaction);
     }
 }
@@ -381,6 +402,25 @@ bool NmtChannel::nextFrame(FrameBits& bits)
     case State::MtRelease:
         frame = txMtRelease();
         break;
+    case State::MftIn:
+        frame = txMftIn();
+        break;
+    case State::MftOut:
+        frame = txMftOut();
+        break;
+    case State::PowerChange:
+        frame = txPowerChange();
+        break;
+    case State::RecallProceed:
+        frame = txRecallProceed();
+        break;
+    case State::RecallEnd:
+        frame = txRecallEnd();
+        break;
+    case State::Mft:
+    case State::RecallDigits:
+        // nothing but audio in these states
+        return false;
     case State::ScipOrder:
         frame = txScipOrder();
         break;
@@ -424,8 +464,10 @@ int NmtChannel::render(float* samples, int length, bool add)
         {
         case DspMode::Frame:
         {
-            // while the call is switched the supervisory tone stays on both channels (scheme C2')
-            const bool tone = (m_state == State::ScipOrder || m_state == State::ScipIdent || m_state == State::ScipIdentReq);
+            // while the call is switched or a procedure of the call runs, the supervisory tone stays on
+            const bool tone = (m_state == State::ScipOrder || m_state == State::ScipIdent || m_state == State::ScipIdentReq
+                            || m_state == State::MftIn || m_state == State::MftOut || m_state == State::PowerChange
+                            || m_state == State::RecallProceed || m_state == State::RecallEnd);
             const int start = pos;
             const int count = m_valid ? m_modem.renderFrames(samples + pos, length - pos, add) : 0;
             framed += count;
@@ -444,8 +486,16 @@ int NmtChannel::render(float* samples, int length, bool add)
             break;
         }
         case DspMode::DialTone:
+        {
+            const int start = pos;
+
             pos += renderTone(samples + pos, length - pos, add);
+            // the dial tone of a register recall is sent during the call, with the supervisory tone
+            if (m_state == State::RecallDigits) {
+                m_superTone.add(samples + start, pos - start);
+            }
             break;
+        }
         case DspMode::Audio:
         default:
             if (callAudioUp()) {
@@ -538,12 +588,18 @@ void NmtChannel::receiveFrame(const RxFrame& rx)
 
 // ---- frames to the phone ----
 
+// The power level the phone has on this channel: the one ordered for its call, else the channel's.
+int NmtChannel::power() const
+{
+    return (m_transaction && m_transaction->power >= 0) ? m_transaction->power : m_config.msPower;
+}
+
 Frame NmtChannel::baseFrame(MessageType type) const
 {
     Frame frame;
 
     frame.mt = type;
-    frame.channelNo = static_cast<uint16_t>(encodeChannel(m_config.system, m_config.channel, m_config.msPower));
+    frame.channelNo = static_cast<uint16_t>(encodeChannel(m_config.system, m_config.channel, power()));
     frame.trafficArea = static_cast<uint8_t>(encodeTrafficArea(m_config.system, m_config.channel, m_config.trafficArea));
 
     return frame;
@@ -806,6 +862,7 @@ Frame NmtChannel::txMoComplete()
 void NmtChannel::enterActive()
 {
     m_state = State::Active;
+    m_mftIdleSeen = false;
     setDspMode(DspMode::Audio);
     m_txAudio.reset();
     m_rxAudio.reset();
@@ -836,6 +893,339 @@ Frame NmtChannel::txMoRelease()
 Frame NmtChannel::txMtRelease()
 {
     return lineSignalFrame(15);
+}
+
+// ---- procedures during the conversation (NMT Doc 450-1 para 4.4.1.8 to 4.4.1.10) ----
+
+// The rule of NMT Doc 450-1 para 4.7.2.1 for digit frames: a frame is a new digit when its position
+// marker (14a: S(0), 14b: S(15)) differs from the one of the digit taken before, however many
+// frames the digit is repeated; the digit is sent three times and has to agree.
+NmtChannel::DigitResult NmtChannel::takeLooseDigit(const Frame& frame, char& digit)
+{
+    const bool odd = (frame.mt == MessageType::Frame14a);
+
+    if (!odd && frame.mt != MessageType::Frame14b) {
+        return DigitResult::Foreign;
+    }
+    if (!matchChannel(frame) || !matchArea(frame) || !matchSubscriber(frame)) {
+        return DigitResult::Foreign;
+    }
+    if ((frame.digit >> 12) != (odd ? 0x00u : 0xffu)) {
+        return DigitResult::Damaged;
+    }
+    if (((frame.digit >> 8) & 0xf) != ((frame.digit >> 4) & 0xf) || ((frame.digit >> 4) & 0xf) != (frame.digit & 0xf)) {
+        return DigitResult::Damaged;
+    }
+    if (m_haveLastDigit && m_lastDigitOdd == odd) {
+        return DigitResult::Repeat;
+    }
+
+    digit = valueToDigit(frame.digit);
+    m_haveLastDigit = true;
+    m_lastDigitOdd = odd;
+    return DigitResult::Digit;
+}
+
+// The phone asks for the MFT converter (L(8)) or for a register recall (L(5)); a call that is
+// being switched to another channel is left alone.
+void NmtChannel::rxActive(const Frame& frame)
+{
+    // A phone in the converter state sends idle frames while it waits for our answer to L(7).
+    if (frame.mt == MessageType::Frame15) {
+        m_mftIdleSeen = true;
+    }
+    if (frame.mt != MessageType::Frame13a || !matchChannel(frame) || !matchSubscriber(frame) || m_transaction->scipTarget) {
+        return;
+    }
+
+    const int signal = lineSignalMajority(frame.lineSignal, 5, 3);
+
+    // L(7) again: the phone did not hear our answer and leaves the converter state once more.
+    // The copies of an answer to a forced release that come after we left are not that; the
+    // phone that waits sends idle frames in between.
+    if (signal == 7)
+    {
+        if (m_mftIdleSeen) {
+            beginMftOut();
+        }
+        return;
+    }
+    if (signal != 8 && signal != 5) {
+        return;
+    }
+
+    // the speech stops; the supervisory alarm is not evaluated in these states
+    m_state = (signal == 8) ? State::MftIn : State::RecallProceed;
+    m_txFrameCount = 0;
+    m_rxFrameCount = 0;
+    m_digitCount = 0;
+    m_haveLastDigit = false;
+    m_recallDigits.clear();
+    m_alarmRunning = false;
+    setDspMode(DspMode::Frame);
+    m_timer->start(kStateWatchdog);
+}
+
+// 3 idle frames, then L(4) four times; the state of the converter starts, the speech path
+// stays silent (the supervisory tone goes on).
+Frame NmtChannel::txMftIn()
+{
+    Frame frame;
+    const int n = ++m_txFrameCount;
+
+    if (n <= kAckIdleFrames) {
+        frame.mt = MessageType::Frame6;
+    } else if (n <= kAckIdleFrames + kAckFrames) {
+        frame = lineSignalFrame(4);
+    }
+    else
+    {
+        frame.mt = MessageType::Frame6;
+        m_state = State::Mft;
+        setDspMode(DspMode::Audio);
+        m_timer->start(kMftSilence);
+    }
+
+    return frame;
+}
+
+// Digits for the converter; L(7) ends the state.
+void NmtChannel::rxMft(const Frame& frame)
+{
+    // the phone sends idle frames while it is in the converter state: it is there
+    if (frame.mt == MessageType::Frame15)
+    {
+        m_timer->start(kMftSilence);
+        return;
+    }
+
+    if (frame.mt == MessageType::Frame13a)
+    {
+        if (matchChannel(frame) && matchSubscriber(frame) && lineSignalMajority(frame.lineSignal, 5, 3) == 7) {
+            beginMftOut();
+        }
+        return;
+    }
+
+    char digit = 0;
+    const DigitResult result = takeLooseDigit(frame, digit);
+
+    if (result == DigitResult::Foreign) {
+        return;
+    }
+
+    m_timer->start(kMftSilence);
+    if (result == DigitResult::Digit)
+    {
+        m_digitCount++;
+        m_host->mftDigit(*m_transaction, digit);
+    }
+}
+
+// The phone left the state (L(7)), or the base station ends it: L(10) four times answers
+// both, then 4 idle frames and the conversation.
+void NmtChannel::beginMftOut()
+{
+    m_state = State::MftOut;
+    m_txFrameCount = 0;
+    setDspMode(DspMode::Frame);
+    m_timer->start(kStateWatchdog);
+}
+
+Frame NmtChannel::txMftOut()
+{
+    Frame frame;
+    const int n = ++m_txFrameCount;
+
+    if (n <= kAckFrames) {
+        frame = lineSignalFrame(10);
+    } else if (n <= kAckFrames + kLeaveIdleFrames) {
+        frame.mt = MessageType::Frame6;
+    }
+    else
+    {
+        frame.mt = MessageType::Frame6;
+        enterActive();
+    }
+
+    return frame;
+}
+
+// The phone is ordered to another power level: frame 3a for at most T. NMT-450 has the new level
+// in Na and the old one in N1, NMT-900 has it in N1 (Na has no power bits there).
+bool NmtChannel::beginPowerChange(int level)
+{
+    if (!m_host || !m_transaction || m_state != State::Active || !m_transaction->callUp || m_transaction->scipTarget
+     || level < 0 || level > 3 || level == power()) {
+        return false;
+    }
+
+    m_newPower = level;
+    m_state = State::PowerChange;
+    m_txFrameCount = 0;
+    m_alarmRunning = false;
+    setDspMode(DspMode::Frame);
+    m_timer->start(kStateWatchdog);
+    return true;
+}
+
+Frame NmtChannel::txPowerChange()
+{
+    Frame frame;
+
+    if (++m_txFrameCount > kPowerOrderFrames)
+    {
+        // no answer within T: the call goes on at the old level, the standard has nothing else
+        NmtTransaction* const transaction = m_transaction;
+
+        frame.mt = MessageType::Frame6;
+        enterActive();
+        m_host->powerChanged(*transaction, m_newPower, false);
+        return frame;
+    }
+
+    frame = baseFrame(MessageType::Frame3a);
+    frame.msCountry = static_cast<uint8_t>(digitsToValue(std::string(1, m_transaction->subscriber.country)));
+    frame.msNumber = static_cast<uint32_t>(digitsToValue(m_transaction->subscriber.number));
+    if (m_config.system == System::Nmt450)
+    {
+        frame.tcNo = static_cast<uint16_t>(encodeTc(m_config.system, m_config.channel, m_newPower));
+    }
+    else
+    {
+        frame.channelNo = static_cast<uint16_t>(encodeChannel(m_config.system, m_config.channel, m_newPower));
+        frame.tcNo = static_cast<uint16_t>(encodeTc(m_config.system, m_config.channel, 0));
+    }
+
+    return frame;
+}
+
+// The answer carries the new level in N1.
+void NmtChannel::rxPowerChange(const Frame& frame)
+{
+    if (frame.mt != MessageType::Frame10b || !matchChannel(frame) || !matchSubscriber(frame)) {
+        return;
+    }
+
+    int channel, level;
+
+    if (!decodeChannel(m_config.system, frame.channelNo, channel, level) || level != m_newPower) {
+        return;
+    }
+
+    NmtTransaction* const transaction = m_transaction;
+
+    transaction->power = m_newPower;
+    enterActive();
+    m_host->powerChanged(*transaction, m_newPower, true);
+}
+
+// Register recall: 3 idle frames, L(3) four times, then the dial tone until the first digit.
+Frame NmtChannel::txRecallProceed()
+{
+    Frame frame;
+    const int n = ++m_txFrameCount;
+
+    if (n <= kAckIdleFrames) {
+        frame.mt = MessageType::Frame6;
+    } else if (n <= kAckIdleFrames + kAckFrames) {
+        frame = lineSignalFrame(3);
+    }
+    else
+    {
+        frame.mt = MessageType::Frame6;
+        m_state = State::RecallDigits;
+        setDspMode(DspMode::DialTone);
+        m_timer->start(kRecallFirstDigit);
+    }
+
+    return frame;
+}
+
+void NmtChannel::rxRecall(const Frame& frame)
+{
+    // The R button again (after a wrong digit): the digits so far are over, a new recall starts.
+    if (frame.mt == MessageType::Frame13a)
+    {
+        if (matchChannel(frame) && matchSubscriber(frame) && lineSignalMajority(frame.lineSignal, 5, 3) == 5)
+        {
+            NmtTransaction* const transaction = m_transaction;
+            const std::string digits = m_recallDigits;
+
+            m_state = State::RecallProceed;
+            m_txFrameCount = 0;
+            m_digitCount = 0;
+            m_haveLastDigit = false;
+            m_recallDigits.clear();
+            setDspMode(DspMode::Frame);
+            m_timer->start(kStateWatchdog);
+            m_host->recallEnded(*transaction, digits);
+        }
+        return;
+    }
+
+    char digit = 0;
+    const DigitResult result = takeLooseDigit(frame, digit);
+
+    switch (result)
+    {
+    case DigitResult::Foreign:
+    case DigitResult::Repeat:
+    case DigitResult::Damaged:
+    case DigitResult::Lost:
+        return;
+    case DigitResult::TooLong:
+        beginRecallEnd();
+        return;
+    case DigitResult::Digit:
+        break;
+    }
+
+    // the dial tone ends with the first digit
+    if (m_recallDigits.empty()) {
+        setDspMode(DspMode::Audio);
+    }
+    m_digitCount++;
+    m_recallDigits.push_back(digit);
+    m_timer->start(kRecallNextDigit);
+
+    const bool enough = m_host->recallDigit(*m_transaction, digit);
+
+    if (m_state == State::RecallDigits && (enough || m_recallDigits.size() >= kMaxRecallDigits)) {
+        beginRecallEnd();
+    }
+}
+
+// Back to the conversation: L(6) four times and 4 idle frames. The exchange gets the digits.
+void NmtChannel::beginRecallEnd()
+{
+    NmtTransaction* const transaction = m_transaction;
+    const std::string digits = m_recallDigits;
+
+    m_state = State::RecallEnd;
+    m_txFrameCount = 0;
+    setDspMode(DspMode::Frame);
+    m_timer->start(kStateWatchdog);
+    m_host->recallEnded(*transaction, digits);
+}
+
+Frame NmtChannel::txRecallEnd()
+{
+    Frame frame;
+    const int n = ++m_txFrameCount;
+
+    if (n <= kAckFrames) {
+        frame = lineSignalFrame(6);
+    } else if (n <= kAckFrames + kLeaveIdleFrames) {
+        frame.mt = MessageType::Frame6;
+    }
+    else
+    {
+        frame.mt = MessageType::Frame6;
+        enterActive();
+    }
+
+    return frame;
 }
 
 // ---- switching a call in progress (NMT Doc 450-1 para 4.4.1.4, scheme C2') ----
@@ -870,6 +1260,11 @@ void NmtChannel::beginScipOrder()
         return;
     }
 
+    // the level of the phone is the one of this channel; the new channel keeps it
+    if (m_transaction && m_transaction->power < 0) {
+        m_transaction->power = m_config.msPower;
+    }
+
     m_state = State::ScipOrder;
     m_txFrameCount = 0;
     m_alarmRunning = false;
@@ -896,11 +1291,14 @@ Frame NmtChannel::txScipOrder()
 
         // the channel of the frame is the new one: N1'N2'N3' equals NaNbNc
         frame = baseFrame(MessageType::Frame3c);
-        frame.channelNo = static_cast<uint16_t>(encodeChannel(t.system, t.channel, t.msPower));
+        // the phone keeps the power level of its call
+        const int level = power();
+
+        frame.channelNo = static_cast<uint16_t>(encodeChannel(t.system, t.channel, level));
         frame.trafficArea = static_cast<uint8_t>(encodeTrafficArea(t.system, t.channel, m_config.trafficArea));
         frame.msCountry = static_cast<uint8_t>(digitsToValue(std::string(1, m_transaction->subscriber.country)));
         frame.msNumber = static_cast<uint32_t>(digitsToValue(m_transaction->subscriber.number));
-        frame.tcNo = static_cast<uint16_t>(encodeTc(t.system, t.channel, t.msPower));
+        frame.tcNo = static_cast<uint16_t>(encodeTc(t.system, t.channel, level));
     }
     else
     {
@@ -1075,11 +1473,14 @@ void NmtChannel::process(const Frame& frame)
             if (transaction->scipTarget) {
                 m_host->scipEnded(*transaction, false);
             }
+            const State previous = m_state;
+
             setDspMode(DspMode::Frame);
             m_state = State::MoRelease;
             m_txFrameCount = 0;
             m_timer->start(kStateWatchdog);
-            if (wasUp) {
+            abortInCall(previous);
+            if (wasUp && m_transaction == transaction) {
                 m_host->callCleared(*transaction);
             }
             return;
@@ -1114,6 +1515,22 @@ void NmtChannel::process(const Frame& frame)
     case State::ScipIdentReq:
         rxScipIdent(frame);
         break;
+    case State::Active:
+        rxActive(frame);
+        break;
+    case State::Mft:
+        rxMft(frame);
+        break;
+    case State::PowerChange:
+        rxPowerChange(frame);
+        break;
+    case State::RecallDigits:
+        rxRecall(frame);
+        break;
+    case State::MftIn:
+    case State::MftOut:
+    case State::RecallProceed:
+    case State::RecallEnd:
     case State::ScipOrder:
     case State::ScipRelease:
         break;
@@ -1123,7 +1540,6 @@ void NmtChannel::process(const Frame& frame)
     case State::MoConfirm:          // the phone dials after the dial tone, not before
     case State::RoamingConfirm:
     case State::MoComplete:
-    case State::Active:
     case State::MoRelease:
     default:
         break;
@@ -1196,71 +1612,95 @@ void NmtChannel::rxMoDialling(const Frame& frame)
         return;
     }
 
-    const bool odd = (frame.mt == MessageType::Frame14a);      // 1st, 3rd, ... digit
-    if (!odd && frame.mt != MessageType::Frame14b) {
+    const size_t len = m_dialled.size();
+    char digit = 0;
+
+    switch (takeDigit(frame, len, kMaxDialled, digit))
+    {
+    case DigitResult::Foreign:
         return;
-    }
-    if (!matchChannel(frame) || !matchArea(frame) || !matchSubscriber(frame)) {
+    case DigitResult::Repeat:
+    case DigitResult::Damaged:
+        m_timer->start(kDiallingTimeout);
         return;
+    case DigitResult::TooLong:
+        // A longer number would be a wrong number: the 33rd digit ends the call.
+        m_timer->start(kDiallingTimeout);
+        release();
+        return;
+    case DigitResult::Lost:
+        m_timer->start(kDiallingTimeout);
+        release();
+        return;
+    case DigitResult::Digit:
+        break;
     }
 
     m_timer->start(kDiallingTimeout);
+    m_dialled.push_back(digit);
+    // the dial tone ends with the first digit
+    if (len == 0) {
+        setDspMode(DspMode::Audio);
+    }
+}
 
-    // A longer number would be a wrong number: the 33rd digit ends the call. An even frame at
-    // 32 digits is the repeat of the 32nd.
-    const size_t len = m_dialled.size();
-    if (len >= kMaxDialled)
-    {
-        if (odd) {
-            release();
-        }
-        return;
+// A digit frame of the phone. `count` digits were taken so far, up to `limit`; the frame count
+// since the last new digit tells a repeat from a digit that was lost. A digit that is taken
+// resets the frame count.
+NmtChannel::DigitResult NmtChannel::takeDigit(const Frame& frame, size_t count, size_t limit, char& digit)
+{
+    const bool odd = (frame.mt == MessageType::Frame14a);      // 1st, 3rd, ... digit
+    if (!odd && frame.mt != MessageType::Frame14b) {
+        return DigitResult::Foreign;
+    }
+    if (!matchChannel(frame) || !matchArea(frame) || !matchSubscriber(frame)) {
+        return DigitResult::Foreign;
+    }
+
+    // An even frame at the limit is the repeat of the last digit.
+    if (count >= limit) {
+        return odd ? DigitResult::TooLong : DigitResult::Repeat;
     }
 
     bool lost;
     if (odd) {
-        if (len & 1) {
+        if (count & 1) {
             // one more digit than frames of that kind: a repeat, unless the even one got lost
             lost = m_rxFrameCount > 1;
             if (!lost) {
-                return;
+                return DigitResult::Repeat;
             }
         } else {
-            lost = len && m_rxFrameCount > 3;
+            lost = count && m_rxFrameCount > 3;
         }
     } else {
-        if (!len) {
+        if (!count) {
             lost = true;                        // an even digit before the first one
-        } else if (!(len & 1)) {
+        } else if (!(count & 1)) {
             lost = m_rxFrameCount > 1;
             if (!lost) {
-                return;
+                return DigitResult::Repeat;
             }
         } else {
             lost = m_rxFrameCount > 3;
         }
     }
-    if (lost)
-    {
-        release();
-        return;
+    if (lost) {
+        return DigitResult::Lost;
     }
 
     // Position marker in the upper digits (00 for odd, FF for even digits), the digit itself is
     // sent three times; anything else is a damaged frame.
     if ((frame.digit >> 12) != (odd ? 0x00u : 0xffu)) {
-        return;
+        return DigitResult::Damaged;
     }
     if (((frame.digit >> 8) & 0xf) != ((frame.digit >> 4) & 0xf) || ((frame.digit >> 4) & 0xf) != (frame.digit & 0xf)) {
-        return;
+        return DigitResult::Damaged;
     }
 
-    m_dialled.push_back(valueToDigit(frame.digit));
+    digit = valueToDigit(frame.digit);
     m_rxFrameCount = 0;
-    // the dial tone ends with the first digit
-    if (len == 0) {
-        setDspMode(DspMode::Audio);
-    }
+    return DigitResult::Digit;
 }
 
 // The number is complete: '+' replaces the A (international) and B (service number) prefixes.
@@ -1393,10 +1833,29 @@ void NmtChannel::release()
         m_host->scipEnded(*m_transaction, true);
     }
 
+    const State previous = m_state;
+
     m_state = State::MtRelease;
     m_txFrameCount = 0;
     setDspMode(DspMode::Frame);
     m_timer->start(kReleaseTimeout);
+    abortInCall(previous);
+}
+
+// A power change or a register recall that does not finish because the call ends: the host is told.
+void NmtChannel::abortInCall(State previous)
+{
+    if (!m_transaction) {
+        return;
+    }
+
+    NmtTransaction* const transaction = m_transaction;
+
+    if (previous == State::PowerChange) {
+        m_host->powerChanged(*transaction, m_newPower, false);
+    } else if (previous == State::RecallProceed || previous == State::RecallDigits) {
+        m_host->recallEnded(*transaction, m_recallDigits);
+    }
 }
 
 void NmtChannel::goIdle()
@@ -1408,6 +1867,8 @@ void NmtChannel::goIdle()
     m_state = State::Idle;
     m_txFrameCount = 0;
     m_dialled.clear();
+    m_recallDigits.clear();
+    m_digitCount = 0;
     m_alarmRunning = false;
     m_rxMute = 0;
     m_superDetector.reset();
@@ -1439,6 +1900,37 @@ void NmtChannel::onTimer()
 
     switch (m_state)
     {
+    case State::MftIn:
+    case State::MftOut:
+    case State::RecallEnd:
+        // this channel stopped sending: the conversation goes on
+        enterActive();
+        return;
+    case State::RecallProceed:
+    {
+        NmtTransaction* const transaction = m_transaction;
+        const std::string digits = m_recallDigits;
+
+        enterActive();
+        m_host->recallEnded(*transaction, digits);
+        return;
+    }
+    case State::PowerChange:
+    {
+        NmtTransaction* const transaction = m_transaction;
+        const int level = m_newPower;
+
+        enterActive();
+        m_host->powerChanged(*transaction, level, false);
+        return;
+    }
+    case State::Mft:
+        // the phone is silent: the converter state is ended like a forced release
+        beginMftOut();
+        return;
+    case State::RecallDigits:
+        beginRecallEnd();
+        return;
     case State::ScipIdent:
         // no identity yet: ask for it
         m_state = State::ScipIdentReq;
