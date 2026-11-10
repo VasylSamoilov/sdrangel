@@ -127,6 +127,7 @@ void FrameReceiver::receiveBit(int bit, double quality, double level)
 
 NmtModem::NmtModem(double sampleRate, double deviationFactor) :
     m_modulator(sampleRate, kBitRate, kFreqBit0, kFreqBit1, kTxPeakFsk * deviationFactor),
+    m_dataModulator(sampleRate, kBitRate, kFreqBit0, kFreqBit1, kTxPeakFsk * deviationFactor),
     m_demodulator(sampleRate, kBitRate, kFreqBit0, kFreqBit1, kBitAdjust),
     m_receiver(),
     m_frame(),
@@ -135,6 +136,9 @@ NmtModem::NmtModem(double sampleRate, double deviationFactor) :
     m_modulator.setBitSource([this]() { return nextBit(); });
     m_demodulator.setBitSink([this](int bit, double quality, double level) {
         m_receiver.receiveBit(bit, quality, level);
+        if (m_tap) {
+            m_tap(bit, quality, level);
+        }
     });
 }
 

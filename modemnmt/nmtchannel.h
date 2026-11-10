@@ -27,10 +27,12 @@
 #include <vector>
 
 #include "compandor.h"
+#include "nmtdms.h"
 #include "nmtframe.h"
 #include "nmtmodem.h"
 #include "nmtmwi.h"
 #include "nmtnumbers.h"
+#include "nmtsms.h"
 #include "nmtvoice.h"
 #include "timer.h"
 #include "export.h"
@@ -94,6 +96,19 @@ struct NmtTransaction
     uint8_t mwiFlags = 0;
     NmtServiceEnd mwiResult = NmtServiceEnd::Undelivered;
     bool mwiReported = false;
+
+    // A short message call (NMT Doc 450-3 / 900-3 Annex 24): the data link of the DMS on the
+    // speech path, no call in the exchange (callUp stays false), no supervision. To the phone it
+    // is a message call (messageCall) with smsDeliver; from the phone the dialled number is the
+    // one of the service centre. How a short message to the phone ended, and the RP cause of
+    // the phone's refusal.
+    bool smsCall = false;
+    bool smsToPhone = false;
+    SmsDeliver smsDeliver;
+    uint8_t smsRef = 0;
+    NmtServiceEnd smsResult = NmtServiceEnd::Undelivered;
+    uint8_t smsCause = 0;
+    bool smsReported = false;
 };
 
 // What a channel needs from the base station it belongs to (implemented by NmtSystem).
@@ -116,6 +131,11 @@ public:
     virtual bool callDialled(NmtTransaction& transaction, const std::string& dialled) = 0;
     // The phone cleared a call that was taken with callDialled().
     virtual void callCleared(NmtTransaction& transaction) = 0;
+    // Short messages. The phone dialled the number of the service centre: the call is a short
+    // message call, the exchange is not called.
+    virtual bool isSmsCenter(const std::string& dialled) = 0;
+    // A short message from the phone (SMS-SUBMIT). The RP cause to answer with, 0 to accept.
+    virtual uint8_t smsSubmitted(NmtTransaction& transaction, const SmsSubmit& message) = 0;
     // Speech of a connected call, 8 kHz mono: from the phone, and for the phone (the host
     // fills the samples, silence if it has none). Called from the audio path of the channel.
     virtual void audioFromMobile(NmtTransaction& transaction, const float* samples, int count) = 0;
@@ -272,7 +292,8 @@ public:
         RecallEnd,          // call: register recall over, back to the conversation
         MtAutoanswer,       // traffic channel: asking the phone to answer without ringing
         MwiClear,           // clearing: the message indicators (5c), then the release
-        MwiInCall           // call: the message indicators (5c) twice, then the conversation
+        MwiInCall,          // call: the message indicators (5c) twice, then the conversation
+        Sms                 // short message call: the data link of the DMS on the speech path
     };
 
     struct ReceivedFrame
@@ -381,6 +402,11 @@ private:
     void rxMtAutoanswer(const Frame& frame);
     void rxMwiClear(const Frame& frame);
     void beginMwiClear(int leadIdle, bool phoneCleared);
+    void enterSms();
+    void smsData(const std::vector<uint8_t>& data);
+    void smsAllSent();
+    void smsSend(const std::vector<uint8_t>& rp);
+    void smsRelease();
     void rxActive(const Frame& frame);
     void rxMft(const Frame& frame);
     void rxPowerChange(const Frame& frame);
@@ -466,6 +492,11 @@ private:
     bool m_mwiAcked;                // the phone cleared / acknowledged already: nothing to wait for after the sequence
     modemcellular::Compandor m_compandor;   // speech path at 8 kHz
     bool m_compandorOn;             // the phone was ordered to switch its compandor in for this call
+    NmtDmsLink m_dms;               // short message call: the data link
+    std::vector<uint8_t> m_smsRx;   // octets from the phone that are not a whole message yet
+    bool m_smsSent;                 // all we sent is acknowledged
+    bool m_smsReleasing;            // the exchange is over, the release follows
+    bool m_smsAnswered;             // our answer to the phone goes out: the release follows when it is acknowledged
 };
 
 } // namespace modemnmt

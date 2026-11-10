@@ -101,6 +101,13 @@ public:
     void setFrameSource(FrameSource source) { m_source = std::move(source); }
     void setFrameSink(FrameReceiver::FrameSink sink) { m_receiver.setFrameSink(std::move(sink)); }
     void setSyncHandler(FrameReceiver::SyncHandler handler) { m_receiver.setSyncHandler(std::move(handler)); }
+    // Every demodulated bit also goes here (the data link of the DMS uses the same tones).
+    void setBitTap(FfskDemodulator::BitSink tap) { m_tap = std::move(tap); }
+    // Bits of the data link on the speech path, at the level of the signalling: renderData()
+    // renders them until the source has no more (it returns the samples rendered).
+    void setDataSource(FfskModulator::BitSource source) { m_dataModulator.setBitSource(std::move(source)); }
+    int renderData(float* samples, int length, bool add) { return m_dataModulator.render(samples, length, add); }
+    void resetData() { m_dataModulator.reset(); }
 
     // Renders the frame stream into the buffer, silence in the gaps. Returns the number of
     // samples that carried signalling.
@@ -114,8 +121,10 @@ private:
     int nextBit();
 
     FfskModulator m_modulator;
+    FfskModulator m_dataModulator;
     FfskDemodulator m_demodulator;
     FrameReceiver m_receiver;
+    FfskDemodulator::BitSink m_tap;
     FrameSource m_source;
     FrameBits m_frame;
     int m_framePos;              // kFrameBits if no frame is loaded
