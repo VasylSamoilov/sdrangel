@@ -76,6 +76,28 @@ public:
     // old one.
     bool moveCall(char country, const std::string& number, int channel = 0);
 
+    // Orders the phone of a connected call to another power level 0..3 (NMT Doc 450-1 4.4.1.8).
+    // False if the phone has no connected call, or it has that level already. The result is
+    // told to the power handler: the level, and whether the phone took it. The new level is
+    // kept for the call; the next call starts with the level of its channel.
+    bool changePower(char country, const std::string& number, int level);
+    using PowerHandler = std::function<void(const NmtSubscriber& subscriber, int level, bool done)>;
+    void setPowerHandler(PowerHandler handler) { m_powerHandler = std::move(handler); }
+
+    // The phone presses the MFT button during a call and dials: the digits (0-9, *, #, A-D) are
+    // for the network, one call per digit. And a register recall: the digits after the R button;
+    // the handler says true when it has enough and the recall ends, the end handler gets all
+    // digits (also after a pause of the phone).
+    using DigitHandler = std::function<void(const NmtSubscriber& subscriber, char digit)>;
+    using RecallDigitHandler = std::function<bool(const NmtSubscriber& subscriber, char digit)>;
+    using RecallEndHandler = std::function<void(const NmtSubscriber& subscriber, const std::string& digits)>;
+    void setMftHandler(DigitHandler handler) { m_mftHandler = std::move(handler); }
+    void setRecallHandlers(RecallDigitHandler digit, RecallEndHandler end)
+    {
+        m_recallDigitHandler = std::move(digit);
+        m_recallEndHandler = std::move(end);
+    }
+
     // A call to a phone: it is paged on the calling channels and moved to a traffic channel
     // when it answers. False if the phone has a call or a roaming update going on. The caller
     // is told through the call handlers set below. The call can be ended with releaseCall().
@@ -131,6 +153,10 @@ public:
     void callFailed(NmtTransaction& transaction, modemcellular::Cause cause) override;
     void scipCompleted(NmtTransaction& transaction) override;
     void scipEnded(NmtTransaction& transaction, bool forceRelease) override;
+    void mftDigit(NmtTransaction& transaction, char digit) override;
+    bool recallDigit(NmtTransaction& transaction, char digit) override;
+    void recallEnded(NmtTransaction& transaction, const std::string& digits) override;
+    void powerChanged(NmtTransaction& transaction, int level, bool done) override;
 
 private:
     void page(NmtTransaction& transaction, int tryNo);
@@ -144,6 +170,10 @@ private:
     ClearHandler m_clearHandler;
     AudioFromMobile m_audioFromMobile;
     AudioToMobile m_audioToMobile;
+    PowerHandler m_powerHandler;
+    DigitHandler m_mftHandler;
+    RecallDigitHandler m_recallDigitHandler;
+    RecallEndHandler m_recallEndHandler;
     CallEventHandler m_alerting;
     CallEventHandler m_answered;
     CallFailedHandler m_failed;
