@@ -115,6 +115,15 @@ const double kReleaseTimeout = 2.0;
 // frame counts are 8 + 4 frames (about 1.7 s); this only ends transactions of a channel that
 // stopped sending.
 const double kStateWatchdog = 5.0;
+// Switching a call in progress (scheme C2'): the order 3c is sent 4 times and followed by 4 idle
+// frames (T' = 553 ms). If the phone has not identified itself on the new channel T' after the
+// start of the order, it is asked for its identity (4 frames), and if it does not answer
+// within T' after that the switch is given up. 300 ms are added for the delay of the radio.
+const int kScipOrderFrames = 4;
+const int kScipIdleFrames = 4;
+const int kScipRequestFrames = 4;
+const double kScipIdentTime = 0.553;
+const double kScipRequestTime = 0.553 + 0.3;
 // Frames of L(3), the roaming updating confirmation (NMT Doc 450-1 scheme D, T''' = 2 frames).
 const int kConfirmFrames = 2;
 // The phone dials digit by digit; a pause longer than this ends the call.
@@ -165,7 +174,8 @@ NmtChannel::NmtChannel(const ChannelConfig& config, double sampleRate, double de
     m_txAudio(m_valid ? sampleRate : 48000.0),
     m_rxMute(0),
     m_alarmRunning(false),
-    m_callerIdCount(0)
+    m_callerIdCount(0),
+    m_scipOrdered(false)
 {
     m_modem.setFrameSource([this](FrameBits& bits) { return nextFrame(bits); });
     m_modem.setFrameSink([this](const RxFrame& rx) { receiveFrame(rx); });
@@ -371,6 +381,19 @@ bool NmtChannel::nextFrame(FrameBits& bits)
     case State::MtRelease:
         frame = txMtRelease();
         break;
+    case State::ScipOrder:
+        frame = txScipOrder();
+        break;
+    case State::ScipIdent:
+        // idle frame of a channel in use; not the free-channel marker, nobody may seize it
+        frame.mt = MessageType::Frame6;
+        break;
+    case State::ScipIdentReq:
+        frame = txScipIdentReq();
+        break;
+    case State::ScipRelease:
+        frame = txScipRelease();
+        break;
     case State::MoDialling:
     case State::Active:
         // nothing but audio in these states
@@ -401,6 +424,9 @@ int NmtChannel::render(float* samples, int length, bool add)
         {
         case DspMode::Frame:
         {
+            // while the call is switched the supervisory tone stays on both channels (scheme C2')
+            const bool tone = (m_state == State::ScipOrder || m_state == State::ScipIdent || m_state == State::ScipIdentReq);
+            const int start = pos;
             const int count = m_valid ? m_modem.renderFrames(samples + pos, length - pos, add) : 0;
             framed += count;
             pos += count;
@@ -411,6 +437,9 @@ int NmtChannel::render(float* samples, int length, bool add)
                     std::fill(samples + pos, samples + length, 0.0f);
                 }
                 pos = length;
+            }
+            if (tone) {
+                m_superTone.add(samples + start, pos - start);
             }
             break;
         }
@@ -628,6 +657,12 @@ Frame NmtChannel::txMtQueue()
         return txMtChannel();
     }
 
+    // The queueing frame goes between the idle frames of the channel (scheme B: 2f "may also be
+    // sent"), so the other phones keep their calling channel.
+    if (m_txFrameCount++ & 1) {
+        return idleFrame();
+    }
+
     Frame frame = baseFrame(m_transaction->priority ? MessageType::Frame2c : MessageType::Frame2f);
 
     frame.msCountry = static_cast<uint8_t>(digitsToValue(std::string(1, m_transaction->subscriber.country)));
@@ -635,7 +670,6 @@ Frame NmtChannel::txMtQueue()
     // the fictitious channels 1008 (ordinary), 1009 (priority); NMT-450 codes them as 3F0, 3F1
     const uint16_t code = m_transaction->priority ? 1 : 0;
     frame.additionalInfo = (m_config.system == System::Nmt450 ? 0x3f0 : 0x9f0) + code;
-    ++m_txFrameCount;
     return frame;
 }
 
@@ -682,7 +716,7 @@ Frame NmtChannel::txMtRinging()
     {
         if (m_callerIdCount) {
             frame = Frame();
-            encodeANumber(frame, m_txFrameCount - 4, m_transaction->callerType, m_transaction->callerId,
+            encodeANumber(frame, m_txFrameCount - 5, m_transaction->callerType, m_transaction->callerId,
                           m_config.system, m_config.channel, m_config.msPower, m_config.trafficArea);
         } else {
             frame = Frame();
@@ -804,6 +838,148 @@ Frame NmtChannel::txMtRelease()
     return lineSignalFrame(15);
 }
 
+// ---- switching a call in progress (NMT Doc 450-1 para 4.4.1.4, scheme C2') ----
+
+bool NmtChannel::scipTargetState() const
+{
+    return m_state == State::ScipIdent || m_state == State::ScipIdentReq || m_state == State::ScipRelease;
+}
+
+// The new channel: idle frames and the supervisory tone before the phone is ordered here.
+void NmtChannel::beginScipIdent(NmtTransaction& transaction)
+{
+    if (!m_host) {
+        return;
+    }
+
+    m_transaction = &transaction;
+    m_scipOrdered = false;
+    m_state = State::ScipIdent;
+    m_txFrameCount = 0;
+    setDspMode(DspMode::Frame);
+    // T' is counted from the first 3c on the old channel (txScipOrder); this only covers an old
+    // channel that never sends it
+    m_timer->start(kStateWatchdog);
+}
+
+// The old channel: the order 3c four times, then idle frames for T'. Then the call goes on
+// here, until the phone shows up on the new channel.
+void NmtChannel::beginScipOrder()
+{
+    if (!m_host) {
+        return;
+    }
+
+    m_state = State::ScipOrder;
+    m_txFrameCount = 0;
+    m_alarmRunning = false;
+    setDspMode(DspMode::Frame);
+    m_timer->start(kStateWatchdog);
+}
+
+Frame NmtChannel::txScipOrder()
+{
+    const NmtChannel* const target = m_transaction->scipTarget;
+    Frame frame;
+
+    ++m_txFrameCount;
+    if (m_txFrameCount <= kScipOrderFrames && target)
+    {
+        const ChannelConfig& t = target->config();
+
+        // T' for the identity starts with the order
+        if (m_txFrameCount == 1)
+        {
+            m_transaction->scipTarget->m_timer->start(kScipIdentTime);
+            m_transaction->scipTarget->m_scipOrdered = true;
+        }
+
+        // the channel of the frame is the new one: N1'N2'N3' equals NaNbNc
+        frame = baseFrame(MessageType::Frame3c);
+        frame.channelNo = static_cast<uint16_t>(encodeChannel(t.system, t.channel, t.msPower));
+        frame.trafficArea = static_cast<uint8_t>(encodeTrafficArea(t.system, t.channel, m_config.trafficArea));
+        frame.msCountry = static_cast<uint8_t>(digitsToValue(std::string(1, m_transaction->subscriber.country)));
+        frame.msNumber = static_cast<uint32_t>(digitsToValue(m_transaction->subscriber.number));
+        frame.tcNo = static_cast<uint16_t>(encodeTc(t.system, t.channel, t.msPower));
+    }
+    else
+    {
+        frame.mt = MessageType::Frame6;
+        if (m_txFrameCount > kScipOrderFrames + kScipIdleFrames)
+        {
+            // the speech goes on here; if the phone does not come to the new channel it stays
+            enterActive();
+        }
+    }
+
+    return frame;
+}
+
+// Identity request on the new channel, at most T' long.
+Frame NmtChannel::txScipIdentReq()
+{
+    Frame frame;
+
+    if (++m_txFrameCount > kScipRequestFrames)
+    {
+        frame.mt = MessageType::Frame6;
+        return frame;
+    }
+
+    frame = baseFrame(MessageType::Frame3b);
+    frame.msCountry = static_cast<uint8_t>(digitsToValue(std::string(1, m_transaction->subscriber.country)));
+    frame.msNumber = static_cast<uint32_t>(digitsToValue(m_transaction->subscriber.number));
+    frame.additionalInfo = encodeAreaNo(m_config.system, static_cast<uint8_t>(m_config.areaNo));
+
+    return frame;
+}
+
+// The phone did not come: the release signal on the new channel, then it is free.
+void NmtChannel::beginScipRelease()
+{
+    if (!m_host) {
+        return;
+    }
+
+    m_state = State::ScipRelease;
+    m_txFrameCount = 0;
+    setDspMode(DspMode::Frame);
+    m_timer->start(kStateWatchdog);
+}
+
+Frame NmtChannel::txScipRelease()
+{
+    Frame frame = lineSignalFrame(15);
+
+    if (++m_txFrameCount == 4)
+    {
+        NmtTransaction* const transaction = m_transaction;
+
+        goIdle();
+        m_host->detachChannel(*this, transaction);
+    }
+
+    return frame;
+}
+
+// The phone is on the new channel and says who it is.
+void NmtChannel::rxScipIdent(const Frame& frame)
+{
+    if (frame.mt != MessageType::Frame10b || m_transaction->scipTarget != this) {
+        return;
+    }
+    // no identity before the order; before our request the phone has only seen the area of the
+    // old channel, so the area is checked after the request only
+    if (!m_scipOrdered || !matchChannel(frame) || !matchSubscriber(frame)
+     || (m_state == State::ScipIdentReq && !matchArea(frame))) {
+        return;
+    }
+
+    // the call is here now
+    enterActive();
+    m_host->scipCompleted(*m_transaction);
+}
+
 // ---- frames from the phone ----
 
 NmtSubscriber NmtChannel::subscriberOf(const Frame& frame)
@@ -879,7 +1055,7 @@ void NmtChannel::process(const Frame& frame)
     // The phone clears: acknowledge with the release signal, unless that is already going on
     // (a clearing from the phone that answers our release is handled in MtRelease).
     if (frame.mt == MessageType::Frame13a && m_state != State::Idle
-     && m_state != State::MoRelease && m_state != State::MtRelease)
+     && m_state != State::MoRelease && m_state != State::MtRelease && !scipTargetState())
     {
         // three of five characters have to agree on L(1); other line signals (the answer, for
         // one) are for the state
@@ -891,6 +1067,14 @@ void NmtChannel::process(const Frame& frame)
             NmtTransaction* const transaction = m_transaction;
 
             transaction->callUp = false;
+            // the page stops: no more tries, and the other calling channels let go
+            if (transaction->paging) {
+                m_host->pagingAnswered(*transaction, *this);
+            }
+            // a switch to another channel is off, the phone is here
+            if (transaction->scipTarget) {
+                m_host->scipEnded(*transaction, false);
+            }
             setDspMode(DspMode::Frame);
             m_state = State::MoRelease;
             m_txFrameCount = 0;
@@ -925,6 +1109,13 @@ void NmtChannel::process(const Frame& frame)
         break;
     case State::MtRelease:
         rxMtRelease(frame);
+        break;
+    case State::ScipIdent:
+    case State::ScipIdentReq:
+        rxScipIdent(frame);
+        break;
+    case State::ScipOrder:
+    case State::ScipRelease:
         break;
     case State::MtQueue:
     case State::MtChannel:
@@ -1141,7 +1332,8 @@ void NmtChannel::rxMtIdent(const Frame& frame)
     }
     // On a combined channel the phone repeats its acknowledgement of the page for a while; the
     // identity is the answer to our request, at least two frame periods after the allocation.
-    if (m_rxFrameCount < 2) {
+    // A separate traffic channel has no such repeat.
+    if (m_config.type == ChannelType::CcTc && m_rxFrameCount < 2) {
         return;
     }
 
@@ -1168,6 +1360,7 @@ void NmtChannel::rxMtRinging(const Frame& frame)
     }
 
     m_timer->start(kStateWatchdog);
+    m_transaction->answered = true;
     m_state = State::MtComplete;
     m_txFrameCount = 0;
     m_host->callAnswered(*m_transaction);
@@ -1195,6 +1388,11 @@ void NmtChannel::rxMtRelease(const Frame& frame)
 // the guard time is over.
 void NmtChannel::release()
 {
+    // a phone that was sent to another channel is released there too
+    if (m_transaction && m_transaction->scipTarget) {
+        m_host->scipEnded(*m_transaction, true);
+    }
+
     m_state = State::MtRelease;
     m_txFrameCount = 0;
     setDspMode(DspMode::Frame);
@@ -1226,6 +1424,46 @@ void NmtChannel::onTimer()
 {
     if (!m_transaction) {
         return;
+    }
+
+    // switching the call to another channel
+    if ((m_state == State::ScipIdent || m_state == State::ScipIdentReq) && m_transaction->scipTarget != this)
+    {
+        // the switch was ended without this channel being told
+        NmtTransaction* const transaction = m_transaction;
+
+        goIdle();
+        m_host->detachChannel(*this, transaction);
+        return;
+    }
+
+    switch (m_state)
+    {
+    case State::ScipIdent:
+        // no identity yet: ask for it
+        m_state = State::ScipIdentReq;
+        m_txFrameCount = 0;
+        m_timer->start(kScipRequestTime);
+        return;
+    case State::ScipIdentReq:
+        // the phone is not here: the call stays on the old channel, this one sends the release
+        m_host->scipEnded(*m_transaction, true);
+        return;
+    case State::ScipRelease:
+        {
+            NmtTransaction* const transaction = m_transaction;
+
+            goIdle();
+            m_host->detachChannel(*this, transaction);
+        }
+        return;
+    case State::ScipOrder:
+        // this channel stopped sending: the order is off, the call goes on
+        m_host->scipEnded(*m_transaction, true);
+        enterActive();
+        return;
+    default:
+        break;
     }
 
     // a pause in the dialling: the phone is released like for any other failure
