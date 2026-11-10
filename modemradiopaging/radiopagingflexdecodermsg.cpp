@@ -226,8 +226,9 @@ int dataBitCount(const std::vector<int8_t>& bits)
 //   - data end in the middle of the last word: the rest of the word is the inverse of the last data bit;
 //   - data end exactly at the end of the last word: nothing is added, except in the last fragment when the
 //     last character is all 0s or all 1s: then a word of the inverse of the last data bit is added.
-// The length is a multiple of blocking. A non-last fragment that ends exactly at a word end, with a
-// run of equal bits of blocking bits or more at its end, can not be told from fill: taken as fill.
+// The length is a multiple of blocking. Design rule: a fragment that is not the last is packed full (the
+// transmitter sizes it so), so its fill is shorter than a character and it has no padding word; only the last
+// fragment can have a longer fill, or the padding word that tells data from fill at an exact word end.
 // state: 0 follows the rules, 1 does not, 2 can not be told (lost bits at the end, blocking unknown = 0)
 int terminateBits(const std::vector<int8_t>& bits, int blocking, bool lastFragment, int& state)
 {
@@ -303,29 +304,30 @@ int terminateBits(const std::vector<int8_t>& bits, int blocking, bool lastFragme
 
     if (run == wordBits)
     {
-        // A whole word of one value is not fill (fill is shorter)
-        if ((n % blocking) != 0) {
-            state = 1;
-        }
-        return n;
+        // A whole word of one value is not fill (fill is shorter); the bits after the last whole character are
+        // too few to be data
+        return n - (n % blocking);
     }
     if (run >= blocking)
     {
+        // A fragment that is not the last is packed full: no fill and no padding word, the only bits after its
+        // last character are the ones too few for another character (fewer than blocking). A run of blocking
+        // bits or more is data; the data end exactly at the word end
+        if (!lastFragment)
+        {
+            state = ((n % blocking) != 0) ? 1 : 0;
+            return n;
+        }
         if (((n - run) % blocking) == 0) {
             return n - run;
         }
-        state = (lastFragment || ((n % blocking) != 0)) ? 1 : 0;
+        state = 1;
         return n;
     }
-    if ((n % blocking) == 0) {
-        return n;
-    }
-    if (((n - run) % blocking) == 0) {
-        return n - run;
-    }
-
-    state = 1;
-    return n;
+    // Fewer than blocking equal bits at the end: the fill is mandatory only when the rest of the word could be
+    // mistaken for data, that is when it could hold another character. The bits after the last whole character
+    // are too few to be data, whether they are fill or not
+    return n - (n % blocking);
 }
 
 // Signature sum of HEX/binary data (3.10.1.2 p.61): groups of 8 bits, the first bit of a group the least
