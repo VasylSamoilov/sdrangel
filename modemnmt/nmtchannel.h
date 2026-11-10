@@ -53,6 +53,7 @@ struct NmtTransaction
     NmtSubscriber subscriber;
     std::vector<NmtChannel*> channels;      // channels the transaction is bound to
     bool callUp = false;                    // a call exists in the exchange for the transaction
+    bool answered = false;                  // a call to the phone was answered
 
     // call to the phone
     bool mobileTerminated = false;
@@ -60,10 +61,14 @@ struct NmtTransaction
     int pageTry = 0;
     bool pageDeferred = false;              // waiting for the wake-up window of battery saving
     bool pageWaited = false;                // the wake-up window was waited for
+    int pageBusy = 0;                       // polls while no calling channel was free
     bool priority = false;                  // the phone answered as a priority phone
     std::string callerId;
     modemcellular::NumberType callerType = modemcellular::NumberType::NotAvailable;
     std::unique_ptr<modemcellular::Timer> timer;        // paging
+
+    // switching the call to another traffic channel: the channel the phone is sent to
+    NmtChannel* scipTarget = nullptr;
 };
 
 // What a channel needs from the base station it belongs to (implemented by NmtSystem).
@@ -104,6 +109,14 @@ public:
     virtual void callAnswered(NmtTransaction& transaction) = 0;
     // The call to the phone failed before it was answered (no answer, no channel, ...).
     virtual void callFailed(NmtTransaction& transaction, modemcellular::Cause cause) = 0;
+
+    // Switching a call in progress to another traffic channel
+    // The phone identified itself on the new channel (transaction.scipTarget): the call is
+    // there now, the old channel goes idle.
+    virtual void scipCompleted(NmtTransaction& transaction) = 0;
+    // The switch is over without the phone on the new channel: the call stays where it is. With
+    // forceRelease the new channel sends the release signal, else it just goes idle.
+    virtual void scipEnded(NmtTransaction& transaction, bool forceRelease) = 0;
 };
 
 // What the transmitter of a channel sends instead of frames.
@@ -178,7 +191,11 @@ public:
         MtRinging,          // traffic channel: the phone rings
         MtComplete,         // traffic channel: the phone answered, connecting
         MoRelease,          // acknowledging a release from the phone
-        MtRelease           // sending a release towards the phone
+        MtRelease,          // sending a release towards the phone
+        ScipOrder,          // old traffic channel: ordering the phone to the new channel
+        ScipIdent,          // new traffic channel: supervisory tone on, waiting for the phone
+        ScipIdentReq,       // new traffic channel: asking the phone for its identity
+        ScipRelease         // new traffic channel: the phone did not come, forced release
     };
 
     struct ReceivedFrame
@@ -209,6 +226,11 @@ public:
     void startPaging(NmtTransaction& transaction);
     // The traffic channel takes over a call to the phone: identity request, then ringing.
     void beginMtIdent(NmtTransaction& transaction);
+    // Switching the call in progress: this connected channel orders the phone to the target
+    // (transaction.scipTarget), which waits for it.
+    void beginScipOrder();
+    void beginScipIdent(NmtTransaction& transaction);
+    void beginScipRelease();
     // The channel is a calling channel (also a combined one).
     bool isCallingChannel() const;
     State state() const { return m_state; }
@@ -261,6 +283,12 @@ private:
     void failCall(modemcellular::Cause cause);
     Frame txMoRelease();
     Frame txMtRelease();
+    Frame txScipOrder();
+    Frame txScipIdentReq();
+    Frame txScipRelease();
+    void rxScipIdent(const Frame& frame);
+    // The channel waits for a phone that is switched to it (or sends it the release).
+    bool scipTargetState() const;
 
     // frames from the phone
     void process(const Frame& frame);
@@ -314,6 +342,7 @@ private:
     int m_rxMute;                   // samples of received audio still to be muted
     bool m_alarmRunning;            // the supervisory tone was lost and the alarm timer runs
     int m_callerIdCount;            // 0: no number while ringing, 1: before the first ring, 2: after
+    bool m_scipOrdered;             // new channel: the phone has been ordered here (first 3c sent)
 };
 
 } // namespace modemnmt
