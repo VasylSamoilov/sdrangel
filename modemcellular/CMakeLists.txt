@@ -2,6 +2,7 @@ project(modemcellular)
 
 set(modemcellular_SOURCES
     callrouter.cpp
+    carrierqueue.cpp
     cellularsystem.cpp
     clock.cpp
     compandor.cpp
@@ -16,6 +17,8 @@ set(modemcellular_HEADERS
     audioendpoint.h
     callrouter.h
     calltypes.h
+    carrierbatch.h
+    carrierqueue.h
     cellularsystem.h
     clock.h
     compandor.h
