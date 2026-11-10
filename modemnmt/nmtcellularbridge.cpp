@@ -19,6 +19,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <vector>
+
+#include "dtmfgenerator.h"
 
 namespace modemnmt
 {
@@ -39,6 +42,20 @@ public:
     const NmtSubscriber& subscriber() const { return m_subscriber; }
     modemcellular::CallRef callref() const { return m_callref; }
     void setCallref(modemcellular::CallRef callref) { m_callref = callref; }
+
+    // The digits the phone sends in the MFT state go to the far end as push-button tones.
+    void digit(char digit) { m_dtmf.queue(digit); }
+    // The speech of the phone with the tones of the digits added; it is the speech itself if there are none.
+    const float* withTones(const float* samples, int count)
+    {
+        if (!m_dtmf.active()) {
+            return samples;
+        }
+        m_scratch.assign(samples, samples + count);
+        m_dtmf.mix(m_scratch.data(), count);
+        return m_scratch.data();
+    }
+    void clearTones() { m_dtmf.reset(); }
 
     // These come from the router, on any thread, and are only queued.
     void setup(modemcellular::CallRef callref, const std::string& callerId, modemcellular::NumberType callerType,
@@ -75,6 +92,8 @@ private:
     NmtSubscriber m_subscriber;
     // set from the router (any thread), read by the audio handlers under the station lock
     std::atomic<modemcellular::CallRef> m_callref;
+    modemcellular::DtmfGenerator m_dtmf;
+    std::vector<float> m_scratch;
 };
 
 std::string NmtCellularBridge::numberOf(const NmtSubscriber& subscriber)
@@ -108,6 +127,7 @@ NmtCellularBridge::NmtCellularBridge(NmtSystem& nmt, modemcellular::CellularSyst
         if (!result.ok()) {
             return false;
         }
+        leg.clearTones();
         leg.setCallref(result.callref);
         return true;
     });
@@ -152,11 +172,21 @@ NmtCellularBridge::NmtCellularBridge(NmtSystem& nmt, modemcellular::CellularSyst
             }
         });
 
+    // the MFT converter: the digits of the phone go to the far end as push-button tones
+    m_nmt.setMftHandler([this](const NmtSubscriber& subscriber, char digit) {
+        Leg& leg = legFor(subscriber);
+
+        if (leg.callref()) {
+            leg.digit(digit);
+        }
+    });
+
     m_nmt.setAudioHandlers(
         [this](const NmtSubscriber& subscriber, const float* samples, int count) {
-            const modemcellular::CallRef callref = legFor(subscriber).callref();
+            Leg& leg = legFor(subscriber);
+            const modemcellular::CallRef callref = leg.callref();
             if (callref) {
-                m_cellular.audioFromMobile(callref, samples, count);
+                m_cellular.audioFromMobile(callref, leg.withTones(samples, count), count);
             }
         },
         [this](const NmtSubscriber& subscriber, float* samples, int count) {
@@ -186,6 +216,7 @@ NmtCellularBridge::~NmtCellularBridge()
     m_nmt.setClearHandler(nullptr);
     m_nmt.setCallToPhoneHandlers(nullptr, nullptr, nullptr);
     m_nmt.setAudioHandlers(nullptr, nullptr);
+    m_nmt.setMftHandler(nullptr);
 
     // waits for notifications that are being delivered to a leg
     for (auto& entry : m_legs) {

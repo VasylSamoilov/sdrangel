@@ -11,6 +11,7 @@ set(MODEMCELLULAR_LIB_SOURCES
     ../callrouter.cpp
     ../cellularsystem.cpp
     ../clock.cpp
+    ../dtmfgenerator.cpp
     ../echoendpoint.cpp
     ../musicendpoint.cpp
     ../timer.cpp
@@ -40,5 +41,6 @@ endfunction()
 modemcellular_add_test(modemcellular_timer_test test_timer.cpp)
 modemcellular_add_test(modemcellular_endpoint_test test_endpoints.cpp)
 modemcellular_add_test(modemcellular_tone_test test_tones.cpp)
+modemcellular_add_test(modemcellular_dtmf_test test_dtmf.cpp)
 modemcellular_add_test(modemcellular_router_test test_router.cpp)
 modemcellular_add_test(modemcellular_system_test test_system.cpp)

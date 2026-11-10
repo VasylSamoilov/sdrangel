@@ -4,6 +4,7 @@ set(modemcellular_SOURCES
     callrouter.cpp
     cellularsystem.cpp
     clock.cpp
+    dtmfgenerator.cpp
     echoendpoint.cpp
     musicendpoint.cpp
     timer.cpp
@@ -16,6 +17,7 @@ set(modemcellular_HEADERS
     calltypes.h
     cellularsystem.h
     clock.h
+    dtmfgenerator.h
     echoendpoint.h
     mobileleg.h
     musicendpoint.h

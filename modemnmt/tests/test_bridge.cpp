@@ -603,8 +603,56 @@ static void testFarEndReleasesDuringMove()
     CHECK(s.nmt.transactionCount() == 0);
 }
 
+// The digits a phone sends to the MFT converter reach the far end as push-button tones.
+static void testMftDigitsAsTones()
+{
+    Station s;
+    const Phone phone;
+
+    s.cellular.setFallback(modemcellular::CallRouter::Fallback::Echo);
+    s.cellular.setAnswerDelay(0.1);
+    s.roam(*s.a, phone);
+    s.callFrom(*s.a, phone, "5551234");
+    s.air(1.0, *s.a, microphone({}));
+
+    // the converter: the request, the acknowledgement frames, then the audio path stays
+    phoneSends(*s.a, lineSignalFrame(*s.a, phone, 0x88888), 1);
+    s.air(1.5, *s.a, microphone({}));
+    CHECK(s.a->state() == NmtChannel::State::Mft);
+    CHECK(s.cellular.callCount() == 1);
+
+    // key 5 and then #: two frames each, the second one in the other kind of frame
+    phoneSends(*s.a, digitFrame(*s.a, phone, '5', true), 1);
+    phoneSends(*s.a, digitFrame(*s.a, phone, '5', true), 1);
+    s.air(0.3, *s.a, microphone({}));
+    phoneSends(*s.a, digitFrame(*s.a, phone, '#', false), 1);
+    phoneSends(*s.a, digitFrame(*s.a, phone, '#', false), 1);
+
+    // the echo of the router sends them back a second later: 770+1336 Hz, then 941+1477 Hz
+    const std::vector<float> sent = s.air(3.0, *s.a, microphone({}));
+    bool five = false, hash = false;
+
+    for (size_t from = 0; from + 800 <= sent.size(); from += 400)
+    {
+        const size_t to = from + 800;
+
+        five = five || (toneAmplitude(sent, from, to, 770.0, kRate) > 0.05 && toneAmplitude(sent, from, to, 1336.0, kRate) > 0.05);
+        hash = hash || (toneAmplitude(sent, from, to, 941.0, kRate) > 0.05 && toneAmplitude(sent, from, to, 1477.0, kRate) > 0.05);
+    }
+    CHECK(five && hash);
+
+    // after the converter the speech is the speech again
+    phoneSends(*s.a, lineSignalFrame(*s.a, phone, 0x77777), 1);
+    s.air(1.5, *s.a, microphone({}));
+    CHECK(s.a->state() == NmtChannel::State::Active);
+    const double start = static_cast<double>(s.m_samples) / kRate;
+    const std::vector<float> speech = s.air(4.0, *s.a, microphone({{start + 0.2, start + 1.2}}));
+    CHECK(std::fabs(toneAmplitude(speech, static_cast<size_t>(kRate * 1.4), static_cast<size_t>(kRate * 2.0), 1000.0, kRate) - 0.4) < 0.05);
+}
+
 int main()
 {
+    testMftDigitsAsTones();
     testMovedCall();
     testFarEndReleasesDuringMove();
     testRoamingRegisters();
