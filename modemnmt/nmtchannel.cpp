@@ -132,10 +132,8 @@ const int kAckIdleFrames = 3;
 const int kAckFrames = 4;
 const int kLeaveIdleFrames = 4;
 const int kPowerOrderFrames = 8;
-// Frames to wait for the idle frame of a phone before the order to answer by itself goes out.
+// Idle frames after the identity before the order to answer by itself (scheme B2: 6 x 6).
 const int kAutoanswerWait = 6;
-// Idle frames of the phone (scheme B2: 15, 15, 15/16, 15/16) after which the order goes out.
-const int kPhoneIdleFrames = 4;
 const double kMftSilence = 10.0;
 const double kRecallFirstDigit = 30.0;
 const double kRecallNextDigit = 8.0;
@@ -202,7 +200,6 @@ NmtChannel::NmtChannel(const ChannelConfig& config, double sampleRate, double de
     m_mftIdleSeen(false),
     m_autoanswerGo(false),
     m_autoanswerAcked(false),
-    m_phoneIdle(0),
     m_mwiLead(0),
     m_mwiAcked(false)
 {
@@ -304,6 +301,8 @@ uint64_t NmtChannel::additionalInfo(MessageType type)
                 h |= static_cast<uint64_t>(encodeBandLimit(m_config.ccBandStart)) << 24;
                 h |= static_cast<uint64_t>(encodeBandLimit(m_config.ccBandEnd)) << 16;
             }
+            // H5H6 is the band end limit here: the overdecadic bit belongs to the battery saving
+            // frame only (NMT Doc 450-1 para 4.3.3.12.5)
             if (type != MessageType::Frame1b && m_config.tcBandStart && m_config.tcBandEnd)
             {
                 h |= static_cast<uint64_t>(encodeBandLimit(m_config.tcBandStart)) << 8;
@@ -752,13 +751,22 @@ Frame NmtChannel::txMtQueue()
     if (m_host->findTrafficChannel(*this))
     {
         m_timer->stop();
+
+        // A priority phone that places a call is paged again first and has to confirm before the
+        // traffic channel is assigned.
+        if (m_transaction->priorityMo)
+        {
+            m_host->pageAgain(*m_transaction);
+            return txMtPaging();
+        }
+
         m_state = State::MtChannel;
         m_txFrameCount = 0;
         return txMtChannel();
     }
 
-    // The queueing frame goes between the idle frames of the channel (scheme B: 2f "may also be
-    // sent"), so the other phones keep their calling channel.
+    // The queueing frame goes between the idle frames of the channel (scheme 4.4.1.7: X = 1a,
+    // 2a/b/c/d/f), so the other phones keep their calling channel.
     if (m_txFrameCount++ & 1) {
         return idleFrame();
     }
@@ -817,6 +825,7 @@ Frame NmtChannel::txMtRinging()
     {
         if (m_callerIdCount) {
             frame = Frame();
+            // the sequence starts with M(0), which carries its length
             encodeANumber(frame, m_txFrameCount - 5, m_transaction->callerType, m_transaction->callerId,
                           m_config.system, m_config.channel, m_config.msPower, m_config.trafficArea);
         } else {
@@ -1144,6 +1153,7 @@ Frame NmtChannel::txPowerChange()
     }
     else
     {
+        // NMT-900: NaNbNc has no power bits, the new level is in N1 (NMT Doc 900-1 para 4.4.1.8)
         frame.channelNo = static_cast<uint16_t>(encodeChannel(m_config.system, m_config.channel, m_newPower));
         frame.tcNo = static_cast<uint16_t>(encodeTc(m_config.system, m_config.channel, 0));
     }
@@ -1151,16 +1161,10 @@ Frame NmtChannel::txPowerChange()
     return frame;
 }
 
-// The answer carries the new level in N1.
+// The identity of the phone on this channel is the answer, whatever level it carries.
 void NmtChannel::rxPowerChange(const Frame& frame)
 {
     if (frame.mt != MessageType::Frame10b || !matchChannel(frame) || !matchSubscriber(frame)) {
-        return;
-    }
-
-    int channel, level;
-
-    if (!decodeChannel(m_config.system, frame.channelNo, channel, level) || level != m_newPower) {
         return;
     }
 
@@ -1224,9 +1228,6 @@ void NmtChannel::rxRecall(const Frame& frame)
     case DigitResult::Repeat:
     case DigitResult::Damaged:
     case DigitResult::Lost:
-        return;
-    case DigitResult::TooLong:
-        beginRecallEnd();
         return;
     case DigitResult::Digit:
         break;
@@ -1551,6 +1552,7 @@ void NmtChannel::process(const Frame& frame)
     case State::MoIdent:
         rxIdent(frame);
         break;
+    case State::MoConfirm:
     case State::MoDialling:
         rxMoDialling(frame);
         break;
@@ -1598,7 +1600,6 @@ void NmtChannel::process(const Frame& frame)
     case State::MtQueue:
     case State::MtChannel:
     case State::MtComplete:
-    case State::MoConfirm:          // the phone dials after the dial tone, not before
     case State::RoamingConfirm:
     case State::MoComplete:
     case State::MoRelease:
@@ -1609,11 +1610,14 @@ void NmtChannel::process(const Frame& frame)
 
 void NmtChannel::rxIdle(const Frame& frame)
 {
-    // roaming update (11a), call from an ordinary phone (10b) or from a coin-box phone (12)
-    if (frame.mt != MessageType::Frame11a && frame.mt != MessageType::Frame10b && frame.mt != MessageType::Frame12) {
+    // roaming update (11a), call from an ordinary phone (10b) or from a coin-box phone (12), a
+    // priority phone that places a call (11b, calling channel), the called phone that found this
+    // traffic channel by itself (10c)
+    if (frame.mt != MessageType::Frame11a && frame.mt != MessageType::Frame10b && frame.mt != MessageType::Frame12
+     && frame.mt != MessageType::Frame11b && frame.mt != MessageType::Frame10c) {
         return;
     }
-    if (!matchChannel(frame) || !isTrafficChannel() || !matchArea(frame)) {
+    if (!matchChannel(frame)) {
         return;
     }
 
@@ -1621,6 +1625,32 @@ void NmtChannel::rxIdle(const Frame& frame)
     if (!plainDigits(subscriber.number) || !plainDigits(std::string(1, subscriber.country))) {
         return;
     }
+
+    if (frame.mt == MessageType::Frame11b)
+    {
+        // the phone is paged to check who it is; the transaction is bound to the calling channels
+        if (isCallingChannel() && matchArea(frame)) {
+            m_host->startPriorityCall(subscriber, *this);
+        }
+        return;
+    }
+    if (!isTrafficChannel()) {
+        return;
+    }
+    if (frame.mt == MessageType::Frame10c)
+    {
+        // the transaction moves here; the identity request follows
+        NmtTransaction* const transaction = m_host->calledPhoneSeized(subscriber, *this);
+
+        if (transaction) {
+            beginMtIdent(*transaction);
+        }
+        return;
+    }
+    if (!matchArea(frame)) {
+        return;
+    }
+
     subscriber.coinbox = (frame.mt == MessageType::Frame12);
 
     m_transaction = m_host->createTransaction(subscriber, *this);
@@ -1684,11 +1714,6 @@ void NmtChannel::rxMoDialling(const Frame& frame)
     case DigitResult::Damaged:
         m_timer->start(kDiallingTimeout);
         return;
-    case DigitResult::TooLong:
-        // A longer number would be a wrong number: the 33rd digit ends the call.
-        m_timer->start(kDiallingTimeout);
-        release();
-        return;
     case DigitResult::Lost:
         m_timer->start(kDiallingTimeout);
         release();
@@ -1699,6 +1724,8 @@ void NmtChannel::rxMoDialling(const Frame& frame)
 
     m_timer->start(kDiallingTimeout);
     m_dialled.push_back(digit);
+    // a digit before the end of the proceed signal: the dial tone does not start
+    m_state = State::MoDialling;
     // the dial tone ends with the first digit
     if (len == 0) {
         setDspMode(DspMode::Audio);
@@ -1718,9 +1745,9 @@ NmtChannel::DigitResult NmtChannel::takeDigit(const Frame& frame, size_t count, 
         return DigitResult::Foreign;
     }
 
-    // An even frame at the limit is the repeat of the last digit.
+    // A digit beyond the limit is ignored, the call goes on with the digits taken.
     if (count >= limit) {
-        return odd ? DigitResult::TooLong : DigitResult::Repeat;
+        return DigitResult::Repeat;
     }
 
     bool lost;
@@ -1847,8 +1874,17 @@ void NmtChannel::rxMtIdent(const Frame& frame)
         m_txFrameCount = 0;
         m_autoanswerGo = false;
         m_autoanswerAcked = false;
-        m_phoneIdle = 0;
         m_timer->start(kStateWatchdog);
+        return;
+    }
+
+    // A priority phone that places a call is rung to lift the handset; nobody in the exchange is called.
+    if (m_transaction->priorityMo)
+    {
+        m_state = State::MtRinging;
+        m_txFrameCount = 0;
+        m_callerIdCount = 0;
+        m_timer->start(kRingingTimeout);
         return;
     }
 
@@ -1861,8 +1897,9 @@ void NmtChannel::rxMtIdent(const Frame& frame)
 }
 
 // Automatic answer (scheme B2, NMT Doc 450-1 para 4.4.1.12): the order to receive a short message,
-// L(12) four times once the phone is quiet, then idle frames while it acknowledges with L(12).
-// A phone that does not know the order is rung after all (the call goes on as an ordinary one).
+// 6 idle frames after the identity, L(12) four times (T'), then 3 idle frames while the phone
+// acknowledges with L(12). A phone that does not know the order is rung after all, without the
+// number of the caller.
 Frame NmtChannel::txMtAutoanswer()
 {
     Frame frame;
@@ -1871,8 +1908,6 @@ Frame NmtChannel::txMtAutoanswer()
 
     if (!m_autoanswerGo)
     {
-        // the phone sends idle frames after its identity (15, 15, 15, 15); do not start before,
-        // but not forever
         if (++m_txFrameCount >= kAutoanswerWait) {
             m_autoanswerGo = true;
             m_txFrameCount = 0;
@@ -1888,7 +1923,7 @@ Frame NmtChannel::txMtAutoanswer()
     // the phone answered while the order was going out: the order is complete, then 3 idle frames
     if (n == kAckFrames + 1 && m_autoanswerAcked)
     {
-        beginMwiClear(3, false);
+        beginMwiClear(kAckIdleFrames, false);
         return txMwiClear();
     }
     if (n <= kAckFrames + kLeaveIdleFrames) {
@@ -1897,24 +1932,14 @@ Frame NmtChannel::txMtAutoanswer()
 
     // no acknowledgement: ring the phone
     m_state = State::MtRinging;
-    m_txFrameCount = m_config.sendCallerId ? 4 : 0;
-    m_callerIdCount = m_config.sendCallerId ? 1 : 0;
+    m_txFrameCount = 0;
+    m_callerIdCount = 0;
     m_timer->start(kMessageRingTimeout);
     return frame;
 }
 
 void NmtChannel::rxMtAutoanswer(const Frame& frame)
 {
-    if (frame.mt == MessageType::Frame15 && !m_autoanswerGo)
-    {
-        // identity 4 frames, then idle frames 4 frames: the order follows the last of them
-        if (++m_phoneIdle >= kPhoneIdleFrames)
-        {
-            m_autoanswerGo = true;
-            m_txFrameCount = 0;
-        }
-        return;
-    }
     if (frame.mt != MessageType::Frame13a || !m_autoanswerGo) {
         return;
     }
@@ -1922,8 +1947,8 @@ void NmtChannel::rxMtAutoanswer(const Frame& frame)
         return;
     }
 
-    // The phone answers (scheme B2: while the order goes out, it needs one valid copy). The order
-    // is sent to its end, then 3 idle frames count, then the indicators and the release.
+    // The phone answers (scheme B2: within T' of the order). The order is sent to its end, then
+    // 3 idle frames count, then the indicators and the release.
     if (m_txFrameCount < kAckFrames)
     {
         m_autoanswerAcked = true;
@@ -2022,6 +2047,17 @@ void NmtChannel::rxMtRinging(const Frame& frame)
         return;
     }
     if (lineSignalMajority(frame.lineSignal, 5, 3) != 14) {
+        return;
+    }
+
+    // The handset of a priority phone is lifted: it places its call from here on, with the
+    // proceed to send and the digits.
+    if (m_transaction->priorityMo)
+    {
+        m_transaction->mobileTerminated = false;
+        m_state = State::MoConfirm;
+        m_txFrameCount = 0;
+        m_timer->start(kStateWatchdog);
         return;
     }
 
