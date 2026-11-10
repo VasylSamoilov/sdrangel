@@ -38,6 +38,7 @@
 class QNetworkAccessManager;
 class QNetworkReply;
 class QThread;
+class QTimer;
 class DeviceAPI;
 class ObjectPipe;
 class RadioPagingModBaseband;
@@ -58,6 +59,7 @@ public:
         QString m_voiceFile;            //!< GSC voice page: the path of the WAV file
         RadioPagingGscTxStream::Voice m_voice;  //!< The file loaded when the request was checked, not loaded again
         bool m_live = false;            //!< GSC voice page from the microphone: the voice comes with MsgLiveVoice, up to MsgLiveEnd
+        QString m_pageId;               //!< Page of the message center: its id is the id of the record, its states are reported
     };
 
     class MsgConfigureRadioPagingMod : public Message {
@@ -131,23 +133,25 @@ public:
         { }
     };
 
-    //! A message was sent or will not be (from the source, through the input queue)
+    //! A message is being transmitted, was sent or will not be (from the source, through the input queue)
     class MsgTxEvent : public Message {
         MESSAGE_CLASS_DECLARATION
 
     public:
-        quint64 getId() const { return m_id; }
-        bool getSent() const { return m_sent; }
+        enum Event { Transmitted, Sent, Dropped, Failed };
 
-        static MsgTxEvent* create(quint64 id, bool sent) {
-            return new MsgTxEvent(id, sent);
+        quint64 getId() const { return m_id; }
+        Event getEvent() const { return m_event; }
+
+        static MsgTxEvent* create(quint64 id, Event event) {
+            return new MsgTxEvent(id, event);
         }
 
     private:
         quint64 m_id;
-        bool m_sent;
+        Event m_event;
 
-        MsgTxEvent(quint64 id, bool sent) : Message(), m_id(id), m_sent(sent) { }
+        MsgTxEvent(quint64 id, Event event) : Message(), m_id(id), m_event(event) { }
     };
 
     //! To the GUI: a message of the log of the messages transmitted, as it was queued, sent or dropped
@@ -329,10 +333,19 @@ private:
         RadioPagingGscTxStream::Voice m_voice;  //!< Voice page from a file
         std::vector<float> m_live;              //!< Live voice page: the voice sent, at the rate of the modulator
         bool m_isVoice = false;
+        QString m_pageId;                       //!< Page of the message center, empty if none
+        bool m_transmitted = false;             //!< Its blocks were pushed to the modulator
     };
     std::map<quint64, PendingTx> m_pending;
     void fillRecord(const TxRequest& request, const RadioPagingModSource::Request& sourceRequest, quint64 id, PendingTx& pending);
-    void txEvent(quint64 id, bool sent);
+    void txEvent(quint64 id, MsgTxEvent::Event event);
+    //! The state of a page of the message center, on the messages pipe (see MessageCenterEngine::applyEvent)
+    void publishPageEvent(const QString& pageId, const QString& state, const QString& reason = QString());
+    //! This transmitter in the message center: its alias, protocols, speeds and polarities, and its queue
+    MessageRecord endpointRecord(const QString& event);
+    void announce(const QString& event = "status");
+    QTimer *m_announceTimer = nullptr;
+    QString m_lastAlias;                        //!< The alias announced last
     QString recordVoice(const PendingTx& pending, double& seconds);
     void publishRecord(const MessageRecord& record);
 

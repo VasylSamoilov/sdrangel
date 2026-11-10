@@ -299,7 +299,7 @@ void RadioPagingModSource::feed()
     if (!m_mod.push(block.m_baud, block.m_levels, block.m_shaping, block.m_deviation))
     {
         qWarning() << "RadioPagingModSource::feed: baud rate not supported:" << block.m_baud;
-        drop(block.m_ids);
+        fail(block.m_ids);
         m_streamEnded = true;
         return;
     }
@@ -316,6 +316,17 @@ void RadioPagingModSource::feed()
 
     if (!block.m_ids.empty()) {
         m_inFlight.push_back(InFlight{m_pushed, block.m_ids});
+    }
+
+    // The messages are on air: with this block, or the voice pages with their first one
+    if (m_notifyTransmitted)
+    {
+        for (uint64_t id : block.m_startIds) {
+            m_notifyTransmitted(id);
+        }
+        for (uint64_t id : block.m_ids) {
+            m_notifyTransmitted(id);
+        }
     }
 }
 
@@ -460,7 +471,22 @@ void RadioPagingModSource::addRequest(const Request& request)
         }
 
         qWarning() << "RadioPagingModSource::addRequest: message" << request.m_id << "dropped:" << QString::fromStdString(error);
-        drop({request.m_id});
+        fail({request.m_id});
+    }
+}
+
+// Messages that can not be transmitted: counted, and reported as failed
+void RadioPagingModSource::fail(const std::vector<uint64_t>& ids)
+{
+    m_status.m_dropped += ids.size();
+
+    for (uint64_t id : ids)
+    {
+        if (m_notifyFailed) {
+            m_notifyFailed(id);
+        } else if (m_notify) {
+            m_notify(id, false);
+        }
     }
 }
 

@@ -244,6 +244,7 @@ set(sdrbase_SOURCES
     util/CRC64.cpp
     util/csv.cpp
     util/messagerecord.cpp
+    util/messageendpoint.cpp
     util/db.cpp
     util/dsc.cpp
     util/fixedtraits.cpp
@@ -532,6 +533,7 @@ set(sdrbase_HEADERS
     util/CRC64.h
     util/csv.h
     util/messagerecord.h
+    util/messageendpoint.h
     util/db.h
     util/dsc.h
     util/doublebuffer.h

@@ -12,6 +12,7 @@ void SWGRadioPagingModTx::cleanup()
     delete m_type; m_type = nullptr;
     delete m_text; m_text = nullptr;
     delete m_polarity; m_polarity = nullptr;
+    delete m_id; m_id = nullptr;
 }
 void SWGRadioPagingModTx::init()
 {
@@ -25,6 +26,7 @@ void SWGRadioPagingModTx::init()
     m_text = new QString(); m_textIsSet = false;
     m_speed = 0; m_speedIsSet = false;
     m_polarity = new QString(); m_polarityIsSet = false;
+    m_id = new QString(); m_idIsSet = false;
 }
 SWGRadioPagingModTx* SWGRadioPagingModTx::fromJson(QString& json)
 {
@@ -40,6 +42,7 @@ void SWGRadioPagingModTx::fromJsonObject(QJsonObject& json)
     if (json.contains("type")) { ::SWGSDRangel::setValue(&m_type,json["type"],"QString","QString"); m_typeIsSet = true; }
     if (json.contains("text")) { ::SWGSDRangel::setValue(&m_text,json["text"],"QString","QString"); m_textIsSet = true; }
     if (json.contains("speed")) { ::SWGSDRangel::setValue(&m_speed,json["speed"],"qint32",""); m_speedIsSet = true; }
+    if (json.contains("id")) { ::SWGSDRangel::setValue(&m_id,json["id"],"QString","QString"); m_idIsSet = true; }
     if (json.contains("polarity")) { ::SWGSDRangel::setValue(&m_polarity,json["polarity"],"QString","QString"); m_polarityIsSet = true; }
 }
 QString SWGRadioPagingModTx::asJson()
@@ -57,13 +60,14 @@ QJsonObject* SWGRadioPagingModTx::asJsonObject()
     if (m_type && (m_typeIsSet || !m_type->isEmpty())) { toJsonValue(QString("type"),m_type,object,QString("QString")); }
     if (m_text && (m_textIsSet || !m_text->isEmpty())) { toJsonValue(QString("text"),m_text,object,QString("QString")); }
     if (m_speedIsSet) { object->insert("speed",QJsonValue(m_speed)); }
+    if (m_id && (m_idIsSet || !m_id->isEmpty())) { toJsonValue(QString("id"),m_id,object,QString("QString")); }
     if (m_polarity && (m_polarityIsSet || !m_polarity->isEmpty())) { toJsonValue(QString("polarity"),m_polarity,object,QString("QString")); }
     return object;
 }
 bool SWGRadioPagingModTx::isSet()
 {
     return m_addressIsSet || m_functionIsSet || m_capcodeIsSet || m_priorityIsSet || m_protocolIsSet || m_typeIsSet || m_textIsSet
-        || m_speedIsSet || m_polarityIsSet;
+        || m_speedIsSet || m_polarityIsSet || m_idIsSet;
 }
 qint32 SWGRadioPagingModTx::getAddress() { return m_address; }
 void SWGRadioPagingModTx::setAddress(qint32 value) { m_address = value; m_addressIsSet = true; }
@@ -81,6 +85,8 @@ QString* SWGRadioPagingModTx::getText() { return m_text; }
 void SWGRadioPagingModTx::setText(QString* value) { if (m_text != value) { delete m_text; m_text = value; } m_textIsSet = true; }
 qint32 SWGRadioPagingModTx::getSpeed() { return m_speed; }
 void SWGRadioPagingModTx::setSpeed(qint32 value) { m_speed = value; m_speedIsSet = true; }
+QString* SWGRadioPagingModTx::getId() { return m_id; }
+void SWGRadioPagingModTx::setId(QString* value) { if (m_id != value) { delete m_id; m_id = value; } m_idIsSet = true; }
 QString* SWGRadioPagingModTx::getPolarity() { return m_polarity; }
 void SWGRadioPagingModTx::setPolarity(QString* value) { if (m_polarity != value) { delete m_polarity; m_polarity = value; } m_polarityIsSet = true; }
 }

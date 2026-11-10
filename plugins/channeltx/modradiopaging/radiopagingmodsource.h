@@ -121,6 +121,10 @@ public:
     //! Called (from the thread of the source, with its lock held: do not call it back) when a message
     //! was sent (true) or will not be (false)
     void setNotify(const std::function<void(quint64 id, bool sent)>& notify) { m_notify = notify; }
+    //! Called when the blocks of a message are pushed to the modulator (before they are on air)
+    void setNotifyTransmitted(const std::function<void(quint64 id)>& notify) { m_notifyTransmitted = notify; }
+    //! Called when a message can not be transmitted at all (it does not encode, the protocol is not the channel's)
+    void setNotifyFailed(const std::function<void(quint64 id)>& notify) { m_notifyFailed = notify; }
     //! Voice of the live voice page being sent (taken once its alert time is over)
     void pushLive(const std::vector<float>& samples);
     //! The live voice page ends: the turn-off word follows
@@ -176,6 +180,9 @@ private:
     static const int m_levelNbSamples = 480;    // 10 ms at 48 kHz
 
     std::function<void(quint64, bool)> m_notify;
+    std::function<void(quint64)> m_notifyTransmitted;
+    std::function<void(quint64)> m_notifyFailed;
+    void fail(const std::vector<uint64_t>& ids);
     void drop(const std::vector<uint64_t>& ids);
     void makeStream();
     bool mixing() const;

@@ -915,6 +915,7 @@ bool RadioPagingGscTxStream::next(RadioPagingTxBlock& block)
     }
     else if (first.m_live)
     {
+        block.m_startIds.push_back(first.m_id);     // On air with the page; sent with its turn-off word
         // The alert time, then the voice as it comes (nextLive); the turn-off word is prepared with
         // the id of the page
         RadioPagingTxBlock alert;
@@ -941,6 +942,7 @@ bool RadioPagingGscTxStream::next(RadioPagingTxBlock& block)
     }
     else
     {
+        block.m_startIds.push_back(first.m_id);     // On air with the page; sent with its turn-off word
         // The alert time (the carrier unmodulated) and the voice, as they are; inverted with the
         // polarity of the transmission. Then the activation code again after a comma: the
         // turn-off word, with the id of the page

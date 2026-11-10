@@ -111,6 +111,8 @@ public:
     RadioPagingModSource::Status getStatus() const { return m_source.getStatus(); }
     //! The source tells when a message was sent or will not be (see RadioPagingModSource::setNotify)
     void setNotify(const std::function<void(quint64, bool)>& notify) { m_source.setNotify(notify); }
+    void setNotifyTransmitted(const std::function<void(quint64)>& notify) { m_source.setNotifyTransmitted(notify); }
+    void setNotifyFailed(const std::function<void(quint64)>& notify) { m_source.setNotifyFailed(notify); }
     //! Voice of the live voice page and its end, passed to the source (thread safe)
     void pushLive(const std::vector<float>& samples) { m_source.pushLive(samples); }
     void endLive() { m_source.endLive(); }

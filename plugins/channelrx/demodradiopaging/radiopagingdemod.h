@@ -30,6 +30,7 @@
 
 class QNetworkAccessManager;
 class QNetworkReply;
+class QTimer;
 class DeviceAPI;
 
 // Radio paging demodulator: POCSAG, FLEX and GSC, all speeds and polarities at the same
@@ -150,6 +151,9 @@ private:
     void applySettings(const QStringList& settingsKeys, const RadioPagingDemodSettings& settings, bool force = false);
     void sendSampleRateToDemodAnalyzer();
     void publishRecord(MessageRecord record);
+    void announce(const QString& event);
+    QTimer *m_announceTimer = nullptr;
+    QString m_lastAlias;                        //!< The alias announced last
     void webapiReverseSendSettings(const QStringList& channelSettingsKeys, const RadioPagingDemodSettings& settings, bool force);
     void webapiFormatChannelSettings(
             const QStringList& channelSettingsKeys,

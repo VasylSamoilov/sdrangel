@@ -48,6 +48,7 @@ struct RadioPagingTxBlock
     double m_shaping = 0.0;             //!< Gaussian cutoff of the block, Hz
     double m_deviation = 0.0;           //!< Deviation of the outer symbol, Hz; 0: the modulator's
     std::vector<uint64_t> m_ids;        //!< Messages completed by the block
+    std::vector<uint64_t> m_startIds;   //!< Messages that go on air with the block and complete in a later one (voice pages)
     bool m_ers = false;                 //!< FLEX emergency re-synchronization
 
     //!< Ticks per second of the time base of mixed streams: a whole number for every rate

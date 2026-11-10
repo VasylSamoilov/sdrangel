@@ -23,6 +23,7 @@
 #include <QNetworkReply>
 #include <QStorageInfo>
 #include <QThread>
+#include <QTimer>
 #include <QUuid>
 
 #include <algorithm>
@@ -42,6 +43,7 @@
 #include "dsp/wavfilerecord.h"
 #include "util/db.h"
 #include "maincore.h"
+#include "util/messageendpoint.h"
 #include "radiopagingwav.h"
 #include "radiopagingvoicestore.h"
 
@@ -77,13 +79,24 @@ RadioPagingMod::RadioPagingMod(DeviceAPI *deviceAPI) :
     m_basebandSource->moveToThread(m_thread);
     // Sent or dropped: the main thread logs the message and records its voice
     m_basebandSource->setNotify([this](quint64 id, bool sent) {
-        getInputMessageQueue()->push(MsgTxEvent::create(id, sent));
+        getInputMessageQueue()->push(MsgTxEvent::create(id, sent ? MsgTxEvent::Sent : MsgTxEvent::Dropped));
+    });
+    m_basebandSource->setNotifyTransmitted([this](quint64 id) {
+        getInputMessageQueue()->push(MsgTxEvent::create(id, MsgTxEvent::Transmitted));
+    });
+    m_basebandSource->setNotifyFailed([this](quint64 id) {
+        getInputMessageQueue()->push(MsgTxEvent::create(id, MsgTxEvent::Failed));
     });
 
     applySettings(QStringList(), m_settings, true);
 
     m_deviceAPI->addChannelSource(this);
     m_deviceAPI->addChannelSourceAPI(this);
+
+    // The message center learns this transmitter at the next announcement, whenever it starts
+    m_announceTimer = new QTimer(this);
+    QObject::connect(m_announceTimer, &QTimer::timeout, this, [this]() { announce("status"); });
+    m_announceTimer->start(5000);
 
     m_networkManager = new QNetworkAccessManager();
     QObject::connect(
@@ -96,6 +109,8 @@ RadioPagingMod::RadioPagingMod(DeviceAPI *deviceAPI) :
 
 RadioPagingMod::~RadioPagingMod()
 {
+    m_announceTimer->stop();
+    announce("unregister");
     QObject::disconnect(
         m_networkManager,
         &QNetworkAccessManager::finished,
@@ -301,6 +316,20 @@ quint64 RadioPagingMod::transmit(const TxRequest& request, QString& error, QStri
 {
     QMutexLocker mutexLocker(&m_settingsMutex);
     RadioPagingModSource::Request sourceRequest;
+
+    // A page is posted once
+    if (!request.m_pageId.isEmpty())
+    {
+        for (const auto& entry : m_pending)
+        {
+            if (entry.second.m_pageId == request.m_pageId)
+            {
+                error = QString("Page %1 is already queued").arg(request.m_pageId);
+                return 0;
+            }
+        }
+    }
+
     error = checkRequest(request, sourceRequest, warning);
 
     if (!error.isEmpty()) {
@@ -330,7 +359,9 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
 {
     MessageRecord& record = pending.m_record;
     record.resetToDefaults();
-    record.m_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    // The id of a page of the message center is the id of its record
+    pending.m_pageId = request.m_pageId;
+    record.m_id = request.m_pageId.isEmpty() ? QUuid::createUuid().toString(QUuid::WithoutBraces) : request.m_pageId;
     record.m_timestamp = QDateTime::currentMSecsSinceEpoch();
     record.m_direction = MessageRecord::DirectionTX;
     record.m_kind = MessageRecord::KindMessage;
@@ -389,7 +420,7 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
 
 // A message was sent or dropped: the voice is recorded, the record goes to the log and, if sent, to
 // the message pipes
-void RadioPagingMod::txEvent(quint64 id, bool sent)
+void RadioPagingMod::txEvent(quint64 id, MsgTxEvent::Event event)
 {
     auto it = m_pending.find(id);
 
@@ -397,8 +428,31 @@ void RadioPagingMod::txEvent(quint64 id, bool sent)
         return;
     }
 
+    if (event == MsgTxEvent::Transmitted)
+    {
+        // Once: a voice page is on air with its first block and complete with its last
+        if (!it->second.m_transmitted && !it->second.m_pageId.isEmpty()) {
+            publishPageEvent(it->second.m_pageId, "transmitted");
+        }
+
+        it->second.m_transmitted = true;
+        return;
+    }
+
+    bool sent = (event == MsgTxEvent::Sent);
     PendingTx pending = it->second;
     m_pending.erase(it);
+
+    // A page of the message center: sent; rejected if it can not be transmitted at all; aborted if it
+    // was on air; else released (nothing went out)
+    if (!pending.m_pageId.isEmpty())
+    {
+        if (event == MsgTxEvent::Failed) {
+            publishPageEvent(pending.m_pageId, "rejected", "the channel can not transmit it");
+        } else {
+            publishPageEvent(pending.m_pageId, sent ? "sent" : pending.m_transmitted ? "aborted" : "released");
+        }
+    }
 
     if (sent && pending.m_isVoice)
     {
@@ -474,6 +528,80 @@ QString RadioPagingMod::recordVoice(const PendingTx& pending, double& seconds)
     return file;
 }
 
+void RadioPagingMod::publishPageEvent(const QString& pageId, const QString& state, const QString& reason)
+{
+    MessageRecord record;
+    record.m_id = pageId;
+    record.m_timestamp = QDateTime::currentMSecsSinceEpoch();
+    record.m_kind = MessageRecord::KindEvent;
+    record.m_direction = MessageRecord::DirectionTX;
+    record.m_channelAlias = m_settings.effectiveChannelAlias(m_centerFrequency + m_settings.m_inputFrequencyOffset);
+    record.m_protocolData.insert("event", "page");
+    record.m_protocolData.insert("state", state);
+
+    if (!reason.isEmpty()) {
+        record.m_protocolData.insert("reason", reason);
+    }
+
+    publishRecord(record);
+}
+
+// The transmitter as the message center sees it. It is idle when it has nothing to send; the
+// protocols are the one of the channel, and POCSAG too when a FLEX network mixes it
+MessageRecord RadioPagingMod::endpointRecord(const QString& event)
+{
+    QMutexLocker mutexLocker(&m_settingsMutex);
+    MessageEndpoint endpoint;
+    int outstandingCount = outstanding();
+    endpoint.m_frequency = m_centerFrequency + m_settings.m_inputFrequencyOffset;
+    endpoint.m_alias = m_settings.effectiveChannelAlias(endpoint.m_frequency);
+    endpoint.m_role = MessageEndpoint::Transmitter;
+    endpoint.m_status = (event == "unregister") ? MessageEndpoint::Offline
+        : (outstandingCount > 0) ? MessageEndpoint::Busy : MessageEndpoint::Idle;
+    endpoint.m_protocols.append(RadioPagingModSettings::protocolName(m_settings.m_protocol).toLower());
+
+    if ((m_settings.m_protocol == RadioPagingModSettings::Flex) && (m_settings.m_mode == RadioPagingModSettings::Network)
+        && m_settings.m_flexMixPocsag) {
+        endpoint.m_protocols.append("pocsag");
+    }
+
+    // A POCSAG channel: its messages choose the speed. A FLEX network that mixes POCSAG and GSC have
+    // their own speeds in their records: no list
+    if (m_settings.m_protocol == RadioPagingModSettings::Pocsag)
+    {
+        for (int i = 0; i < RadioPagingModSettings::m_nbPocsagSpeeds; i++) {
+            endpoint.m_speeds.append(RadioPagingModSettings::m_pocsagSpeeds[i]);
+        }
+    }
+
+    endpoint.m_polarities = {(int) MessageRecord::PolarityNormal, (int) MessageRecord::PolarityInverted};
+    endpoint.m_queueDepth = outstandingCount;
+    endpoint.m_capacity = m_maxQueued;
+    endpoint.m_capabilities.insert("maxText", m_maxTextLength);
+    endpoint.m_capabilities.insert("voice", m_settings.m_protocol == RadioPagingModSettings::Gsc);
+    return MessageEndpoint::toRecord(endpoint, event);
+}
+
+void RadioPagingMod::announce(const QString& event)
+{
+    MessageRecord record = endpointRecord(event);
+    QString alias = record.m_protocolData.value("endpoint").toString();
+
+    // The alias changed (it is the frequency by default): the old one is gone
+    if (!m_lastAlias.isEmpty() && (alias != m_lastAlias) && (event != "unregister"))
+    {
+        MessageRecord old = record;
+        old.m_channelAlias = m_lastAlias;
+        old.m_protocolData.insert("event", "unregister");
+        old.m_protocolData.insert("endpoint", m_lastAlias);
+        old.m_protocolData.insert("status", "offline");
+        publishRecord(old);
+    }
+
+    m_lastAlias = alias;
+    publishRecord(record);
+}
+
 void RadioPagingMod::publishRecord(const MessageRecord& record)
 {
     QList<ObjectPipe*> pipes;
@@ -510,8 +638,14 @@ bool RadioPagingMod::handleMessage(const Message& cmd)
         quint64 id = transmit(tx.getRequest(), error, &warning);
 
         // A WebAPI request was checked when posted; settings applied since may refuse it
-        if (id == 0) {
+        if (id == 0)
+        {
             qWarning() << "RadioPagingMod::handleMessage: MsgTx refused:" << error;
+
+            // A page of the message center is told, unless it is the same page posted twice
+            if (!tx.getRequest().m_pageId.isEmpty() && !error.contains("already queued")) {
+                publishPageEvent(tx.getRequest().m_pageId, "rejected", error);
+            }
         }
 
         if (getMessageQueueToGUI()) {
@@ -523,7 +657,7 @@ bool RadioPagingMod::handleMessage(const Message& cmd)
     else if (MsgTxEvent::match(cmd))
     {
         const MsgTxEvent& event = (const MsgTxEvent&) cmd;
-        txEvent(event.getId(), event.getSent());
+        txEvent(event.getId(), event.getEvent());
 
         return true;
     }
@@ -565,6 +699,7 @@ bool RadioPagingMod::handleMessage(const Message& cmd)
         // Forward to the source
         DSPSignalNotification& notif = (DSPSignalNotification&) cmd;
         m_centerFrequency = notif.getCenterFrequency();
+        announce("register");       // The frequency is known now (the alias is the frequency by default)
         DSPSignalNotification* rep = new DSPSignalNotification(notif); // make a copy
         qDebug() << "RadioPagingMod::handleMessage: DSPSignalNotification";
         m_basebandSource->getInputMessageQueue()->push(rep);
@@ -639,6 +774,13 @@ void RadioPagingMod::applySettings(const QStringList& settingsKeys, const RadioP
         m_settings = settings;
     } else {
         m_settings.applySettings(settingsKeys, settings);
+    }
+
+    // A new alias, frequency offset or protocol is announced at once
+    if (m_announceTimer && !force
+        && (settingsKeys.contains("channelAlias") || settingsKeys.contains("inputFrequencyOffset")
+            || settingsKeys.contains("protocol") || settingsKeys.contains("mode") || settingsKeys.contains("mixPocsag"))) {
+        announce("status");
     }
 }
 
@@ -972,6 +1114,7 @@ int RadioPagingMod::webapiActionsPost(
         QString type = swgTx->getType() ? swgTx->getType()->toLower() : QString();
         QString polarity = swgTx->getPolarity() ? swgTx->getPolarity()->toLower() : QString();
         std::string text = swgTx->getText() ? swgTx->getText()->toStdString() : std::string();
+        request.m_pageId = swgTx->getId() ? *swgTx->getId() : QString();
         QString messageProtocol = swgTx->getProtocol() ? swgTx->getProtocol()->toLower() : QString();
         QMutexLocker mutexLocker(&m_settingsMutex);
         RadioPagingModSettings::Protocol protocol = m_settings.m_protocol;

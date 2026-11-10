@@ -49,28 +49,6 @@ QList<int> intsFromJson(const QJsonValue& value)
     return out;
 }
 
-QList<int> intsFromVariant(const QVariant& value)
-{
-    QList<int> out;
-
-    for (const QVariant& v : value.toList()) {
-        out.append(v.toInt());
-    }
-
-    return out;
-}
-
-QVariantList intsToVariant(const QList<int>& values)
-{
-    QVariantList out;
-
-    for (int v : values) {
-        out.append(v);
-    }
-
-    return out;
-}
-
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -82,7 +60,9 @@ bool MessageCenterFilter::matches(const MessageRecord& record) const
     if (!m_protocols.isEmpty() && !m_protocols.contains(record.m_protocol, Qt::CaseInsensitive)) {
         return false;
     }
-    if (!m_aliases.isEmpty() && !m_aliases.contains(record.m_channelAlias)) {
+    // The channel of a message; a page also by the transmitter it is for
+    if (!m_aliases.isEmpty() && !m_aliases.contains(record.m_channelAlias)
+        && !m_aliases.contains(record.m_protocolData.value("transmitter").toString())) {
         return false;
     }
     if ((m_direction >= 0) && ((int) record.m_direction != m_direction)) {
@@ -283,11 +263,22 @@ bool MessageCenterFileSource::poll(std::vector<MessageRecord>& records, QString&
     }
 
     file.seek(m_offset);
+    int lines = 0;
 
-    while (!file.atEnd())
+    // A big file is read over several polls, and a line has a limit
+    while (!file.atEnd() && (lines++ < m_maxLinesPerPoll))
     {
         qint64 start = file.pos();
-        QByteArray line = file.readLine();
+        QByteArray line = file.readLine(m_maxLineLength);
+
+        if (!line.endsWith('\n') && (line.size() >= m_maxLineLength - 1))
+        {
+            // Not a record: skip to the end of the line
+            file.readLine();
+            m_offset = file.pos();
+            m_skipped++;
+            continue;
+        }
 
         // A line being written is read when it is complete
         if (!line.endsWith('\n'))
@@ -324,94 +315,6 @@ bool MessageCenterFileSource::poll(std::vector<MessageRecord>& records, QString&
 // Endpoint
 // ---------------------------------------------------------------------------
 
-bool MessageCenterEndpoint::fromRecord(const MessageRecord& record, MessageCenterEndpoint& endpoint, QString& event)
-{
-    const QVariantMap& d = record.m_protocolData;
-    event = d.value("event").toString();
-
-    if ((record.m_kind != MessageRecord::KindEvent) || ((event != "register") && (event != "status") && (event != "unregister"))
-        || d.value("endpoint").toString().isEmpty()) {
-        return false;
-    }
-
-    endpoint = MessageCenterEndpoint();
-    endpoint.m_alias = d.value("endpoint").toString();
-    endpoint.m_role = (d.value("role").toString() == "tx") ? Transmitter : Receiver;
-    QString status = d.value("status").toString();
-    endpoint.m_status = (event == "unregister") ? Offline : (status == "busy") ? Busy : (status == "offline") ? Offline : Idle;
-    endpoint.m_protocols = d.value("protocols").toStringList();
-    endpoint.m_speeds = intsFromVariant(d.value("speeds"));
-    endpoint.m_polarities = intsFromVariant(d.value("polarities"));
-    endpoint.m_queueDepth = d.value("queueDepth").toInt();
-    endpoint.m_capacity = d.value("capacity").toInt();
-    endpoint.m_frequency = record.m_frequency;
-    endpoint.m_lastSeen = record.m_timestamp;
-
-    for (auto it = d.begin(); it != d.end(); ++it)
-    {
-        if (it.key().startsWith("cap_")) {
-            endpoint.m_capabilities.insert(it.key().mid(4), it.value());
-        }
-    }
-
-    return true;
-}
-
-MessageRecord MessageCenterEndpoint::toRecord(const MessageCenterEndpoint& endpoint, const QString& event)
-{
-    static const char *statuses[] = {"offline", "idle", "busy"};
-    MessageRecord record;
-    record.m_timestamp = QDateTime::currentMSecsSinceEpoch();
-    record.m_kind = MessageRecord::KindEvent;
-    record.m_direction = (endpoint.m_role == Transmitter) ? MessageRecord::DirectionTX : MessageRecord::DirectionRX;
-    record.m_channelAlias = endpoint.m_alias;
-    record.m_frequency = endpoint.m_frequency;
-    record.m_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    record.m_protocolData.insert("event", event);
-    record.m_protocolData.insert("endpoint", endpoint.m_alias);
-    record.m_protocolData.insert("role", endpoint.m_role == Transmitter ? "tx" : "rx");
-    record.m_protocolData.insert("status", statuses[(int) endpoint.m_status]);
-    record.m_protocolData.insert("protocols", endpoint.m_protocols);
-    record.m_protocolData.insert("speeds", intsToVariant(endpoint.m_speeds));
-    record.m_protocolData.insert("polarities", intsToVariant(endpoint.m_polarities));
-    record.m_protocolData.insert("queueDepth", endpoint.m_queueDepth);
-    record.m_protocolData.insert("capacity", endpoint.m_capacity);
-
-    for (auto it = endpoint.m_capabilities.begin(); it != endpoint.m_capabilities.end(); ++it) {
-        record.m_protocolData.insert("cap_" + it.key(), it.value());
-    }
-
-    return record;
-}
-
-bool MessageCenterEndpoint::canTransmit(const MessageRecord& page) const
-{
-    if (m_role != Transmitter) {
-        return false;
-    }
-    if (!m_protocols.isEmpty() && !m_protocols.contains(page.m_protocol, Qt::CaseInsensitive)) {
-        return false;
-    }
-    if (!m_polarities.isEmpty() && (page.m_polarity != MessageRecord::PolarityUnknown) && !m_polarities.contains((int) page.m_polarity)) {
-        return false;
-    }
-    if (!m_speeds.isEmpty() && (page.m_speed > 0) && !m_speeds.contains(page.m_speed)) {
-        return false;
-    }
-
-    return true;
-}
-
-bool MessageCenterEndpoint::ready() const
-{
-    if (m_status == Offline) {
-        return false;
-    }
-
-    return (m_capacity <= 0) || (m_queueDepth < m_capacity);
-}
-
-// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -545,21 +448,45 @@ void MessageCenterEngine::store(const MessageRecord& record)
                 data.insert(d.key(), d.value());
             }
 
-            MessageRecord merged = record;
-            merged.m_timestamp = it->m_timestamp;
+            // What the later record sets completes the earlier one; what it leaves out stays
+            MessageRecord merged = *it;
             merged.m_protocolData = data;
 
-            if (record.m_text.isEmpty()) {
-                merged.m_text = it->m_text;
+            if (!record.m_text.isEmpty() && (it->m_partial || !record.m_partial)) {
+                merged.m_text = record.m_text;
+                merged.m_charStatus = record.m_charStatus;
             }
-            if (record.m_msgType.isEmpty()) {
-                merged.m_msgType = it->m_msgType;
+            if (!record.m_msgType.isEmpty()) {
+                merged.m_msgType = record.m_msgType;
             }
-            if (record.m_address.isEmpty()) {
-                merged.m_address = it->m_address;
+            if (!record.m_address.isEmpty()) {
+                merged.m_address = record.m_address;
+            }
+            if (!record.m_mode.isEmpty()) {
+                merged.m_mode = record.m_mode;
+            }
+            if (!record.m_channelAlias.isEmpty()) {
+                merged.m_channelAlias = record.m_channelAlias;
+            }
+            if (!record.m_protocol.isEmpty()) {
+                merged.m_protocol = record.m_protocol;
+            }
+            if (record.m_rawBits >= 0) {
+                merged.m_rawData = record.m_rawData;
+                merged.m_rawBits = record.m_rawBits;
+            }
+            if (record.m_speed > 0) {
+                merged.m_speed = record.m_speed;
+            }
+            if (record.m_frequency >= 0) {
+                merged.m_frequency = record.m_frequency;
+            }
+            if (record.m_polarity != MessageRecord::PolarityUnknown) {
+                merged.m_polarity = record.m_polarity;
             }
 
-            merged.m_partial = record.m_partial && it->m_partial;
+            // Only an update of a message still partial leaves it partial
+            merged.m_partial = it->m_partial && record.m_partial;
             *it = merged;
             return;
         }
@@ -582,8 +509,7 @@ void MessageCenterEngine::deliver(const MessageRecord& record, const QString& si
     if (sinkName == "queue")
     {
         // Only a message for a transmitter becomes a page
-        if ((record.m_direction == MessageRecord::DirectionTX) && !record.m_protocolData.value("transmitter").toString().isEmpty()
-            && !findPage(record.m_id)) {
+        if ((record.m_direction == MessageRecord::DirectionTX) && !record.m_protocolData.value("transmitter").toString().isEmpty()) {
             addPage(record, now);
         }
 
@@ -596,7 +522,7 @@ void MessageCenterEngine::deliver(const MessageRecord& record, const QString& si
         {
             QString error;
 
-            if (!sink->accept(record, error)) {
+            if (!sink->accept(record, error) && (m_sinkErrors.size() < m_maxSinkErrors)) {
                 m_sinkErrors.append(error);
             }
 
@@ -605,34 +531,45 @@ void MessageCenterEngine::deliver(const MessageRecord& record, const QString& si
     }
 }
 
+QString MessageCenterEngine::endpointKey(MessageEndpoint::Role role, const QString& alias)
+{
+    return QString(role == MessageEndpoint::Transmitter ? "tx:" : "rx:") + alias;
+}
+
 void MessageCenterEngine::ingest(const MessageRecord& record, const QString& source, qint64 now)
 {
-    (void) source;
     const QVariantMap& d = record.m_protocolData;
 
+    // The announcements of the channels and the states of the pages come from the channels, not
+    // from a file that is read (a replayed file must not move the live pages)
     if (record.m_kind == MessageRecord::KindEvent)
     {
-        MessageCenterEndpoint endpoint;
+        if (sourceNames().contains(source)) {
+            return;
+        }
+
+        MessageEndpoint endpoint;
         QString event;
 
-        if (MessageCenterEndpoint::fromRecord(record, endpoint, event))
+        if (MessageEndpoint::fromRecord(record, endpoint, event))
         {
-            bool known = m_endpoints.contains(endpoint.m_alias);
+            // A receiver and a transmitter may have the same alias (the frequency): they are two endpoints
+            QString key = endpointKey(endpoint.m_role, endpoint.m_alias);
 
             // A status record changes the status and the queue, the capabilities stay as registered
-            if ((event == "status") && known)
+            if ((event == "status") && m_endpoints.contains(key))
             {
-                MessageCenterEndpoint& current = m_endpoints[endpoint.m_alias];
+                MessageEndpoint& current = m_endpoints[key];
                 current.m_status = endpoint.m_status;
                 current.m_queueDepth = endpoint.m_queueDepth;
                 current.m_capacity = endpoint.m_capacity;
                 current.m_lastSeen = endpoint.m_lastSeen;
             }
             else {
-                m_endpoints[endpoint.m_alias] = endpoint;
+                m_endpoints[key] = endpoint;
             }
 
-            if (m_endpoints[endpoint.m_alias].m_status == MessageCenterEndpoint::Offline) {
+            if ((m_endpoints[key].m_status == MessageEndpoint::Offline) && (endpoint.m_role == MessageEndpoint::Transmitter)) {
                 endpointGone(endpoint.m_alias, now);
             }
 
@@ -704,8 +641,8 @@ QStringList MessageCenterEngine::eligible(const MessageRecord& page) const
 
     for (auto it = m_endpoints.begin(); it != m_endpoints.end(); ++it)
     {
-        if ((it->m_status != MessageCenterEndpoint::Offline) && it->canTransmit(page)) {
-            aliases.append(it.key());
+        if ((it->m_status != MessageEndpoint::Offline) && it->canTransmit(page)) {
+            aliases.append(it->m_alias);
         }
     }
 
@@ -716,6 +653,11 @@ QString MessageCenterEngine::addPage(MessageRecord record, qint64 now)
 {
     if (record.m_id.isEmpty()) {
         record.m_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    }
+
+    // A page has its transmitter and an id of its own
+    if (record.m_protocolData.value("transmitter").toString().isEmpty() || findPage(record.m_id)) {
+        return QString();
     }
 
     record.m_direction = MessageRecord::DirectionTX;
@@ -788,11 +730,11 @@ std::vector<MessageCenterPage> MessageCenterEngine::dispatch(qint64 now)
     for (MessageCenterPage& page : m_pages)
     {
         const QString alias = page.transmitter();
-        auto endpoint = m_endpoints.constFind(alias);
+        auto endpoint = m_endpoints.constFind(endpointKey(MessageEndpoint::Transmitter, alias));
 
         if (page.m_state == MessageCenterPage::Pending)
         {
-            if ((endpoint != m_endpoints.constEnd()) && (endpoint->m_status != MessageCenterEndpoint::Offline)
+            if ((endpoint != m_endpoints.constEnd()) && (endpoint->m_status != MessageEndpoint::Offline)
                 && endpoint->canTransmit(page.m_record))
             {
                 page.m_state = MessageCenterPage::Queued;
@@ -845,7 +787,7 @@ bool MessageCenterEngine::applyEvent(const QString& id, const QString& state, co
         if (page->m_attempts >= m_maxAttempts)
         {
             page->m_state = MessageCenterPage::Dead;
-            page->m_reason = "attempts";
+            page->m_reason = QString("attempts (%1)").arg(why);
         }
         else
         {
@@ -855,9 +797,22 @@ bool MessageCenterEngine::applyEvent(const QString& id, const QString& state, co
         }
     };
 
+    // A late or repeated report does not move a page that is somewhere else already
+    const MessageCenterPage::State current = page->m_state;
+    const bool claimed = (current == MessageCenterPage::Claimed);
+    const bool transmitted = (current == MessageCenterPage::Transmitted);
+
     if (state == "claimed")
     {
-        if ((page->m_state != MessageCenterPage::Queued) && (page->m_state != MessageCenterPage::Pending)) {
+        if ((current != MessageCenterPage::Queued) && (current != MessageCenterPage::Pending)) {
+            return false;
+        }
+        if (page->m_attempts >= m_maxAttempts)
+        {
+            page->m_state = MessageCenterPage::Dead;
+            page->m_reason = "attempts";
+            page->m_dispatched = false;
+            page->m_changed = now;
             return false;
         }
 
@@ -869,7 +824,7 @@ bool MessageCenterEngine::applyEvent(const QString& id, const QString& state, co
     }
     else if (state == "transmitted")
     {
-        if ((page->m_state != MessageCenterPage::Claimed) && (page->m_state != MessageCenterPage::Queued)) {
+        if (!claimed) {
             return false;
         }
 
@@ -877,23 +832,39 @@ bool MessageCenterEngine::applyEvent(const QString& id, const QString& state, co
     }
     else if (state == "sent")
     {
+        if (!claimed && !transmitted) {
+            return false;
+        }
+
         page->m_state = MessageCenterPage::Sent;
         page->m_dispatched = false;
         page->m_reason.clear();
     }
     else if (state == "rejected")
     {
+        if ((current == MessageCenterPage::Sent) || (current == MessageCenterPage::Dead) || transmitted) {
+            return false;
+        }
+
         page->m_state = MessageCenterPage::Dead;
         page->m_reason = reason.isEmpty() ? QString("rejected") : QString("rejected: %1").arg(reason);
         page->m_dispatched = false;
     }
     else if ((state == "aborted") || (state == "underrun") || (state == "interrupted"))
     {
+        if (!claimed && !transmitted) {
+            return false;
+        }
+
         failed(state);
     }
     else if (state == "released")
     {
         // Nothing went on air: it waits for the transmitter
+        if (!claimed && (current != MessageCenterPage::Queued)) {
+            return false;
+        }
+
         page->m_state = MessageCenterPage::Pending;
         page->m_dispatched = false;
         page->m_claimedBy.clear();
@@ -946,12 +917,37 @@ void MessageCenterEngine::expireClaims(qint64 now, qint64 timeoutMs)
         if (page.m_attempts >= m_maxAttempts)
         {
             page.m_state = MessageCenterPage::Dead;
-            page.m_reason = "expired";
+            page.m_reason = "attempts (claim timed out)";
         }
         else {
             page.m_reason = "claim timed out";
         }
     }
+}
+
+// A channel that has not announced itself for this long is gone: its transmitter's pages are
+// released or interrupted, it is offline until it announces again
+void MessageCenterEngine::sweep(qint64 now, qint64 silentMs)
+{
+    for (auto it = m_endpoints.begin(); it != m_endpoints.end(); ++it)
+    {
+        if ((it->m_status == MessageEndpoint::Offline) || (now - it->m_lastSeen <= silentMs)) {
+            continue;
+        }
+
+        it->m_status = MessageEndpoint::Offline;
+
+        if (it->m_role == MessageEndpoint::Transmitter) {
+            endpointGone(it->m_alias, now);
+        }
+    }
+}
+
+QStringList MessageCenterEngine::takeSinkErrors()
+{
+    QStringList errors = m_sinkErrors;
+    m_sinkErrors.clear();
+    return errors;
 }
 
 bool MessageCenterEngine::requeue(const QString& id, qint64 now)

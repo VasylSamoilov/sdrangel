@@ -36,6 +36,8 @@ public:
     void setText(QString* value);
     qint32 getSpeed();
     void setSpeed(qint32 value);
+    QString* getId();
+    void setId(QString* value);
     QString* getPolarity();
     void setPolarity(QString* value);
 private:
@@ -55,6 +57,8 @@ private:
     bool m_textIsSet = false;
     qint32 m_speed = 0;
     bool m_speedIsSet = false;
+    QString* m_id = nullptr;
+    bool m_idIsSet = false;
     QString* m_polarity = nullptr;
     bool m_polarityIsSet = false;
 };

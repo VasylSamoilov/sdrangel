@@ -829,6 +829,8 @@ void testGscLive(int sampleRate)
     Loop loop(sampleRate, 0, RadioPagingModSettings::Gsc);
     std::vector<std::pair<quint64, bool>> events;
     loop.m_source.setNotify([&events](quint64 id, bool sent) { events.push_back({id, sent}); });
+    std::vector<quint64> transmitted;
+    loop.m_source.setNotifyTransmitted([&transmitted](quint64 id) { transmitted.push_back(id); });
 
     RadioPagingModSource::Request live = gscRequest(330, "123456", 2, RadioPagingGsc::Voice, "", false);
     live.m_live = true;
@@ -844,6 +846,8 @@ void testGscLive(int sampleRate)
 
     RadioPagingModSource::Status open = loop.m_source.getStatus();
     bool opened = open.m_liveActive && open.m_liveOpen && (open.m_liveId == 330) && (steps > 60) && (steps < 120);
+    // The live page is on air from its first block, not from its last
+    bool onAir = (transmitted.size() == 1) && (transmitted[0] == 330);
 
     // 1.5 s of 1 kHz at the rate of the modulator, 20 ms at a time, with a gap
     std::vector<float> chunk(RadioPagingWav::m_sampleRate / 50);
@@ -866,7 +870,7 @@ void testGscLive(int sampleRate)
     const Received& received = loop.take();
     RadioPagingModSource::Status status = loop.m_source.getStatus();
 
-    check(opened && stillOn && (status.m_sent == 2) && (status.m_dropped == 0) && !status.m_liveActive
+    check(opened && onAir && stillOn && (status.m_sent == 2) && (status.m_dropped == 0) && !status.m_liveActive
         && (received.m_voiceStarts == 1) && (received.m_voiceEnds.size() == 1) && (received.m_voiceEnds[0] == "turn_off")
         && (received.m_voiceSeconds > 3.6) && (received.m_voiceSeconds < 4.4)
         && contains(received, { gscKey("123456", 3, false, "") })

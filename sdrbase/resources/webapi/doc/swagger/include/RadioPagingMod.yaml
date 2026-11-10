@@ -245,6 +245,9 @@ RadioPagingModTx:
       description: "POCSAG speed in baud: 512, 1200 or 2400. 0 or omitted: the channel setting"
       type: integer
       format: int32
+    id:
+      description: "Id of the page of the message center this message is: the records of the message have this id, and its states (transmitted, sent, aborted, released, rejected) are reported on the messages pipe"
+      type: string
     polarity:
       description: "normal or inverted. Empty or omitted: the channel setting. FLEX: the other polarity than the network's is sent in the frames the network has nothing mandatory in. GSC: a transmission has one polarity"
       type: string

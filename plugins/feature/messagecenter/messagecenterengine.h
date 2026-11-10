@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "util/messagerecord.h"
+#include "util/messageendpoint.h"
 
 // The message center without the user interface: where the messages come from (sources), where
 // they go (sinks) and which way (routes), the log, the endpoints (the channels that registered)
@@ -39,7 +40,7 @@
 //   sinks:   the log, a JSON lines file, a CSV file, the transmit queue
 //
 // Endpoints (demodulators and modulators) announce themselves with event records (see
-// MessageCenterEndpoint::fromRecord). A page for transmission goes through the states
+// MessageEndpoint::fromRecord). A page for transmission goes through the states
 // pending -> queued -> claimed -> transmitted -> sent; the modulator claims it, and reports
 // the states back with event records of the same id (see MessageCenterEngine::applyEvent).
 // No Qt GUI and no thread: the caller (the feature) serializes the calls.
@@ -115,38 +116,14 @@ public:
     QString name() const override { return m_name; }
     bool poll(std::vector<MessageRecord>& records, QString& error) override;
     int skipped() const { return m_skipped; }       //!< Lines that were not records
+    static const int m_maxLinesPerPoll = 1000;
+    static const int m_maxLineLength = 1 << 20;
 
 private:
     QString m_name;
     QString m_path;
     qint64 m_offset = 0;
     int m_skipped = 0;
-};
-
-// A channel registered in the message center
-struct MessageCenterEndpoint
-{
-    enum Role { Receiver, Transmitter };
-    enum Status { Offline, Idle, Busy };
-
-    QString m_alias;                    //!< The channel alias: the id of the transmitter in a page
-    Role m_role = Receiver;
-    Status m_status = Offline;
-    QStringList m_protocols;            //!< Lower case protocol names it handles
-    QList<int> m_speeds;                //!< Bits per second, empty: any
-    QList<int> m_polarities;            //!< MessageRecord::Polarity values it handles, empty: both
-    int m_queueDepth = 0;               //!< Pages in its own queue
-    int m_capacity = 0;                 //!< Pages its queue can take, 0: it does not say
-    qint64 m_frequency = -1;
-    qint64 m_lastSeen = 0;              //!< Milliseconds since the epoch
-    QVariantMap m_capabilities;         //!< The rest as announced
-
-    //!< The endpoint of an event record (protocolData "event" = register, status or unregister), false if it is not one
-    static bool fromRecord(const MessageRecord& record, MessageCenterEndpoint& endpoint, QString& event);
-    //!< The event record for an endpoint (for the channels to publish)
-    static MessageRecord toRecord(const MessageCenterEndpoint& endpoint, const QString& event);
-    bool canTransmit(const MessageRecord& page) const;
-    bool ready() const;                 //!< Idle or busy with room in its queue
 };
 
 // A page to transmit
@@ -211,7 +188,7 @@ public:
     void clearLog() { m_log.clear(); }
 
     // Endpoints
-    const QMap<QString, MessageCenterEndpoint>& endpoints() const { return m_endpoints; }
+    const QMap<QString, MessageEndpoint>& endpoints() const { return m_endpoints; }
     //!< The transmitters that could send a page
     QStringList eligible(const MessageRecord& page) const;
 
@@ -228,6 +205,12 @@ public:
     bool applyEvent(const QString& id, const QString& state, const QString& reason, qint64 now);
     //!< Dispatched pages not claimed for this long go back to the queue (a claim counts as an attempt)
     void expireClaims(qint64 now, qint64 timeoutMs);
+    //!< Channels that have not announced themselves for silentMs are offline
+    void sweep(qint64 now, qint64 silentMs);
+    //!< The errors of the sinks since the last call (at most m_maxSinkErrors are kept)
+    QStringList takeSinkErrors();
+    static QString endpointKey(MessageEndpoint::Role role, const QString& alias);
+    static const int m_maxSinkErrors = 100;
     //!< Dead page back to pending with its attempts reset
     bool requeue(const QString& id, qint64 now);
     bool cancel(const QString& id);
@@ -245,7 +228,7 @@ private:
     std::vector<Route> m_routes;
     std::vector<std::unique_ptr<MessageCenterSink>> m_sinks;
     std::vector<std::unique_ptr<MessageCenterSource>> m_sources;
-    QMap<QString, MessageCenterEndpoint> m_endpoints;
+    QMap<QString, MessageEndpoint> m_endpoints;
     std::vector<MessageCenterPage> m_pages;
     QStringList m_sinkErrors;
 

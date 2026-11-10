@@ -22,6 +22,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QBuffer>
+#include <QTimer>
 
 #include "SWGChannelSettings.h"
 #include "SWGWorkspaceInfo.h"
@@ -32,6 +33,7 @@
 #include "dsp/dspcommands.h"
 #include "device/deviceapi.h"
 #include "settings/serializable.h"
+#include "util/messageendpoint.h"
 #include "util/db.h"
 #include "util/messagerecord.h"
 #include "maincore.h"
@@ -65,11 +67,42 @@ RadioPagingDemod::RadioPagingDemod(DeviceAPI *deviceAPI) :
     m_networkManager = new QNetworkAccessManager();
     QObject::connect(m_networkManager, &QNetworkAccessManager::finished, this, &RadioPagingDemod::networkManagerFinished);
     QObject::connect(this, &ChannelAPI::indexInDeviceSetChanged, this, &RadioPagingDemod::handleIndexInDeviceSetChanged);
+
+    // The message center learns this receiver at the next announcement, whenever it starts
+    m_announceTimer = new QTimer(this);
+    QObject::connect(m_announceTimer, &QTimer::timeout, this, [this]() { announce("status"); });
+    m_announceTimer->start(5000);
+}
+
+// The receiver as the message center sees it: every protocol, speed and polarity is decoded
+void RadioPagingDemod::announce(const QString& event)
+{
+    MessageEndpoint endpoint;
+    endpoint.m_frequency = m_centerFrequency + m_settings.m_inputFrequencyOffset;
+    endpoint.m_alias = m_settings.effectiveChannelAlias(endpoint.m_frequency);
+    endpoint.m_role = MessageEndpoint::Receiver;
+    endpoint.m_status = (event == "unregister") ? MessageEndpoint::Offline : MessageEndpoint::Idle;
+    endpoint.m_protocols = QStringList({"pocsag", "flex", "gsc"});
+    endpoint.m_capabilities.insert("voice", true);
+    endpoint.m_capabilities.insert("voiceRecording", m_settings.m_gscVoiceRecord);
+    // The alias changed (it is the frequency by default): the old one is gone
+    if (!m_lastAlias.isEmpty() && (endpoint.m_alias != m_lastAlias) && (event != "unregister"))
+    {
+        MessageEndpoint old = endpoint;
+        old.m_alias = m_lastAlias;
+        old.m_status = MessageEndpoint::Offline;
+        publishRecord(MessageEndpoint::toRecord(old, "unregister"));
+    }
+
+    m_lastAlias = endpoint.m_alias;
+    publishRecord(MessageEndpoint::toRecord(endpoint, event));
 }
 
 RadioPagingDemod::~RadioPagingDemod()
 {
     qDebug("RadioPagingDemod::~RadioPagingDemod");
+    m_announceTimer->stop();
+    announce("unregister");
     QObject::disconnect(m_networkManager, &QNetworkAccessManager::finished, this, &RadioPagingDemod::networkManagerFinished);
     delete m_networkManager;
     m_deviceAPI->removeChannelSinkAPI(this);
@@ -158,6 +191,7 @@ bool RadioPagingDemod::handleMessage(const Message& cmd)
         const DSPSignalNotification& notif = (const DSPSignalNotification&) cmd;
         m_basebandSampleRate = notif.getSampleRate();
         m_centerFrequency = notif.getCenterFrequency();
+        announce("register");       // The frequency is known now (the alias is the frequency by default)
         // Forward to the sink
         DSPSignalNotification* rep = new DSPSignalNotification(notif); // make a copy
         qDebug() << "RadioPagingDemod::handleMessage: DSPSignalNotification";
@@ -199,7 +233,8 @@ void RadioPagingDemod::publishRecord(MessageRecord record)
     record.m_centerFrequency = m_centerFrequency;
     record.m_channelOffset = m_settings.m_inputFrequencyOffset;
 
-    if (getMessageQueueToGUI()) {
+    // The table of the GUI shows the messages, not the announcements of the channel
+    if (getMessageQueueToGUI() && (record.m_kind != MessageRecord::KindEvent)) {
         getMessageQueueToGUI()->push(MainCore::MsgMessageRecord::create(this, record));
     }
 
@@ -261,6 +296,11 @@ void RadioPagingDemod::applySettings(const QStringList& settingsKeys, const Radi
         m_settings = settings;
     } else {
         m_settings.applySettings(settingsKeys, settings);
+    }
+
+    // A new alias or frequency offset is announced at once
+    if (m_announceTimer && !force && (settingsKeys.contains("channelAlias") || settingsKeys.contains("inputFrequencyOffset"))) {
+        announce("status");
     }
 }
 
