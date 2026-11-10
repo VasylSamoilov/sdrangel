@@ -574,6 +574,9 @@ void RadioPagingDemodSink::updateStatus()
     status.m_flexMode = RadioPagingFlex::modeName(flex.m_mode);
     status.m_flexInverted = flex.m_inverted;
     status.m_flexQuality = flex.m_quality;
+    status.m_flexErs = flex.m_ers;
+    status.m_flexErsSeconds = flex.m_ersSeconds;
+    status.m_flexErsCount = flex.m_ersDetections;
     if (status.m_flexSync && flex.m_ber.valid()) {
         m_lastBer[1] = flex.m_ber;
     }

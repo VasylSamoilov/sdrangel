@@ -29,6 +29,12 @@
 
 // FLEX receiver: FM discriminator samples to frames and messages.
 //
+// While hunting, the emergency re-synchronization (STD-43A 3.2.1: BS, Ar, inverted BS,
+// inverted Ar, 96 bits repeated) is detected on the last 96 bits, with at most
+// m_maxErsErrors bit errors (sync 1 of 3200/4 is 16 bits from it, random bits about 48).
+// Inverted it is the same cycle shifted by half, so it carries no polarity; it is reported
+// while received, with its length.
+//
 // A demodulator at 1600 baud with 2 levels runs all the time and hunts for sync 1 on its
 // own, in both polarities: the mode code A, the 16 bit pattern B and the inverted mode
 // code are compared with the code of each mode. Sync 1 is accepted when the 80 bits have
@@ -74,10 +80,15 @@ public:
         int m_reassemblies;
         float m_deviation;              //!< Measured outer deviation, discriminator units
         float m_dc;                     //!< Measured DC offset (carrier offset), discriminator units
+        bool m_ers;                     //!< Emergency re-synchronization being received
+        uint32_t m_ersDetections;       //!< Re-synchronizations received
+        float m_ersSeconds;             //!< Length received of the current or last one
     };
 
     //!< Number of bit errors allowed over the 80 bits of A, B and inverted A
     static const int m_maxSyncErrors = 8;
+    //!< Number of bit errors allowed over a 96 bit cycle of the emergency re-synchronization
+    static const int m_maxErsErrors = 8;
     //!< Blocks with a mean power this many dB below sync 1 are erased
     static constexpr float m_erasureDb = 15.0f;
 
@@ -147,6 +158,11 @@ private:
     double m_errorSum;
     int m_errorCount;
 
+    uint64_t m_syncSymbols;             //!< Symbols of the sync demodulator
+    uint64_t m_ersFirst;                //!< Symbol at which the current or last re-synchronization started
+    uint64_t m_ersLast;                 //!< Symbol of its last cycle
+    uint32_t m_ersDetections;
+
     uint32_t m_syncs;
     uint32_t m_frames;
     uint32_t m_frameInfoFailures;
@@ -158,6 +174,8 @@ private:
 
     void syncSymbol(const RadioPagingFskDemod::Symbol& symbol, float magsq);
     bool checkSync(RadioPagingFlex::Mode& mode, bool& inverted) const;
+    bool checkErs() const;
+    bool ersActive() const;
     void fitSync1(RadioPagingFlex::Mode mode, bool inverted);
     bool m_levelsMeasured = false;
     float m_measuredDc = 0.0f;

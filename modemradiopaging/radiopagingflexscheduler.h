@@ -149,6 +149,9 @@ public:
     std::vector<uint32_t> unschedulable() const;
     //!< Remove a queued message. False if the id is not queued
     bool remove(uint32_t id);
+    //!< Queued messages a frame of the frame index would carry if it had room (their capcode
+    //!< listens to the frame, the frame is not reserved)
+    size_t eligible(uint64_t frameIndex) const;
 
     //!< The frame of a frame index. Messages placed in it are removed from the queue
     Frame buildFrame(uint64_t frameIndex);

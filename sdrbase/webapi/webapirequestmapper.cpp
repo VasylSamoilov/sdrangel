@@ -5200,6 +5200,12 @@ bool WebAPIRequestMapper::getChannelSettings(
             channelSettings->getRadioPagingDemodSettings()->init();
             channelSettings->getRadioPagingDemodSettings()->fromJsonObject(settingsJsonObject);
         }
+        else if (channelSettingsKey == "RadioPagingModSettings")
+        {
+            channelSettings->setRadioPagingModSettings(new SWGSDRangel::SWGRadioPagingModSettings());
+            channelSettings->getRadioPagingModSettings()->init();
+            channelSettings->getRadioPagingModSettings()->fromJsonObject(settingsJsonObject);
+        }
         else if (channelSettingsKey == "RadiosondeDemodSettings")
         {
             channelSettings->setRadiosondeDemodSettings(new SWGSDRangel::SWGRadiosondeDemodSettings());
@@ -5387,6 +5393,11 @@ bool WebAPIRequestMapper::getChannelActions(
         {
             channelActions->setPacketModActions(new SWGSDRangel::SWGPacketModActions());
             channelActions->getPacketModActions()->fromJsonObject(actionsJsonObject);
+        }
+        else if (channelActionsKey == "RadioPagingModActions")
+        {
+            channelActions->setRadioPagingModActions(new SWGSDRangel::SWGRadioPagingModActions());
+            channelActions->getRadioPagingModActions()->fromJsonObject(actionsJsonObject);
         }
         else if (channelActionsKey == "PSK31ModActions")
         {
@@ -6162,6 +6173,8 @@ void WebAPIRequestMapper::resetChannelSettings(SWGSDRangel::SWGChannelSettings& 
     channelSettings.setPsk31ModSettings(nullptr);
     channelSettings.setRadioAstronomySettings(nullptr);
     channelSettings.setRadioClockSettings(nullptr);
+    channelSettings.setRadioPagingDemodSettings(nullptr);
+    channelSettings.setRadioPagingModSettings(nullptr);
     channelSettings.setRadiosondeDemodSettings(nullptr);
     channelSettings.setRemoteSinkSettings(nullptr);
     channelSettings.setRemoteSourceSettings(nullptr);
@@ -6214,6 +6227,8 @@ void WebAPIRequestMapper::resetChannelReport(SWGSDRangel::SWGChannelReport& chan
     channelReport.setPsk31ModReport(nullptr);
     channelReport.setRadioAstronomyReport(nullptr);
     channelReport.setRadioClockReport(nullptr);
+    channelReport.setRadioPagingDemodReport(nullptr);
+    channelReport.setRadioPagingModReport(nullptr);
     channelReport.setRadiosondeDemodReport(nullptr);
     channelReport.setRemoteSourceReport(nullptr);
     channelReport.setRttyDemodReport(nullptr);
@@ -6242,6 +6257,7 @@ void WebAPIRequestMapper::resetChannelActions(SWGSDRangel::SWGChannelActions& ch
     channelActions.setPacketModActions(nullptr);
     channelActions.setPsk31ModActions(nullptr);
     channelActions.setRadioAstronomyActions(nullptr);
+    channelActions.setRadioPagingModActions(nullptr);
     channelActions.setRttyModActions(nullptr);
 }
 

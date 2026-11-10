@@ -111,6 +111,18 @@ RadioPagingDemodReport:
       description: FLEX decode quality of the last frame, 0 to 1
       type: number
       format: float
+    flexErs:
+      description: "A FLEX emergency re-synchronization is being received (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    flexErsSeconds:
+      description: Length of the current or last FLEX emergency re-synchronization in seconds
+      type: number
+      format: float
+    flexErsCount:
+      description: Number of FLEX emergency re-synchronizations received since start
+      type: integer
+      format: int64
     gscSync:
       description: "GSC decoder: 0 not synchronised, 1 synchronised, 2 synchronised on inverted polarity"
       type: integer

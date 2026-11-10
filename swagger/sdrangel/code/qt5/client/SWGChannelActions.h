@@ -34,6 +34,7 @@
 #include "SWGMeshcoreModActions.h"
 #include "SWGPSK31ModActions.h"
 #include "SWGPacketModActions.h"
+#include "SWGRadioPagingModActions.h"
 #include "SWGRTTYModActions.h"
 #include "SWGRadioAstronomyActions.h"
 #include "SWGSigMFFileSinkActions.h"
@@ -102,6 +103,9 @@ public:
     SWGPacketModActions* getPacketModActions();
     void setPacketModActions(SWGPacketModActions* packet_mod_actions);
 
+    SWGRadioPagingModActions* getRadioPagingModActions();
+    void setRadioPagingModActions(SWGRadioPagingModActions* radio_paging_mod_actions);
+
     SWGPSK31ModActions* getPsk31ModActions();
     void setPsk31ModActions(SWGPSK31ModActions* psk31_mod_actions);
 
@@ -162,6 +166,9 @@ private:
 
     SWGPacketModActions* packet_mod_actions;
     bool m_packet_mod_actions_isSet;
+
+    SWGRadioPagingModActions* radio_paging_mod_actions;
+    bool m_radio_paging_mod_actions_isSet;
 
     SWGPSK31ModActions* psk31_mod_actions;
     bool m_psk31_mod_actions_isSet;

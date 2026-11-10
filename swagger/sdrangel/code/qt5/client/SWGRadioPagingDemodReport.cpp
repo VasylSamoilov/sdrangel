@@ -25,6 +25,9 @@ void SWGRadioPagingDemodReport::init()
     m_gscVoice = 0; m_gscVoiceIsSet = false;
     m_pocsagMessages = 0; m_pocsagMessagesIsSet = false;
     m_flexMessages = 0; m_flexMessagesIsSet = false;
+    m_flexErs = 0; m_flexErsIsSet = false;
+    m_flexErsSeconds = 0; m_flexErsSecondsIsSet = false;
+    m_flexErsCount = 0; m_flexErsCountIsSet = false;
     m_gscMessages = 0; m_gscMessagesIsSet = false;
 }
 SWGRadioPagingDemodReport* SWGRadioPagingDemodReport::fromJson(QString& json)
@@ -45,6 +48,9 @@ void SWGRadioPagingDemodReport::fromJsonObject(QJsonObject& json)
     if (json.contains("gscVoice")) { ::SWGSDRangel::setValue(&m_gscVoice,json["gscVoice"],"qint32",""); m_gscVoiceIsSet = true; }
     if (json.contains("pocsagMessages")) { ::SWGSDRangel::setValue(&m_pocsagMessages,json["pocsagMessages"],"qint64",""); m_pocsagMessagesIsSet = true; }
     if (json.contains("flexMessages")) { ::SWGSDRangel::setValue(&m_flexMessages,json["flexMessages"],"qint64",""); m_flexMessagesIsSet = true; }
+    if (json.contains("flexErs")) { ::SWGSDRangel::setValue(&m_flexErs,json["flexErs"],"qint32",""); m_flexErsIsSet = true; }
+    if (json.contains("flexErsSeconds")) { ::SWGSDRangel::setValue(&m_flexErsSeconds,json["flexErsSeconds"],"float",""); m_flexErsSecondsIsSet = true; }
+    if (json.contains("flexErsCount")) { ::SWGSDRangel::setValue(&m_flexErsCount,json["flexErsCount"],"qint64",""); m_flexErsCountIsSet = true; }
     if (json.contains("gscMessages")) { ::SWGSDRangel::setValue(&m_gscMessages,json["gscMessages"],"qint64",""); m_gscMessagesIsSet = true; }
 }
 QString SWGRadioPagingDemodReport::asJson()
@@ -66,12 +72,15 @@ QJsonObject* SWGRadioPagingDemodReport::asJsonObject()
     if (m_gscVoiceIsSet) { object->insert("gscVoice",QJsonValue(m_gscVoice)); }
     if (m_pocsagMessagesIsSet) { object->insert("pocsagMessages",QJsonValue(m_pocsagMessages)); }
     if (m_flexMessagesIsSet) { object->insert("flexMessages",QJsonValue(m_flexMessages)); }
+    if (m_flexErsIsSet) { object->insert("flexErs",QJsonValue(m_flexErs)); }
+    if (m_flexErsSecondsIsSet) { object->insert("flexErsSeconds",QJsonValue(m_flexErsSeconds)); }
+    if (m_flexErsCountIsSet) { object->insert("flexErsCount",QJsonValue(m_flexErsCount)); }
     if (m_gscMessagesIsSet) { object->insert("gscMessages",QJsonValue(m_gscMessages)); }
     return object;
 }
 bool SWGRadioPagingDemodReport::isSet()
 {
-    return m_channelPowerDBIsSet || m_channelSampleRateIsSet || m_pocsag512SyncIsSet || m_pocsag1200SyncIsSet || m_pocsag2400SyncIsSet || m_flexSyncIsSet || m_flexModeIsSet || m_flexQualityIsSet || m_gscSyncIsSet || m_gscVoiceIsSet || m_pocsagMessagesIsSet || m_flexMessagesIsSet || m_gscMessagesIsSet;
+    return m_channelPowerDBIsSet || m_channelSampleRateIsSet || m_pocsag512SyncIsSet || m_pocsag1200SyncIsSet || m_pocsag2400SyncIsSet || m_flexSyncIsSet || m_flexModeIsSet || m_flexQualityIsSet || m_gscSyncIsSet || m_gscVoiceIsSet || m_pocsagMessagesIsSet || m_flexMessagesIsSet || m_gscMessagesIsSet || m_flexErsIsSet || m_flexErsSecondsIsSet || m_flexErsCountIsSet;
 }
 float SWGRadioPagingDemodReport::getChannelPowerDb() { return m_channelPowerDB; }
 void SWGRadioPagingDemodReport::setChannelPowerDb(float value) { m_channelPowerDB = value; m_channelPowerDBIsSet = true; }
@@ -97,6 +106,12 @@ qint64 SWGRadioPagingDemodReport::getPocsagMessages() { return m_pocsagMessages;
 void SWGRadioPagingDemodReport::setPocsagMessages(qint64 value) { m_pocsagMessages = value; m_pocsagMessagesIsSet = true; }
 qint64 SWGRadioPagingDemodReport::getFlexMessages() { return m_flexMessages; }
 void SWGRadioPagingDemodReport::setFlexMessages(qint64 value) { m_flexMessages = value; m_flexMessagesIsSet = true; }
+qint32 SWGRadioPagingDemodReport::getFlexErs() { return m_flexErs; }
+void SWGRadioPagingDemodReport::setFlexErs(qint32 value) { m_flexErs = value; m_flexErsIsSet = true; }
+float SWGRadioPagingDemodReport::getFlexErsSeconds() { return m_flexErsSeconds; }
+void SWGRadioPagingDemodReport::setFlexErsSeconds(float value) { m_flexErsSeconds = value; m_flexErsSecondsIsSet = true; }
+qint64 SWGRadioPagingDemodReport::getFlexErsCount() { return m_flexErsCount; }
+void SWGRadioPagingDemodReport::setFlexErsCount(qint64 value) { m_flexErsCount = value; m_flexErsCountIsSet = true; }
 qint64 SWGRadioPagingDemodReport::getGscMessages() { return m_gscMessages; }
 void SWGRadioPagingDemodReport::setGscMessages(qint64 value) { m_gscMessages = value; m_gscMessagesIsSet = true; }
 }

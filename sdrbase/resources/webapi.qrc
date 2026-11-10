@@ -106,6 +106,7 @@
         <file>webapi/doc/swagger/include/RadioAstronomy.yaml</file>
         <file>webapi/doc/swagger/include/RadioClock.yaml</file>
         <file>webapi/doc/swagger/include/RadioPagingDemod.yaml</file>
+        <file>webapi/doc/swagger/include/RadioPagingMod.yaml</file>
         <file>webapi/doc/swagger/include/RadiosondeDemod.yaml</file>
         <file>webapi/doc/swagger/include/Radiosonde.yaml</file>
         <file>webapi/doc/swagger/include/RemoteInput.yaml</file>

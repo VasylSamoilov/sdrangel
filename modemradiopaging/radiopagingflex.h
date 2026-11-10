@@ -186,6 +186,16 @@ public:
     //!< Symbols of bytes (most significant bit first) for the given number of levels
     static std::vector<uint8_t> bytesToSymbols(const std::vector<uint8_t>& bytes, int levels, bool inverted);
 
+    //!< Emergency re-synchronization (STD-43A 3.2.1, Table 3.2.1-1): BS, Ar, inverted BS and
+    //!< inverted Ar repeated at 1600 baud 2 levels, for the given number of bits (the last
+    //!< cycle may be cut)
+    static SymbolBlock ers(int bits, bool inverted);
+    //!< Bits at 1600 baud the re-synchronization lasts at least: the battery saving cycle of a
+    //!< pager with the collapse value, 2^collapse frames of 1.875 s (STD-43A 3.2.1)
+    static int ersMinBits(int collapse);
+    static const int m_frameMs = 1875;          //!< Frame duration, milliseconds
+    static const int m_bitsPerFrame = 3000;     //!< At 1600 baud
+
     static const char m_numericChars[17];   //!< Index = 4-bit value
 };
 

@@ -1,0 +1,1047 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>RadioPagingModGUI</class>
+ <widget class="RollupContents" name="RadioPagingModGUI">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>380</width>
+    <height>560</height>
+   </rect>
+  </property>
+  <property name="sizePolicy">
+   <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+    <horstretch>0</horstretch>
+    <verstretch>0</verstretch>
+   </sizepolicy>
+  </property>
+  <property name="minimumSize">
+   <size>
+    <width>380</width>
+    <height>0</height>
+   </size>
+  </property>
+  <property name="font">
+   <font>
+    <family>Liberation Sans</family>
+    <pointsize>9</pointsize>
+   </font>
+  </property>
+  <property name="focusPolicy">
+   <enum>Qt::StrongFocus</enum>
+  </property>
+  <property name="windowTitle">
+   <string>Radio Paging Modulator</string>
+  </property>
+  <widget class="QWidget" name="settingsContainer" native="true">
+   <property name="geometry">
+    <rect>
+     <x>2</x>
+     <y>2</y>
+     <width>376</width>
+     <height>90</height>
+    </rect>
+   </property>
+   <property name="minimumSize">
+    <size>
+     <width>300</width>
+     <height>0</height>
+    </size>
+   </property>
+   <property name="windowTitle">
+    <string>Settings</string>
+   </property>
+   <layout class="QVBoxLayout" name="settingsLayout">
+    <property name="spacing">
+     <number>3</number>
+    </property>
+    <property name="leftMargin">
+     <number>2</number>
+    </property>
+    <property name="topMargin">
+     <number>2</number>
+    </property>
+    <property name="rightMargin">
+     <number>2</number>
+    </property>
+    <property name="bottomMargin">
+     <number>2</number>
+    </property>
+    <item>
+     <layout class="QHBoxLayout" name="deltaFreqPowLayout">
+      <item>
+       <widget class="QLabel" name="deltaFrequencyLabel">
+        <property name="minimumSize">
+         <size>
+          <width>16</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="text">
+         <string>Df</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="ValueDialZ" name="deltaFrequency" native="true">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Maximum" vsizetype="Maximum">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>32</width>
+          <height>16</height>
+         </size>
+        </property>
+        <property name="font">
+         <font>
+          <family>Liberation Mono</family>
+          <pointsize>12</pointsize>
+         </font>
+        </property>
+        <property name="cursor">
+         <cursorShape>PointingHandCursor</cursorShape>
+        </property>
+        <property name="focusPolicy">
+         <enum>Qt::StrongFocus</enum>
+        </property>
+        <property name="toolTip">
+         <string>Modulator shift frequency from center in Hz</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="deltaUnits">
+        <property name="text">
+         <string>Hz </string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="deltaSpacer">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>40</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+      <item>
+       <widget class="QLabel" name="channelPower">
+        <property name="minimumSize">
+         <size>
+          <width>60</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="toolTip">
+         <string>Channel power</string>
+        </property>
+        <property name="text">
+         <string>-100.0 dB</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="channelMute">
+        <property name="toolTip">
+         <string>Mute/Unmute channel</string>
+        </property>
+        <property name="text">
+         <string>...</string>
+        </property>
+        <property name="icon">
+         <iconset resource="../../../sdrgui/resources/res.qrc">
+          <normaloff>:/txon.png</normaloff>
+          <normalon>:/txoff.png</normalon>:/txon.png</iconset>
+        </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+    <item>
+     <layout class="QHBoxLayout" name="protocolLayout">
+      <item>
+       <widget class="QComboBox" name="protocol">
+        <property name="toolTip">
+         <string>Protocol transmitted by this channel</string>
+        </property>
+        <item>
+         <property name="text">
+          <string>POCSAG</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>FLEX</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>GSC</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="mode">
+        <property name="toolTip">
+         <string>One-shot: carrier on for each transmission, off after it. Network: carrier on all the time with idle fill</string>
+        </property>
+        <item>
+         <property name="text">
+          <string>One-shot</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Network</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="deviationLabel">
+        <property name="text">
+         <string>Dev</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QSpinBox" name="deviation">
+        <property name="toolTip">
+         <string>Frequency deviation of the outer symbol (Hz)</string>
+        </property>
+        <property name="minimum">
+         <number>500</number>
+        </property>
+        <property name="maximum">
+         <number>10000</number>
+        </property>
+        <property name="singleStep">
+         <number>100</number>
+        </property>
+        <property name="value">
+         <number>4500</number>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="protocolSpacer">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>10</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+     </layout>
+    </item>
+    <item>
+     <layout class="QHBoxLayout" name="gainLayout">
+      <item>
+       <widget class="QLabel" name="gainLabel">
+        <property name="text">
+         <string>Gain</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QDial" name="gain">
+        <property name="maximumSize">
+         <size>
+          <width>24</width>
+          <height>24</height>
+         </size>
+        </property>
+        <property name="toolTip">
+         <string>Gain (dB)</string>
+        </property>
+        <property name="minimum">
+         <number>-60</number>
+        </property>
+        <property name="maximum">
+         <number>0</number>
+        </property>
+        <property name="singleStep">
+         <number>1</number>
+        </property>
+        <property name="pageStep">
+         <number>5</number>
+        </property>
+        <property name="value">
+         <number>0</number>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="gainText">
+        <property name="minimumSize">
+         <size>
+          <width>40</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="text">
+         <string>0dB</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="LevelMeterVU" name="volumeMeter" native="true">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="font">
+         <font>
+          <family>Liberation Mono</family>
+          <pointsize>8</pointsize>
+         </font>
+        </property>
+        <property name="toolTip">
+         <string>Level (% full range) top trace: average, bottom trace: instantaneous peak, tip: peak hold</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QWidget" name="networkContainer" native="true">
+   <property name="geometry">
+    <rect>
+     <x>2</x>
+     <y>96</y>
+     <width>376</width>
+     <height>60</height>
+    </rect>
+   </property>
+   <property name="windowTitle">
+    <string>Network</string>
+   </property>
+   <layout class="QGridLayout" name="networkLayout">
+    <property name="leftMargin">
+     <number>2</number>
+    </property>
+    <property name="topMargin">
+     <number>2</number>
+    </property>
+    <property name="rightMargin">
+     <number>2</number>
+    </property>
+    <property name="bottomMargin">
+     <number>2</number>
+    </property>
+    <property name="spacing">
+     <number>3</number>
+    </property>
+    <item row="0" column="0">
+     <widget class="QLabel" name="speedLabel">
+      <property name="text">
+       <string>Speed</string>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="1">
+     <widget class="QComboBox" name="speed">
+      <property name="toolTip">
+       <string>Default POCSAG speed (baud) of the messages sent</string>
+      </property>
+      <item>
+       <property name="text">
+        <string>512</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>1200</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>2400</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="0" column="2">
+     <widget class="QLabel" name="polarityLabel">
+      <property name="text">
+       <string>Polarity</string>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="3">
+     <widget class="QComboBox" name="polarity">
+      <property name="toolTip">
+       <string>Default polarity of the messages sent. Normal: binary 1 is a negative deviation</string>
+      </property>
+      <item>
+       <property name="text">
+        <string>Normal</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>Inverted</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="1" column="0">
+     <widget class="QLabel" name="rampLabel">
+      <property name="text">
+       <string>Ramp</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="1">
+     <widget class="QDoubleSpinBox" name="rampUp">
+      <property name="toolTip">
+       <string>Power ramp at the start of a transmission (ms)</string>
+      </property>
+      <property name="suffix">
+       <string> ms up</string>
+      </property>
+      <property name="decimals">
+       <number>1</number>
+      </property>
+      <property name="maximum">
+       <double>100.000000000000000</double>
+      </property>
+      <property name="value">
+       <double>5.000000000000000</double>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="2">
+     <widget class="QDoubleSpinBox" name="rampDown">
+      <property name="toolTip">
+       <string>Power ramp at the end of a transmission (ms)</string>
+      </property>
+      <property name="suffix">
+       <string> ms down</string>
+      </property>
+      <property name="decimals">
+       <number>1</number>
+      </property>
+      <property name="maximum">
+       <double>100.000000000000000</double>
+      </property>
+      <property name="value">
+       <double>5.000000000000000</double>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="3">
+     <widget class="QSpinBox" name="rampRange">
+      <property name="toolTip">
+       <string>Range of the power ramps (dB)</string>
+      </property>
+      <property name="suffix">
+       <string> dB</string>
+      </property>
+      <property name="minimum">
+       <number>0</number>
+      </property>
+      <property name="maximum">
+       <number>120</number>
+      </property>
+      <property name="value">
+       <number>60</number>
+      </property>
+     </widget>
+    </item>
+    <item row="3" column="0" colspan="2">
+     <widget class="QCheckBox" name="mixPocsag">
+      <property name="toolTip">
+       <string>Mixing with POCSAG (STD-43A Chapter 7): POCSAG messages go in the time between FLEX frames, with the POCSAG settings. Frames 0 to 3 of the cycle are always FLEX. Network mode</string>
+      </property>
+      <property name="text">
+       <string>Mix POCSAG</string>
+      </property>
+     </widget>
+    </item>
+    <item row="3" column="2" colspan="2">
+     <widget class="QCheckBox" name="mixShared">
+      <property name="toolTip">
+       <string>Shared channel: the minimum FLEX activity is per 4 minutes (128 frames) instead of per minute (32 frames)</string>
+      </property>
+      <property name="text">
+       <string>Shared channel</string>
+      </property>
+     </widget>
+    </item>
+    <item row="4" column="0">
+     <widget class="QLabel" name="mixSpeedLabel">
+      <property name="text">
+       <string>POCSAG</string>
+      </property>
+     </widget>
+    </item>
+    <item row="4" column="1">
+     <widget class="QComboBox" name="mixSpeed">
+      <property name="toolTip">
+       <string>Default POCSAG speed (baud) of the messages mixed in</string>
+      </property>
+      <item>
+       <property name="text">
+        <string>512</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>1200</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>2400</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="4" column="2">
+     <widget class="QComboBox" name="mixPolarity">
+      <property name="toolTip">
+       <string>Default POCSAG polarity of the messages mixed in. Normal: binary 1 is a negative deviation</string>
+      </property>
+      <item>
+       <property name="text">
+        <string>Normal</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>Inverted</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="4" column="3">
+     <widget class="QSpinBox" name="mixDeviation">
+      <property name="toolTip">
+       <string>Frequency deviation of POCSAG when mixed with FLEX (Hz); FLEX uses the deviation above</string>
+      </property>
+      <property name="suffix">
+       <string> Hz</string>
+      </property>
+      <property name="minimum">
+       <number>500</number>
+      </property>
+      <property name="maximum">
+       <number>10000</number>
+      </property>
+      <property name="singleStep">
+       <number>100</number>
+      </property>
+      <property name="value">
+       <number>4500</number>
+      </property>
+     </widget>
+    </item>
+    <item row="5" column="0">
+     <widget class="QLabel" name="mixFramesLabel">
+      <property name="text">
+       <string>FLEX/min</string>
+      </property>
+     </widget>
+    </item>
+    <item row="5" column="1">
+     <widget class="QSpinBox" name="mixFrames">
+      <property name="toolTip">
+       <string>Collapse: the first 2^collapse frames of each minute are FLEX (STD-43A 7.1.1). A number of frames: that many frames a minute are FLEX, with system collapse 5; capcodes of the other frames are refused (7.1.2)</string>
+      </property>
+      <property name="specialValueText">
+       <string>collapse</string>
+      </property>
+      <property name="minimum">
+       <number>0</number>
+      </property>
+      <property name="maximum">
+       <number>128</number>
+      </property>
+     </widget>
+    </item>
+    <item row="6" column="0">
+     <widget class="QLabel" name="mixSwitchLabel">
+      <property name="text">
+       <string>Switch</string>
+      </property>
+     </widget>
+    </item>
+    <item row="6" column="1">
+     <widget class="QSpinBox" name="mixSwitch512">
+      <property name="toolTip">
+       <string>750 bps 1,0 pattern before 512 bps POCSAG after FLEX (STD-43A 7.2.1: at least 400 ms)</string>
+      </property>
+      <property name="suffix">
+       <string> ms</string>
+      </property>
+      <property name="maximum">
+       <number>1000</number>
+      </property>
+      <property name="singleStep">
+       <number>50</number>
+      </property>
+     </widget>
+    </item>
+    <item row="6" column="2">
+     <widget class="QSpinBox" name="mixSwitch1200">
+      <property name="toolTip">
+       <string>750 bps 1,0 pattern before 1200 bps POCSAG after FLEX (STD-43A 7.2.2: at least 200 ms)</string>
+      </property>
+      <property name="suffix">
+       <string> ms</string>
+      </property>
+      <property name="maximum">
+       <number>1000</number>
+      </property>
+      <property name="singleStep">
+       <number>50</number>
+      </property>
+     </widget>
+    </item>
+    <item row="6" column="3">
+     <widget class="QSpinBox" name="mixSwitch2400">
+      <property name="toolTip">
+       <string>750 bps 1,0 pattern before 2400 bps POCSAG after FLEX. Not in the standard: 100 ms, extrapolated from 512 and 1200</string>
+      </property>
+      <property name="suffix">
+       <string> ms</string>
+      </property>
+      <property name="maximum">
+       <number>1000</number>
+      </property>
+      <property name="singleStep">
+       <number>50</number>
+      </property>
+     </widget>
+    </item>
+    <item row="2" column="0">
+     <widget class="QLabel" name="collapseLabel">
+      <property name="text">
+       <string>Collapse</string>
+      </property>
+     </widget>
+    </item>
+    <item row="2" column="1">
+     <widget class="QSpinBox" name="collapse">
+      <property name="toolTip">
+       <string>FLEX collapse: the re-synchronization lasts at least 2^collapse frames; network: pagers listen to one frame in 2^collapse</string>
+      </property>
+      <property name="minimum">
+       <number>0</number>
+      </property>
+      <property name="maximum">
+       <number>7</number>
+      </property>
+      <property name="value">
+       <number>0</number>
+      </property>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QWidget" name="messageContainer" native="true">
+   <property name="geometry">
+    <rect>
+     <x>2</x>
+     <y>160</y>
+     <width>376</width>
+     <height>110</height>
+    </rect>
+   </property>
+   <property name="windowTitle">
+    <string>Message</string>
+   </property>
+   <layout class="QGridLayout" name="messageLayout">
+    <property name="leftMargin">
+     <number>2</number>
+    </property>
+    <property name="topMargin">
+     <number>2</number>
+    </property>
+    <property name="rightMargin">
+     <number>2</number>
+    </property>
+    <property name="bottomMargin">
+     <number>2</number>
+    </property>
+    <property name="spacing">
+     <number>3</number>
+    </property>
+    <item row="0" column="0">
+     <widget class="QLabel" name="addressLabel">
+      <property name="text">
+       <string>Address</string>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="1">
+     <widget class="QSpinBox" name="address">
+      <property name="toolTip">
+       <string>POCSAG address (capcode), 21 bits</string>
+      </property>
+      <property name="maximum">
+       <number>2097151</number>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="1">
+     <widget class="QLineEdit" name="capcode">
+      <property name="toolTip">
+       <string>FLEX capcode: short 1 to 1933312, long 2101249 to 4297068542</string>
+      </property>
+      <property name="text">
+       <string>1</string>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="2">
+     <widget class="QCheckBox" name="priority">
+      <property name="toolTip">
+       <string>FLEX: address in the priority part of the address field</string>
+      </property>
+      <property name="text">
+       <string>Priority</string>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="2">
+     <widget class="QComboBox" name="function">
+      <property name="toolTip">
+       <string>POCSAG function (sub address)</string>
+      </property>
+      <item>
+       <property name="text">
+        <string>A (0)</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>B (1)</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>C (2)</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>D (3)</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="0" column="3">
+     <widget class="QComboBox" name="messageType">
+      <property name="toolTip">
+       <string>Message type</string>
+      </property>
+      <item>
+       <property name="text">
+        <string>Alphanumeric</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>Numeric</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>Tone</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="1" column="0">
+     <widget class="QLabel" name="overrideLabel">
+      <property name="text">
+       <string>Send at</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="1">
+     <widget class="QComboBox" name="messageSpeed">
+      <property name="toolTip">
+       <string>Speed of this message; Default is the network setting</string>
+      </property>
+      <item>
+       <property name="text">
+        <string>Default</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>512</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>1200</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>2400</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="1" column="2" colspan="2">
+     <widget class="QComboBox" name="messagePolarity">
+      <property name="toolTip">
+       <string>Polarity of this message; Default is the network setting</string>
+      </property>
+      <item>
+       <property name="text">
+        <string>Default polarity</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>Normal</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>Inverted</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="2" column="0">
+     <widget class="QLabel" name="textLabel">
+      <property name="text">
+       <string>Text</string>
+      </property>
+     </widget>
+    </item>
+    <item row="2" column="1" colspan="2">
+     <widget class="QLineEdit" name="text">
+      <property name="toolTip">
+       <string>Message text. Numeric: 0-9, space, U, -, ], [. Alphanumeric: 7-bit characters. Enter to send</string>
+      </property>
+     </widget>
+    </item>
+    <item row="2" column="3">
+     <widget class="QPushButton" name="send">
+      <property name="toolTip">
+       <string>Queue the message for transmission</string>
+      </property>
+      <property name="text">
+       <string>Send</string>
+      </property>
+     </widget>
+    </item>
+    <item row="3" column="0">
+     <widget class="QLabel" name="messageProtocolLabel">
+      <property name="text">
+       <string>Protocol</string>
+      </property>
+     </widget>
+    </item>
+    <item row="3" column="1">
+     <widget class="QComboBox" name="messageProtocol">
+      <property name="toolTip">
+       <string>Protocol of this message: a FLEX network with the mixing option also sends POCSAG</string>
+      </property>
+      <item>
+       <property name="text">
+        <string>FLEX</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>POCSAG</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QWidget" name="queueContainer" native="true">
+   <property name="geometry">
+    <rect>
+     <x>2</x>
+     <y>274</y>
+     <width>376</width>
+     <height>200</height>
+    </rect>
+   </property>
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
+   <property name="windowTitle">
+    <string>Queue</string>
+   </property>
+   <layout class="QVBoxLayout" name="queueLayout">
+    <property name="spacing">
+     <number>3</number>
+    </property>
+    <property name="leftMargin">
+     <number>2</number>
+    </property>
+    <property name="topMargin">
+     <number>2</number>
+    </property>
+    <property name="rightMargin">
+     <number>2</number>
+    </property>
+    <property name="bottomMargin">
+     <number>2</number>
+    </property>
+    <item>
+     <layout class="QHBoxLayout" name="queueStatusLayout">
+      <item>
+       <widget class="QLabel" name="status">
+        <property name="toolTip">
+         <string>State, message being sent, messages waiting, messages sent</string>
+        </property>
+        <property name="text">
+         <string>Idle</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="queueSpacer">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>10</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+      <item>
+       <widget class="QPushButton" name="clear">
+        <property name="toolTip">
+         <string>Drop the messages waiting</string>
+        </property>
+        <property name="text">
+         <string>Clear</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="abort">
+        <property name="toolTip">
+         <string>Drop the messages waiting; one-shot: end the transmission being sent</string>
+        </property>
+        <property name="text">
+         <string>Abort</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+    <item>
+     <widget class="QPlainTextEdit" name="log">
+      <property name="toolTip">
+       <string>Messages queued and the results of the requests</string>
+      </property>
+      <property name="readOnly">
+       <bool>true</bool>
+      </property>
+      <property name="maximumBlockCount">
+       <number>1000</number>
+      </property>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>RollupContents</class>
+   <extends>QWidget</extends>
+   <header>gui/rollupcontents.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ValueDialZ</class>
+   <extends>QWidget</extends>
+   <header>gui/valuedialz.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>LevelMeterVU</class>
+   <extends>QWidget</extends>
+   <header>gui/levelmeter.h</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <tabstops>
+  <tabstop>deltaFrequency</tabstop>
+  <tabstop>channelMute</tabstop>
+  <tabstop>protocol</tabstop>
+  <tabstop>mode</tabstop>
+  <tabstop>deviation</tabstop>
+  <tabstop>gain</tabstop>
+  <tabstop>speed</tabstop>
+  <tabstop>polarity</tabstop>
+  <tabstop>rampUp</tabstop>
+  <tabstop>rampDown</tabstop>
+  <tabstop>rampRange</tabstop>
+  <tabstop>collapse</tabstop>
+  <tabstop>mixPocsag</tabstop>
+  <tabstop>mixShared</tabstop>
+  <tabstop>mixSpeed</tabstop>
+  <tabstop>mixPolarity</tabstop>
+  <tabstop>mixDeviation</tabstop>
+  <tabstop>mixFrames</tabstop>
+  <tabstop>mixSwitch512</tabstop>
+  <tabstop>mixSwitch1200</tabstop>
+  <tabstop>mixSwitch2400</tabstop>
+  <tabstop>messageProtocol</tabstop>
+  <tabstop>address</tabstop>
+  <tabstop>capcode</tabstop>
+  <tabstop>function</tabstop>
+  <tabstop>priority</tabstop>
+  <tabstop>messageType</tabstop>
+  <tabstop>messageSpeed</tabstop>
+  <tabstop>messagePolarity</tabstop>
+  <tabstop>text</tabstop>
+  <tabstop>send</tabstop>
+  <tabstop>clear</tabstop>
+  <tabstop>abort</tabstop>
+  <tabstop>log</tabstop>
+ </tabstops>
+ <resources>
+  <include location="../../../sdrgui/resources/res.qrc"/>
+ </resources>
+ <connections/>
+</ui>

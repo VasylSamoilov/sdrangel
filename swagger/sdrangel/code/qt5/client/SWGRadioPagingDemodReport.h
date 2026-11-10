@@ -44,6 +44,12 @@ public:
     void setPocsagMessages(qint64 value);
     qint64 getFlexMessages();
     void setFlexMessages(qint64 value);
+    qint32 getFlexErs();
+    void setFlexErs(qint32 value);
+    float getFlexErsSeconds();
+    void setFlexErsSeconds(float value);
+    qint64 getFlexErsCount();
+    void setFlexErsCount(qint64 value);
     qint64 getGscMessages();
     void setGscMessages(qint64 value);
 private:
@@ -71,6 +77,12 @@ private:
     bool m_pocsagMessagesIsSet = false;
     qint64 m_flexMessages = 0;
     bool m_flexMessagesIsSet = false;
+    qint32 m_flexErs = 0;
+    bool m_flexErsIsSet = false;
+    float m_flexErsSeconds = 0;
+    bool m_flexErsSecondsIsSet = false;
+    qint64 m_flexErsCount = 0;
+    bool m_flexErsCountIsSet = false;
     qint64 m_gscMessages = 0;
     bool m_gscMessagesIsSet = false;
 };

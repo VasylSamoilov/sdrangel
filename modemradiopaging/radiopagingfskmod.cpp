@@ -36,6 +36,7 @@ RadioPagingFskMod::RadioPagingFskMod() :
     m_shaping(2400.0),
     m_channelSampleRate(m_internalRate),
     m_symbol(0),
+    m_blockStart(true),
     m_sampleInSymbol(0),
     m_hold(0.0f),
     m_tail(0),
@@ -51,10 +52,11 @@ RadioPagingFskMod::RadioPagingFskMod() :
     applyChannelSampleRate();
 }
 
+// Only the FM sensitivity changes: the filters and the symbols queued are kept
 void RadioPagingFskMod::setDeviation(double deviation)
 {
     m_deviation = deviation;
-    applyChannelSampleRate();
+    m_phaseSensitivity = 2.0 * M_PI * m_deviation / (double) m_channelSampleRate;
 }
 
 void RadioPagingFskMod::setShaping(double cutoff)
@@ -93,6 +95,7 @@ void RadioPagingFskMod::reset()
 {
     m_blocks.clear();
     m_symbol = 0;
+    m_blockStart = true;
     m_sampleInSymbol = 0;
     m_hold = 0.0f;
     m_tail = 0;
@@ -103,14 +106,14 @@ void RadioPagingFskMod::reset()
     applyChannelSampleRate();
 }
 
-bool RadioPagingFskMod::push(int baud, const std::vector<float>& levels)
+bool RadioPagingFskMod::push(double baud, const std::vector<float>& levels, double shaping, double deviation)
 {
-    if ((baud <= 0) || (m_internalRate % baud != 0)) {
+    if ((baud < 1.0) || (baud > (double) m_internalRate)) {
         return false;
     }
 
     if (!levels.empty()) {
-        m_blocks.push_back(Block{m_internalRate / baud, levels});
+        m_blocks.push_back(Block{(double) m_internalRate / baud, levels, shaping, deviation});
     }
 
     return true;
@@ -137,16 +140,43 @@ void RadioPagingFskMod::shapeSample()
     {
         Block& block = m_blocks.front();
 
+        // A block with its own shaping: the filter is designed again at its first symbol, its
+        // history filled with the level held so that the deviation does not jump
+        // The first sample of a block (a flag: the fraction of a symbol carried over from the
+        // block before is not zero after a rate that does not divide 38400)
+        bool blockStart = m_blockStart;
+        m_blockStart = false;
+
+        if (blockStart && (block.m_shaping > 0.0) && (block.m_shaping != m_shaping))
+        {
+            m_shaping = block.m_shaping;
+            applyShaping();
+
+            for (int i = 0; i <= 2 * m_gaussianDelay; i++) {
+                m_gaussian.filter(m_hold);
+            }
+        }
+
+        // A block with its own deviation: the FM sensitivity from its first symbol
+        if (blockStart && (block.m_deviation > 0.0) && (block.m_deviation != m_deviation)) {
+            setDeviation(block.m_deviation);
+        }
+
         level = block.m_levels[m_symbol];
 
-        if (++m_sampleInSymbol >= block.m_samplesPerSymbol)
+        // The symbol ends when its samples are sent; the fraction over is carried to the next
+        // symbol, so the block has exactly its length on average
+        m_sampleInSymbol += 1.0;
+
+        if (m_sampleInSymbol >= block.m_samplesPerSymbol - 1e-6)
         {
-            m_sampleInSymbol = 0;
+            m_sampleInSymbol = std::max(0.0, m_sampleInSymbol - block.m_samplesPerSymbol);
 
             if (++m_symbol >= block.m_levels.size())
             {
                 m_blocks.pop_front();
                 m_symbol = 0;
+                m_blockStart = true;
 
                 if (m_blocks.empty()) {
                     m_tail = m_gaussianDelay;

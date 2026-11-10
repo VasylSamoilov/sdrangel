@@ -264,6 +264,25 @@ bool RadioPagingFlexEncoder::remove(uint32_t id)
     return false;
 }
 
+size_t RadioPagingFlexEncoder::eligible(uint64_t frameIndex) const
+{
+    uint32_t frame = RadioPagingFlexScheduler::frameTime(frameIndex).m_frame;
+    size_t n = 0;
+
+    if (m_reserved[frame]) {
+        return 0;
+    }
+
+    for (const Item& item : m_queue)
+    {
+        if (RadioPagingFlexScheduler::frameEligible(item.m_message.m_capcode, frame, m_collapse)) {
+            n++;
+        }
+    }
+
+    return n;
+}
+
 RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameIndex)
 {
     Frame frame;

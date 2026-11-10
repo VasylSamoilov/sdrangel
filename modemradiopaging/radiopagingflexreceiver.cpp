@@ -37,6 +37,22 @@ const uint32_t syncCInv = 0x127bu;
 const unsigned grayToDibit[4] = {0, 1, 3, 2};
 // Sync 1 (A, B, inverted A) lasts 80 bits at 1600 baud
 const int syncBits = 80;
+// Half a cycle of the emergency re-synchronization, BS and Ar (STD-43A Table 3.2.1-1); the
+// other half is its inverse
+const uint64_t ersHalf = 0xaaaacb205939ULL;
+const uint64_t mask48 = 0xffffffffffffULL;
+const int ersCycleBits = 96;
+// Cycles missed in noise do not split a re-synchronization in two: a new one after 3 cycles
+const int ersGapBits = 3 * ersCycleBits;
+
+int popcount64(uint64_t x)
+{
+    int n = 0;
+    for (; x; n++) {
+        x &= x - 1;
+    }
+    return n;
+}
 
 int popcount32(uint32_t x)
 {
@@ -50,6 +66,10 @@ int popcount32(uint32_t x)
 
 RadioPagingFlexReceiver::RadioPagingFlexReceiver() :
     m_sampleRate(38400.0),
+    m_syncSymbols(0),
+    m_ersFirst(0),
+    m_ersLast(0),
+    m_ersDetections(0),
     m_syncs(0),
     m_frames(0),
     m_frameInfoFailures(0),
@@ -78,6 +98,10 @@ void RadioPagingFlexReceiver::reset()
     m_syncs = 0;
     m_frames = 0;
     m_frameInfoFailures = 0;
+    m_syncSymbols = 0;
+    m_ersFirst = 0;
+    m_ersLast = 0;
+    m_ersDetections = 0;
     m_mode = RadioPagingFlex::Mode1600_2;
     m_inverted = false;
     m_lastQuality = 0.0f;
@@ -131,8 +155,29 @@ RadioPagingFlexReceiver::Status RadioPagingFlexReceiver::getStatus() const
     status.m_networkTime = m_decoder.networkTime(m_inverted);
     status.m_groups = m_decoder.groups(m_inverted);
     status.m_reassemblies = m_decoder.reassemblies(m_inverted);
+    status.m_ers = ersActive();
+    status.m_ersDetections = m_ersDetections;
+    status.m_ersSeconds = (m_ersDetections > 0) ? (float) (m_ersLast - m_ersFirst) / RadioPagingFlex::m_syncBaud : 0.0f;
 
     return status;
+}
+
+// The last 96 bits are a cycle of the re-synchronization, starting at either half
+bool RadioPagingFlexReceiver::checkErs() const
+{
+    uint64_t newer = m_regLo & mask48;
+    uint64_t older = (((m_regHi & 0xffffffffULL) << 16) | (m_regLo >> 48)) & mask48;
+    uint64_t other = ~ersHalf & mask48;
+    int errors = std::min(popcount64(older ^ ersHalf) + popcount64(newer ^ other),
+        popcount64(older ^ other) + popcount64(newer ^ ersHalf));
+
+    return errors <= m_maxErsErrors;
+}
+
+// A cycle matches every half cycle while it lasts: active until two halves are missed
+bool RadioPagingFlexReceiver::ersActive() const
+{
+    return (m_ersDetections > 0) && (m_syncSymbols - m_ersLast <= (uint64_t) ersCycleBits);
 }
 
 void RadioPagingFlexReceiver::process(float sample, float magsq)
@@ -141,8 +186,13 @@ void RadioPagingFlexReceiver::process(float sample, float magsq)
 
     // The sync demodulator keeps its symbol clock running through the data part, so the
     // next frame's sync is found without a new acquisition
-    if (m_syncDemod.process(sample, symbol) && ((m_state == Hunting) || (m_state == FrameInfo))) {
-        syncSymbol(symbol, magsq);
+    if (m_syncDemod.process(sample, symbol))
+    {
+        m_syncSymbols++;
+
+        if ((m_state == Hunting) || (m_state == FrameInfo)) {
+            syncSymbol(symbol, magsq);
+        }
     }
 
     if ((m_state == Sync2) || (m_state == Data))
@@ -266,8 +316,21 @@ void RadioPagingFlexReceiver::syncSymbol(const RadioPagingFskDemod::Symbol& symb
 
         RadioPagingFlex::Mode mode;
         bool inverted;
+        bool sync = checkSync(mode, inverted);
 
-        if (checkSync(mode, inverted))
+        // Sync 1 is closer to the re-synchronization than random bits: not checked on it
+        if (!sync && (m_enabled[0] || m_enabled[1]) && checkErs())
+        {
+            // A new one after a gap of more than ersGapBits; it started a cycle ago
+            if ((m_ersDetections == 0) || (m_syncSymbols - m_ersLast > (uint64_t) ersGapBits))
+            {
+                m_ersDetections++;
+                m_ersFirst = m_syncSymbols - std::min<uint64_t>(m_syncSymbols, ersCycleBits);
+            }
+            m_ersLast = m_syncSymbols;
+        }
+
+        if (sync)
         {
             m_mode = mode;
             m_inverted = inverted;

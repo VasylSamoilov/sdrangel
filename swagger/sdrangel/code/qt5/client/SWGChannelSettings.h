@@ -85,6 +85,7 @@
 #include "SWGRadioAstronomySettings.h"
 #include "SWGRadioClockSettings.h"
 #include "SWGRadioPagingDemodSettings.h"
+#include "SWGRadioPagingModSettings.h"
 #include "SWGRadiosondeDemodSettings.h"
 #include "SWGRemoteSinkSettings.h"
 #include "SWGRemoteSourceSettings.h"
@@ -308,6 +309,9 @@ public:
 
     SWGRadioPagingDemodSettings* getRadioPagingDemodSettings();
     void setRadioPagingDemodSettings(SWGRadioPagingDemodSettings* radio_paging_demod_settings);
+
+    SWGRadioPagingModSettings* getRadioPagingModSettings();
+    void setRadioPagingModSettings(SWGRadioPagingModSettings* radio_paging_mod_settings);
 
     SWGRadiosondeDemodSettings* getRadiosondeDemodSettings();
     void setRadiosondeDemodSettings(SWGRadiosondeDemodSettings* radiosonde_demod_settings);
@@ -551,6 +555,9 @@ private:
 
     SWGRadioPagingDemodSettings* radio_paging_demod_settings;
     bool m_radio_paging_demod_settings_isSet;
+
+    SWGRadioPagingModSettings* radio_paging_mod_settings;
+    bool m_radio_paging_mod_settings_isSet;
 
     SWGRadiosondeDemodSettings* radiosonde_demod_settings;
     bool m_radiosonde_demod_settings_isSet;

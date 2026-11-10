@@ -70,6 +70,9 @@ public:
         QString m_flexMode;
         bool m_flexInverted;
         float m_flexQuality;
+        bool m_flexErs;                 //!< Emergency re-synchronization being received
+        float m_flexErsSeconds;         //!< Length of the current or last one
+        quint32 m_flexErsCount;         //!< Re-synchronizations received
         bool m_gscSync;
         bool m_gscVoice;
         bool m_gscAudio;                //!< The voice message is being played

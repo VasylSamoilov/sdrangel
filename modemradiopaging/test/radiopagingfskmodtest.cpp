@@ -407,11 +407,86 @@ void testFlex()
 
 } // namespace
 
+// 750 bps does not divide 38400: a block has exactly its length at every channel rate, and
+// the symbols alternate at 375 Hz. A block with its own deviation sets the FM sensitivity
+// from its first symbol
+void testFractionalAndDeviation()
+{
+    for (int rate : channelRates)
+    {
+        RadioPagingFskMod mod;
+        mod.setChannelSampleRate(rate);
+        mod.setDeviation(4500.0);
+        mod.setShaping(750.0);
+
+        std::vector<float> levels;
+        for (int i = 0; i < 300; i++) {
+            levels.push_back((i & 1) ? -1.0f : 1.0f);
+        }
+
+        // Samples from the first to the last symbol: 300 symbols of 1 / 750 s = 0.4 s
+        mod.push(750.0, levels, 750.0, 3000.0);
+        size_t samples = 0;
+        while (mod.queued() > 0)
+        {
+            mod.next();
+            samples++;
+        }
+
+        double seconds = (double) samples / rate;
+        char what[160];
+        std::snprintf(what, sizeof(what), "750 bps block of 300 symbols lasts 0.4 s at %d Hz (%.5f s)", rate, seconds);
+        check(std::fabs(seconds - 0.4) < 0.0005, what);
+    }
+
+    // Deviation of the block: peak frequency of a 1,0 run at 750 bps, 3000 Hz then 4500 Hz
+    RadioPagingFskMod mod;
+    mod.setChannelSampleRate(48000);
+    mod.setDeviation(4500.0);
+    mod.setShaping(750.0);
+    std::vector<float> run(100, 1.0f);
+    mod.push(750.0, run, 750.0, 3000.0);
+    mod.push(750.0, run, 750.0, 4500.0);
+    Signal t;
+    t.m_rate = 48000;
+    while (mod.busy()) {
+        t.m_iq.push_back(mod.next());
+    }
+    std::vector<float> f = discriminate(t, 1000.0);
+    size_t half = f.size() / 2;
+    double first = f[half / 2] * 1000.0;
+    double second = f[half + half / 2] * 1000.0;
+    char what[160];
+    std::snprintf(what, sizeof(what), "Block deviation: 3000 Hz then 4500 Hz (%.0f, %.0f)", first, second);
+    check((std::fabs(first - 3000.0) < 30.0) && (std::fabs(second - 4500.0) < 45.0), what);
+
+    // After a block with a fractional symbol clock the next block still starts with its own
+    // deviation (the fraction carried over is not zero)
+    {
+        RadioPagingFskMod fraction;
+        fraction.setChannelSampleRate(48000);
+        fraction.setDeviation(4800.0);
+        fraction.setShaping(3200.0);
+        fraction.push(1601.37, std::vector<float>(40, 1.0f), 3200.0, 4800.0);
+        fraction.push(750.0, std::vector<float>(100, 1.0f), 750.0, 3000.0);
+        Signal u;
+        u.m_rate = 48000;
+        while (fraction.busy()) {
+            u.m_iq.push_back(fraction.next());
+        }
+        std::vector<float> g = discriminate(u, 1000.0);
+        double last = g[g.size() - 200] * 1000.0;       // Inside the second block, settled
+        std::snprintf(what, sizeof(what), "Deviation of a block after a fractional rate block: 3000 Hz (%.0f)", last);
+        check(std::fabs(last - 3000.0) < 30.0, what);
+    }
+}
+
 int main()
 {
     testPocsag();
     testGsc();
     testFlex();
+    testFractionalAndDeviation();
 
     std::printf("%d passed, %d failed\n", passes, failures);
     return failures ? 1 : 0;

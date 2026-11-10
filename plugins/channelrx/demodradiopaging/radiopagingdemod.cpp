@@ -502,6 +502,9 @@ void RadioPagingDemod::webapiFormatChannelReport(SWGSDRangel::SWGChannelReport& 
     model->setFlexSync(sync(status.m_flexSync, status.m_flexInverted));
     model->setFlexMode(new QString(status.m_flexMode));
     model->setFlexQuality(status.m_flexQuality);
+    model->setFlexErs(status.m_flexErs ? 1 : 0);
+    model->setFlexErsSeconds(status.m_flexErsSeconds);
+    model->setFlexErsCount(status.m_flexErsCount);
     model->setGscSync(sync(status.m_gscSync, status.m_gscInverted));
     model->setGscVoice(status.m_gscVoice ? 1 : 0);
     model->setPocsagMessages(status.m_messages[0]);

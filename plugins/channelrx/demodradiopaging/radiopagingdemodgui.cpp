@@ -802,8 +802,13 @@ void RadioPagingDemodGUI::updateStatus()
     }
 
     setStatus(ui->pocsagStatus, status, 0, pocsagSync, "SYNC", pocsag.join(", "));
-    setStatus(ui->flexStatus, status, 1, status.m_flexSync, "SYNC",
-        status.m_flexMode + " " + polarityHtml(status.m_flexInverted));
+    // The re-synchronization has no mode or polarity
+    if (status.m_flexErs && !status.m_flexSync) {
+        setStatus(ui->flexStatus, status, 1, true, "ERS", QString("%1 s").arg(status.m_flexErsSeconds, 0, 'f', 2));
+    } else {
+        setStatus(ui->flexStatus, status, 1, status.m_flexSync, "SYNC",
+            status.m_flexMode + " " + polarityHtml(status.m_flexInverted));
+    }
     setStatus(ui->gscStatus, status, 2, status.m_gscSync, status.m_gscVoice ? "VOICE" : "SYNC",
         polarityHtml(status.m_gscInverted));
 
@@ -885,6 +890,10 @@ QString RadioPagingDemodGUI::flexDetails(const RadioPagingDemodSink::Status& sta
         text += QString("<br>groups %1/16 %2&nbsp;&nbsp;reasm %3/%4").arg(status.m_flexGroups.size()).arg(groups.join(" "))
             .arg(status.m_flexReassemblies).arg(RadioPagingFlexDecoder::m_reassemblySlots);
     }
+    if ((status.m_flexErsCount > 0) && !status.m_flexErs)
+    {
+        text += QString("<br>last ERS %1 s (%2)").arg(status.m_flexErsSeconds, 0, 'f', 2).arg(status.m_flexErsCount);
+    }
 
     return text;
 }
@@ -895,6 +904,8 @@ QString RadioPagingDemodGUI::flexToolTip(const RadioPagingDemodSink::Status& sta
         "green no errors, yellow errors corrected, red errors that could not be corrected, grey after the reception), "
         "df the carrier frequency offset (DC offset of the discriminator; the levels of sync 1 are kept through 4-level "
         "frames) and messages received.\n"
+        "ERS: emergency re-synchronization being received (no mode or polarity), with its length so far; "
+        "last ERS: length of the last one and the number received.\n"
         "Cxx/Fxxx: cycle and frame of the last frame. Collapse n: pagers wake up every 2^n frames. "
         "Roaming: roaming bit of the frame. Repeat xN: the frame content is sent N times.\n"
         "Date, time and zone: network time from the block information words. LID: local id, coverage: coverage zone, "

@@ -157,6 +157,9 @@ ChannelReport:
     RadioPagingDemodReport:
       $ref: "/doc/swagger/include/RadioPagingDemod.yaml#/RadioPagingDemodReport"
       description: "Radio paging demodulator report data for Channel."
+    RadioPagingModReport:
+      $ref: "/doc/swagger/include/RadioPagingMod.yaml#/RadioPagingModReport"
+      description: "Radio paging modulator report data for Channel."
     RadiosondeDemodReport:
       $ref: "/doc/swagger/include/RadiosondeDemod.yaml#/RadiosondeDemodReport"
       description: "Radiosonde demod report data for Channel."

@@ -39,6 +39,8 @@ const uint64_t RadioPagingFlex::m_longMax;
 const unsigned RadioPagingFlex::m_vectorTone;
 const unsigned RadioPagingFlex::m_vectorNumeric;
 const unsigned RadioPagingFlex::m_vectorAlpha;
+const int RadioPagingFlex::m_frameMs;
+const int RadioPagingFlex::m_bitsPerFrame;
 
 namespace {
 
@@ -69,6 +71,15 @@ const uint8_t syncAInv[4][4] = {
     {0x7b, 0x18, 0xa6, 0xc6},
     {0xb0, 0x68, 0xa6, 0xc6},
     {0xde, 0xa0, 0xa6, 0xc6}
+};
+
+// Emergency re-synchronization cycle, transmission order (STD-43A Table 3.2.1-1): BS, Ar,
+// inverted BS, inverted Ar
+const uint8_t ersCycle[12] = {
+    0xaa, 0xaa,
+    0xcb, 0x20, 0x59, 0x39,
+    0x55, 0x55,
+    0x34, 0xdf, 0xa6, 0xc6
 };
 
 uint32_t reverse21(uint32_t value)
@@ -966,4 +977,27 @@ std::vector<RadioPagingFlex::SymbolBlock> RadioPagingFlex::toSymbols(const Frame
     blocks[1].m_levels = levels(mode);
     blocks[1].m_symbols = bytesToSymbols(bytes.m_data, levels(mode), inverted);
     return blocks;
+}
+
+RadioPagingFlex::SymbolBlock RadioPagingFlex::ers(int bits, bool inverted)
+{
+    SymbolBlock block;
+    std::vector<uint8_t> cycle(ersCycle, ersCycle + sizeof(ersCycle));
+    std::vector<uint8_t> cycleSymbols = bytesToSymbols(cycle, 2, inverted);
+
+    block.m_baud = m_syncBaud;
+    block.m_levels = 2;
+    block.m_symbols.reserve(std::max(0, bits));
+
+    for (int i = 0; i < bits; i++) {
+        block.m_symbols.push_back(cycleSymbols[i % cycleSymbols.size()]);
+    }
+
+    return block;
+}
+
+int RadioPagingFlex::ersMinBits(int collapse)
+{
+    collapse = std::max(0, std::min(m_maxCollapse, collapse));
+    return m_bitsPerFrame << collapse;
 }

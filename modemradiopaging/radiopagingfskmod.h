@@ -58,9 +58,14 @@ public:
 
     //!< Drop the queued symbols and clear the filters
     void reset();
-    //!< Queue symbols at a baud rate. False (nothing queued) if the rate does not divide 38400
-    bool push(int baud, const std::vector<float>& levels);
-    //!< Symbols queued and not started yet
+    //!< Queue symbols at a baud rate, up to 38400. A rate that does not divide 38400 (750)
+    //!< has symbols of a whole number of samples on average: the symbol clock is fractional.
+    //!< A shaping cutoff (Hz) and a deviation (Hz) other than 0 apply from the first symbol of
+    //!< the block: blocks of different rates, shaping and deviation follow each other in one
+    //!< stream. False (nothing queued) if the rate is not between 1 and 38400
+    bool push(double baud, const std::vector<float>& levels, double shaping = 0.0, double deviation = 0.0);
+    //!< Symbols queued and not finished, the one being sent included: 0 once the last symbol
+    //!< of the queue has been sent
     size_t queued() const;
     //!< Symbols are queued, or the last symbol is still in the shaping filter
     bool busy() const { return !m_blocks.empty() || (m_tail > 0); }
@@ -73,8 +78,10 @@ public:
 private:
     struct Block
     {
-        int m_samplesPerSymbol;
+        double m_samplesPerSymbol;      //!< Not a whole number for rates that do not divide 38400
         std::vector<float> m_levels;
+        double m_shaping;               //!< 0: the current shaping
+        double m_deviation;             //!< 0: the current deviation
     };
 
     double m_deviation;
@@ -83,7 +90,8 @@ private:
 
     std::deque<Block> m_blocks;
     size_t m_symbol;                    //!< Symbol of the first block being sent
-    int m_sampleInSymbol;
+    bool m_blockStart;                  //!< The next sample is the first of a block
+    double m_sampleInSymbol;            //!< Samples of the symbol sent, the fraction carried to the next
     float m_hold;                       //!< Level held after the last symbol
     int m_tail;                         //!< Samples of the shaping filter delay still to output
 

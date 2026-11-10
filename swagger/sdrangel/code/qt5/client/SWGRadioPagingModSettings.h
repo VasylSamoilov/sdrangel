@@ -1,0 +1,152 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Qt model for RadioPagingMod.yaml, following the Swagger client model interface.
+#ifndef SWGRadioPagingModSettings_H_
+#define SWGRadioPagingModSettings_H_
+#include <QJsonObject>
+#include <QString>
+#include "SWGObject.h"
+#include "export.h"
+#include "SWGChannelMarker.h"
+#include "SWGRollupState.h"
+
+namespace SWGSDRangel {
+class SWG_API SWGRadioPagingModSettings : public SWGObject {
+public:
+    SWGRadioPagingModSettings();
+    explicit SWGRadioPagingModSettings(QString* json);
+    ~SWGRadioPagingModSettings() override;
+    void init();
+    void cleanup();
+    QString asJson() override;
+    QJsonObject* asJsonObject() override;
+    void fromJsonObject(QJsonObject& json) override;
+    SWGRadioPagingModSettings* fromJson(QString& json) override;
+    bool isSet() override;
+    qint64 getInputFrequencyOffset();
+    void setInputFrequencyOffset(qint64 value);
+    qint32 getProtocol();
+    void setProtocol(qint32 value);
+    qint32 getMode();
+    void setMode(qint32 value);
+    float getDeviation();
+    void setDeviation(float value);
+    float getGain();
+    void setGain(float value);
+    qint32 getChannelMute();
+    void setChannelMute(qint32 value);
+    float getRampUpMs();
+    void setRampUpMs(float value);
+    float getRampDownMs();
+    void setRampDownMs(float value);
+    qint32 getRampRange();
+    void setRampRange(qint32 value);
+    qint32 getPocsagSpeed();
+    void setPocsagSpeed(qint32 value);
+    qint32 getPocsagInverted();
+    void setPocsagInverted(qint32 value);
+    qint32 getFlexMode();
+    void setFlexMode(qint32 value);
+    qint32 getFlexInverted();
+    void setFlexInverted(qint32 value);
+    qint32 getFlexCollapse();
+    void setFlexCollapse(qint32 value);
+    qint32 getMixPocsag();
+    void setMixPocsag(qint32 value);
+    float getPocsagDeviation();
+    void setPocsagDeviation(float value);
+    qint32 getMixFramesPerMinute();
+    void setMixFramesPerMinute(qint32 value);
+    qint32 getMixShared();
+    void setMixShared(qint32 value);
+    qint32 getMixSwitchMs512();
+    void setMixSwitchMs512(qint32 value);
+    qint32 getMixSwitchMs1200();
+    void setMixSwitchMs1200(qint32 value);
+    qint32 getMixSwitchMs2400();
+    void setMixSwitchMs2400(qint32 value);
+    qint32 getRgbColor();
+    void setRgbColor(qint32 value);
+    QString* getTitle();
+    void setTitle(QString* value);
+    qint32 getStreamIndex();
+    void setStreamIndex(qint32 value);
+    qint32 getUseReverseApi();
+    void setUseReverseApi(qint32 value);
+    QString* getReverseApiAddress();
+    void setReverseApiAddress(QString* value);
+    qint32 getReverseApiPort();
+    void setReverseApiPort(qint32 value);
+    qint32 getReverseApiDeviceIndex();
+    void setReverseApiDeviceIndex(qint32 value);
+    qint32 getReverseApiChannelIndex();
+    void setReverseApiChannelIndex(qint32 value);
+    SWGChannelMarker* getChannelMarker();
+    void setChannelMarker(SWGChannelMarker* value);
+    SWGRollupState* getRollupState();
+    void setRollupState(SWGRollupState* value);
+private:
+    qint64 m_inputFrequencyOffset = 0;
+    bool m_inputFrequencyOffsetIsSet = false;
+    qint32 m_protocol = 0;
+    bool m_protocolIsSet = false;
+    qint32 m_mode = 0;
+    bool m_modeIsSet = false;
+    float m_deviation = 0;
+    bool m_deviationIsSet = false;
+    float m_gain = 0;
+    bool m_gainIsSet = false;
+    qint32 m_channelMute = 0;
+    bool m_channelMuteIsSet = false;
+    float m_rampUpMs = 0;
+    bool m_rampUpMsIsSet = false;
+    float m_rampDownMs = 0;
+    bool m_rampDownMsIsSet = false;
+    qint32 m_rampRange = 0;
+    bool m_rampRangeIsSet = false;
+    qint32 m_pocsagSpeed = 0;
+    bool m_pocsagSpeedIsSet = false;
+    qint32 m_pocsagInverted = 0;
+    bool m_pocsagInvertedIsSet = false;
+    qint32 m_flexMode = 0;
+    bool m_flexModeIsSet = false;
+    qint32 m_flexInverted = 0;
+    bool m_flexInvertedIsSet = false;
+    qint32 m_flexCollapse = 0;
+    bool m_flexCollapseIsSet = false;
+    qint32 m_mixPocsag = 0;
+    bool m_mixPocsagIsSet = false;
+    float m_pocsagDeviation = 0;
+    bool m_pocsagDeviationIsSet = false;
+    qint32 m_mixFramesPerMinute = 0;
+    bool m_mixFramesPerMinuteIsSet = false;
+    qint32 m_mixShared = 0;
+    bool m_mixSharedIsSet = false;
+    qint32 m_mixSwitchMs512 = 0;
+    bool m_mixSwitchMs512IsSet = false;
+    qint32 m_mixSwitchMs1200 = 0;
+    bool m_mixSwitchMs1200IsSet = false;
+    qint32 m_mixSwitchMs2400 = 0;
+    bool m_mixSwitchMs2400IsSet = false;
+    qint32 m_rgbColor = 0;
+    bool m_rgbColorIsSet = false;
+    QString* m_title = nullptr;
+    bool m_titleIsSet = false;
+    qint32 m_streamIndex = 0;
+    bool m_streamIndexIsSet = false;
+    qint32 m_useReverseAPI = 0;
+    bool m_useReverseAPIIsSet = false;
+    QString* m_reverseAPIAddress = nullptr;
+    bool m_reverseAPIAddressIsSet = false;
+    qint32 m_reverseAPIPort = 0;
+    bool m_reverseAPIPortIsSet = false;
+    qint32 m_reverseAPIDeviceIndex = 0;
+    bool m_reverseAPIDeviceIndexIsSet = false;
+    qint32 m_reverseAPIChannelIndex = 0;
+    bool m_reverseAPIChannelIndexIsSet = false;
+    SWGChannelMarker* m_channelMarker = nullptr;
+    bool m_channelMarkerIsSet = false;
+    SWGRollupState* m_rollupState = nullptr;
+    bool m_rollupStateIsSet = false;
+};
+}
+#endif

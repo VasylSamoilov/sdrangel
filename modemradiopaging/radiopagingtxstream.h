@@ -1,0 +1,332 @@
+///////////////////////////////////////////////////////////////////////////////////
+// Copyright (C) 2026 Vasyl Samoilov <vasyl.samoilov@gmail.com>                  //
+//                                                                               //
+// This program is free software; you can redistribute it and/or modify          //
+// it under the terms of the GNU General Public License as published by          //
+// the Free Software Foundation as version 3 of the License, or                  //
+// (at your option) any later version.                                           //
+//                                                                               //
+// This program is distributed in the hope that it will be useful,               //
+// but WITHOUT ANY WARRANTY; without even the implied warranty of                //
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the                  //
+// GNU General Public License V3 for more details.                               //
+//                                                                               //
+// You should have received a copy of the GNU General Public License             //
+// along with this program. If not, see <http://www.gnu.org/licenses/>.          //
+///////////////////////////////////////////////////////////////////////////////////
+
+#ifndef MODEMRADIOPAGING_RADIOPAGINGTXSTREAM_H
+#define MODEMRADIOPAGING_RADIOPAGINGTXSTREAM_H
+
+#include <cmath>
+#include <cstdint>
+#include <deque>
+#include <functional>
+#include <map>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "export.h"
+#include "radiopagingflex.h"
+#include "radiopagingflexscheduler.h"
+#include "radiopagingpocsag.h"
+
+// Symbols of a transmitter, a block at a time, for the modulator (RadioPagingFskMod).
+//
+// A transmission is a sequence of blocks; it ends when next() returns false. One-shot
+// streams make a transmission of what is queued and end it; network streams never end a
+// transmission: they fill with idle signal when nothing is queued. Messages carry an id of
+// the caller; a block lists the ids of the messages it completes.
+struct RadioPagingTxBlock
+{
+    double m_baud = 0.0;                //!< Symbols per second; 750 and the fill are not whole divisors of 38400
+    std::vector<float> m_levels;        //!< -1 to +1, +1 = highest frequency
+    double m_shaping = 0.0;             //!< Gaussian cutoff of the block, Hz
+    double m_deviation = 0.0;           //!< Deviation of the outer symbol, Hz; 0: the modulator's
+    std::vector<uint64_t> m_ids;        //!< Messages completed by the block
+    bool m_ers = false;                 //!< FLEX emergency re-synchronization
+
+    //!< Ticks per second of the time base of mixed streams: a whole number for every rate
+    //!< (512, 750, 1200, 1600, 2400, 3200, 6400)
+    static const int m_tickRate = 192000;
+    //!< Length of the block in ticks
+    int64_t ticks() const { return (int64_t) std::llround((double) m_levels.size() * m_tickRate / m_baud); }
+};
+
+class MODEMRADIOPAGING_API RadioPagingTxStream
+{
+public:
+    virtual ~RadioPagingTxStream() {}
+
+    //!< A transmission can start (network: always)
+    virtual bool hasWork() const = 0;
+    //!< A transmission starts: epochMs is the time of its first symbol, milliseconds since the
+    //!< Unix epoch (UTC). FLEX places its frames on the time grid from it
+    virtual void begin(int64_t epochMs) = 0;
+    //!< Next block of the transmission. False: the transmission ends
+    virtual bool next(RadioPagingTxBlock& block) = 0;
+    //!< Messages queued and not in a block yet
+    virtual size_t pending() const = 0;
+    //!< Drop the messages queued: their ids
+    virtual std::vector<uint64_t> clear() = 0;
+    //!< The transmission is cut: drop the blocks prepared and not returned yet, the ids of the
+    //!< messages they carried. Messages still queued stay
+    virtual std::vector<uint64_t> cut() { return std::vector<uint64_t>(); }
+    virtual bool continuous() const = 0;
+};
+
+// POCSAG (ITU-R M.584). Messages are grouped by speed and polarity.
+//   One-shot: each message is a transmission: preamble and batches.
+//   Network: the preamble once, then batches without end: the messages of the current
+//   group at the next batch, idle batches when there are none. After two idle batches the
+//   next group with messages in the carousel order (1200, 512, 2400 normal, then inverted)
+//   takes over with a new preamble (as osmocom-analog pocsag); so does it after
+//   m_maxBlocksPerTurn message blocks in a row, so that a busy group does not hold the
+//   others. With no message anywhere the network goes back to the default group.
+// Normal polarity: a binary 1 is a negative frequency deviation.
+class MODEMRADIOPAGING_API RadioPagingPocsagTxStream : public RadioPagingTxStream
+{
+public:
+    static const int m_idleBatchesBeforeSwitch = 2;
+    //!< Message blocks of a group in a row before another group with messages takes over
+    static const int m_maxBlocksPerTurn = 4;
+
+    RadioPagingPocsagTxStream(bool network, int baud, bool inverted);
+
+    //!< Queue a message at a speed and polarity. False and an error if it can not be encoded
+    bool add(const RadioPagingPocsag::TxMessage& message, int baud, bool inverted, uint64_t id, std::string& error);
+    //!< Group of the idle batches when the network starts (network only)
+    void setDefaultGroup(int baud, bool inverted);
+    //!< Group being sent
+    int groupBaud() const { return m_group.first; }
+    bool groupInverted() const { return m_group.second; }
+
+    // Mixing with FLEX (RadioPagingMixTxStream): POCSAG gets the time between FLEX frames, in
+    // runs. No idle batches: when there is nothing to send FLEX frames fill the time.
+    //!< A run starts: the next block begins with a preamble
+    void startRun();
+    //!< The next block of the run, at most maxTicks long: the preamble (when due) and the
+    //!< batches of as many of the queued messages of the group as fit. A group with no more
+    //!< messages, or whose turn is over (m_maxBlocksPerTurn) while another one waits, gives
+    //!< way to the next one, with a new preamble. False if nothing fits
+    //!< overhead: ticks the caller sends before the block for the speed of the group (the 750
+    //!< bps pattern), counted in maxTicks
+    bool nextMixed(RadioPagingTxBlock& block, int64_t maxTicks, const std::function<int64_t(int)>& overhead = nullptr);
+
+    bool hasWork() const override;
+    void begin(int64_t epochMs) override;
+    bool next(RadioPagingTxBlock& block) override;
+    size_t pending() const override;
+    std::vector<uint64_t> clear() override;
+    bool continuous() const override { return m_network; }
+
+    //!< Preamble or batch bits as levels of the polarity
+    static std::vector<float> levels(const std::vector<uint8_t>& bits, bool inverted);
+    static std::vector<uint8_t> preambleBits();
+    static std::vector<uint8_t> idleBatchBits();
+
+private:
+    typedef std::pair<int, bool> Group;     //!< Baud, inverted
+
+    struct Item
+    {
+        RadioPagingPocsag::TxMessage m_message;
+        uint64_t m_id;
+    };
+
+    bool m_network;
+    Group m_defaultGroup;                   //!< Network: group of the idle batches
+    Group m_group;                          //!< Network: group being sent
+    bool m_preambleDue;
+    int m_idleBatches;
+    int m_turnBlocks;                       //!< Message blocks sent in the turn of the group
+    std::map<Group, std::deque<Item>> m_queues;
+    std::deque<std::pair<Group, Item>> m_oneShot;   //!< One-shot: in arrival order
+    bool m_inTransmission;
+
+    bool nextGroup(Group& group) const;
+};
+
+// FLEX (ARIB RCR STD-43A): one network, in one mode and polarity (2.1.3 defines one mapping
+// of the symbols). A pager is set for one polarity and decodes only the frames of it, so the
+// other polarity is a second logical channel on the same carrier, shared frame by frame.
+// One encoder per polarity holds its queue, placement and message numbers. A transmission starts with the emergency
+// re-synchronization (3.2.1), at least a battery saving cycle of the collapse long and
+// ending on a frame boundary of the time grid, then frames one after the other, each with
+// the cycle and frame number of its time. A frame is in the network polarity; it goes to
+// the other polarity when that one has a message due in the frame and the network has no
+// mandatory content due in it. The re-synchronization is its own inverse (the cycle
+// shifted by half), so it serves both polarities. Each frame carries the messages due in
+// it (their capcode listens to it): priority addresses first, then the others, tone only
+// last, oldest first; a message that does not fit waits for its next frame.
+// The collapse sets the length of the re-synchronization: pagers with that collapse wake up
+// once in 2^collapse frames and must see it.
+//   One-shot: the transmission ends after the last queued message has been sent. The frames
+//   are scheduled with collapse 0 (the pagers have just been re-synchronized and listen to
+//   every frame), so a message goes in the first frame.
+//   Network: frames without end, idle frames when nothing is queued. The collapse is also
+//   the scheduling parameter of the network: a message waits for a frame its capcode
+//   listens to.
+class MODEMRADIOPAGING_API RadioPagingFlexTxStream : public RadioPagingTxStream
+{
+public:
+    static const int m_shaping = 3200;      //!< STD-43A 2.1.9 baseband filter, every rate
+
+    RadioPagingFlexTxStream(bool network, RadioPagingFlex::Mode mode, bool inverted, int collapse);
+
+    //!< Queue a message in a polarity. False and an error if it is not valid
+    bool add(const RadioPagingFlexEncoder::TxMessage& message, bool inverted, uint64_t id, std::string& error);
+    //!< Mode of the frames from the next one (each frame announces its mode in sync 1)
+    void setMode(RadioPagingFlex::Mode mode);
+    RadioPagingFlex::Mode mode() const { return m_encoders[0].mode(); }
+    //!< Polarity of the network from the next transmission (begin())
+    void setInverted(bool inverted) { m_nextInverted = inverted; }
+    bool inverted() const { return m_inverted; }
+    //!< The network has content that must go in the frame (group message registration and
+    //!< delivery, fragments, roaming and time frames): the frame can not go to the other
+    //!< polarity. None of these is sent yet: false
+    bool mandatory(uint64_t frameIndex) const;
+    //!< False and an error if out of range. Applies to the next re-synchronization
+    bool setCollapse(int collapse, std::string& error);
+    //!< Collapse of the frames (block information word, placement): network only, 0 for one-shot
+    int scheduleCollapse() const { return m_collapse; }
+    //!< The collapse of the frames apart from that of the re-synchronization (network only):
+    //!< the system collapse of a mixed channel that sends some frames a minute
+    bool setScheduleCollapse(int collapse, std::string& error);
+    //!< Frames not transmitted (128 entries, non zero = reserved; frames 0-3 can not be): the
+    //!< messages of capcodes that listen to none of the others are refused (STD-43A 7.1.2)
+    bool setReservedFrames(const std::vector<uint8_t>& table, std::string& error);
+
+    // For RadioPagingMixTxStream, which decides frame by frame
+    //!< The next frame to build is this one (frames between were not sent). Not inside a frame
+    void setFrame(uint64_t frame) { if (m_blocks.empty()) { m_frame = frame; } }
+    //!< Blocks of a frame are still to be returned by next()
+    bool frameInProgress() const { return !m_blocks.empty(); }
+    //!< A message of either polarity is due in the frame
+    bool due(uint64_t frameIndex) const;
+    //!< Collapse the re-synchronization is long enough for
+    int ersCollapse() const { return m_ersCollapse; }
+
+    bool hasWork() const override;
+    void begin(int64_t epochMs) override;
+    bool next(RadioPagingTxBlock& block) override;
+    size_t pending() const override;
+    std::vector<uint64_t> clear() override;
+    std::vector<uint64_t> cut() override;
+    bool continuous() const override { return m_network; }
+
+    //!< Frame index (cycle and frame from it, RadioPagingFlexScheduler) of a time: frames of
+    //!< 1.875 s from the Unix epoch, which is on a cycle boundary
+    static uint64_t frameIndex(int64_t epochMs) { return (uint64_t) (epochMs / RadioPagingFlex::m_frameMs); }
+    //!< First frame index and re-synchronization bits of a transmission starting at a time
+    static void plan(int64_t epochMs, int collapse, uint64_t& firstFrame, int& ersBits);
+    static std::vector<float> levels(const RadioPagingFlex::SymbolBlock& block);
+    uint64_t currentFrame() const { return m_frame; }
+
+private:
+    bool m_network;
+    RadioPagingFlexEncoder m_encoders[2];       //!< Normal, inverted
+    std::map<uint32_t, uint64_t> m_ids[2];      //!< Encoder id to caller id
+    bool m_inverted;                            //!< Polarity of the network
+    bool m_nextInverted;                        //!< Polarity of the next transmission
+    int m_collapse;                             //!< Of the frames: network collapse, 0 for one-shot
+    int m_ersCollapse;                          //!< Of the re-synchronization length
+    uint64_t m_frame;                           //!< Index of the next frame
+    int m_ersBits;                              //!< Re-synchronization still to send
+    std::deque<RadioPagingTxBlock> m_blocks;    //!< Blocks of the frame being sent
+
+    void buildFrame();
+};
+
+// FLEX mixed with POCSAG (STD-43A Chapter 7), network only. FLEX frames stay on their time
+// grid and POCSAG gets the time between them:
+//   - a frame is FLEX when it is required: frames 0-3 of the cycle (roaming: never mixed,
+//     Motorola 3.9.1), frames a FLEX message of either polarity is due in, and the minimum
+//     activity (7.1.1: the first 2^collapse frames of each minute, of each 4 minutes on a
+//     shared channel; 7.1.2: the first N frames of each minute, the system collapse 5, the
+//     capcodes of the other frames refused);
+//   - otherwise POCSAG, when it has messages: from a frame boundary, blocks of the
+//     POCSAG network stream (RadioPagingPocsagTxStream) that end before the next required
+//     frame. After FLEX the run starts with the 750 bps 1,0 pattern (7.2.1, 7.2.2), then the
+//     preamble and the batches. When the next block does not fit, 1,0 at 1600 bps fills to
+//     the frame boundary (7.1);
+//   - with nothing to send, FLEX idle frames fill the time (Motorola 4.3.3.2); a frame not
+//     transmitted (7.1.2) is filled with 1,0.
+// Time is counted in ticks (RadioPagingTxBlock::m_tickRate), so that every rate is exact.
+class MODEMRADIOPAGING_API RadioPagingMixTxStream : public RadioPagingTxStream
+{
+public:
+    struct Config
+    {
+        RadioPagingFlex::Mode m_flexMode = RadioPagingFlex::Mode1600_2;
+        bool m_flexInverted = false;        //!< Polarity of the FLEX network
+        int m_collapse = 0;                 //!< 0-7: re-synchronization; 7.1.1: the schedule
+        int m_framesPerMinute = 0;          //!< 0: plan of 7.1.1; N (1-32): plan of 7.1.2
+        bool m_shared = false;              //!< Minute is 4 minutes (128 frames)
+        double m_flexDeviation = 4800.0;
+        double m_pocsagDeviation = 4500.0;
+        int m_pocsagBaud = 1200;            //!< Default group
+        bool m_pocsagInverted = false;
+        int m_switchMs[3] = {400, 200, 100};    //!< 750 bps pattern before POCSAG: 512, 1200, 2400
+    };
+
+    static const int m_minuteFrames = 32;   //!< Frames of a minute
+    static const int m_switchBaud = 750;    //!< STD-43A 7.2: the pattern that activates POCSAG
+    static const int m_fillBaud = 1600;     //!< STD-43A 7.1: the filling pattern
+
+    RadioPagingMixTxStream(const Config& config);
+
+    //!< Apply a configuration; the plan and the polarity take effect from the next frames
+    //!< and transmission. False and an error if the schedule is not valid
+    bool setConfig(const Config& config, std::string& error);
+    const Config& config() const { return m_config; }
+
+    bool addFlex(const RadioPagingFlexEncoder::TxMessage& message, bool inverted, uint64_t id, std::string& error);
+    bool addPocsag(const RadioPagingPocsag::TxMessage& message, int baud, bool inverted, uint64_t id, std::string& error);
+
+    bool hasWork() const override { return true; }
+    void begin(int64_t epochMs) override;
+    bool next(RadioPagingTxBlock& block) override;
+    size_t pending() const override;
+    std::vector<uint64_t> clear() override;
+    std::vector<uint64_t> cut() override;
+    bool continuous() const override { return true; }
+
+    //!< Frame the next block belongs to or follows, and the time to its start
+    uint64_t currentFrame() const { return m_frameIdx; }
+    int64_t ticksToBoundary() const { return m_toBoundary; }
+    //!< The frame is FLEX whatever POCSAG has to send
+    bool required(uint64_t frameIndex) const;
+    RadioPagingFlexTxStream& flex() { return m_flex; }
+    RadioPagingPocsagTxStream& pocsag() { return m_pocsag; }
+
+    static const int64_t m_frameTicks = (int64_t) RadioPagingFlex::m_frameMs * RadioPagingTxBlock::m_tickRate / 1000;
+
+private:
+    Config m_config;
+    RadioPagingFlexTxStream m_flex;
+    RadioPagingPocsagTxStream m_pocsag;
+    std::vector<uint8_t> m_reserved;            //!< Frames not transmitted (7.1.2)
+    bool m_ersPending;
+    bool m_flexFrame;                           //!< Blocks of a FLEX frame are being returned
+    bool m_lastFlex;                            //!< The last block was FLEX or fill: POCSAG starts a run
+    uint64_t m_frameIdx;                        //!< Frame starting at the next boundary
+    int64_t m_toBoundary;                       //!< Ticks to that boundary, 0: now
+    RadioPagingTxBlock m_pendingBlock;
+    bool m_hasPending;
+
+    void advance(int64_t ticks);
+    int64_t availableTicks() const;
+    int64_t switchTicks(int baud) const;
+    RadioPagingTxBlock switchBlock(int baud, bool inverted) const;
+    RadioPagingTxBlock fillBlock(int64_t ticks) const;
+    bool reserved(uint64_t frameIndex) const;
+    bool minimumActivity(uint32_t frame) const;
+    int64_t longestGapTicks() const;
+    bool nextPocsag(RadioPagingTxBlock& block);
+    void nextFlex(RadioPagingTxBlock& block);
+};
+
+#endif // MODEMRADIOPAGING_RADIOPAGINGTXSTREAM_H

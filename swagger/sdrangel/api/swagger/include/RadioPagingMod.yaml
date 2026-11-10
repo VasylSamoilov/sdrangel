@@ -1,0 +1,224 @@
+RadioPagingModSettings:
+  description: "Radio paging modulator: one protocol per channel; the protocol settings are the defaults of the messages sent"
+  type: object
+  properties:
+    inputFrequencyOffset:
+      description: Channel center frequency shift from baseband center in Hz
+      type: integer
+      format: int64
+    protocol:
+      description: "Protocol transmitted: 0 POCSAG, 1 FLEX, 2 GSC. GSC is not implemented: tx is refused"
+      type: integer
+      format: int32
+    mode:
+      description: "0 one-shot (carrier on for each transmission, off after it), 1 network (carrier on all the time, idle signal between messages)"
+      type: integer
+      format: int32
+    deviation:
+      description: Frequency deviation of the outer symbol in Hz, 500 to 10000
+      type: number
+      format: float
+    gain:
+      description: Gain in dB, -60 to 0
+      type: number
+      format: float
+    channelMute:
+      description: "Mute the channel (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    rampUpMs:
+      description: Power ramp at the start of a transmission in milliseconds, 0 to 100
+      type: number
+      format: float
+    rampDownMs:
+      description: Power ramp at the end of a transmission in milliseconds, 0 to 100
+      type: number
+      format: float
+    rampRange:
+      description: Range of the power ramps in dB
+      type: integer
+      format: int32
+    pocsagSpeed:
+      description: "POCSAG speed in baud: 512, 1200 or 2400"
+      type: integer
+      format: int32
+    pocsagInverted:
+      description: "POCSAG polarity: 0 normal (binary 1 is a negative deviation), 1 inverted"
+      type: integer
+      format: int32
+    flexMode:
+      description: "FLEX mode: 0 1600/2, 1 3200/2, 2 3200/4, 3 6400/4"
+      type: integer
+      format: int32
+    flexInverted:
+      description: "FLEX polarity: 0 normal (symbol 3 is the highest frequency), 1 inverted"
+      type: integer
+      format: int32
+    flexCollapse:
+      description: "FLEX collapse 0 to 7: the emergency re-synchronization lasts at least 2^collapse frames. Network: pagers listen to one frame in 2^collapse. One-shot: the frames are sent with collapse 0"
+      type: integer
+      format: int32
+    mixPocsag:
+      description: "FLEX network: mixing with POCSAG (1 for yes, 0 for no). POCSAG messages are sent in the time between FLEX frames with the POCSAG settings (STD-43A Chapter 7). Frames 0 to 3 of the cycle are always FLEX"
+      type: integer
+      format: int32
+    pocsagDeviation:
+      description: "Frequency deviation of POCSAG when mixed with FLEX in Hz, 500 to 10000 (FLEX: the deviation setting)"
+      type: number
+      format: float
+    mixFramesPerMinute:
+      description: "Mixing: 0 the first 2^flexCollapse frames of each minute are FLEX (7.1.1); N (1 to 32, 128 on a shared channel) the first N frames, with system collapse 5 (7 shared), capcodes of the other frames refused (7.1.2)"
+      type: integer
+      format: int32
+    mixShared:
+      description: "Mixing: shared channel, the minute is 4 minutes (128 frames) (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    mixSwitchMs512:
+      description: "Mixing: duration in ms of the 750 bps 1,0 pattern before 512 bps POCSAG after FLEX (STD-43A 7.2.1: at least 400)"
+      type: integer
+      format: int32
+    mixSwitchMs1200:
+      description: "Mixing: duration in ms of the 750 bps 1,0 pattern before 1200 bps POCSAG after FLEX (STD-43A 7.2.2: at least 200)"
+      type: integer
+      format: int32
+    mixSwitchMs2400:
+      description: "Mixing: duration in ms of the 750 bps 1,0 pattern before 2400 bps POCSAG after FLEX (not in the standard: 100, extrapolated from 512 and 1200)"
+      type: integer
+      format: int32
+    rgbColor:
+      type: integer
+      format: int32
+    title:
+      type: string
+    streamIndex:
+      description: MIMO channel. Not relevant when connected to SI (single Rx).
+      type: integer
+      format: int32
+    useReverseAPI:
+      description: Synchronize with reverse API (1 for yes, 0 for no)
+      type: integer
+      format: int32
+    reverseAPIAddress:
+      type: string
+    reverseAPIPort:
+      type: integer
+      format: int32
+    reverseAPIDeviceIndex:
+      type: integer
+      format: int32
+    reverseAPIChannelIndex:
+      type: integer
+      format: int32
+    channelMarker:
+      $ref: "http://swgserver:8081/api/swagger/include/ChannelMarker.yaml#/ChannelMarker"
+    rollupState:
+      $ref: "http://swgserver:8081/api/swagger/include/RollupState.yaml#/RollupState"
+
+RadioPagingModReport:
+  description: Radio paging modulator
+  type: object
+  properties:
+    channelPowerDB:
+      description: Power transmitted in channel (dB)
+      type: number
+      format: float
+    channelSampleRate:
+      type: integer
+      format: int32
+    state:
+      description: "0 idle, 1 ramp up, 2 transmitting, 3 ramp down"
+      type: integer
+      format: int32
+    queued:
+      description: Messages waiting
+      type: integer
+      format: int32
+    inFlight:
+      description: Messages being sent
+      type: integer
+      format: int32
+    currentId:
+      description: Id of the message being sent, 0 if none
+      type: integer
+      format: int64
+    lastSentId:
+      description: Id of the last message sent completely, 0 if none
+      type: integer
+      format: int64
+    sent:
+      description: Messages sent completely since the channel was created
+      type: integer
+      format: int64
+    dropped:
+      description: Messages cleared, aborted or dropped by a change of protocol or mode since the channel was created
+      type: integer
+      format: int64
+    sampleCounter:
+      description: Channel samples produced since the channel was created (not while muted)
+      type: integer
+      format: int64
+    ers:
+      description: "FLEX emergency re-synchronization on air (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    ersMs:
+      description: Length of the last FLEX emergency re-synchronization in milliseconds
+      type: integer
+      format: int32
+    ersCount:
+      description: FLEX emergency re-synchronizations sent since the channel was created
+      type: integer
+      format: int64
+
+RadioPagingModActions:
+  description: Radio paging modulator
+  type: object
+  properties:
+    tx:
+      $ref: "http://swgserver:8081/api/swagger/include/RadioPagingMod.yaml#/RadioPagingModTx"
+    clear:
+      description: "Drop the messages waiting (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    abort:
+      description: "Drop the messages waiting; one-shot: end the transmission being sent (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+
+RadioPagingModTx:
+  description: "A message to transmit in the protocol of the channel. Speed and polarity default to the channel settings; FLEX is sent in the mode of the network (channel setting)"
+  type: object
+  properties:
+    address:
+      description: "POCSAG: 21-bit address"
+      type: integer
+      format: int32
+    function:
+      description: "POCSAG: function 0 to 3 (A to D)"
+      type: integer
+      format: int32
+    capcode:
+      description: "FLEX: capcode, short 1 to 1933312 or long 2101249 to 4297068542"
+      type: integer
+      format: int64
+    priority:
+      description: "FLEX: address in the priority part of the address field (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    protocol:
+      description: "pocsag or flex: the protocol of the message. Omitted: the protocol of the channel. A FLEX channel in network mode with mixing also takes pocsag messages"
+      type: string
+    type:
+      description: "tone, numeric or alphanumeric"
+      type: string
+    text:
+      description: "Numeric: 0-9, space, U, -, ], [. Alphanumeric: 7-bit characters"
+      type: string
+    speed:
+      description: "POCSAG speed in baud: 512, 1200 or 2400. 0 or omitted: the channel setting"
+      type: integer
+      format: int32
+    polarity:
+      description: "normal or inverted. Empty or omitted: the channel setting. FLEX: the other polarity than the network's is sent in the frames the network has nothing mandatory in"
+      type: string
