@@ -89,9 +89,10 @@ NmtSystem::~NmtSystem()
     }
 }
 
-// A message call that has not got to a traffic channel yet gives way to anything the phone does or
-// is called for: it ends as undelivered (the flags can be sent again). Once the phone is on a
-// traffic channel the call is short and runs to its end.
+// A message call that has not got to a traffic channel yet gives way to what the phone itself
+// does (a seizure, a priority call): it ends there, its indicators go with the new call. A call
+// from the exchange finds the phone busy. Once the phone is on a traffic channel the message
+// call is short and runs to its end.
 bool NmtSystem::cancelMessageCall(char country, const std::string& number, uint8_t* carried)
 {
     for (NmtTransaction& transaction : m_transactions)
@@ -197,7 +198,9 @@ bool NmtSystem::sendMwi(char country, const std::string& number, uint8_t flags)
         if (transaction.subscriber.country != country || transaction.subscriber.number != number) {
             continue;
         }
-        // a phone in a call hears it when the call is cleared; one that is doing anything else is busy
+        // A phone in a call hears it at once when it is in the conversation (5c twice), and again
+        // when the call is cleared; in a procedure of the call only then. One that is doing
+        // anything else is busy.
         const bool switching = transaction.channels.size() == 2 && transaction.scipTarget;
 
         if (!transaction.callUp || (transaction.channels.size() != 1 && !switching)
@@ -205,6 +208,7 @@ bool NmtSystem::sendMwi(char country, const std::string& number, uint8_t flags)
             return false;
         }
         transaction.mwiFlags |= flags;
+        transaction.channels.front()->beginMwiInCall();
         return true;
     }
 
@@ -353,9 +357,8 @@ namespace
 
 // queueing information frames after the answer (our choice; one is what the phone needs)
 const int kQueueInfoFrames = 2;
-// how long an answered call waits for a traffic channel; a message call holds less
+// how long an answered call, or message call, waits for a traffic channel
 const double kQueueTimeout = 60.0;
-const double kMessageQueueTimeout = 10.0;
 // 2T after the answer the phone no longer waits for the channel order (NMT Doc 450-3 5.4.3)
 const double kOrderDeadline = 2.0 * 1.107;
 
@@ -572,7 +575,7 @@ NmtHost::CarouselItem NmtSystem::carouselItem(NmtChannel& callingChannel)
         // the traffic channel was taken meanwhile: the call is queued
         transaction.ccPhase = NmtTransaction::CcPhase::Queue;
         transaction.queueInfoLeft = kQueueInfoFrames;
-        transaction.timer->start(transaction.messageCall ? kMessageQueueTimeout : kQueueTimeout);
+        transaction.timer->start(kQueueTimeout);
     }
 
     // then the queueing information, also within 2T
@@ -652,7 +655,7 @@ bool NmtSystem::callingChannelAnswer(const NmtSubscriber& subscriber, NmtChannel
         {
             transaction.ccPhase = NmtTransaction::CcPhase::Queue;
             transaction.queueInfoLeft = kQueueInfoFrames;
-            transaction.timer->start(transaction.messageCall ? kMessageQueueTimeout : kQueueTimeout);
+            transaction.timer->start(kQueueTimeout);
         }
         return true;
     }
@@ -704,12 +707,7 @@ void NmtSystem::queueTimeout(NmtTransaction& transaction)
 bool NmtSystem::startCall(char country, const std::string& number, const std::string& callerId,
                           modemcellular::NumberType callerType, modemcellular::Cause* cause)
 {
-    // a call waits for nothing a message call could still do; its indicators go with the call
-    uint8_t carried = 0;
-
-    cancelMessageCall(country, number, &carried);
-
-    // a phone has one transaction
+    // a phone has one transaction; one with a message call is busy as well
     for (const NmtTransaction& transaction : m_transactions)
     {
         if (transaction.subscriber.country == country && transaction.subscriber.number == number)
@@ -722,22 +720,12 @@ bool NmtSystem::startCall(char country, const std::string& number, const std::st
     }
 
     // no room on the calling channels: rejected at once
-    if (!admits(cause))
-    {
-        if (carried && m_mwiHandler)
-        {
-            NmtSubscriber subscriber;
-
-            subscriber.country = country;
-            subscriber.number = number;
-            m_mwiHandler(subscriber, carried, NmtServiceEnd::Undelivered);
-        }
+    if (!admits(cause)) {
         return false;
     }
 
     NmtTransaction& transaction = newPagedTransaction(country, number);
 
-    transaction.mwiFlags = carried;
     transaction.callUp = true;
     // the phone does not add the '+' of an international number
     transaction.callerId = (callerType == modemcellular::NumberType::International && !callerId.empty() && callerId[0] != '+')

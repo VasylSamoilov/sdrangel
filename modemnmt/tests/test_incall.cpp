@@ -490,7 +490,8 @@ static void testMftPresence()
     CHECK(s.a->state() == State::MftOut);
 }
 
-// L(7) again from a phone that did not hear the answer; the tail of an answer is not that.
+// L(7) is only taken in the converter state: the copies that come after the answer, or later,
+// leave the conversation alone.
 static void testRepeatedMftOut()
 {
     Station s;
@@ -505,14 +506,39 @@ static void testRepeatedMftOut()
     }
     CHECK(s.a->state() == State::Active);
 
-    phoneSends(*s.a, lineSignalFrame(*s.a, s.phone, 0x77777), 1);       // right after: the tail
+    phoneSends(*s.a, lineSignalFrame(*s.a, s.phone, 0x77777), 1);
     CHECK(s.a->state() == State::Active);
-    phoneSends(*s.a, idleFromPhone(), 5);                               // it waits in the converter state
-    phoneSends(*s.a, lineSignalFrame(*s.a, s.phone, 0x77777), 1);       // and tries again
-    CHECK(s.a->state() == State::MftOut);
-    for (int i = 0; i < 4; i++) {
-        CHECK(isLineSignal(pull(*s.a), 10));
+    phoneSends(*s.a, idleFromPhone(), 5);
+    phoneSends(*s.a, lineSignalFrame(*s.a, s.phone, 0x77777), 1);
+    CHECK(s.a->state() == State::Active);
+    CHECK(s.a->dspMode() == DspMode::Audio);
+}
+
+// A digit is taken when the channel number or the identity is ours, and the first digit may come
+// in either frame (NMT Doc 450-1 4.7.2.1).
+static void testLooseDigitMatch()
+{
+    Station s;
+    std::string heard;
+
+    s.system.setMftHandler([&heard](const NmtSubscriber&, char digit) { heard += digit; });
+    phoneSends(*s.a, lineSignalFrame(*s.a, s.phone, 0x88888), 1);
+    for (int i = 0; i < 8; i++) {
+        moreFrames(*s.a);
     }
+    CHECK(s.a->state() == State::Mft);
+
+    phoneSends(*s.a, digitFrame(*s.a, s.phone, '1', false), 2);        // 14b first
+    Frame otherChannel = digitFrame(*s.a, s.phone, '2', true);
+    otherChannel.channelNo ^= 0x001;
+    phoneSends(*s.a, otherChannel, 2);
+    Phone stranger = s.phone;
+    stranger.number = "777777";
+    phoneSends(*s.a, digitFrame(*s.a, stranger, '3', false), 2);       // our channel, other identity
+    Frame neither = digitFrame(*s.a, stranger, '4', true);
+    neither.channelNo ^= 0x001;
+    phoneSends(*s.a, neither, 2);
+    CHECK(heard == "123");
 }
 
 // A damaged frame does not disturb the count of the digits.
@@ -661,7 +687,7 @@ static void testHandlerReleases()
     }
 }
 
-// The R button again starts a new recall.
+// The R button again during the digits is not a new recall: the digits go on, the timeout ends it.
 static void testRecallRestart()
 {
     Station s;
@@ -672,22 +698,12 @@ static void testRecallRestart()
     }
     s.keys("4");
     phoneSends(*s.a, lineSignalFrame(*s.a, s.phone, 0x55555), 1);
-    CHECK(s.a->state() == State::RecallProceed);
-    CHECK(s.recallEnds == 1 && s.recallEnded == "4");           // the digits so far
-    for (int i = 0; i < 3; i++) {
-        CHECK(pull(*s.a).mt == MessageType::Frame6);
-    }
-    for (int i = 0; i < 4; i++) {
-        CHECK(isLineSignal(pull(*s.a), 3));
-    }
-    CHECK(!moreFrames(*s.a));
     CHECK(s.a->state() == State::RecallDigits);
-    CHECK(s.a->dspMode() == DspMode::DialTone);
-    s.keyCount = 0;
+    CHECK(s.recallEnds == 0);
     s.keys("7");
-    CHECK(s.recall == "47");                                    // the test handler keeps one buffer
+    CHECK(s.recall == "47");
     s.wait(9.0);
-    CHECK(s.recallEnds == 2 && s.recallEnded == "7");
+    CHECK(s.recallEnds == 1 && s.recallEnded == "47");
 }
 
 // A clear or a release in every step of the procedures.
@@ -816,6 +832,7 @@ int main()
     testEndedProcedures();
     testMftPresence();
     testRepeatedMftOut();
+    testLooseDigitMatch();
     testDamagedMftDigit();
     testPowerAcrossSwitch();
     testMft();
