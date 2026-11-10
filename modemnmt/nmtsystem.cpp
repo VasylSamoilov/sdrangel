@@ -585,6 +585,62 @@ void NmtSystem::scipEnded(NmtTransaction& transaction, bool forceRelease)
     target->transactionEnded();
 }
 
+bool NmtSystem::changePower(char country, const std::string& number, int level)
+{
+    for (NmtTransaction& transaction : m_transactions)
+    {
+        if (transaction.subscriber.country != country || transaction.subscriber.number != number) {
+            continue;
+        }
+        if (transaction.channels.size() != 1) {
+            return false;
+        }
+
+        return transaction.channels.front()->beginPowerChange(level);
+    }
+
+    return false;
+}
+
+void NmtSystem::mftDigit(NmtTransaction& transaction, char digit)
+{
+    if (m_mftHandler)
+    {
+        // a copy: the handler may end the transaction
+        const NmtSubscriber subscriber = transaction.subscriber;
+        m_mftHandler(subscriber, digit);
+    }
+}
+
+bool NmtSystem::recallDigit(NmtTransaction& transaction, char digit)
+{
+    if (!m_recallDigitHandler) {
+        return false;
+    }
+
+    const NmtSubscriber subscriber = transaction.subscriber;
+
+    return m_recallDigitHandler(subscriber, digit);
+}
+
+void NmtSystem::recallEnded(NmtTransaction& transaction, const std::string& digits)
+{
+    if (m_recallEndHandler)
+    {
+        const NmtSubscriber subscriber = transaction.subscriber;
+        m_recallEndHandler(subscriber, digits);
+    }
+}
+
+void NmtSystem::powerChanged(NmtTransaction& transaction, int level, bool done)
+{
+    if (m_powerHandler)
+    {
+        const NmtSubscriber subscriber = transaction.subscriber;
+        m_powerHandler(subscriber, level, done);
+    }
+}
+
 void NmtSystem::roamingConfirmed(const NmtSubscriber& subscriber)
 {
     // a copy: the listener may end the transaction the subscriber is stored in

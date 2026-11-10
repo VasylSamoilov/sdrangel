@@ -69,6 +69,9 @@ struct NmtTransaction
 
     // switching the call to another traffic channel: the channel the phone is sent to
     NmtChannel* scipTarget = nullptr;
+
+    // power level of the phone for this call, 0..3; -1 for the one of the channel
+    int power = -1;
 };
 
 // What a channel needs from the base station it belongs to (implemented by NmtSystem).
@@ -117,6 +120,16 @@ public:
     // The switch is over without the phone on the new channel: the call stays where it is. With
     // forceRelease the new channel sends the release signal, else it just goes idle.
     virtual void scipEnded(NmtTransaction& transaction, bool forceRelease) = 0;
+
+    // In-call procedures
+    // A digit of the MFT converter (the phone sends push-button digits to the network).
+    virtual void mftDigit(NmtTransaction& transaction, char digit) = 0;
+    // A digit after a register recall. True if the digits are enough: the recall ends.
+    virtual bool recallDigit(NmtTransaction& transaction, char digit) = 0;
+    // The register recall is over; the digits received.
+    virtual void recallEnded(NmtTransaction& transaction, const std::string& digits) = 0;
+    // The phone answered the order to another power level, or did not.
+    virtual void powerChanged(NmtTransaction& transaction, int level, bool done) = 0;
 };
 
 // What the transmitter of a channel sends instead of frames.
@@ -195,7 +208,14 @@ public:
         ScipOrder,          // old traffic channel: ordering the phone to the new channel
         ScipIdent,          // new traffic channel: supervisory tone on, waiting for the phone
         ScipIdentReq,       // new traffic channel: asking the phone for its identity
-        ScipRelease         // new traffic channel: the phone did not come, forced release
+        ScipRelease,        // new traffic channel: the phone did not come, forced release
+        MftIn,              // call: the phone asked for the MFT converter, acknowledging
+        Mft,                // call: the phone sends digits for the converter
+        MftOut,             // call: leaving the MFT state (acknowledge or forced release)
+        PowerChange,        // call: ordering the phone to another power level
+        RecallProceed,      // call: register recall, acknowledging
+        RecallDigits,       // call: register recall, dial tone, receiving digits
+        RecallEnd           // call: register recall over, back to the conversation
     };
 
     struct ReceivedFrame
@@ -226,6 +246,9 @@ public:
     void startPaging(NmtTransaction& transaction);
     // The traffic channel takes over a call to the phone: identity request, then ringing.
     void beginMtIdent(NmtTransaction& transaction);
+    // The connected call orders the phone to another power level 0..3 (NMT Doc 450-1 4.4.1.8).
+    // False if the channel is not in a connected call, or the level is no change.
+    bool beginPowerChange(int level);
     // Switching the call in progress: this connected channel orders the phone to the target
     // (transaction.scipTarget), which waits for it.
     void beginScipOrder();
@@ -283,6 +306,24 @@ private:
     void failCall(modemcellular::Cause cause);
     Frame txMoRelease();
     Frame txMtRelease();
+    Frame txMftIn();
+    Frame txMftOut();
+    Frame txPowerChange();
+    Frame txRecallProceed();
+    Frame txRecallEnd();
+    void rxActive(const Frame& frame);
+    void rxMft(const Frame& frame);
+    void rxPowerChange(const Frame& frame);
+    void rxRecall(const Frame& frame);
+    void beginMftOut();
+    void beginRecallEnd();
+    void abortInCall(State previous);
+    int power() const;
+    enum class DigitResult { Foreign, Repeat, Damaged, Digit, Lost, TooLong };
+    DigitResult takeDigit(const Frame& frame, size_t count, size_t limit, char& digit);
+    // The same for the MFT and register recall states, by the rule of the standard: a frame of
+    // the other kind than the last digit is a new digit, whenever it comes.
+    DigitResult takeLooseDigit(const Frame& frame, char& digit);
     Frame txScipOrder();
     Frame txScipIdentReq();
     Frame txScipRelease();
@@ -343,6 +384,12 @@ private:
     bool m_alarmRunning;            // the supervisory tone was lost and the alarm timer runs
     int m_callerIdCount;            // 0: no number while ringing, 1: before the first ring, 2: after
     bool m_scipOrdered;             // new channel: the phone has been ordered here (first 3c sent)
+    size_t m_digitCount;            // digits taken in the MFT or register recall state
+    std::string m_recallDigits;     // digits of the register recall
+    int m_newPower;                 // power level that is ordered
+    bool m_haveLastDigit;           // MFT / register recall: a digit was taken
+    bool m_lastDigitOdd;            // ... in a frame 14a
+    bool m_mftIdleSeen;             // conversation: an idle frame of the phone came since the last MFT state
 };
 
 } // namespace modemnmt
