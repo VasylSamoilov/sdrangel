@@ -30,7 +30,6 @@ namespace modemnmt
 
 // Fast frequency shift keying on an audio signal: each bit holds a whole number of half waves, so
 // every symbol starts and ends at a zero crossing.
-
 class MODEMNMT_API FfskModulator
 {
 public:

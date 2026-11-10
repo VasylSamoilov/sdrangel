@@ -91,7 +91,7 @@ bool FfskModulator::nextBit(double& phase)
 
 int FfskModulator::render(float* samples, int length, bool add)
 {
-    if (!m_valid) {
+    if (!m_valid || length <= 0) {
         return 0;
     }
 
