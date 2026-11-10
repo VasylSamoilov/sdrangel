@@ -8,6 +8,7 @@ get_filename_component(SDRANGEL_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 
 set(MODEMNMT_LIB_SOURCES
     ../biquad.cpp
+    ../emphasis.cpp
     ../ffsk.cpp
     ../hagelbarger.cpp
     ../nmtbasestation.cpp
@@ -24,11 +25,13 @@ set(MODEMNMT_LIB_SOURCES
     ../nmtvoice.cpp
     ../../modemcellular/callrouter.cpp
     ../../modemcellular/carrierqueue.cpp
+    ../../modemcellular/carrierradio.cpp
     ../../modemcellular/cellularsystem.cpp
     ../../modemcellular/clock.cpp
     ../../modemcellular/compandor.cpp
     ../../modemcellular/dtmfgenerator.cpp
     ../../modemcellular/echoendpoint.cpp
+    ../../modemcellular/firfilter.cpp
     ../../modemcellular/musicendpoint.cpp
     ../../modemcellular/timer.cpp
     ../../modemcellular/tonegenerator.cpp)

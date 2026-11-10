@@ -94,10 +94,14 @@ NmtBaseStation::~NmtBaseStation() = default;
 bool NmtBaseStation::bind(const std::vector<NmtStreamSpan>& rxStreams, const std::vector<NmtStreamSpan>& txStreams)
 {
     m_channels.clear();
+    m_rxEmphasis.clear();
+    m_txEmphasis.clear();
     m_onAir.clear();
     m_system.reset();
     m_rxStream = -1;
     m_txStream = -1;
+    m_rxSpan = NmtStreamSpan();
+    m_txSpan = NmtStreamSpan();
 
     // the issues of an earlier binding go
     for (NmtCarrierStatus& c : m_carriers)
@@ -163,6 +167,19 @@ bool NmtBaseStation::bind(const std::vector<NmtStreamSpan>& rxStreams, const std
         return false;
     }
 
+    for (const NmtStreamSpan& s : rxStreams)
+    {
+        if (s.id == m_rxStream) {
+            m_rxSpan = s;
+        }
+    }
+    for (const NmtStreamSpan& s : txStreams)
+    {
+        if (s.id == m_txStream) {
+            m_txSpan = s;
+        }
+    }
+
     m_system = std::make_unique<NmtSystem>(m_clock);
     m_system->setSmscNumber(m_config.smscNumber);
     for (int index : m_onAir)
@@ -186,11 +203,60 @@ bool NmtBaseStation::bind(const std::vector<NmtStreamSpan>& rxStreams, const std
         cc.tcBandStart = m_config.tcBandStart;
         cc.tcBandEnd = m_config.tcBandEnd;
         cc.compandor = m_config.compandor;
-        m_channels.push_back(&m_system->addChannel(cc, kAudioRate, c.frequency.deviationFactor));
+        // the deviation factor goes into the speech deviation of the audio (process()), the
+        // levels inside the channel stay those of the Scandinavian plan
+        m_channels.push_back(&m_system->addChannel(cc, kAudioRate, 1.0));
+        m_rxEmphasis.push_back(std::make_unique<Emphasis>(kAudioRate));
+        m_txEmphasis.push_back(std::make_unique<Emphasis>(kAudioRate));
         c.onAir = true;
     }
 
     return true;
+}
+
+int NmtBaseStation::carrierId(size_t index) const
+{
+    return m_config.id * kIdStride + m_carriers[index].config.channel;
+}
+
+namespace
+{
+
+modemcellular::CarrierTuning tuning(int id, double frequency, double centre, const NmtChannelFrequency& f)
+{
+    modemcellular::CarrierTuning t;
+
+    t.id = id;
+    t.offset = frequency - centre;
+    t.passband = NmtBaseStation::kCarrierBandwidth / 2.0 * f.deviationFactor;
+    t.spacing = f.spacing;
+    return t;
+}
+
+} // namespace
+
+std::vector<modemcellular::CarrierTuning> NmtBaseStation::rxTuning() const
+{
+    std::vector<modemcellular::CarrierTuning> out;
+
+    for (int index : m_onAir)
+    {
+        const NmtCarrierStatus& c = m_carriers[static_cast<size_t>(index)];
+        out.push_back(tuning(carrierId(static_cast<size_t>(index)), c.frequency.uplink, m_rxSpan.centre, c.frequency));
+    }
+    return out;
+}
+
+std::vector<modemcellular::CarrierTuning> NmtBaseStation::txTuning() const
+{
+    std::vector<modemcellular::CarrierTuning> out;
+
+    for (int index : m_onAir)
+    {
+        const NmtCarrierStatus& c = m_carriers[static_cast<size_t>(index)];
+        out.push_back(tuning(carrierId(static_cast<size_t>(index)), c.frequency.downlink, m_txSpan.centre, c.frequency));
+    }
+    return out;
 }
 
 void NmtBaseStation::process(const modemcellular::CarrierBatch& rx, modemcellular::CarrierBatch& tx)
@@ -198,27 +264,49 @@ void NmtBaseStation::process(const modemcellular::CarrierBatch& rx, modemcellula
     std::vector<int> ids;
 
     for (int index : m_onAir) {
-        ids.push_back(m_carriers[static_cast<size_t>(index)].config.channel);
+        ids.push_back(carrierId(static_cast<size_t>(index)));
     }
     tx.reset(rx.sample, rx.length, m_system ? ids : std::vector<int>());
     if (!m_system || rx.length <= 0) {
         return;
     }
 
+    m_audio.resize(static_cast<size_t>(rx.length));
     for (size_t i = 0; i < m_channels.size(); i++)
     {
         const int at = rx.find(ids[i]);
 
-        if (at >= 0) {
-            m_channels[i]->receive(rx.carrier(static_cast<size_t>(at)), rx.length);
+        if (at < 0) {
+            continue;
         }
+        // Hz to the speech level, then the emphasis of the receiver
+        const float* in = rx.carrier(static_cast<size_t>(at));
+        const float scale = static_cast<float>(1.0 / speechDeviation(i));
+        for (int k = 0; k < rx.length; k++) {
+            m_audio[static_cast<size_t>(k)] = in[k] * scale;
+        }
+        m_rxEmphasis[i]->de(m_audio.data(), rx.length);
+        m_channels[i]->receive(m_audio.data(), rx.length);
     }
     m_clock.advance(rx.length);
     m_system->run();
-    for (size_t i = 0; i < m_channels.size(); i++) {
-        m_channels[i]->render(tx.carrier(i), rx.length, false);
+    for (size_t i = 0; i < m_channels.size(); i++)
+    {
+        float* out = tx.carrier(i);
+        const float scale = static_cast<float>(speechDeviation(i));
+
+        m_channels[i]->render(out, rx.length, false);
+        m_txEmphasis[i]->pre(out, rx.length);
+        for (int k = 0; k < rx.length; k++) {
+            out[k] *= scale;
+        }
     }
     m_samples += static_cast<uint64_t>(rx.length);
+}
+
+double NmtBaseStation::speechDeviation(size_t onAirIndex) const
+{
+    return kSpeechDeviation * m_carriers[static_cast<size_t>(m_onAir[onAirIndex])].frequency.deviationFactor;
 }
 
 } // namespace modemnmt

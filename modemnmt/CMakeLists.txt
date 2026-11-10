@@ -2,6 +2,7 @@ project(modemnmt)
 
 set(modemnmt_SOURCES
     biquad.cpp
+    emphasis.cpp
     ffsk.cpp
     hagelbarger.cpp
     nmtbasestation.cpp
@@ -20,6 +21,7 @@ set(modemnmt_SOURCES
 
 set(modemnmt_HEADERS
     biquad.h
+    emphasis.h
     ffsk.h
     hagelbarger.h
     nmtbasestation.h

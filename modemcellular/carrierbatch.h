@@ -27,14 +27,15 @@ namespace modemcellular
 
 // One block of the audio of several carriers of one radio stream, the same time span for all of
 // them: what a receiver plugin hands to the network, and what the network hands back for the
-// transmitter. The samples are the FM baseband at the audio rate of the network (48 kHz),
-// carrier after carrier.
+// transmitter. The samples are the frequency deviation in Hz at the audio rate of the network
+// (48 kHz), carrier after carrier.
 struct CarrierBatch
 {
     uint64_t sample = 0;            // index of the first sample on the clock of the receive stream
     int length = 0;                 // samples per carrier
     std::vector<int> carriers;      // carrier ids
     std::vector<float> samples;     // carriers.size() * length
+    std::vector<float> levels;      // receiver: mean power per carrier in dB of full scale
 
     void reset(uint64_t first, int count, const std::vector<int>& ids)
     {
@@ -42,6 +43,7 @@ struct CarrierBatch
         length = count;
         carriers = ids;
         samples.assign(ids.size() * static_cast<size_t>(count > 0 ? count : 0), 0.0f);
+        levels.assign(ids.size(), 0.0f);
     }
     float* carrier(size_t index) { return samples.data() + index * static_cast<size_t>(length); }
     const float* carrier(size_t index) const { return samples.data() + index * static_cast<size_t>(length); }

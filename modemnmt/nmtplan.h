@@ -69,6 +69,7 @@ struct NmtChannelFrequency
     double downlink = 0.0;      // base station transmits
     double uplink = 0.0;        // phone transmits
     double deviationFactor = 1.0;
+    double spacing = 25000.0;   // Hz between the channels of the block
     bool scandinavia = false;
 };
 MODEMNMT_API bool nmtChannelFrequency(const NmtCountry& country, int channel, NmtChannelFrequency& out);

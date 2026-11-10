@@ -3,11 +3,13 @@ project(modemcellular)
 set(modemcellular_SOURCES
     callrouter.cpp
     carrierqueue.cpp
+    carrierradio.cpp
     cellularsystem.cpp
     clock.cpp
     compandor.cpp
     dtmfgenerator.cpp
     echoendpoint.cpp
+    firfilter.cpp
     musicendpoint.cpp
     timer.cpp
     tonegenerator.cpp
@@ -19,11 +21,13 @@ set(modemcellular_HEADERS
     calltypes.h
     carrierbatch.h
     carrierqueue.h
+    carrierradio.h
     cellularsystem.h
     clock.h
     compandor.h
     dtmfgenerator.h
     echoendpoint.h
+    firfilter.h
     mobileleg.h
     musicendpoint.h
     timer.h

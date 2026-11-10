@@ -10,11 +10,13 @@ get_filename_component(SDRANGEL_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 set(MODEMCELLULAR_LIB_SOURCES
     ../callrouter.cpp
     ../carrierqueue.cpp
+    ../carrierradio.cpp
     ../cellularsystem.cpp
     ../clock.cpp
     ../compandor.cpp
     ../dtmfgenerator.cpp
     ../echoendpoint.cpp
+    ../firfilter.cpp
     ../musicendpoint.cpp
     ../timer.cpp
     ../tonegenerator.cpp)
@@ -48,3 +50,4 @@ modemcellular_add_test(modemcellular_compandor_test test_compandor.cpp)
 modemcellular_add_test(modemcellular_router_test test_router.cpp)
 modemcellular_add_test(modemcellular_system_test test_system.cpp)
 modemcellular_add_test(modemcellular_carrierqueue_test test_carrierqueue.cpp)
+modemcellular_add_test(modemcellular_carrierradio_test test_carrierradio.cpp)
