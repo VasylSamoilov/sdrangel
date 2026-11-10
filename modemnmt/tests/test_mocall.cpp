@@ -332,13 +332,15 @@ static void testLongNumber()
         pull(tc);
     }
 
-    // the 33rd digit is a wrong number, not a shorter one: the phone is released
+    // a 33rd digit is ignored: the call goes on with the 32 digits taken
     toDialTone(tc, phone);
     dial(tc, phone, number);
     phoneSends(tc, digitFrame(tc, phone, '9', true), 1);
-    CHECK(tc.state() == State::MtRelease);
+    CHECK(tc.state() == State::MoDialling);
+    CHECK(tc.dialled() == number);
     phoneSends(tc, idleFromPhone(), 1);
-    CHECK(calls.dialled.size() == 1);
+    CHECK(tc.state() == State::MoComplete);
+    CHECK(calls.dialled.size() == 2 && calls.dialled[1] == number);
 }
 
 static void testSeizureVariants()
@@ -630,7 +632,7 @@ static void testCompleteWatchdog()
     CHECK(other.state() == State::MoIdent);
 }
 
-// Digits are dialled after the dial tone: earlier ones are not taken.
+// A digit during the proceed to send is taken, and there is no dial tone after it.
 static void testDigitsBeforeDialTone()
 {
     modemcellular::SampleClock clock(kRate);
@@ -645,12 +647,12 @@ static void testDigitsBeforeDialTone()
     phoneSends(tc, callFrame(tc, phone), 1);
     CHECK(isLineSignal(pull(tc), 3));
     phoneSends(tc, digitFrame(tc, phone, '1', true), 1);
-    CHECK(tc.dialled().empty());
-    CHECK(tc.dspMode() == DspMode::Frame);
-    CHECK(isLineSignal(pull(tc), 3));
-    FrameBits bits;
-    CHECK(!tc.nextFrame(bits));
-    CHECK(tc.dspMode() == DspMode::DialTone);
+    CHECK(tc.dialled() == "1");
+    CHECK(tc.state() == State::MoDialling);
+    CHECK(tc.dspMode() == DspMode::Audio);
+    phoneSends(tc, idleFromPhone(), 1);
+    CHECK(tc.state() == State::MoComplete);
+    CHECK(calls.dialled.size() == 1 && calls.dialled[0] == "1");
 }
 
 // Digits of another phone do not count and do not keep the call alive.
@@ -700,8 +702,39 @@ static void testInvalidChannel()
     }
 }
 
+// The seizure and the identity reply of a call from the phone both have to carry the area of the
+// base station (NMT Doc 450-1 para 4.1.1.2, 4.3.3.10.2).
+static void testIdentityArea()
+{
+    modemcellular::SampleClock clock(kRate);
+    NmtSystem system(clock);
+    NmtChannel& tc = system.addChannel(config(System::Nmt450, ChannelType::Tc, 100), kRate, 1.0);
+    Calls calls;
+    connect(system, calls);
+    const Phone phone;
+
+    // traffic area 0x11: area info 1 and Y 1
+    Frame seizure = seizureFrame(tc, phone, MessageType::Frame10b);
+
+    seizure.areaInfo = 1;
+    seizure.trafficArea = 2;
+    phoneSends(tc, seizure, 40);
+    CHECK(tc.state() == State::Idle);                   // not the area of this station
+
+    seizure.trafficArea = 1;
+    phoneSends(tc, seizure, 40);
+    CHECK(tc.state() == State::MoIdent);
+    seizure.trafficArea = 2;
+    phoneSends(tc, seizure, 3);
+    CHECK(tc.state() == State::MoIdent);                // a reply from another area is not taken
+    seizure.trafficArea = 1;
+    phoneSends(tc, seizure, 3);
+    CHECK(tc.state() == State::MoConfirm);
+}
+
 int main()
 {
+    testIdentityArea();
     testCallFlow();
     testFarEndReleases();
     testCallRefused();
