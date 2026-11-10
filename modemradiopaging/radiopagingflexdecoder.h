@@ -141,7 +141,8 @@ public:
         unsigned m_infoType = 0;            //!< A field: 0-3 system message, 4/5 time zone, 6 channel set up
         unsigned m_info = 0;                //!< 10 bit I field
         unsigned m_zone = 0;                //!< Time zone code (A = 4, 5)
-        int m_zoneMinutes = 0;              //!< Offset from UTC
+        bool m_zoneDefined = false;         //!< The code is in Table 3.7.2-3 (10000 is not defined)
+        int m_zoneMinutes = 0;              //!< Offset from UTC, 0 if the code is not defined
         unsigned m_dst = 0;                 //!< 0 = daylight saving time, 1 = standard
         unsigned m_extendedSeconds = 0;     //!< 0-7 steps of 0.9375 s
         unsigned m_frameOffset = 0;         //!< Channel set up (A = 6)
@@ -337,6 +338,7 @@ public:
         unsigned m_second7_5 = 0;           //!< As received, steps of 7.5 s
         bool m_zoneValid = false;
         unsigned m_zone = 0;
+        bool m_zoneDefined = false;         //!< The code is in Table 3.7.2-3 (10000 is not defined)
         int m_zoneMinutes = 0;
         unsigned m_dst = 0;                 //!< 0 = daylight saving time, 1 = standard
         unsigned m_extendedSeconds = 0;
@@ -538,6 +540,7 @@ private:
         unsigned m_second = 0;
         bool m_seenZone = false;
         unsigned m_zone = 0;
+        bool m_zoneDefined = false;
         int m_zoneMinutes = 0;
         unsigned m_dst = 0;
         unsigned m_extSec = 0;
@@ -642,7 +645,9 @@ private:
     static bool dateValid(int year, unsigned month, unsigned day);
     static void nextDay(int y, unsigned m, unsigned d, int& ny, unsigned& nm, unsigned& nd);
     static bool datesAgree(int y1, unsigned m1, unsigned d1, int y2, unsigned m2, unsigned d2);
-    static bool timeMatchesCycle(unsigned minute, unsigned cycle);
+    //!< The minute of a time word can be the local time of the cycle: zoneOffset is the offset of the zone in minutes
+    //!< when it is known, INT_MIN if not
+    static bool timeMatchesCycle(unsigned minute, unsigned cycle, int zoneOffset);
     static int zoneMinutes(unsigned zone);
 
     void expireTempGroups();

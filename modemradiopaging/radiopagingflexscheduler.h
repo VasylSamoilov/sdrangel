@@ -153,6 +153,35 @@ public:
 
     void setRoaming(const Roaming& roaming) { m_roaming = roaming; }
     const Roaming& roaming() const { return m_roaming; }
+
+    //! Date and time in block information words 001 (date), 010 (time) and 101 A = 0101 (time zone, daylight
+    //! saving time, extended seconds), STD-43A 3.7.2. The time is the local time: the frame grid time (UTC, frame
+    //! index times 1.875 s from the Unix epoch), plus the offset, the zone and one hour of daylight saving time.
+    //! The words fill the block information words 2 to 4 left free (at most 3, after the system ID words of
+    //! roaming) in every phase of every frame, so frame 0 of cycle 0 has a time word in every phase. When they
+    //! do not all fit they take turns: the frame index modulo 3 chooses the first. 3 is prime to 2^collapse, so
+    //! a pager listening to one frame in 2^collapse receives all three within 3 of its frames
+    struct TimeService
+    {
+        enum Reference {
+            FrameZero,      //!< The time of frame 0 of the cycle (the start of its bit sync 1): STD-43A 3.7.2
+            CurrentFrame    //!< The time of the frame that carries the words
+        };
+
+        bool m_enabled = false;
+        Reference m_reference = FrameZero;
+        int m_zoneMinutes = 0;          //!< Offset of the standard time of the zone from UTC (Table 3.7.2-3)
+        bool m_sendZone = true;         //!< Send the time zone word (101)
+        bool m_daylightSaving = false;  //!< The time is daylight saving time: one hour ahead, L0 = 0
+        int64_t m_offsetSeconds = 0;    //!< Added to the frame grid time: sets any date and time
+    };
+
+    //!< False and an error if the zone is not in Table 3.7.2-3
+    bool setTimeService(const TimeService& time, std::string& error);
+    const TimeService& timeService() const { return m_time; }
+    //!< Local date and time of a frame as sent (reference, offset, zone and daylight saving applied): seconds
+    //!< from the epoch and the 1/64 minute steps of the minute
+    int64_t localTimeMs(uint64_t frameIndex) const;
     //!< Collapse 0-7, a pager listens to one frame in 2^collapse. False and error if out of range
     bool setCollapse(int collapse, std::string& error);
     int collapse() const { return m_collapse; }
@@ -175,8 +204,11 @@ public:
     //!< Queued messages a frame of the frame index would carry if it had room (their capcode
     //!< listens to the frame, the frame is not reserved)
     size_t eligible(uint64_t frameIndex) const;
-    //!< A fragment after the first of a message is due in the frame of the frame index
-    bool continuationDue(uint64_t frameIndex) const;
+    //!< The frame of the frame index has content that must go in it: a fragment after the first of a message
+    //!< (the pager waits for it), or the time words of frame 0 of cycle 0
+    bool mandatory(uint64_t frameIndex) const;
+    //!< Block information words 2 to 4 of a phase of the frame (system ID of roaming, date and time), encoded
+    std::vector<uint32_t> extraBlockInfo(uint64_t frameIndex, int phase) const;
 
     //!< The frame of a frame index. Messages placed in it are removed from the queue
     Frame buildFrame(uint64_t frameIndex);
@@ -190,17 +222,24 @@ private:
         int m_fragment = 0;     //!< Fragment index (HEX/binary and secure), in queue order
         int m_fragments = 1;
         int m_signature = -1;   //!< HEX/binary first fragment: signature of the whole message
+        int m_phase = -1;       //!< Fragments after the first: the phase of the first fragment, -1 until it is sent
     };
 
     bool schedulable(uint64_t capcode) const;
-    //!< A fragment goes in a frame after the one of the fragment before it: no earlier fragment is queued
+    //!< A fragment goes in a frame after the one of the fragment before it (no earlier fragment is queued);
+    //!< the first fragment of a fragmented message waits for a fragmented message to the same address
+    //!< queued before it (STD-43A 3.8.5 (2))
     bool fragmentReady(const Item& item) const;
+    //!< The item can go in the frame: not reserved, and a frame of the pager (its collapse) for a first
+    //!< fragment or an unfragmented message, any frame for the fragments after the first (STD-43A 4.2.1)
+    bool frameFor(const Item& item, uint32_t frame) const;
     static RadioPagingFlex::PhaseMessage phaseMessage(const Item& item);
 
     RadioPagingFlex::Mode m_mode;
     bool m_inverted;
     int m_collapse;
     Roaming m_roaming;
+    TimeService m_time;
     std::vector<uint8_t> m_reserved;
     std::list<Item> m_queue;
     uint32_t m_nextId;

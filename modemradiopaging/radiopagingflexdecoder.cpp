@@ -18,6 +18,7 @@
 #include "radiopagingflexdecoder.h"
 
 #include <algorithm>
+#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -38,12 +39,6 @@ namespace {
 
 const int wordsPerFrame = RadioPagingFlex::m_wordsPerFrame;
 const unsigned framesPerHour = 1920;
-
-// Zone code (5 bits) to offset from UTC in minutes
-const int zoneTable[32] = {
-    0, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, 720, 210, 270, 330,
-    0, 345, 390, 570, -210, -660, -600, -540, -480, -420, -360, -300, -240, -180, -120, -60
-};
 
 int subframeWords(int transmissions)
 {
@@ -640,7 +635,9 @@ std::vector<RadioPagingFlexDecoder::Message> RadioPagingFlexDecoder::flush()
 
 int RadioPagingFlexDecoder::zoneMinutes(unsigned zone)
 {
-    return (zone < 32) ? zoneTable[zone] : 0;
+    int minutes = 0;
+    RadioPagingFlex::timeZoneMinutes(zone, minutes);
+    return minutes;
 }
 
 bool RadioPagingFlexDecoder::dateValid(int year, unsigned month, unsigned day)
@@ -709,20 +706,32 @@ bool RadioPagingFlexDecoder::datesAgree(int y1, unsigned m1, unsigned d1, int y2
     return (ny == y1) && (nm == m1) && (nd == d1);
 }
 
-// The minute of the time word must lie in the 4 minutes of the cycle of the frame
-bool RadioPagingFlexDecoder::timeMatchesCycle(unsigned minute, unsigned cycle)
+// The minute of the time word must lie in the 4 minutes of the cycle of the frame. A cycle starts every 4
+// minutes from the hour of the frame grid; the time word gives the local time, so the minute is shifted by the
+// part of the zone offset that is not whole hours (30 or 45 minutes in Table 3.7.2-3) when the grid follows
+// the hours of UTC, and not shifted when it follows the local hours. With the zone not known every shift of
+// the table is accepted
+bool RadioPagingFlexDecoder::timeMatchesCycle(unsigned minute, unsigned cycle, int zoneOffset)
 {
-    int base = (int) (cycle * 4) % 60;
-    int diff = (int) minute - base;
+    int shifts[3] = {0, 30, 45};
+    int count = 3;
 
-    if (diff < -30) {
-        diff += 60;
-    }
-    if (diff > 30) {
-        diff -= 60;
+    if (zoneOffset != INT_MIN)
+    {
+        shifts[1] = ((zoneOffset % 60) + 60) % 60;
+        count = (shifts[1] == 0) ? 1 : 2;
     }
 
-    return (diff >= 0) && (diff <= 3);
+    for (int i = 0; i < count; i++)
+    {
+        int diff = (((int) minute - (int) (cycle * 4) - shifts[i]) % 60 + 60) % 60;
+
+        if (diff <= 3) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 void RadioPagingFlexDecoder::voteDate(int year, unsigned month, unsigned day)
@@ -852,7 +861,7 @@ void RadioPagingFlexDecoder::voteZone(unsigned zone, unsigned dst, unsigned ext)
     if (agree >= m_voteThreshold)
     {
         b.m_zone = zone;
-        b.m_zoneMinutes = zoneMinutes(zone);
+        b.m_zoneDefined = RadioPagingFlex::timeZoneMinutes(zone, b.m_zoneMinutes);
         b.m_dst = dst;
         b.m_extSec = ext;
         b.m_seenZone = true;
@@ -874,6 +883,7 @@ RadioPagingFlexDecoder::NetworkTime RadioPagingFlexDecoder::networkTime(bool inv
     t.m_second7_5 = b.m_second;
     t.m_zoneValid = b.m_seenZone;
     t.m_zone = b.m_zone;
+    t.m_zoneDefined = b.m_zoneDefined;
     t.m_zoneMinutes = b.m_zoneMinutes;
     t.m_dst = b.m_dst;
     t.m_extendedSeconds = b.m_extSec;
@@ -990,7 +1000,7 @@ void RadioPagingFlexDecoder::parseExtraBiw(int index)
         {
             // Out of range
         }
-        else if (!timeMatchesCycle(e.m_minute, m_ctx.m_cycle))
+        else if (!timeMatchesCycle(e.m_minute, m_ctx.m_cycle, (b.m_seenZone && b.m_zoneDefined) ? b.m_zoneMinutes : INT_MIN))
         {
             b.m_voteTimeCount = 0;
         }
@@ -1012,7 +1022,7 @@ void RadioPagingFlexDecoder::parseExtraBiw(int index)
             e.m_zone = e.m_info & 0x1f;
             e.m_dst = (e.m_info >> 5) & 1;
             e.m_extendedSeconds = (e.m_info >> 7) & 7;
-            e.m_zoneMinutes = zoneMinutes(e.m_zone);
+            e.m_zoneDefined = RadioPagingFlex::timeZoneMinutes(e.m_zone, e.m_zoneMinutes);
             voteZone(e.m_zone, e.m_dst, e.m_extendedSeconds);
         }
         else if (e.m_infoType <= 3)

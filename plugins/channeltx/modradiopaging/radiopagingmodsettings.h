@@ -63,6 +63,13 @@ struct RadioPagingModSettings
     int m_ssidCoverageZone;                     //!< 0-31
     int m_ssidCountryCode;                      //!< 0-1023
     int m_ssidTrafficFlags;                     //!< 0-15: traffic management flags announced in the second system ID word
+    // FLEX date and time in block information words 001, 010, 101 (STD-43A 3.7.2), see RadioPagingFlexEncoder::TimeService
+    bool m_flexTime;                            //!< Send the date and time
+    bool m_flexTimeFrameZero;                   //!< Time of frame 0 of the cycle (the standard), else of the frame sent
+    int m_flexTimeZoneMinutes;                  //!< Offset of the standard time of the zone from UTC, a zone of Table 3.7.2-3
+    bool m_flexTimeSendZone;                    //!< Send the time zone word
+    bool m_flexTimeDaylightSaving;              //!< The time is daylight saving time (one hour ahead)
+    qint64 m_flexTimeOffsetSeconds;             //!< Added to the time of the frame grid (UTC): any date and time can be sent
     int m_gscMode;                              //!< RadioPagingGsc::Mode: auto, single, batch, non battery saver. One-shot only
     bool m_gscInverted;                         //!< Set: binary 1 is a negative deviation (normal: positive)
     int m_gscVoiceSeconds;                      //!< Length of the voice of a GSC voice page in seconds, a longer sound file is cut

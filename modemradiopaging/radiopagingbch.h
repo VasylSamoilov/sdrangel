@@ -42,8 +42,10 @@ public:
 
     //!< Codeword for 21 data bits (bits 20-0 of data), check and parity bits set
     static uint32_t encode(uint32_t data);
-    //!< Corrects up to two bit errors in bits 31-1 and checks parity. If parity fails after
-    //!< the correction the parity bit is repaired and m_parityError is set
+    //!< Corrects up to two bit errors in the 32 bits and detects three (minimum distance 6 with the
+    //!< parity bit). Two errors in bits 31-1 are corrected when the parity then holds; a wrong parity
+    //!< after correcting at most one bit in bits 31-1 is an error of the parity bit, which is repaired
+    //!< (m_parityError set). Two corrected bits and a wrong parity is uncorrectable (m_bitErrors -1)
     static Result decode(uint32_t word);
     //!< 21 data bits of a codeword
     static uint32_t data(uint32_t word) { return word >> 11; }

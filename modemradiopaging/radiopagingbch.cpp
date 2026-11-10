@@ -121,8 +121,18 @@ RadioPagingBCH::Result RadioPagingBCH::decode(uint32_t word)
         result.m_parityError = !evenParity(result.m_word);
     }
 
-    // A wrong parity bit after correction is repaired too, so the word is a valid codeword
-    if ((result.m_bitErrors >= 0) && result.m_parityError) {
+    // The code with the parity bit has a minimum distance of 6: it corrects 2 errors and detects 3.
+    // A wrong parity after correcting 2 bits means 3 or more errors: uncorrectable, the word is kept.
+    // With 0 or 1 bit corrected the parity bit is the other error: it is repaired, so the word is a
+    // valid codeword
+    if ((result.m_bitErrors == 2) && result.m_parityError)
+    {
+        result.m_word = word;
+        result.m_bitErrors = -1;
+        result.m_parityError = !evenParity(word);
+    }
+    else if ((result.m_bitErrors >= 0) && result.m_parityError)
+    {
         result.m_word ^= 1u;
     }
 

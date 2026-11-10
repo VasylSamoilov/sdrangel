@@ -943,6 +943,11 @@ int RadioPagingMod::webapiSettingsPutPatch(
         errorMessage = "ssidTrafficFlags must be 0 to 15";
         return 400;
     }
+    if (channelSettingsKeys.contains("flexTimeZoneMinutes") && (RadioPagingFlex::timeZoneCode(swg->getFlexTimeZoneMinutes()) < 0))
+    {
+        errorMessage = "flexTimeZoneMinutes must be a zone of STD-43A Table 3.7.2-3 (offset from UTC in minutes)";
+        return 400;
+    }
 
     QMutexLocker mutexLocker(&m_settingsMutex);
     RadioPagingModSettings settings = m_settings;
@@ -1042,6 +1047,24 @@ void RadioPagingMod::webapiUpdateChannelSettings(
     }
     if (channelSettingsKeys.contains("ssidTrafficFlags")) {
         settings.m_ssidTrafficFlags = swg->getSsidTrafficFlags();
+    }
+    if (channelSettingsKeys.contains("flexTime")) {
+        settings.m_flexTime = swg->getFlexTime() != 0;
+    }
+    if (channelSettingsKeys.contains("flexTimeFrameZero")) {
+        settings.m_flexTimeFrameZero = swg->getFlexTimeFrameZero() != 0;
+    }
+    if (channelSettingsKeys.contains("flexTimeZoneMinutes")) {
+        settings.m_flexTimeZoneMinutes = swg->getFlexTimeZoneMinutes();
+    }
+    if (channelSettingsKeys.contains("flexTimeSendZone")) {
+        settings.m_flexTimeSendZone = swg->getFlexTimeSendZone() != 0;
+    }
+    if (channelSettingsKeys.contains("flexTimeDaylightSaving")) {
+        settings.m_flexTimeDaylightSaving = swg->getFlexTimeDaylightSaving() != 0;
+    }
+    if (channelSettingsKeys.contains("flexTimeOffsetSeconds")) {
+        settings.m_flexTimeOffsetSeconds = swg->getFlexTimeOffsetSeconds();
     }
     if (channelSettingsKeys.contains("gscMode")) {
         settings.m_gscMode = swg->getGscMode();
@@ -1358,6 +1381,12 @@ void RadioPagingMod::webapiFormatChannelSettings(SWGSDRangel::SWGChannelSettings
     swg->setFlexInverted(settings.m_flexInverted ? 1 : 0);
     swg->setFlexCollapse(settings.m_flexCollapse);
     swg->setFlexRoaming(settings.m_flexRoaming ? 1 : 0);
+    swg->setFlexTime(settings.m_flexTime ? 1 : 0);
+    swg->setFlexTimeFrameZero(settings.m_flexTimeFrameZero ? 1 : 0);
+    swg->setFlexTimeZoneMinutes(settings.m_flexTimeZoneMinutes);
+    swg->setFlexTimeSendZone(settings.m_flexTimeSendZone ? 1 : 0);
+    swg->setFlexTimeDaylightSaving(settings.m_flexTimeDaylightSaving ? 1 : 0);
+    swg->setFlexTimeOffsetSeconds(settings.m_flexTimeOffsetSeconds);
     swg->setSsidLocalId(settings.m_ssidLocalId);
     swg->setSsidCoverageZone(settings.m_ssidCoverageZone);
     swg->setSsidCountryCode(settings.m_ssidCountryCode);
@@ -1568,6 +1597,24 @@ void RadioPagingMod::webapiFormatChannelSettings(
     }
     if (channelSettingsKeys.contains("ssidTrafficFlags") || force) {
         swg->setSsidTrafficFlags(settings.m_ssidTrafficFlags);
+    }
+    if (channelSettingsKeys.contains("flexTime") || force) {
+        swg->setFlexTime(settings.m_flexTime ? 1 : 0);
+    }
+    if (channelSettingsKeys.contains("flexTimeFrameZero") || force) {
+        swg->setFlexTimeFrameZero(settings.m_flexTimeFrameZero ? 1 : 0);
+    }
+    if (channelSettingsKeys.contains("flexTimeZoneMinutes") || force) {
+        swg->setFlexTimeZoneMinutes(settings.m_flexTimeZoneMinutes);
+    }
+    if (channelSettingsKeys.contains("flexTimeSendZone") || force) {
+        swg->setFlexTimeSendZone(settings.m_flexTimeSendZone ? 1 : 0);
+    }
+    if (channelSettingsKeys.contains("flexTimeDaylightSaving") || force) {
+        swg->setFlexTimeDaylightSaving(settings.m_flexTimeDaylightSaving ? 1 : 0);
+    }
+    if (channelSettingsKeys.contains("flexTimeOffsetSeconds") || force) {
+        swg->setFlexTimeOffsetSeconds(settings.m_flexTimeOffsetSeconds);
     }
     if (channelSettingsKeys.contains("gscMode") || force) {
         swg->setGscMode(settings.m_gscMode);

@@ -2018,12 +2018,12 @@ void testBinaryTx()
         {"blocking length 0", Flex::Binary, "12", hexParams(0, false, false, false, false)},
         {"not a hex digit", Flex::Binary, "12G4", hexParams(4, false, false, false, false)},
         {"empty", Flex::Binary, "", hexParams(4, false, false, false, false)},
-        // B=4: 430 digits in the first fragment (82 data words, 2 bits left), 435 in the others (83 data words,
-        // 3 bits left): 64 fragments and one digit more
-        {"more than 64 fragments", Flex::Binary, std::string(430 + 63 * 435 + 1, 'A'), hexParams(4, false, false, false, false)},
+        // B=4, short address (85 message words): 435 digits in the first fragment (83 data words, 3 bits left),
+        // 441 in the others (84 data words, none left): 64 fragments and one digit more
+        {"more than 64 fragments", Flex::Binary, std::string(435 + 63 * 441 + 1, 'A'), hexParams(4, false, false, false, false)},
         {"secure type 11 reserved", Flex::Secure, "1234", reserved},
         {"secure binary not hex", Flex::Secure, "xyz", secParams(Flex::SecureBinary)},
-        {"secure alphanumeric more than 64 fragments", Flex::Secure, std::string(64 * 249 + 1, 'a'), secParams(Flex::SecureAlphanumeric)},
+        {"secure alphanumeric more than 64 fragments", Flex::Secure, std::string(64 * 252 + 1, 'a'), secParams(Flex::SecureAlphanumeric)},
     };
 
     for (const Bad& b : bad)
@@ -2039,27 +2039,40 @@ void testBinaryTx()
         check(!er.m_ok, label.c_str());
     }
 
-    // Longest messages that fit: 84 message words
+    // Longest messages in one frame (STD-43A 4.1): 85 message words with a short address, 84 with a long one
     {
-        Enc enc;
-        Enc::TxMessage m;
-        m.m_capcode = 1234567;
-        m.m_type = Flex::Binary;
-        m.m_text = std::string(430, '5');
-        m.m_binary = hexParams(8, false, false, false, false);
-        Enc::EnqueueResult er = enc.enqueue(m);
-        Dec dec;
-        std::vector<Dec::Message> out = runEncoder(enc, dec);
-        check(er.m_ok && (out.size() == 1) && (out[0].m_text == m.m_text) && (out[0].m_signature == Dec::CheckOk)
-            && (out[0].m_checksum == Dec::CheckOk), "tx binary: 430 digits (82 data words) in one frame");
+        struct Longest { uint64_t m_capcode; Flex::MessageType m_type; std::string m_text; Flex::BinaryParams m_binary; const char *m_label; };
+        const Longest longest[] = {
+            // 2 header words and 83 data words: 1743 bits, 434 digits of 8-bit characters (1736 bits)
+            {1234567, Flex::Binary, std::string(434, '5'), hexParams(8, false, false, false, false),
+                "tx binary: 434 digits (83 data words) in one frame, short address"},
+            // Long address: 82 data words, 1722 bits, 430 digits (1720 bits)
+            {2101300, Flex::Binary, std::string(430, '5'), hexParams(8, false, false, false, false),
+                "tx binary: 430 digits (82 data words) in one frame, long address"},
+            {1234567, Flex::Secure, std::string(252, 'z'), secParams(Flex::SecureAlphanumeric),
+                "tx secure: 252 characters (84 data words) in one frame, short address"},
+            {1234567, Flex::Alphanumeric, std::string(251, 'y'), Flex::BinaryParams(),
+                "tx alphanumeric: 251 characters (85 message words) in one frame, short address"},
+            {2101300, Flex::Alphanumeric, std::string(248, 'y'), Flex::BinaryParams(),
+                "tx alphanumeric: 248 characters (84 message words) in one frame, long address"},
+        };
 
-        m.m_type = Flex::Secure;
-        m.m_text = std::string(249, 'z');
-        m.m_binary = secParams(Flex::SecureAlphanumeric);
-        er = enc.enqueue(m);
-        out = runEncoder(enc, dec);
-        check(er.m_ok && (out.size() == 1) && (out[0].m_text == m.m_text) && (out[0].m_checksum == Dec::CheckOk),
-            "tx secure: 249 characters (83 data words) in one frame");
+        for (const Longest& l : longest)
+        {
+            Enc enc;
+            Enc::TxMessage m;
+            m.m_capcode = l.m_capcode;
+            m.m_type = l.m_type;
+            m.m_text = l.m_text;
+            m.m_binary = l.m_binary;
+            Enc::EnqueueResult er = enc.enqueue(m);
+            size_t queued = enc.pending();
+            Dec dec;
+            std::vector<Dec::Message> out = runEncoder(enc, dec);
+            bool ok = er.m_ok && (queued == 1) && (out.size() == 1) && (out[0].m_text == m.m_text) && (out[0].m_checksum == Dec::CheckOk)
+                && ((l.m_type == Flex::Secure) || (out[0].m_signature == Dec::CheckOk));
+            check(ok, l.m_label);
+        }
     }
 
     // Messages longer than a frame: fragments packed full in successive frames, the message reassembled
@@ -2086,30 +2099,33 @@ void testBinaryTx()
     const std::string hex1000 = hex600 + hex600.substr(0, 400);
 
     const Frag frags[] = {
-        // B=8: 82 data words, 1720 bits (2 left) then the rest
-        {"hex B=8 600 digits", 1234567, Flex::Binary, hex600, hexParams(8, false, false, false, false), {1720, 680}, Flex::Mode1600_2},
+        // Short address: 85 message words (STD-43A 4.1), the first HEX fragment has 83 data words, the others 84.
+        // B=8: 83 words are 1743 bits, 1736 bits (7 left, fewer than 8) then the rest
+        {"hex B=8 600 digits", 1234567, Flex::Binary, hex600, hexParams(8, false, false, false, false), {1736, 664}, Flex::Mode1600_2},
         // B=7: a multiple of 28 bits with fewer than 7 left: 80 words (1680 bits)
         {"hex B=7 595 digits", 1234567, Flex::Binary, hex600.substr(0, 595), hexParams(7, false, true, false, false), {1680, 700},
             Flex::Mode1600_2},
-        // B=16: first 1712 bits (82 words, 10 left), then 83 words: 1728 bits (15 left) is not a multiple of 16
-        // with fewer than 16 left: 1728 - 1743 = 15 < 16 yes
-        {"hex B=16 1000 digits", 1234567, Flex::Binary, hex1000, hexParams(16, true, false, false, false), {1712, 1728, 560},
+        // B=16: 1728 bits (15 left of 1743), then 84 words: 1760 bits (4 left of 1764), then the rest
+        {"hex B=16 1000 digits", 1234567, Flex::Binary, hex1000, hexParams(16, true, false, false, false), {1728, 1760, 512},
             Flex::Mode1600_2},
-        // Last fragment of 84 bits ending exactly at a word end, last character 1111: padding word
-        {"hex B=4 last fragment exact end, padding word", 1234567, Flex::Binary, hex600.substr(0, 430) + "123456789ABCDEF12345F",
-            hexParams(4, false, false, false, false), {1720, 84}, Flex::Mode1600_2},
+        // B=4: 1740 bits (3 left); last fragment of 84 bits ending exactly at a word end, last character 1111:
+        // padding word. The bits left in the first fragment are 0 like the last data bits: still not data
+        {"hex B=4 last fragment exact end, padding word", 1234567, Flex::Binary, hex600.substr(0, 435) + "123456789ABCDEF12345F",
+            hexParams(4, false, false, false, false), {1740, 84}, Flex::Mode1600_2},
+        // Long address: 84 message words, the first fragment has 82 data words: 1720 bits
         {"hex long address 600 digits", 2101300, Flex::Binary, hex600, hexParams(8, false, false, false, false), {1720, 680},
             Flex::Mode1600_2},
-        {"hex 6400/4 600 digits", 1234567, Flex::Binary, hex600, hexParams(8, false, false, false, false), {1720, 680}, Flex::Mode6400_4},
-        // Secure alphanumeric: 249 characters a fragment (83 full words, no ETX)
+        {"hex 6400/4 600 digits", 1234567, Flex::Binary, hex600, hexParams(8, false, false, false, false), {1736, 664}, Flex::Mode6400_4},
+        // Secure alphanumeric: 252 characters a fragment (84 full words, no ETX)
         {"secure alphanumeric 600 characters", 1234567, Flex::Secure, chars, secParams(Flex::SecureAlphanumeric), {}, Flex::Mode1600_2},
-        // Secure binary: whole words of 1-bit characters, a multiple of 4: 80 words (1680 bits)
-        {"secure binary 600 digits", 1234567, Flex::Secure, hex600, secParams(Flex::SecureBinary), {1680, 720}, Flex::Mode1600_2},
+        // Secure binary: whole words of 1-bit characters, a multiple of 4: 84 words (1764 bits)
+        {"secure binary 600 digits", 1234567, Flex::Secure, hex600, secParams(Flex::SecureBinary), {1764, 636}, Flex::Mode1600_2},
         // Last fragment ending exactly at a word end: termination word
-        {"secure binary last fragment exact end", 1234567, Flex::Secure, hex600.substr(0, 420) + "123456789ABCDEF123455",
-            secParams(Flex::SecureBinary), {1680, 84}, Flex::Mode1600_2},
+        {"secure binary last fragment exact end", 1234567, Flex::Secure, hex600.substr(0, 441) + "123456789ABCDEF123455",
+            secParams(Flex::SecureBinary), {1764, 84}, Flex::Mode1600_2},
+        // 1764 bits, then 236 bits in 12 words read whole (no termination)
         {"secure data defined separately 500 digits", 1234567, Flex::Secure, hex600.substr(0, 500), secParams(Flex::SecureSeparate),
-            {1680, 336}, Flex::Mode1600_2},
+            {1764, 252}, Flex::Mode1600_2},
     };
 
     for (const Frag& c : frags)
@@ -2143,7 +2159,7 @@ void testBinaryTx()
 
         bool binary = (c.m_type == Flex::Binary);
         bool hexData = binary || (c.m_binary.m_secureType != Flex::SecureAlphanumeric);
-        size_t expected = c.m_bits.empty() ? (c.m_text.size() + 248) / 249 : c.m_bits.size();
+        size_t expected = c.m_bits.empty() ? (c.m_text.size() + 251) / 252 : c.m_bits.size();
         bool ok = er.m_ok && (queued == expected) && whole && (parts.size() == expected) && (frames >= (int) expected);
         std::string why;
 
@@ -2230,8 +2246,349 @@ void testBinaryTx()
     }
 }
 
+// Scheduling of fragments (STD-43A 4.2.1, 3.8.5): the first fragment in a frame of the pager, the others in the
+// frames that follow whatever the collapse, in the phase of the first; one fragmented message per address at a
+// time; while it is sent, one unfragmented message per frame to that address
+void testFragmentScheduling()
+{
+    std::string digits;
+    for (int i = 0; i < 1200; i++) {
+        digits += "1A2B3C4D5E6F7890"[i % 16];
+    }
+    Flex::BinaryParams b8;
+    b8.m_blocking = 8;
+
+    // Frames of a run of the encoder, each decoded; returns the frame index of every fragment and message
+    struct Seen { uint64_t m_index; Dec::Message m_message; };
+    auto run = [](Enc& enc, Dec& dec, uint64_t from, uint64_t to) {
+        std::vector<Seen> seen;
+        for (uint64_t index = from; (index < to) && (enc.pending() > 0); index++)
+        {
+            Enc::Frame f = enc.buildFrame(index);
+            if (f.m_reserved) {
+                continue;
+            }
+            Dec::RxFrame rx = toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data);
+            for (const Dec::Message& m : dec.decodeFrame(rx)) {
+                seen.push_back(Seen{index, m});
+            }
+        }
+        return seen;
+    };
+
+    // Collapse 4: the pager listens to one frame in 16; the fragments after the first follow at once
+    for (Flex::Mode mode : {Flex::Mode1600_2, Flex::Mode6400_4})
+    {
+        Enc enc;
+        std::string error;
+        enc.setMode(mode);
+        enc.setCollapse(4, error);
+        Enc::TxMessage m;
+        m.m_capcode = 1234567;
+        m.m_type = Flex::Binary;
+        m.m_text = digits;          // 4800 bits: 3 fragments
+        m.m_binary = b8;
+        Enc::EnqueueResult er = enc.enqueue(m);
+        Dec dec;
+        dec.setReportFragments(true);
+        std::vector<Seen> seen = run(enc, dec, 0, 400);
+
+        std::vector<uint64_t> frames;
+        std::vector<char> phases;
+        const Dec::Message *whole = nullptr;
+        for (const Seen& s : seen)
+        {
+            if (s.m_message.m_isFragment)
+            {
+                frames.push_back(s.m_index);
+                phases.push_back(s.m_message.m_phase);
+            }
+            else
+            {
+                whole = &s.m_message;
+            }
+        }
+
+        bool ok = er.m_ok && (frames.size() == 3) && whole && whole->m_complete && (whole->m_text == digits)
+            && (whole->m_signature == Dec::CheckOk);
+        ok = ok && RadioPagingFlexScheduler::frameEligible(1234567, RadioPagingFlexScheduler::frameTime(frames[0]).m_frame, 4)
+            && (frames[1] == frames[0] + 1) && (frames[2] == frames[0] + 2);
+        ok = ok && (phases[1] == phases[0]) && (phases[2] == phases[0]);
+        std::string label = std::string("fragment scheduling ") + Flex::modeName(mode)
+            + ": first fragment in a frame of the collapse, the others in the next frames, same phase";
+        check(ok, label.c_str());
+    }
+
+    // Two fragmented messages to one address: the second starts once the first is sent entirely
+    {
+        Enc enc;
+        std::string error;
+        enc.setCollapse(0, error);
+        Enc::TxMessage m;
+        m.m_capcode = 1234567;
+        m.m_type = Flex::Binary;
+        m.m_text = digits.substr(0, 600);   // 2 fragments
+        m.m_binary = b8;
+        Enc::EnqueueResult a = enc.enqueue(m);
+        m.m_text = digits.substr(16, 600);
+        Enc::EnqueueResult b = enc.enqueue(m);
+        Dec dec;
+        dec.setReportFragments(true);
+        std::vector<Seen> seen = run(enc, dec, 0, 50);
+
+        std::vector<std::pair<uint64_t, int>> frags;    // frame, message number
+        int complete = 0;
+        for (const Seen& s : seen)
+        {
+            if (s.m_message.m_isFragment) {
+                frags.push_back(std::make_pair(s.m_index, s.m_message.m_messageNumber));
+            } else if (s.m_message.m_complete && (s.m_message.m_signature == Dec::CheckOk)) {
+                complete++;
+            }
+        }
+
+        bool ok = a.m_ok && b.m_ok && (frags.size() == 4) && (complete == 2)
+            && (frags[0].second == frags[1].second) && (frags[2].second == frags[3].second) && (frags[0].second != frags[2].second)
+            && (frags[2].first > frags[1].first);
+        check(ok, "fragment scheduling: a second fragmented message to the address waits for the end of the first (3.8.5 (2))");
+    }
+
+    // While a fragmented message is sent, one unfragmented message per frame to the same address (3.8.5 (3));
+    // otherwise two (3.8.5 (1))
+    {
+        Enc enc;
+        std::string error;
+        enc.setCollapse(0, error);
+        Enc::TxMessage m;
+        m.m_capcode = 1234567;
+        m.m_type = Flex::Binary;
+        m.m_text = digits;          // 3 fragments
+        m.m_binary = b8;
+        enc.enqueue(m);
+        Enc::TxMessage u;
+        u.m_capcode = 1234567;
+        u.m_type = Flex::Alphanumeric;
+        for (int i = 0; i < 4; i++)
+        {
+            u.m_text = "short " + std::to_string(i);
+            enc.enqueue(u);
+        }
+        Dec dec;
+        dec.setReportFragments(true);
+        std::vector<Seen> seen = run(enc, dec, 0, 50);
+
+        std::map<uint64_t, int> unfragmented;   // frame -> unfragmented messages of the address
+        std::map<uint64_t, bool> fragment;
+        int shorts = 0;
+        for (const Seen& s : seen)
+        {
+            if (s.m_message.m_isFragment) {
+                fragment[s.m_index] = true;
+            } else if (s.m_message.m_type == Dec::TypeAlphanumeric) {
+                unfragmented[s.m_index]++;
+                shorts++;
+            }
+        }
+
+        bool ok = (shorts == 4) && (fragment.size() == 3);
+        for (const auto& f : unfragmented)
+        {
+            if (fragment.count(f.first) ? (f.second > 1) : (f.second > 2)) {
+                ok = false;
+            }
+        }
+        check(ok, "fragment scheduling: one unfragmented message per frame to an address sending a fragmented one, two otherwise");
+    }
+
+    // Reserved frames: the fragments skip them and go on in the next frame that is sent
+    {
+        Enc enc;
+        std::string error;
+        enc.setCollapse(0, error);
+        uint32_t frame = RadioPagingFlexScheduler::capcodeSlot(1234567).m_frame;
+        std::vector<uint8_t> table(128, 0);
+        table[(frame + 1) % 128] = 1;
+        table[(frame + 2) % 128] = 1;
+        bool set = enc.setReservedFrames(table, error);
+        Enc::TxMessage m;
+        m.m_capcode = 1234567;
+        m.m_type = Flex::Binary;
+        m.m_text = digits.substr(0, 600);
+        m.m_binary = b8;
+        enc.enqueue(m);
+        Dec dec;
+        dec.setReportFragments(true);
+        std::vector<Seen> seen = run(enc, dec, frame, frame + 20);
+        std::vector<uint64_t> frames;
+        for (const Seen& s : seen)
+        {
+            if (s.m_message.m_isFragment) {
+                frames.push_back(s.m_index);
+            }
+        }
+        check(set && (frames.size() == 2) && (frames[0] == frame) && (frames[1] == frame + 3),
+            "fragment scheduling: reserved frames are skipped, the next fragment goes in the next frame sent");
+    }
+}
+
+// Date and time (STD-43A 3.7.2): word layout, zone table, civil date, the encoder time service decoded
+void testTime()
+{
+    // Fig. 3.7.2-1: date word of December 31, 1999, the 32 bits in transmission order
+    const char *fig = "110110010100111110011" "1111100011" "0";
+    uint32_t expected = 0;
+    for (int i = 0; i < 32; i++) {
+        expected |= (uint32_t) (fig[i] - '0') << (31 - i);
+    }
+    check(Flex::dateWord(1999, 12, 31) == expected, "time: date word of Fig. 3.7.2-1 (December 31, 1999), all 32 bits");
+
+    // Fields of the time and zone words
+    uint32_t t = Flex::wordData(Flex::timeWord(23, 59, 7));
+    check(Flex::checksumValid(t) && (((t >> 4) & 7) == 2) && (((t >> 7) & 0x1f) == 23) && (((t >> 12) & 0x3f) == 59) && (((t >> 18) & 7) == 7),
+        "time: time word, type 010, H bits 7-11, M bits 12-17, s bits 18-20");
+    uint32_t z = Flex::wordData(Flex::timeZoneWord(9, true, 5));
+    check(Flex::checksumValid(z) && (((z >> 4) & 7) == 5) && (((z >> 7) & 0xf) == 5) && (((z >> 11) & 0x1f) == 9)
+        && (((z >> 16) & 1) == 0) && (((z >> 17) & 1) == 0) && (((z >> 18) & 7) == 5),
+        "time: zone word, type 101 A = 0101, Z bits 11-15, L0 = 0 for daylight saving, reserved 0, S5-S3 bits 18-20");
+    check(((Flex::wordData(Flex::timeZoneWord(9, false, 0)) >> 16) & 1) == 1, "time: zone word, L0 = 1 for standard time");
+    // Year field: 1994-2025, then modulo 32
+    check((((Flex::wordData(Flex::dateWord(1994, 1, 1)) >> 7) & 0x1f) == 0) && (((Flex::wordData(Flex::dateWord(2025, 1, 1)) >> 7) & 0x1f) == 31)
+        && (((Flex::wordData(Flex::dateWord(2026, 1, 1)) >> 7) & 0x1f) == 0), "time: year field 1994 = 0, 2025 = 31, 2026 = 0 (modulo 32)");
+
+    // Table 3.7.2-3
+    struct Zone { unsigned m_code; int m_minutes; };
+    const Zone zones[] = {{0, 0}, {9, 540}, {12, 720}, {13, 210}, {15, 330}, {17, 345}, {18, 390}, {19, 570}, {20, -210},
+        {21, -660}, {27, -300}, {31, -60}};
+    bool zonesOk = true;
+    for (const Zone& zz : zones)
+    {
+        int minutes = 1;
+        zonesOk = zonesOk && Flex::timeZoneMinutes(zz.m_code, minutes) && (minutes == zz.m_minutes) && (Flex::timeZoneCode(zz.m_minutes) == (int) zz.m_code);
+    }
+    int undefinedMinutes = 1;
+    check(zonesOk && !Flex::timeZoneMinutes(16, undefinedMinutes) && (Flex::timeZoneCode(123) == -1),
+        "time: zone table 3.7.2-3, code 10000 not defined, an offset not in the table refused");
+
+    // Civil date and time of epoch seconds (reference values)
+    struct Civil { int64_t m_seconds; int m_year; unsigned m_month, m_day, m_hour, m_minute, m_second; };
+    const Civil civil[] = {
+        {0, 1970, 1, 1, 0, 0, 0}, {946684800, 2000, 1, 1, 0, 0, 0}, {951782400, 2000, 2, 29, 0, 0, 0},
+        {1700000000, 2023, 11, 14, 22, 13, 20}, {4102444800LL, 2100, 1, 1, 0, 0, 0}, {-1, 1969, 12, 31, 23, 59, 59}};
+    bool civilOk = true;
+    for (const Civil& c : civil)
+    {
+        int y; unsigned mo, d, h, mi, s;
+        Flex::civilTime(c.m_seconds, y, mo, d, h, mi, s);
+        civilOk = civilOk && (y == c.m_year) && (mo == c.m_month) && (d == c.m_day) && (h == c.m_hour) && (mi == c.m_minute) && (s == c.m_second);
+    }
+    check(civilOk, "time: civil date and time of epoch seconds (1970, 2000, leap day 2000, 2023, 2100, before the epoch)");
+
+    // Encoder to decoder: zone +9 h, daylight saving, the offset sets 2026-11-11 13:28 local at frame 0 of
+    // the cycle. Frame index 1920 * H is the start of an hour of the grid (cycle 0 frame 0)
+    for (Flex::Mode mode : {Flex::Mode1600_2, Flex::Mode6400_4})
+    {
+        Enc enc;
+        std::string error;
+        enc.setMode(mode);
+        Enc::TimeService ts;
+        ts.m_enabled = true;
+        ts.m_zoneMinutes = 540;
+        ts.m_daylightSaving = true;
+        const uint64_t hourIndex = 1920ull * 400000;      // UTC hour 400000 from the epoch
+        // Wanted local time of the hour start: 2026-11-11 13:00:00. 2026-01-01 is day 20454 from the epoch (56
+        // years, 14 leap days), November 11 is day 314 of 2026: day 20768
+        const int64_t wanted = 20768LL * 86400 + 13 * 3600;
+        ts.m_offsetSeconds = wanted - (int64_t) (hourIndex * 1875 / 1000) - (540 + 60) * 60;
+        bool set = enc.setTimeService(ts, error);
+
+        Dec dec;
+        dec.setReferenceYear(2026);
+        // Cycle 7 of the hour: frame 0 of the cycle is 13:28 local
+        const uint64_t start = hourIndex + 7 * 128;
+        bool allPhases = true;
+        // 40 frames: the decoder tells the time of frame 0 from the time of the frame by observations 5 frames apart
+        for (uint64_t index = start; index < start + 40; index++)
+        {
+            Enc::Frame f = enc.buildFrame(index);
+            dec.decodeFrame(toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data));
+
+            for (int p = 0; p < Flex::phaseCount(mode); p++)
+            {
+                std::vector<uint32_t> extra = enc.extraBlockInfo(index, p);
+                allPhases = allPhases && (extra.size() == 3);
+            }
+        }
+
+        Dec::NetworkTime nt = dec.networkTime(false);
+        bool ok = set && allPhases && nt.m_dateValid && (nt.m_year == 2026) && (nt.m_month == 11) && (nt.m_day == 11)
+            && nt.m_timeValid && (nt.m_hour == 13) && (nt.m_minute == 28) && (nt.m_second7_5 == 0)
+            && nt.m_zoneValid && nt.m_zoneDefined && (nt.m_zoneMinutes == 540) && (nt.m_dst == 0) && (nt.m_mode == 0);
+        std::string label = std::string("time ") + Flex::modeName(mode)
+            + ": date, time of frame 0, zone +9 h daylight saving decoded; the three words in every phase";
+        if (!ok)
+        {
+            label += " (date " + std::to_string(nt.m_year) + "-" + std::to_string(nt.m_month) + "-" + std::to_string(nt.m_day)
+                + " time " + std::to_string(nt.m_hour) + ":" + std::to_string(nt.m_minute) + " s " + std::to_string(nt.m_second7_5)
+                + " zone " + std::to_string(nt.m_zoneMinutes) + " dst " + std::to_string(nt.m_dst) + " mode " + std::to_string(nt.m_mode) + ")";
+        }
+        check(ok, label.c_str());
+    }
+
+    // Roaming in frames 0-3 takes 2 block words in its phase: one time word a frame, the three in turn; frame 0 of
+    // cycle 0 has a time word in every phase
+    {
+        Enc enc;
+        std::string error;
+        enc.setMode(Flex::Mode6400_4);
+        Enc::Roaming r;
+        r.m_enabled = true;
+        r.m_localId = 5;
+        enc.setRoaming(r);
+        Enc::TimeService ts;
+        ts.m_enabled = true;
+        enc.setTimeService(ts, error);
+
+        int ssidPhase = Flex::ssidPhase(Flex::Mode6400_4, 0);
+        std::vector<unsigned> types;
+        bool everyPhase = true;
+        for (uint64_t index = 0; index < 4; index++)
+        {
+            for (int p = 0; p < 4; p++)
+            {
+                std::vector<uint32_t> extra = enc.extraBlockInfo(index, p);
+                bool hasTime = false;
+                for (uint32_t w : extra)
+                {
+                    unsigned type = (Flex::wordData(w) >> 4) & 7;
+                    hasTime = hasTime || (type == 1) || (type == 2) || (type == 5);
+                    if ((p == Flex::ssidPhase(Flex::Mode6400_4, (unsigned) index)) && (type != 0) && (type != 7)) {
+                        types.push_back(type);
+                    }
+                }
+                everyPhase = everyPhase && hasTime && (extra.size() <= 3);
+            }
+        }
+        (void) ssidPhase;
+        bool rotation = (types.size() >= 3) && (types[0] != types[1]) && (types[1] != types[2]) && (types[0] != types[2]);
+        check(everyPhase && rotation,
+            "time: with roaming in frames 0-3 the free block word carries date, time and zone in turn; a time word in every phase");
+    }
+
+    // A zone offset not in the table is refused
+    {
+        Enc enc;
+        std::string error;
+        Enc::TimeService ts;
+        ts.m_enabled = true;
+        ts.m_zoneMinutes = 61;
+        check(!enc.setTimeService(ts, error) && !error.empty(), "time: zone offset not in Table 3.7.2-3 refused");
+    }
+}
+
 int main()
 {
+    testTime();
+    testFragmentScheduling();
     testBinaryTx();
     testHexBits();
     testReferenceFrames();

@@ -18,6 +18,7 @@
 #include "radiopagingflex.h"
 
 #include <algorithm>
+#include <climits>
 #include <cstring>
 
 #include "radiopagingbch.h"
@@ -50,7 +51,8 @@ namespace {
 const uint32_t shortAddressOffset = 32768;
 const uint32_t idleOnes = 0xffffffffu;
 const uint32_t idleZeros = 0x00000000u;
-const int maxAlphaWords = RadioPagingFlex::m_wordsPerFrame - 4;
+// Most message words of a message in one frame: a short address (STD-43A 4.1)
+const int maxMessageWords = RadioPagingFlex::m_wordsPerFrame - 3;
 const int maxNumericWords = 8;
 const int numericOverheadBits = 2;
 const uint32_t alphaEtx = 0x03;
@@ -140,7 +142,7 @@ uint32_t alphaSignature(const std::string& text)
 // Message body words (data bits, not yet encoded) of an alphanumeric message
 std::vector<uint32_t> alphaBody(const std::string& text, int number)
 {
-    std::vector<uint32_t> msg(maxAlphaWords, 0);
+    std::vector<uint32_t> msg(maxMessageWords, 0);
     size_t length = std::min<size_t>(text.size(), RadioPagingFlex::m_maxAlphaChars);
 
     // Header: fragment number 3 (only fragment), message number, retrieval flag
@@ -156,7 +158,7 @@ std::vector<uint32_t> alphaBody(const std::string& text, int number)
         shift += 7;
         if (shift == 21)
         {
-            if (++wordIndex >= maxAlphaWords) {
+            if (++wordIndex >= maxMessageWords) {
                 break;
             }
             shift = 0;
@@ -345,10 +347,14 @@ int estimateBody(const RadioPagingFlex::PhaseMessage& message)
     case RadioPagingFlex::Tone:
         return 0;
     case RadioPagingFlex::Alphanumeric:
-        if ((len == 0) || (len > (size_t) RadioPagingFlex::m_maxAlphaChars)) {
+    {
+        if ((len == 0) || (len > (size_t) RadioPagingFlex::maxAlphaChars(message.m_capcode))) {
             return -1;
         }
-        return 1 + (int) ((len + 4) / 3);
+        // Header word, then the signature slot and the characters, 3 a word
+        int words = 1 + (int) ((len + 1 + 2) / 3);
+        return (words > RadioPagingFlex::maxMessageWords(message.m_capcode)) ? -1 : words;
+    }
     case RadioPagingFlex::Numeric:
     {
         if ((len == 0) || (len > (size_t) RadioPagingFlex::m_maxNumericChars)) {
@@ -364,7 +370,7 @@ int estimateBody(const RadioPagingFlex::PhaseMessage& message)
         // Header word 2 in the first fragment only, the termination in the last one only
         int words = RadioPagingFlex::binaryWords(message.m_text, message.m_binary.m_blocking, (message.m_fragment == 0) ? 2 : 1,
             message.m_fragment == message.m_fragments - 1);
-        return (words > maxAlphaWords) ? -1 : words;
+        return (words > RadioPagingFlex::maxMessageWords(message.m_capcode)) ? -1 : words;
     }
     case RadioPagingFlex::Secure:
     {
@@ -387,7 +393,7 @@ int estimateBody(const RadioPagingFlex::PhaseMessage& message)
             break;
         }
 
-        return (words > maxAlphaWords) ? -1 : words;
+        return (words > RadioPagingFlex::maxMessageWords(message.m_capcode)) ? -1 : words;
     }
     }
 
@@ -513,6 +519,84 @@ uint32_t RadioPagingFlex::blockInfoWord(unsigned priorityWords, unsigned address
     data |= (carryOn & 0x3) << 16;
     data |= (collapse & 0x7) << 18;
     return encodeWord(addChecksum(data));
+}
+
+uint32_t RadioPagingFlex::dateWord(int year, unsigned month, unsigned day)
+{
+    // The year field counts from 1994 in a period of 32 years (00000-11111: 1994-2025); later years take the
+    // field modulo 32, the receiver places the year by its own reference
+    unsigned yearField = (unsigned) (((year - 1994) % 32 + 32) % 32);
+    uint32_t data = (1u << 4) | (yearField << 7) | ((day & 0x1f) << 12) | ((month & 0xf) << 17);
+    return encodeWord(addChecksum(data));
+}
+
+uint32_t RadioPagingFlex::timeWord(unsigned hour, unsigned minute, unsigned eighths)
+{
+    uint32_t data = (2u << 4) | ((hour & 0x1f) << 7) | ((minute & 0x3f) << 12) | ((eighths & 7) << 18);
+    return encodeWord(addChecksum(data));
+}
+
+uint32_t RadioPagingFlex::timeZoneWord(unsigned zone, bool daylightSaving, unsigned extendedSeconds)
+{
+    // I0-I4 zone, I5 L0, I6 reserved (0), I7-I9 S3-S5, in bits 11-20 after A3-A0 = 0101 in bits 7-10
+    uint32_t info = (zone & 0x1f) | ((daylightSaving ? 0u : 1u) << 5) | ((extendedSeconds & 7) << 7);
+    uint32_t data = (5u << 4) | (5u << 7) | (info << 11);
+    return encodeWord(addChecksum(data));
+}
+
+namespace {
+
+// Table 3.7.2-3: offset from Greenwich in minutes of each zone code; code 10000 is not defined (INT32_MIN)
+const int timeZoneTable[32] = {
+    0, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, 720, 210, 270, 330,
+    INT32_MIN, 345, 390, 570, -210, -660, -600, -540, -480, -420, -360, -300, -240, -180, -120, -60
+};
+
+} // namespace
+
+bool RadioPagingFlex::timeZoneMinutes(unsigned zone, int& minutes)
+{
+    minutes = 0;
+
+    if ((zone >= 32) || (timeZoneTable[zone] == INT32_MIN)) {
+        return false;
+    }
+
+    minutes = timeZoneTable[zone];
+    return true;
+}
+
+int RadioPagingFlex::timeZoneCode(int minutes)
+{
+    for (int code = 0; code < 32; code++)
+    {
+        if (timeZoneTable[code] == minutes) {
+            return code;
+        }
+    }
+
+    return -1;
+}
+
+void RadioPagingFlex::civilTime(int64_t seconds, int& year, unsigned& month, unsigned& day, unsigned& hour, unsigned& minute,
+    unsigned& second)
+{
+    // Days from the epoch to a proleptic Gregorian date (era of 400 years, March based years)
+    int64_t days = (seconds >= 0) ? seconds / 86400 : -((-seconds + 86399) / 86400);
+    int64_t rest = seconds - days * 86400;
+    days += 719468;
+    int64_t era = (days >= 0 ? days : days - 146096) / 146097;
+    int64_t doe = days - era * 146097;
+    int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    int64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    int64_t mp = (5 * doy + 2) / 153;
+
+    day = (unsigned) (doy - (153 * mp + 2) / 5 + 1);
+    month = (unsigned) ((mp < 10) ? mp + 3 : mp - 9);
+    year = (int) (yoe + era * 400 + ((month <= 2) ? 1 : 0));
+    hour = (unsigned) (rest / 3600);
+    minute = (unsigned) ((rest % 3600) / 60);
+    second = (unsigned) (rest % 60);
 }
 
 bool RadioPagingFlex::isShortAddress(uint64_t capcode)
@@ -753,6 +837,8 @@ bool RadioPagingFlex::fragmentMessage(const PhaseMessage& message, std::vector<P
     // no termination: its fragments end on whole words so that their bits join)
     const int blocking = (message.m_type == Binary) ? message.m_binary.m_blocking : 1;
     const size_t len = message.m_text.size();
+    // Message words of a frame for the address (STD-43A 4.1): 85 short, 84 long
+    const int messageWords = maxMessageWords(message.m_capcode);
     std::vector<std::string> pieces;
     size_t pos = 0;
 
@@ -760,7 +846,7 @@ bool RadioPagingFlex::fragmentMessage(const PhaseMessage& message, std::vector<P
     {
         // Message words of the fragment: header words 2 (HEX/binary first fragment) or 1, then the data
         const int headerWords = ((message.m_type == Binary) && pieces.empty()) ? 2 : 1;
-        const int dataWords = maxAlphaWords - headerWords;
+        const int dataWords = messageWords - headerWords;
         const std::string rest = message.m_text.substr(pos);
         size_t take;
 
@@ -778,7 +864,7 @@ bool RadioPagingFlex::fragmentMessage(const PhaseMessage& message, std::vector<P
                 lastWords = headerWords + (int) ((rest.size() * 4 + 20) / 21);
             }
 
-            if (lastWords <= maxAlphaWords)
+            if (lastWords <= messageWords)
             {
                 take = rest.size();
             }
@@ -794,14 +880,17 @@ bool RadioPagingFlex::fragmentMessage(const PhaseMessage& message, std::vector<P
                     b = t;
                 }
                 const int unit = blocking * 4 / a;
+                const int restBits = (int) rest.size() * 4;
                 int bits = unit;
 
+                // A fragment that is not the last leaves data for the last one: the rest does not fit with
+                // its termination, but it may fit without it
                 for (int w = dataWords; w >= 1; w--)
                 {
                     int cap = w * 21;
                     int fit = (cap / unit) * unit;
 
-                    if ((fit > 0) && (cap - fit < blocking))
+                    if ((fit > 0) && (fit < restBits) && (cap - fit < blocking))
                     {
                         bits = fit;
                         break;
@@ -993,9 +1082,10 @@ bool RadioPagingFlex::validateMessage(uint64_t capcode, MessageType type, const 
             error = "Empty alphanumeric message";
             return false;
         }
-        if (text.size() > (size_t) m_maxAlphaChars)
+        if (text.size() > (size_t) maxAlphaChars(capcode))
         {
-            error = "Alphanumeric message too long";
+            error = "Alphanumeric message too long: " + std::to_string(maxAlphaChars(capcode)) + " characters at most"
+                + (isLongAddress(capcode) ? " with a long address" : "");
             return false;
         }
         for (char c : text)

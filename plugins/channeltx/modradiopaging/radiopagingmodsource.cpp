@@ -159,6 +159,20 @@ RadioPagingFlexEncoder::Roaming RadioPagingModSource::roaming(const RadioPagingM
     return r;
 }
 
+RadioPagingFlexEncoder::TimeService RadioPagingModSource::timeService(const RadioPagingModSettings& settings)
+{
+    RadioPagingFlexEncoder::TimeService t;
+
+    t.m_enabled = settings.m_flexTime;
+    t.m_reference = settings.m_flexTimeFrameZero ? RadioPagingFlexEncoder::TimeService::FrameZero
+        : RadioPagingFlexEncoder::TimeService::CurrentFrame;
+    t.m_zoneMinutes = settings.m_flexTimeZoneMinutes;
+    t.m_sendZone = settings.m_flexTimeSendZone;
+    t.m_daylightSaving = settings.m_flexTimeDaylightSaving;
+    t.m_offsetSeconds = settings.m_flexTimeOffsetSeconds;
+    return t;
+}
+
 RadioPagingMixTxStream::Config RadioPagingModSource::mixConfig(const RadioPagingModSettings& settings)
 {
     RadioPagingMixTxStream::Config config;
@@ -169,6 +183,7 @@ RadioPagingMixTxStream::Config RadioPagingModSource::mixConfig(const RadioPaging
     config.m_framesPerMinute = settings.m_mixFramesPerMinute;
     config.m_shared = settings.m_mixShared;
     config.m_roaming = roaming(settings);
+    config.m_time = timeService(settings);
     config.m_flexDeviation = settings.m_deviation;
     config.m_pocsagDeviation = settings.m_pocsagDeviation;
     config.m_pocsagBaud = settings.m_pocsagSpeed;
@@ -217,6 +232,10 @@ void RadioPagingModSource::applyStreamDefaults()
             flex->setCollapse(m_settings.m_flexCollapse, error);
             flex->setInverted(m_settings.m_flexInverted);
             flex->setRoaming(roaming(m_settings));
+
+            if (!flex->setTimeService(timeService(m_settings), error)) {
+                qWarning() << "RadioPagingModSource::applyStreamDefaults:" << QString::fromStdString(error);
+            }
         }
 
         // Another network polarity: the transmission ends, it starts again with the

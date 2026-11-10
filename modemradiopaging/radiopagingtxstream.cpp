@@ -430,7 +430,7 @@ void RadioPagingFlexTxStream::setRoaming(const RadioPagingFlexEncoder::Roaming& 
 bool RadioPagingFlexTxStream::mandatory(uint64_t frameIndex) const
 {
     // A fragment of a message whose first fragment has gone: the next one is in this frame
-    return m_encoders[m_inverted ? 1 : 0].continuationDue(frameIndex);
+    return m_encoders[m_inverted ? 1 : 0].mandatory(frameIndex);
 }
 
 bool RadioPagingFlexTxStream::setCollapse(int collapse, std::string& error)
@@ -468,6 +468,11 @@ bool RadioPagingFlexTxStream::setScheduleCollapse(int collapse, std::string& err
     }
 
     return true;
+}
+
+bool RadioPagingFlexTxStream::setTimeService(const RadioPagingFlexEncoder::TimeService& time, std::string& error)
+{
+    return m_encoders[0].setTimeService(time, error) && m_encoders[1].setTimeService(time, error);
 }
 
 bool RadioPagingFlexTxStream::setReservedFrames(const std::vector<uint8_t>& table, std::string& error)
@@ -1017,6 +1022,10 @@ bool RadioPagingMixTxStream::setConfig(const Config& config, std::string& error)
     m_flex.setMode(c.m_flexMode);
     m_flex.setInverted(c.m_flexInverted);
     m_flex.setRoaming(c.m_roaming);
+
+    if (!m_flex.setTimeService(c.m_time, error)) {
+        return false;
+    }
 
     // 7.1.2: N frames a minute, the system collapse of the minute (5, 7 for 4 minutes), which
     // is also what the re-synchronization has to reach; the capcodes of the other frames can

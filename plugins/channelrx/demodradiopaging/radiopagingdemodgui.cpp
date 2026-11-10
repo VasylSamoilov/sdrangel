@@ -1067,9 +1067,19 @@ QString RadioPagingDemodGUI::flexDetails(const RadioPagingDemodSink::Status& sta
     }
     if (t.m_zoneValid)
     {
-        int minutes = t.m_zoneMinutes;
-        network.append(QString("UTC%1%2:%3 %4").arg(minutes < 0 ? "-" : "+").arg(std::abs(minutes) / 60)
-            .arg(std::abs(minutes) % 60, 2, 10, QChar('0')).arg(t.m_dst == 0 ? "dst" : "std"));
+        // L0 = 0: the time is daylight saving time (STD-43A 3.7.2)
+        QString saving = (t.m_dst == 0) ? "dst" : "std";
+
+        if (t.m_zoneDefined)
+        {
+            int minutes = t.m_zoneMinutes;
+            network.append(QString("UTC%1%2:%3 %4").arg(minutes < 0 ? "-" : "+").arg(std::abs(minutes) / 60)
+                .arg(std::abs(minutes) % 60, 2, 10, QChar('0')).arg(saving));
+        }
+        else
+        {
+            network.append(QString("zone %1 (not defined) %2").arg(t.m_zone).arg(saving));
+        }
     }
     if (t.m_ssid1Valid) {
         network.append(QString("LID %1 coverage %2").arg(t.m_localId).arg(t.m_coverageZone));

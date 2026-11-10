@@ -78,6 +78,30 @@ RadioPagingModSettings:
       description: "Roaming: traffic management flags announced in the second system ID word, 0 to 15 (bit 0 is T0). Only announced, the addresses are not filtered"
       type: integer
       format: int32
+    flexTime:
+      description: "FLEX: send the date and time in block information words 001 (date), 010 (time) and 101 (time zone) (STD-43A 3.7.2): 1 for yes. They fill the block information words left free in every frame, taking turns when they do not all fit"
+      type: integer
+      format: int32
+    flexTimeFrameZero:
+      description: "FLEX time: 1 the time of frame 0 of the cycle (the standard), 0 the time of the frame that carries it"
+      type: integer
+      format: int32
+    flexTimeZoneMinutes:
+      description: "FLEX time: offset of the standard time of the zone from UTC in minutes, one of STD-43A Table 3.7.2-3 (-660 to 720, with 210, 270, 330, 345, 390, 570, -210)"
+      type: integer
+      format: int32
+    flexTimeSendZone:
+      description: "FLEX time: send the time zone word (zone, daylight saving flag, extended seconds), 1 for yes"
+      type: integer
+      format: int32
+    flexTimeDaylightSaving:
+      description: "FLEX time: 1 the time is daylight saving time, one hour ahead of the standard time (L0 = 0)"
+      type: integer
+      format: int32
+    flexTimeOffsetSeconds:
+      description: "FLEX time: seconds added to the time of the frame grid (UTC from the computer clock), to send any date and time"
+      type: integer
+      format: int64
     gscMode:
       description: "GSC transmissions (one-shot only, GSC has no network mode): 0 auto (a batch of messages of the same preamble value, a message alone after its own preamble), 1 single (one message per transmission), 2 batch (a batch even for one message), 3 non battery saver (all queued messages of a polarity after one 1100 pattern)"
       type: integer

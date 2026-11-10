@@ -70,6 +70,12 @@ void RadioPagingModSettings::resetToDefaults()
     m_ssidCoverageZone = 0;
     m_ssidCountryCode = 0;
     m_ssidTrafficFlags = 0xf;
+    m_flexTime = false;
+    m_flexTimeFrameZero = true;
+    m_flexTimeZoneMinutes = 0;
+    m_flexTimeSendZone = true;
+    m_flexTimeDaylightSaving = false;
+    m_flexTimeOffsetSeconds = 0;
     m_gscMode = (int) RadioPagingGsc::Auto;
     m_gscInverted = false;
     m_gscVoiceSeconds = 30;
@@ -123,6 +129,12 @@ void RadioPagingModSettings::validate()
     m_ssidCoverageZone = std::max(0, std::min(31, m_ssidCoverageZone));
     m_ssidCountryCode = std::max(0, std::min(1023, m_ssidCountryCode));
     m_ssidTrafficFlags = std::max(0, std::min(15, m_ssidTrafficFlags));
+
+    // A zone of Table 3.7.2-3, else UTC
+    if (RadioPagingFlex::timeZoneCode(m_flexTimeZoneMinutes) < 0) {
+        m_flexTimeZoneMinutes = 0;
+    }
+
     m_gscVoiceSeconds = std::max(1, std::min(50, m_gscVoiceSeconds));
     m_pocsagDeviation = std::max(500.0f, std::min(10000.0f, m_pocsagDeviation));
     m_mixFramesPerMinute = std::max(0, std::min(m_mixShared ? 128 : 32, m_mixFramesPerMinute));
@@ -176,7 +188,7 @@ QString RadioPagingModSettings::protocolName(Protocol protocol)
     return "";
 }
 
-// Tags 1 to 14 and 33 to 47 are the modulator settings, 20 to 32 the usual channel tags. New tags are only appended
+// Tags 1 to 14 and 33 to 58 are the modulator settings, 20 to 32 the usual channel tags. New tags are only appended
 QByteArray RadioPagingModSettings::serialize() const
 {
     SimpleSerializer s(1);
@@ -237,6 +249,12 @@ QByteArray RadioPagingModSettings::serialize() const
     s.writeS32(50, m_ssidCoverageZone);
     s.writeS32(51, m_ssidCountryCode);
     s.writeS32(52, m_ssidTrafficFlags);
+    s.writeBool(53, m_flexTime);
+    s.writeBool(54, m_flexTimeFrameZero);
+    s.writeS32(55, m_flexTimeZoneMinutes);
+    s.writeBool(56, m_flexTimeSendZone);
+    s.writeBool(57, m_flexTimeDaylightSaving);
+    s.writeS64(58, m_flexTimeOffsetSeconds);
 
     return s.final();
 }
@@ -333,6 +351,12 @@ bool RadioPagingModSettings::deserialize(const QByteArray& data)
         d.readS32(50, &m_ssidCoverageZone, 0);
         d.readS32(51, &m_ssidCountryCode, 0);
         d.readS32(52, &m_ssidTrafficFlags, 0xf);
+        d.readBool(53, &m_flexTime, false);
+        d.readBool(54, &m_flexTimeFrameZero, true);
+        d.readS32(55, &m_flexTimeZoneMinutes, 0);
+        d.readBool(56, &m_flexTimeSendZone, true);
+        d.readBool(57, &m_flexTimeDaylightSaving, false);
+        d.readS64(58, &m_flexTimeOffsetSeconds, 0);
         m_gscVoiceKeepDays = std::max(0, std::min(3650, m_gscVoiceKeepDays));
         m_gscVoiceKeepMin = std::max(0, std::min(100000, m_gscVoiceKeepMin));
 
@@ -405,6 +429,24 @@ void RadioPagingModSettings::applySettings(const QStringList& settingsKeys, cons
     }
     if (settingsKeys.contains("ssidTrafficFlags")) {
         m_ssidTrafficFlags = settings.m_ssidTrafficFlags;
+    }
+    if (settingsKeys.contains("flexTime")) {
+        m_flexTime = settings.m_flexTime;
+    }
+    if (settingsKeys.contains("flexTimeFrameZero")) {
+        m_flexTimeFrameZero = settings.m_flexTimeFrameZero;
+    }
+    if (settingsKeys.contains("flexTimeZoneMinutes")) {
+        m_flexTimeZoneMinutes = settings.m_flexTimeZoneMinutes;
+    }
+    if (settingsKeys.contains("flexTimeSendZone")) {
+        m_flexTimeSendZone = settings.m_flexTimeSendZone;
+    }
+    if (settingsKeys.contains("flexTimeDaylightSaving")) {
+        m_flexTimeDaylightSaving = settings.m_flexTimeDaylightSaving;
+    }
+    if (settingsKeys.contains("flexTimeOffsetSeconds")) {
+        m_flexTimeOffsetSeconds = settings.m_flexTimeOffsetSeconds;
     }
     if (settingsKeys.contains("gscMode")) {
         m_gscMode = settings.m_gscMode;
@@ -543,6 +585,24 @@ QString RadioPagingModSettings::getDebugString(const QStringList& settingsKeys, 
     }
     if (settingsKeys.contains("ssidTrafficFlags") || force) {
         ostr << " m_ssidTrafficFlags: " << m_ssidTrafficFlags;
+    }
+    if (settingsKeys.contains("flexTime") || force) {
+        ostr << " m_flexTime: " << m_flexTime;
+    }
+    if (settingsKeys.contains("flexTimeFrameZero") || force) {
+        ostr << " m_flexTimeFrameZero: " << m_flexTimeFrameZero;
+    }
+    if (settingsKeys.contains("flexTimeZoneMinutes") || force) {
+        ostr << " m_flexTimeZoneMinutes: " << m_flexTimeZoneMinutes;
+    }
+    if (settingsKeys.contains("flexTimeSendZone") || force) {
+        ostr << " m_flexTimeSendZone: " << m_flexTimeSendZone;
+    }
+    if (settingsKeys.contains("flexTimeDaylightSaving") || force) {
+        ostr << " m_flexTimeDaylightSaving: " << m_flexTimeDaylightSaving;
+    }
+    if (settingsKeys.contains("flexTimeOffsetSeconds") || force) {
+        ostr << " m_flexTimeOffsetSeconds: " << m_flexTimeOffsetSeconds;
     }
     if (settingsKeys.contains("gscMode") || force) {
         ostr << " m_gscMode: " << m_gscMode;

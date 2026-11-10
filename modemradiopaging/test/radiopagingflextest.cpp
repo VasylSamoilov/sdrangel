@@ -980,17 +980,21 @@ void testRejections()
     allRejected = allRejected && !enc.enqueue(makeMessage(1933313, Flex::Alphanumeric, "x")).m_ok;
     allRejected = allRejected && !enc.enqueue(makeMessage(4297068543ULL, Flex::Tone, "")).m_ok;
     allRejected = allRejected && !enc.enqueue(makeMessage(10, Flex::Alphanumeric, "")).m_ok;
-    allRejected = allRejected && !enc.enqueue(makeMessage(10, Flex::Alphanumeric, std::string(249, 'a'))).m_ok;
+    // STD-43A 4.1: 251 characters with a short address, 248 with a long one
+    allRejected = allRejected && !enc.enqueue(makeMessage(10, Flex::Alphanumeric, std::string(252, 'a'))).m_ok;
+    allRejected = allRejected && !enc.enqueue(makeMessage(2101300, Flex::Alphanumeric, std::string(249, 'a'))).m_ok;
     allRejected = allRejected && !enc.enqueue(makeMessage(10, Flex::Alphanumeric, "caf\xc3\xa9")).m_ok;
     allRejected = allRejected && !enc.enqueue(makeMessage(10, Flex::Numeric, "")).m_ok;
     allRejected = allRejected && !enc.enqueue(makeMessage(10, Flex::Numeric, "12a")).m_ok;
     allRejected = allRejected && !enc.enqueue(makeMessage(10, Flex::Numeric, std::string(42, '1'))).m_ok;
     check(allRejected && enc.pending() == 0, "enqueue: invalid capcode and text rejected with an error");
 
-    Encoder::EnqueueResult ok = enc.enqueue(makeMessage(10, Flex::Alphanumeric, std::string(248, 'a')));
+    Encoder::EnqueueResult ok = enc.enqueue(makeMessage(10, Flex::Alphanumeric, std::string(251, 'a')));
     Encoder::EnqueueResult ok2 = enc.enqueue(makeMessage(10, Flex::Tone, "ignored"));
-    check(ok.m_ok && ok2.m_ok && ok.m_id != ok2.m_id && enc.pending() == 2, "enqueue: longest alphanumeric message and tone accepted, unique ids");
-    check(enc.remove(ok.m_id) && !enc.remove(ok.m_id) && enc.pending() == 1, "enqueue: queued message removed by id");
+    Encoder::EnqueueResult ok3 = enc.enqueue(makeMessage(2101300, Flex::Alphanumeric, std::string(248, 'a')));
+    check(ok.m_ok && ok2.m_ok && ok3.m_ok && ok.m_id != ok2.m_id && enc.pending() == 3,
+        "enqueue: longest alphanumeric messages (251 short, 248 long address) and tone accepted, unique ids");
+    check(enc.remove(ok.m_id) && !enc.remove(ok.m_id) && enc.pending() == 2, "enqueue: queued message removed by id");
 }
 
 void testNumbers()

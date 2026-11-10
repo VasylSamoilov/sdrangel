@@ -219,18 +219,51 @@ RadioPagingFlex::PhaseMessage RadioPagingFlexEncoder::phaseMessage(const Item& i
 
 bool RadioPagingFlexEncoder::fragmentReady(const Item& item) const
 {
-    if (item.m_fragment == 0) {
+    if (item.m_fragment > 0)
+    {
+        // After the fragment before it (that one is erased from the queue once its frame is built)
+        for (const Item& other : m_queue)
+        {
+            if ((other.m_id == item.m_id) && (other.m_fragment < item.m_fragment)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+    if (item.m_fragments <= 1) {
         return true;
     }
 
+    // The first fragment of a fragmented message waits until a fragmented message to the same address
+    // queued before it has been sent entirely (STD-43A 3.8.5 (2), 4.2 (1))
     for (const Item& other : m_queue)
     {
-        if ((other.m_id == item.m_id) && (other.m_fragment < item.m_fragment)) {
+        if (&other == &item) {
+            break;
+        }
+        if ((other.m_id != item.m_id) && (other.m_fragments > 1) && (other.m_message.m_capcode == item.m_message.m_capcode)) {
             return false;
         }
     }
 
     return true;
+}
+
+bool RadioPagingFlexEncoder::frameFor(const Item& item, uint32_t frame) const
+{
+    if (m_reserved[frame]) {
+        return false;
+    }
+
+    // The first fragment and an unfragmented message go in a frame of the pager (its collapse); the
+    // pager then receives the frames that follow until the last fragment, regardless of the collapse
+    // (STD-43A 4.2.1 (1)): the other fragments go in any frame
+    if (item.m_fragment > 0) {
+        return true;
+    }
+
+    return RadioPagingFlexScheduler::frameEligible(item.m_message.m_capcode, frame, m_collapse);
 }
 
 RadioPagingFlexEncoder::EnqueueResult RadioPagingFlexEncoder::enqueue(const TxMessage& message)
@@ -346,7 +379,7 @@ size_t RadioPagingFlexEncoder::eligible(uint64_t frameIndex) const
 
     for (const Item& item : m_queue)
     {
-        if (RadioPagingFlexScheduler::frameEligible(item.m_message.m_capcode, frame, m_collapse) && fragmentReady(item)) {
+        if (frameFor(item, frame) && fragmentReady(item)) {
             n++;
         }
     }
@@ -354,23 +387,98 @@ size_t RadioPagingFlexEncoder::eligible(uint64_t frameIndex) const
     return n;
 }
 
-bool RadioPagingFlexEncoder::continuationDue(uint64_t frameIndex) const
+bool RadioPagingFlexEncoder::mandatory(uint64_t frameIndex) const
 {
-    uint32_t frame = RadioPagingFlexScheduler::frameTime(frameIndex).m_frame;
+    RadioPagingFlexScheduler::FrameTime time = RadioPagingFlexScheduler::frameTime(frameIndex);
 
-    if (m_reserved[frame]) {
+    if (m_reserved[time.m_frame]) {
         return false;
+    }
+
+    // Frame 0 of cycle 0 carries the time in every phase (STD-43A 3.7.2)
+    if (m_time.m_enabled && (time.m_cycle == 0) && (time.m_frame == 0)) {
+        return true;
     }
 
     for (const Item& item : m_queue)
     {
-        if ((item.m_fragment > 0) && RadioPagingFlexScheduler::frameEligible(item.m_message.m_capcode, frame, m_collapse)
-            && fragmentReady(item)) {
+        if ((item.m_fragment > 0) && fragmentReady(item)) {
             return true;
         }
     }
 
     return false;
+}
+
+bool RadioPagingFlexEncoder::setTimeService(const TimeService& time, std::string& error)
+{
+    if (time.m_sendZone && (RadioPagingFlex::timeZoneCode(time.m_zoneMinutes) < 0))
+    {
+        error = "Time zone offset " + std::to_string(time.m_zoneMinutes) + " minutes is not in STD-43A Table 3.7.2-3";
+        return false;
+    }
+
+    m_time = time;
+    return true;
+}
+
+int64_t RadioPagingFlexEncoder::localTimeMs(uint64_t frameIndex) const
+{
+    RadioPagingFlexScheduler::FrameTime time = RadioPagingFlexScheduler::frameTime(frameIndex);
+    // The time of frame 0 of the cycle: the synchronization is on the first bit of bit sync 1 of that frame
+    uint64_t reference = (m_time.m_reference == TimeService::FrameZero) ? frameIndex - time.m_frame : frameIndex;
+
+    return (int64_t) reference * RadioPagingFlex::m_frameMs + m_time.m_offsetSeconds * 1000
+        + ((int64_t) m_time.m_zoneMinutes + (m_time.m_daylightSaving ? 60 : 0)) * 60000;
+}
+
+std::vector<uint32_t> RadioPagingFlexEncoder::extraBlockInfo(uint64_t frameIndex, int phase) const
+{
+    // Block information words 2 to 4: at most 3 (the address start field a1 a0 counts 1 to 4 block words)
+    const size_t maxExtra = 3;
+    RadioPagingFlexScheduler::FrameTime time = RadioPagingFlexScheduler::frameTime(frameIndex);
+    std::vector<uint32_t> words;
+
+    // The simulcast system ID words are in one phase of the frame (STD-43A 6.1.1.3): word 1 in every frame,
+    // word 2 in frames 0 to 3
+    if (m_roaming.m_enabled && (phase == RadioPagingFlex::ssidPhase(m_mode, time.m_frame)))
+    {
+        words.push_back(RadioPagingFlex::ssid1Word(m_roaming.m_localId, m_roaming.m_coverageZone));
+
+        if (time.m_frame < (uint32_t) RadioPagingFlexScheduler::m_protectedFrames) {
+            words.push_back(RadioPagingFlex::ssid2Word(m_roaming.m_countryCode, m_roaming.m_trafficFlags));
+        }
+    }
+
+    if (m_time.m_enabled && (words.size() < maxExtra))
+    {
+        int64_t ms = localTimeMs(frameIndex);
+        int64_t seconds = (ms >= 0) ? ms / 1000 : -((-ms + 999) / 1000);
+        int year;
+        unsigned month, day, hour, minute, second;
+        RadioPagingFlex::civilTime(seconds, year, month, day, hour, minute, second);
+        // The second in 1/64 minute steps: the eighths of minute in the time word, the rest in the zone word
+        int64_t inMinute = (int64_t) second * 1000 + (((ms % 1000) + 1000) % 1000);
+        unsigned steps = (unsigned) ((inMinute * 64) / 60000);
+
+        // In the order date, time, time zone; the frame index modulo 3 chooses the first when they do not all fit
+        std::vector<uint32_t> timeWords;
+        timeWords.push_back(RadioPagingFlex::dateWord(year, month, day));
+        timeWords.push_back(RadioPagingFlex::timeWord(hour, minute, steps / 8));
+        if (m_time.m_sendZone) {
+            timeWords.push_back(RadioPagingFlex::timeZoneWord((unsigned) RadioPagingFlex::timeZoneCode(m_time.m_zoneMinutes),
+                m_time.m_daylightSaving, steps % 8));
+        }
+
+        size_t room = maxExtra - words.size();
+        size_t first = (room < timeWords.size()) ? (size_t) (frameIndex % 3) % timeWords.size() : 0;
+
+        for (size_t i = 0; (i < timeWords.size()) && (i < room); i++) {
+            words.push_back(timeWords[(first + i) % timeWords.size()]);
+        }
+    }
+
+    return words;
 }
 
 RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameIndex)
@@ -401,15 +509,43 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
     };
 
     std::vector<Candidate> candidates[RadioPagingFlex::m_maxPhases];
-    // The system ID words of roaming (block information words 2 to 4) take words of the phase that carries them
-    const int ssidPhase = m_roaming.m_enabled ? RadioPagingFlex::ssidPhase(m_mode, time.m_frame) : -1;
-    const int ssidWords = (time.m_frame <= 3) ? 2 : 1;
+    // Block information words 2 to 4 of each phase (system ID of roaming, time): they take words of the phase
+    std::vector<uint32_t> extraBiw[RadioPagingFlex::m_maxPhases];
     int used[RadioPagingFlex::m_maxPhases] = {0, 0, 0, 0};
-    if ((ssidPhase >= 0) && (ssidPhase < RadioPagingFlex::m_maxPhases)) {
-        used[ssidPhase] = ssidWords;
+    for (int p = 0; p < phases; p++)
+    {
+        extraBiw[p] = extraBlockInfo(frameIndex, p);
+        used[p] = (int) extraBiw[p].size();
     }
     int priorityWords[RadioPagingFlex::m_maxPhases] = {0, 0, 0, 0};
-    std::vector<std::pair<uint64_t, int>> usage;
+
+    // Use of each address in the frame (STD-43A 3.8.5): unfragmented messages twice at most, once only
+    // while the address is sending a fragmented message (from its first to its last fragment)
+    struct Usage
+    {
+        uint64_t m_capcode;
+        int m_unfragmented;
+        bool m_fragmenting;
+    };
+    std::vector<Usage> usage;
+    auto usageOf = [&](uint64_t capcode) -> Usage& {
+        for (Usage& u : usage)
+        {
+            if (u.m_capcode == capcode) {
+                return u;
+            }
+        }
+        usage.push_back(Usage{capcode, 0, false});
+        return usage.back();
+    };
+
+    // Addresses with a fragmented message under way: its first fragment has gone
+    for (const Item& item : m_queue)
+    {
+        if (item.m_fragment > 0) {
+            usageOf(item.m_message.m_capcode).m_fragmenting = true;
+        }
+    }
 
     // Phases of the most significant bit of 4-level symbols are preferred when a phase is full
     auto isMsb = [&](int p) {
@@ -419,29 +555,30 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
         return (phases == 2) ? (p == 0) : (phases == 4) ? ((p == 0) || (p == 2)) : true;
     };
 
-    // Passes: priority addresses, other addresses, tone only addresses. Messages keep their queue order.
-    for (int pass = 0; pass < 3; pass++)
+    // Passes: fragments after the first (the pager is waiting for them: they keep the interval of
+    // STD-43A 4.2 (4)), priority addresses, other addresses, tone only addresses. Messages keep their
+    // queue order. The address field puts the priority addresses first whatever the pass
+    for (int pass = 0; pass < 4; pass++)
     {
         for (auto it = m_queue.begin(); it != m_queue.end(); ++it)
         {
             const TxMessage& m = it->m_message;
             bool isTone = (m.m_type == RadioPagingFlex::Tone);
+            bool continuation = (it->m_fragment > 0);
 
-            if (!RadioPagingFlexScheduler::frameEligible(m.m_capcode, time.m_frame, m_collapse)) {
+            if (!frameFor(*it, time.m_frame) || !fragmentReady(*it)) {
                 continue;
             }
-            // A fragment waits for a frame after the one of the fragment before it (that one is erased from the
-            // queue once its frame is built)
-            if (!fragmentReady(*it)) {
+            if ((pass == 0) && !continuation) {
                 continue;
             }
-            if ((pass == 0) && !(m.m_priority && !isTone)) {
+            if ((pass == 1) && (continuation || !m.m_priority || isTone)) {
                 continue;
             }
-            if ((pass == 1) && (m.m_priority || isTone)) {
+            if ((pass == 2) && (continuation || m.m_priority || isTone)) {
                 continue;
             }
-            if ((pass == 2) && !isTone) {
+            if ((pass == 3) && !isTone) {
                 continue;
             }
 
@@ -450,25 +587,32 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
                 continue;
             }
 
-            // The same address is used at most twice in a frame
-            int usageCount = 0;
-            for (const auto& u : usage)
+            Usage& use = usageOf(m.m_capcode);
+
+            if (it->m_fragments > 1)
             {
-                if (u.first == m.m_capcode) {
-                    usageCount = u.second;
-                    break;
+                // One fragmented message at a time per address (fragmentReady), and a first fragment
+                // only when the address has at most one unfragmented message in the frame
+                if ((it->m_fragment == 0) && (use.m_unfragmented > 1)) {
+                    continue;
                 }
             }
-            if (usageCount >= 2) {
+            else if (use.m_unfragmented >= (use.m_fragmenting ? 1 : 2))
+            {
                 continue;
             }
 
             int addressWords = RadioPagingFlex::isLongAddress(m.m_capcode) ? 2 : 1;
             int phase = (int) (RadioPagingFlexScheduler::capcodeSlot(m.m_capcode).m_phase % (uint32_t) phases);
 
+            // The fragments of a message stay in the phase of its first fragment: the pager reads that phase
+            if (it->m_phase >= 0) {
+                phase = it->m_phase % phases;
+            }
+
             if (used[phase] + cost > capacity)
             {
-                if (phases <= 1) {
+                if ((phases <= 1) || (it->m_phase >= 0)) {
                     continue;
                 }
 
@@ -493,7 +637,7 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
 
             if (m.m_priority && (priorityWords[phase] + addressWords > RadioPagingFlex::m_maxPriorityWords))
             {
-                if (phases <= 1) {
+                if ((phases <= 1) || (it->m_phase >= 0)) {
                     continue;
                 }
 
@@ -532,18 +676,10 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
                 priorityWords[phase] += addressWords;
             }
 
-            bool counted = false;
-            for (auto& u : usage)
-            {
-                if (u.first == m.m_capcode)
-                {
-                    u.second++;
-                    counted = true;
-                    break;
-                }
-            }
-            if (!counted) {
-                usage.push_back(std::make_pair(m.m_capcode, 1));
+            if (it->m_fragments > 1) {
+                use.m_fragmenting = true;
+            } else {
+                use.m_unfragmented++;
             }
         }
     }
@@ -555,16 +691,15 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
         for (const Candidate& c : candidates[p]) {
             addressWords[p] += c.m_addressWords;
         }
-        // The flag tells that the address field ends in block 0 (STD-43A 3.6): the system ID words come first
-        if (p == ssidPhase) {
-            addressWords[p] += ssidWords;
-        }
+        // The flag tells that the address field ends in block 0 (STD-43A 3.6): block information words 2 to 4
+        // come first
+        addressWords[p] += (int) extraBiw[p].size();
     }
     frame.m_traffic = RadioPagingFlex::lowTrafficFlags(addressWords, phases);
 
     // Phases
     std::vector<std::vector<uint32_t>> phaseWords(phases);
-    std::vector<std::list<Item>::iterator> sent;
+    std::vector<std::pair<std::list<Item>::iterator, int>> sent;   // Item and the phase it went in
 
     for (int p = 0; p < phases; p++)
     {
@@ -574,15 +709,7 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
         params.m_collapse = m_collapse;
         params.m_carryOn = 0;
 
-        // The simulcast system ID words are in one phase of the frame (STD-43A 6.1.1.3)
-        if (m_roaming.m_enabled && (p == RadioPagingFlex::ssidPhase(m_mode, time.m_frame)))
-        {
-            params.m_extraBiw.push_back(RadioPagingFlex::ssid1Word(m_roaming.m_localId, m_roaming.m_coverageZone));
-
-            if (time.m_frame <= 3) {
-                params.m_extraBiw.push_back(RadioPagingFlex::ssid2Word(m_roaming.m_countryCode, m_roaming.m_trafficFlags));
-            }
-        }
+        params.m_extraBiw = extraBiw[p];
 
         if (!candidates[p].empty())
         {
@@ -616,7 +743,7 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
                 for (size_t j = 0; j < messages.size(); j++)
                 {
                     if (result.m_packed[j]) {
-                        sent.push_back(candidates[p][j].m_item);
+                        sent.push_back(std::make_pair(candidates[p][j].m_item, p));
                     }
                 }
             }
@@ -627,8 +754,21 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
         }
     }
 
-    for (auto it : sent)
+    for (const auto& s : sent)
     {
+        auto it = s.first;
+
+        // The fragments still to go take the phase of this one
+        if (it->m_fragments > 1)
+        {
+            for (Item& other : m_queue)
+            {
+                if ((other.m_id == it->m_id) && (other.m_fragment > it->m_fragment)) {
+                    other.m_phase = s.second;
+                }
+            }
+        }
+
         // A message is sent with its last fragment
         if (it->m_fragment == it->m_fragments - 1)
         {

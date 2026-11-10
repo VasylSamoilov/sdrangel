@@ -257,6 +257,13 @@ int terminateBits(const std::vector<int8_t>& bits, int blocking, bool lastFragme
         }
     }
 
+    // A fragment that is not the last is packed full: no fill and no padding word, the only bits after
+    // its last character are the ones too few for another character (fewer than blocking). Their value
+    // tells nothing (they may equal the last data bits): the data are the whole characters
+    if (!lastFragment) {
+        return n - (n % blocking);
+    }
+
     // Rule (3): an extra word of the inverse of the last data bit
     if (lastFragment && (n >= 2 * wordBits) && (((n - wordBits) % blocking) == 0) && (n - wordBits >= blocking))
     {
@@ -310,14 +317,7 @@ int terminateBits(const std::vector<int8_t>& bits, int blocking, bool lastFragme
     }
     if (run >= blocking)
     {
-        // A fragment that is not the last is packed full: no fill and no padding word, the only bits after its
-        // last character are the ones too few for another character (fewer than blocking). A run of blocking
-        // bits or more is data; the data end exactly at the word end
-        if (!lastFragment)
-        {
-            state = ((n % blocking) != 0) ? 1 : 0;
-            return n;
-        }
+        // Last fragment: fill of blocking bits or more after the last character
         if (((n - run) % blocking) == 0) {
             return n - run;
         }

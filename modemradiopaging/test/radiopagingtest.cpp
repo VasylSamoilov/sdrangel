@@ -84,10 +84,45 @@ void testBCH()
         }
     }
 
+    // One error in bits 31-1 and the parity bit: two errors, corrected. Every pattern of three errors
+    // in the 32 bits is detected (minimum distance 6 with the parity bit)
+    bool oneAndParityOk = true;
+    bool tripleOk = true;
+
+    for (int n = 0; n < 20; n++)
+    {
+        uint32_t word = RadioPagingBCH::encode(rng() & 0x1fffff);
+
+        for (int i = 1; i < 32; i++)
+        {
+            RadioPagingBCH::Result r = RadioPagingBCH::decode(word ^ (1u << i) ^ 1u);
+            if ((r.m_word != word) || (r.m_bitErrors != 1) || !r.m_parityError) {
+                oneAndParityOk = false;
+            }
+        }
+
+        for (int i = 0; i < 32; i++)
+        {
+            for (int j = i + 1; j < 32; j++)
+            {
+                for (int k = j + 1; k < 32; k++)
+                {
+                    uint32_t bad = word ^ (1u << i) ^ (1u << j) ^ (1u << k);
+                    RadioPagingBCH::Result r = RadioPagingBCH::decode(bad);
+                    if ((r.m_bitErrors != -1) || (r.m_word != bad)) {
+                        tripleOk = false;
+                    }
+                }
+            }
+        }
+    }
+
     check(encodeOk, "BCH encode gives zero syndrome, even parity and the data back");
     check(singleOk, "BCH corrects every single bit error in bits 31-1");
     check(doubleOk, "BCH corrects every double bit error in bits 31-1");
     check(parityOk, "BCH reports a parity bit error and repairs it");
+    check(oneAndParityOk, "BCH corrects one bit error in bits 31-1 with a parity bit error");
+    check(tripleOk, "BCH reports every three bit error pattern as uncorrectable");
     check(RadioPagingBCH::reverse(0x80000001u) == 0x80000001u
         && RadioPagingBCH::reverse(0x00000002u) == 0x40000000u, "BCH bit reverse");
 }

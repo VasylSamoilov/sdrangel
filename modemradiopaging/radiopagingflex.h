@@ -99,7 +99,15 @@ public:
     static const int m_maxPhases = 4;
     static const int m_syncBaud = 1600;
     static const int m_maxCollapse = 7;
-    static const int m_maxAlphaChars = 248;     //!< Characters of one alphanumeric message
+    static const int m_maxAlphaChars = 251;     //!< Characters of one alphanumeric message, short address (STD-43A 4.1)
+    //!< Most message words (message field, and the second vector word of a long address) of one message in
+    //!< a frame (STD-43A 4.1): 88 less the block information word, the address and the vector words: 85
+    //!< with a short address, 84 with a long one (2 address words, 2 vector words, the first message word
+    //!< in the second vector word)
+    static int maxMessageWords(uint64_t capcode) { return isLongAddress(capcode) ? m_wordsPerFrame - 4 : m_wordsPerFrame - 3; }
+    //!< Most characters of an alphanumeric message in one frame: 3 a word after the header word, less the
+    //!< signature slot: 251 with a short address, 248 with a long one
+    static int maxAlphaChars(uint64_t capcode) { return 3 * (maxMessageWords(capcode) - 1) - 1; }
     static const int m_maxNumericChars = 41;
     static const int m_maxPriorityWords = 15;   //!< Priority address words of a phase
     static const uint64_t m_shortMin = 1;
@@ -198,6 +206,25 @@ public:
     static int ssidPhase(Mode mode, unsigned frame);
     //!< addressStart: number of block information words minus 1, vectorStart: word index of the first vector
     static uint32_t blockInfoWord(unsigned priorityWords, unsigned addressStart, unsigned vectorStart, unsigned carryOn, unsigned collapse);
+
+    // Time related block information words (STD-43A 3.7.2, Table 3.7.2-1 and 3.7.2-2). The time is the local
+    // time (standard time of the zone, daylight saving time when it applies)
+    //!< Date word, format 001: Y4-Y0 (year in a period of 32 years from 1994, the year modulo 32 after 2025),
+    //!< d4-d0 day 1-31, m3-m0 month 1-12
+    static uint32_t dateWord(int year, unsigned month, unsigned day);
+    //!< Time word, format 010: H4-H0 hour 0-23, M5-M0 minute 0-59, s2-s0 second in eighths of a minute (7.5 s)
+    static uint32_t timeWord(unsigned hour, unsigned minute, unsigned eighths);
+    //!< System information word, format 101, A3-A0 = 0101 Additional Time Instruction: Z4-Z0 time zone code
+    //!< (Table 3.7.2-3), L0 0 for daylight saving time and 1 for standard time, S5-S3 extended second (0-7,
+    //!< 1/64 minute steps added to the time word)
+    static uint32_t timeZoneWord(unsigned zone, bool daylightSaving, unsigned extendedSeconds);
+    //!< Offset from UTC in minutes of a time zone code (Table 3.7.2-3); false for code 10000, which is not defined
+    static bool timeZoneMinutes(unsigned zone, int& minutes);
+    //!< Time zone code of an offset from UTC in minutes, -1 if the table has no such zone. UTC is code 00000
+    static int timeZoneCode(int minutes);
+    //!< Civil date and time of a number of seconds from the Unix epoch (no time zone applied)
+    static void civilTime(int64_t seconds, int& year, unsigned& month, unsigned& day, unsigned& hour, unsigned& minute,
+        unsigned& second);
 
     static bool isShortAddress(uint64_t capcode);
     static bool isLongAddress(uint64_t capcode);

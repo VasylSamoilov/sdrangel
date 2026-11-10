@@ -189,10 +189,12 @@ public:
     //!< Polarity of the network from the next transmission (begin())
     void setInverted(bool inverted) { m_nextInverted = inverted; }
     bool inverted() const { return m_inverted; }
-    //!< The network has content that must go in the frame (group message registration and
-    //!< delivery, fragments, roaming and time frames): the frame can not go to the other
-    //!< polarity. Of these, the fragments after the first of a message are sent
+    //!< The network has content that must go in the frame (fragments after the first of a message, the time
+    //!< of frame 0 of cycle 0): the frame can not go to the other polarity
     bool mandatory(uint64_t frameIndex) const;
+    //!< Date and time of the frames sent (see RadioPagingFlexEncoder::TimeService). False and an error if a
+    //!< field is out of range
+    bool setTimeService(const RadioPagingFlexEncoder::TimeService& time, std::string& error);
     //!< False and an error if out of range. Applies to the next re-synchronization
     bool setCollapse(int collapse, std::string& error);
     //!< Collapse of the frames (block information word, placement): network only, 0 for one-shot
@@ -368,6 +370,7 @@ public:
         bool m_pocsagInverted = false;
         int m_switchMs[3] = {400, 200, 100};    //!< 750 bps pattern before POCSAG: 512, 1200, 2400
         RadioPagingFlexEncoder::Roaming m_roaming;  //!< Frames 0-3 are FLEX whatever the plan; with roaming they carry the system ID
+        RadioPagingFlexEncoder::TimeService m_time; //!< Date and time of the FLEX frames
     };
 
     static const int m_minuteFrames = 32;   //!< Frames of a minute
