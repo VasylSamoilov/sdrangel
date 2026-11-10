@@ -231,7 +231,8 @@ NmtChannel::NmtChannel(const ChannelConfig& config, double sampleRate, double de
 // The speech path is connected to the call.
 bool NmtChannel::callAudioUp() const
 {
-    return m_host && m_transaction && m_transaction->callUp && m_state == State::Active;
+    // in the MFT state the speech of the phone is silent but the path stays: the host puts the tones of the digits into it
+    return m_host && m_transaction && m_transaction->callUp && (m_state == State::Active || m_state == State::Mft);
 }
 
 void NmtChannel::receive(const float* samples, int length)
@@ -256,6 +257,8 @@ void NmtChannel::receive(const float* samples, int length)
     m_rxMute -= muted;
     if (call && callAudioUp()) {
         m_rxAudio.process(samples, length, muted);
+    } else if (m_state == State::Mft && callAudioUp()) {
+        m_rxAudio.process(samples, length, length);       // the phone sends data, not speech
     }
 }
 
