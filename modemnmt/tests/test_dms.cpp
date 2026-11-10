@@ -56,6 +56,19 @@ static void feed(NmtDmsLink& link, const std::vector<uint8_t>& bits, double qual
     }
 }
 
+// The bits a side sends, at most `limit` of them
+static std::vector<uint8_t> drain(NmtDmsLink& link, int limit = 2000)
+{
+    std::vector<uint8_t> out;
+    int bit;
+
+    while (out.size() < static_cast<size_t>(limit) && link.pullBit(bit)) {
+        out.push_back(static_cast<uint8_t>(bit));
+    }
+
+    return out;
+}
+
 // Two links with a wire in each direction, one bit of each per step, with optional bit errors.
 struct Pair
 {
@@ -164,7 +177,6 @@ static void testHandshakeAndData()
     p.b.setDataHandler([&](const std::vector<uint8_t>& d) { received.push_back(d); });
     p.a.setEstablishedHandler([&] { established = true; });
     p.a.setAllSentHandler([&] { allSent = true; });
-    p.a.setIdentity("1123456");
 
     // 20 bytes with bytes above 127 and a zero inside
     std::vector<uint8_t> data;
@@ -190,12 +202,12 @@ static void testHandshakeAndData()
         all.insert(all.end(), d.begin(), d.end());
     }
     CHECK(all == data);
-    CHECK(p.b.peerIdentity().size() == 7 && p.b.peerIdentity()[0] == '1' && p.b.peerIdentity()[6] == '6');
+    // the identity frame carries the id 3 and zeros
+    CHECK(p.b.peerIdentity() == std::vector<uint8_t>({3, 0, 0, 0, 0, 0, 0}));
 
     // the answering side used the other direction bit: the first label of its bits has d = 1
     CHECK(p.bBits.size() > 40 && p.bBits[26] == 1);
     CHECK(p.aBits[26] == 0);
-    // data frames follow each other without a second bit sync (112 bits), the first has one
     CHECK(p.a.framesRejected() == 0 && p.b.framesRejected() == 0);
 
     // the other way round: the answering side sends
@@ -305,14 +317,10 @@ static void testOwnFramesAreIgnored()
 {
     // a frame with the direction bit of this side (an echo) is not taken
     NmtDmsLink a;
-    int bit;
-    std::vector<uint8_t> echoed;
 
     a.startAsCaller();
-    while (a.pullBit(bit)) {
-        echoed.push_back(static_cast<uint8_t>(bit));
-    }
-    CHECK(!echoed.empty());
+    const std::vector<uint8_t> echoed = drain(a, 4 * 127);
+    CHECK(echoed.size() == 4 * 127);
     feed(a, echoed);
     CHECK(a.framesReceived() == 0);
 
@@ -321,7 +329,7 @@ static void testOwnFramesAreIgnored()
 
     feed(a, NmtDmsLink::encodeDt(true, true, 0, data, true));
     CHECK(a.framesReceived() == 1);
-    CHECK(a.peerIdentity().size() == 7);
+    CHECK(a.peerIdentity() == std::vector<uint8_t>({'1', '2', '3', '4', '5', '6', '7'}));
 }
 
 static void testQualityAndGarbage()
@@ -369,32 +377,56 @@ static void testBusyReceiver()
     p.a.setEstablishedHandler([&] { done = true; });
     p.run(6000, [&] { return done; });
     CHECK(done);
+    p.run(2000, [&] { return p.a.unacknowledged() == 0; });
+    CHECK(p.a.unacknowledged() == 0);
 
-    // a full receiver (NR): the data wait, up to 3 s
-    std::vector<uint8_t> data(14, 0x55);
+    // a full receiver (NR): the data wait until an RR or a DT comes, at most T = 3 s (Figure 1)
+    std::vector<uint8_t> data(21, 0x55);                        // three frames, numbers 2, 3, 4
 
     p.a.queueData(data.data(), data.size());
-    feed(p.a, NmtDmsLink::encodeRr(true, true, false, 2));
+    CHECK(p.a.unacknowledged() == 3);
+    feed(p.a, NmtDmsLink::encodeRr(true, true, false, 2));      // NR(2) acknowledges frame 1: nothing
     CHECK(p.a.peerBusy());
+    CHECK(p.a.unacknowledged() == 3);
 
     int bit;
     int drained = 0;
 
-    // the frame that is going out is finished, then nothing
+    // the frame that is going out is finished, then nothing until T is over
     while (p.a.pullBit(bit) && drained < 400) {
         drained++;
     }
     CHECK(drained < 400);
-    p.a.advance(0.5);
+    p.a.advance(2.9);
     CHECK(!p.a.pullBit(bit));
-    p.a.advance(2.6);
+    CHECK(p.a.peerBusy());
+    p.a.advance(0.2);
     CHECK(!p.a.peerBusy());
     CHECK(p.a.pullBit(bit));
+    while (p.a.pullBit(bit)) {
+    }
 
-    // and an RR clears it at once
-    feed(p.a, NmtDmsLink::encodeRr(true, true, false, 2));
+    // an NR acknowledges like an RR; every NR starts T again
+    feed(p.a, NmtDmsLink::encodeRr(true, true, false, 3));      // frame 2
+    CHECK(p.a.peerBusy() && p.a.unacknowledged() == 2);
+    CHECK(!p.a.pullBit(bit));
+    p.a.advance(2.0);
+    feed(p.a, NmtDmsLink::encodeRr(true, true, false, 3));
+    p.a.advance(2.0);
     CHECK(p.a.peerBusy());
-    feed(p.a, NmtDmsLink::encodeRr(true, false, false, 2));
+
+    // any RR clears it, also one that acknowledges nothing new
+    feed(p.a, NmtDmsLink::encodeRr(true, false, false, 3));
+    CHECK(!p.a.peerBusy() && p.a.unacknowledged() == 2);
+    CHECK(p.a.pullBit(bit));
+    while (p.a.pullBit(bit)) {
+    }
+
+    // a DT of the other side clears it too
+    feed(p.a, NmtDmsLink::encodeRr(true, true, false, 3));
+    CHECK(p.a.peerBusy());
+    const uint8_t words[8] = {0x41, 0, 0, 0, 0, 0, 0, 0};
+    feed(p.a, NmtDmsLink::encodeDt(true, false, p.a.nextRx(), words, true));
     CHECK(!p.a.peerBusy());
 }
 
@@ -412,22 +444,17 @@ static void testNoDataBeforeTheRandomNumbers()
 
     a.startAsCaller();
     a.queueData(reinterpret_cast<const uint8_t*>("abc"), 3);
-    int frames = 0;
-    std::vector<uint8_t> bits;
-
-    while (a.pullBit(bit) && bits.size() < 5000) {
-        bits.push_back(static_cast<uint8_t>(bit));
-    }
-    // two control frames go round (identity, random number), the data frame is not among them
-    CHECK(!bits.empty());
-    for (size_t i = 0; i + 11 <= bits.size(); i++)
+    const std::vector<uint8_t> bits = drain(a, 8 * 127);
+    // the two control frames go round (identity, random number), the data frame is not among them
+    CHECK(bits.size() == 8 * 127);
+    for (size_t frame = 0; frame < 8; frame++)
     {
-        if (text(bits, i, 11) == "00101000111") {
-            frames++;
-        }
+        const size_t at = frame * 127;
+
+        CHECK(text(bits, at, 15) == "101010101010101");
+        CHECK(text(bits, at + 15, 11) == "00101000111");
+        CHECK(text(bits, at + 26, 7) == ((frame & 1) ? "0011001" : "0011000"));    // d=0 s=0 pp=11 n=0 / n=1
     }
-    CHECK(frames == 4);                                     // two passes of the two frames, then the pause
-    CHECK(bits.size() == 127 + 112 + 112 + 112);
 }
 
 static void testResetAndLeaks()
@@ -444,46 +471,36 @@ static void testResetAndLeaks()
     CHECK(!a.pullBit(bit));
 }
 
-// Wire that carries what the test builds, for one side
-static std::vector<uint8_t> drain(NmtDmsLink& link, int limit = 2000)
-{
-    std::vector<uint8_t> out;
-    int bit;
-
-    while (out.size() < static_cast<size_t>(limit) && link.pullBit(bit)) {
-        out.push_back(static_cast<uint8_t>(bit));
-    }
-
-    return out;
-}
-
-// An RR that is old or beyond the window acknowledges nothing; only the frames that went out count.
+// An RR(n) acknowledges the frame n-1 if it is one of the first four frames of the list, with the
+// frames before it, whether or not they went out. Any other number acknowledges nothing.
 static void testAcknowledgementWindow()
 {
     NmtDmsLink a;
     std::vector<uint8_t> d(7 * 20, 0x41);
 
     a.startAsCaller();
-    // the random numbers are exchanged
-    const uint8_t id[8] = {82, 0, 1, 0, 2, 0, 3, '8'};
-    feed(a, NmtDmsLink::encodeRr(true, false, false, 1));          // nothing sent yet: nothing acknowledged
     CHECK(a.unacknowledged() == 2);
-    drain(a, 127 + 112);                                           // both control frames went out
-    feed(a, NmtDmsLink::encodeRr(true, false, false, 1));
+    feed(a, NmtDmsLink::encodeRr(true, false, false, 1));          // acknowledges the identity, not sent yet
     CHECK(a.unacknowledged() == 1);
-    feed(a, NmtDmsLink::encodeDt(true, true, 0, id, true));        // the peer's random number
+    const uint8_t rand[8] = {82, 0, 1, 0, 2, 0, 3, '8'};
+    feed(a, NmtDmsLink::encodeDt(true, true, 0, rand, true));      // the peer's random number
+    CHECK(a.established());
     feed(a, NmtDmsLink::encodeRr(true, false, false, 2));
-    CHECK(a.unacknowledged() == 0 && a.established());
+    CHECK(a.unacknowledged() == 0);
 
     CHECK(a.queueData(d.data(), d.size()));
+    CHECK(a.unacknowledged() == 20);                               // numbers 2, 3, 4, 5, 6, 7, 0, 1, ...
+    feed(a, NmtDmsLink::encodeRr(true, false, false, 2));          // frame 1: not in the list
     CHECK(a.unacknowledged() == 20);
-    drain(a, 4 * 112 + 20);                                        // the window of four went out
-    feed(a, NmtDmsLink::encodeRr(true, false, false, 1));          // old: the frames before
-    CHECK(a.unacknowledged() == 20);
-    feed(a, NmtDmsLink::encodeRr(true, false, false, 7));          // beyond the window
-    CHECK(a.unacknowledged() == 20);
-    feed(a, NmtDmsLink::encodeRr(true, false, false, 6));          // the window
-    CHECK(a.unacknowledged() == 16);
+    feed(a, NmtDmsLink::encodeRr(true, false, false, 3));          // frame 2, the first
+    CHECK(a.unacknowledged() == 19);
+    feed(a, NmtDmsLink::encodeRr(true, false, false, 7));          // frame 6 is now the fourth
+    CHECK(a.unacknowledged() == 15);
+    // RR(5) is NTX-2: the peer wants frame 5 again, which is gone: numbered again from 5
+    feed(a, NmtDmsLink::encodeRr(true, false, false, 5));
+    CHECK(a.unacknowledged() == 15 && a.nextTx() == ((5 + 15) & 7));
+    feed(a, NmtDmsLink::encodeRr(true, false, false, 6));          // the first, now frame 5
+    CHECK(a.unacknowledged() == 14);
 }
 
 // The answering side may queue before it heard anything; its random number is not behind data.
@@ -547,7 +564,7 @@ static void testZeros()
     }
 }
 
-// The format follows the random numbers: a side that asks for 7 bits gets 7 bits both ways.
+// The format follows the random numbers received.
 static void testFormatNegotiation()
 {
     for (int variant = 0; variant < 2; variant++)
@@ -571,7 +588,10 @@ static void testFormatNegotiation()
         p.run(8000, [&] { return done; });
         CHECK(done);
         CHECK(std::string(got.begin(), got.end()) == message);
-        CHECK(!p.a.eightBits() && !p.b.eightBits());
+        // every random number received sets the format: 8 bits if its last byte is '8'. The answer
+        // to a random number always asks for 8 bits.
+        CHECK(p.a.eightBits());
+        CHECK(p.b.eightBits() == (variant == 0));
     }
 }
 
@@ -615,7 +635,7 @@ static void testNotReadyAndPositiveResponse()
     const uint8_t rand[8] = {82, 0, 1, 0, 2, 0, 3, '8'};
 
     a.startAsCaller();
-    drain(a, 127 + 112);
+    drain(a, 2 * 127);
     feed(a, NmtDmsLink::encodeDt(true, true, 0, rand, true));
     feed(a, NmtDmsLink::encodeRr(true, false, true, 2));           // s = 0
     CHECK(a.positiveResponse());
@@ -641,27 +661,112 @@ static void testRecovery()
     // one damaged half of an RR: the other half is taken, the acknowledgement applies once
     NmtDmsLink a;
     a.startAsCaller();
-    drain(a, 127 + 112);
+    drain(a, 2 * 127);
     std::vector<uint8_t> rr = NmtDmsLink::encodeRr(true, false, false, 2);
     rr[30] ^= 1;
     feed(a, rr);
     CHECK(a.unacknowledged() == 0 && a.framesReceived() == 1);
 }
 
-// The pause comes with a repetition, not with the first transmission; an acknowledgement ends it.
-static void testPause()
+// Frames that are not acknowledged go round without a pause, each with its bit sync; the data frames
+// after the random numbers too. From the fourth repetition every frame is followed by 81 ms
+// without FFSK (Annex 21 para 6.5) until something is acknowledged.
+static void testNoPause()
 {
     NmtDmsLink a;
+    int bit;
 
     a.startAsCaller();
-    std::vector<uint8_t> first = drain(a);
-    CHECK(first.size() == 127 + 112 + 112 + 112);                   // two passes in one burst, then the pause
-    int bit;
+    // identity and random number: sent once and repeated three times back to back, then the
+    // first frame of the fourth repetition and the gap
+    const std::vector<uint8_t> bits = drain(a, 20 * 127);
+    CHECK(bits.size() == 9 * 127);
+    for (int frame = 0; frame < 9; frame++) {
+        CHECK(text(bits, static_cast<size_t>(frame) * 127, 15) == "101010101010101");
+    }
+    a.advance(0.080);
     CHECK(!a.pullBit(bit));
-    a.advance(0.05);
-    CHECK(!a.pullBit(bit));
-    a.advance(0.04);
+    a.advance(0.002);
     CHECK(a.pullBit(bit));
+    CHECK(drain(a, 20 * 127).size() == 127 - 1);
+    a.advance(0.081);
+    CHECK(drain(a, 20 * 127).size() == 127);
+
+    // an acknowledgement: the repetitions count again
+    feed(a, NmtDmsLink::encodeRr(true, false, false, 1));
+    CHECK(a.unacknowledged() == 1);
+    a.advance(0.081);
+    CHECK(drain(a, 20 * 127).size() == 5 * 127);
+
+    // the data frames of an established link: 4 frames in the window, each with a bit sync
+    NmtDmsLink b;
+    const uint8_t rand[8] = {82, 0, 1, 0, 2, 0, 3, '8'};
+    const std::vector<uint8_t> data(7 * 6, 0x41);
+
+    b.startAsCaller();
+    feed(b, NmtDmsLink::encodeDt(true, true, 0, rand, true));
+    feed(b, NmtDmsLink::encodeRr(true, false, false, 2));
+    CHECK(b.established() && b.unacknowledged() == 0);
+    b.queueData(data.data(), data.size());
+    drain(b, 77);                                                   // the RR for the peer's random number
+    const std::vector<uint8_t> frames = drain(b, 9 * 127);
+    CHECK(frames.size() == 9 * 127);
+    for (size_t frame = 0; frame < 9; frame++)
+    {
+        CHECK(text(frames, frame * 127, 15) == "101010101010101");
+        CHECK(text(frames, frame * 127 + 15, 11) == "00101000111");
+        CHECK(text(frames, frame * 127 + 26, 7) == std::string("0111") + (frame % 4 == 0 ? "010" : frame % 4 == 1 ? "011" : frame % 4 == 2 ? "100" : "101"));
+    }
+}
+
+// An RR for a frame that is gone (NTX-1 to NTX-3): the frames are numbered again from it
+// (Annex 21 Figure 1, note 2). The speech is closed 200 ms from the start of a frame.
+static void testRestartAndSpeech()
+{
+    NmtDmsLink b;
+    const uint8_t rand[8] = {82, 0, 1, 0, 2, 0, 3, '8'};
+    const std::vector<uint8_t> data(7, 0x41);
+    int bit;
+
+    b.startAsCaller();
+    feed(b, NmtDmsLink::encodeDt(true, true, 0, rand, true));
+    feed(b, NmtDmsLink::encodeRr(true, false, false, 2));
+    CHECK(b.established() && b.unacknowledged() == 0 && b.nextTx() == 2);
+    b.queueData(data.data(), data.size());
+    drain(b, 77);                                                   // the RR for the peer's random number
+
+    // RR(4) refers to the frames under transmission: nothing changes
+    feed(b, NmtDmsLink::encodeRr(true, false, false, 4));
+    std::vector<uint8_t> frame = drain(b, 127);
+    CHECK(text(frame, 26, 7) == "0111010");
+    CHECK(b.nextTx() == 3);
+
+    // RR(7) is before the frame (NTX-3): it is sent again as frame 7
+    feed(b, NmtDmsLink::encodeRr(true, false, false, 7));
+    CHECK(b.unacknowledged() == 1 && b.nextTx() == 0);
+    while (b.pullBit(bit)) {
+    }
+    b.advance(1.0);
+    frame = drain(b, 127);
+    CHECK(text(frame, 26, 7) == "0111111");
+    feed(b, NmtDmsLink::encodeRr(true, false, false, 0));
+    CHECK(b.unacknowledged() == 0);
+
+    // a frame that goes out, or comes in, closes the speech for 200 ms
+    NmtDmsLink a;
+
+    CHECK(!a.speechClosed());
+    a.startAsCaller();
+    CHECK(a.pullBit(bit) && a.speechClosed());
+    a.advance(0.199);
+    CHECK(a.speechClosed());
+    a.advance(0.002);
+    CHECK(!a.speechClosed());
+    NmtDmsLink c;
+    feed(c, NmtDmsLink::encodeRr(true, false, false, 0));
+    CHECK(c.speechClosed());
+    c.advance(0.2);
+    CHECK(!c.speechClosed());
 }
 
 // Two stations that both call: the first frame decides, the other one gives way.
@@ -674,41 +779,6 @@ static void testBothCall()
     p.run(4000);
     CHECK(p.a.framesReceived() == 0 && p.b.framesReceived() == 0);        // each takes the other for an echo
     CHECK(!p.a.established() && !p.b.established());
-}
-
-// The pause of 81 ms is real time: it starts when the last frame of a pass is out.
-static void testPauseRealTime()
-{
-    NmtDmsLink a;
-    std::vector<int> silent;
-    int bit;
-    size_t sent = 0;
-
-    a.startAsCaller();
-    for (int step = 0; step < 1200; step++)
-    {
-        if (a.pullBit(bit)) {
-            sent++;
-        } else {
-            silent.push_back(step);
-        }
-        a.advance(1.0 / 1200.0);
-    }
-    // two passes of two frames in one burst, then 97 or 98 steps of silence
-    CHECK(sent > 463);
-    CHECK(!silent.empty() && silent.front() == 463);
-    size_t run = 0;
-
-    while (run < silent.size() && silent[run] == silent.front() + static_cast<int>(run)) {
-        run++;
-    }
-    CHECK(run >= 97 && run <= 98);
-    // an acknowledgement ends the pause at once
-    NmtDmsLink b;
-    b.startAsCaller();
-    drain(b);
-    feed(b, NmtDmsLink::encodeRr(true, false, false, 1));
-    CHECK(b.pullBit(bit));
 }
 
 static void testPendingAndMasked()
@@ -724,21 +794,21 @@ static void testPendingAndMasked()
     CHECK(c.queueData(big.data(), big.size()));
     CHECK(!c.queueData(big.data(), 1));
 
-    // a 7-bit peer: the eighth bits are lost, and the link says how many
-    NmtDmsLink a8(true), b7(false);
+    // a caller that asks for 7 bits sends 7 bits: the eighth bits are lost, and the link says how many
+    NmtDmsLink a7(false), b8(true);
     Pair p;
     std::vector<uint8_t> got;
     bool done = false;
 
-    std::swap(p.a, a8);
-    std::swap(p.b, b7);
+    std::swap(p.a, a7);
+    std::swap(p.b, b8);
     p.b.setDataHandler([&](const std::vector<uint8_t>& dd) { got.insert(got.end(), dd.begin(), dd.end()); });
     p.a.setAllSentHandler([&] { done = true; });
     p.a.startAsCaller();
     const uint8_t mixed[] = {0xc1, 0xc2, 0x41};
     p.a.queueData(mixed, sizeof(mixed));
     p.run(8000, [&] { return done; });
-    CHECK(done && !p.a.eightBits());
+    CHECK(done);
     CHECK(got == std::vector<uint8_t>({0x41, 0x42, 0x41}));
     CHECK(p.a.maskedBytes() == 2);
 }
@@ -759,7 +829,8 @@ static void testReadyAgain()
     CHECK(out.size() == 77 && text(out, 26, 7) == "1101001");     // RR(1)
 }
 
-// The first frame needs no history of good bits; the minimum quality cannot be NaN; wrong stuffing is no frame.
+// The first frame needs no history of good bits; the minimum quality cannot be NaN; the 1 1 after
+// every 7 bits are not looked at.
 static void testQualityStart()
 {
     const uint8_t id[8] = {73, '1', '1', '2', '3', '4', '5', '6'};
@@ -778,7 +849,7 @@ static void testQualityStart()
     bad[15 + 11 + 7] = 0;
     NmtDmsLink d;
     feed(d, bad);
-    CHECK(d.framesReceived() == 0 && d.framesRejected() == 1);
+    CHECK(d.framesReceived() == 1 && d.framesRejected() == 0);
 }
 
 // A callback that resets the link ends the handling of that frame.
@@ -819,8 +890,47 @@ static void testResetInCallback()
     CHECK(sent == 2 && got.size() == 20);
 }
 
+// A random number from the peer is answered once with a random number that asks for 8 bits, whatever
+// it asked for, and data may go at once, before the answer is acknowledged.
+static void testPeerRandom()
+{
+    NmtDmsLink b(true);
+    const uint8_t id[8] = {73, 3, 0, 0, 0, 0, 0, 0};
+    const uint8_t rand7[8] = {82, 0, 1, 0, 2, 0, 3, '7'};
+
+    feed(b, NmtDmsLink::encodeDt(false, true, 0, id, true));
+    CHECK(!b.established());
+    feed(b, NmtDmsLink::encodeDt(false, true, 1, rand7, true));
+    CHECK(b.established() && !b.eightBits());
+    feed(b, NmtDmsLink::encodeDt(false, true, 1, rand7, true));    // again: no second answer
+    CHECK(b.unacknowledged() == 1);
+
+    const uint8_t data[] = {'a', 'b', 'c'};
+
+    CHECK(b.queueData(data, sizeof(data)));
+    CHECK(b.unacknowledged() == 2);
+    const std::vector<uint8_t> bits = drain(b, 77 + 2 * 127);
+    CHECK(bits.size() == 77 + 2 * 127);
+    CHECK(text(bits, 26, 7) == "1101010");                          // RR(2), d = 1
+    CHECK(text(bits, 77 + 26, 7) == "1011000");                     // the random number, s = 0, n = 0
+    CHECK(text(bits, 77 + 26 + 9 * 8, 7) == "0111000");             // '8'
+    CHECK(text(bits, 77 + 127 + 26, 7) == "1111001");               // the data, s = 1, n = 1
+
+    // a random number that asks for 8 bits sets 8 bits, one that asks for 7 sets 7 bits
+    const uint8_t rand8[8] = {82, 0, 1, 0, 2, 0, 3, '8'};
+    NmtDmsLink c(false);
+
+    feed(c, NmtDmsLink::encodeDt(false, true, 0, rand8, true));
+    CHECK(c.eightBits());
+    feed(c, NmtDmsLink::encodeDt(false, true, 1, rand7, true));
+    CHECK(!c.eightBits());
+    feed(c, NmtDmsLink::encodeDt(false, true, 2, rand8, true));
+    CHECK(c.eightBits());
+}
+
 int main()
 {
+    testPeerRandom();
     testAcknowledgementWindow();
     testResponderQueuesFirst();
     testZeros();
@@ -828,9 +938,9 @@ int main()
     testDuplicatesAndStart();
     testNotReadyAndPositiveResponse();
     testRecovery();
-    testPause();
+    testNoPause();
+    testRestartAndSpeech();
     testBothCall();
-    testPauseRealTime();
     testPendingAndMasked();
     testReadyAgain();
     testQualityStart();

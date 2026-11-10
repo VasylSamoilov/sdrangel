@@ -32,8 +32,9 @@ namespace modemnmt
 {
 
 // The data link of the NMT data and message service (DMS, NMT Doc 450-3 Annex 21): user data in the
-// speech path of a traffic channel, 1200 bit/s FFSK, in frames of its own. No timers and no audio:
-// the caller pulls the bits to send and pushes the bits it receives. Not thread safe.
+// speech path of a traffic channel, 1200 bit/s FFSK, in frames of its own. No audio: the caller
+// pulls the bits to send, pushes the bits it receives and tells the time that went by. Not thread
+// safe.
 //
 // A DT frame is 127 bits: bit sync (15), frame sync 00101000111 (11), a label d s p p n n n and 8 words
 // of 7 bits (user data, or a control type and 7 words), a CRC-16 of 16 bits. After every 7 bits two
@@ -70,9 +71,9 @@ public:
     void setEstablishedHandler(EventHandler handler) { m_onEstablished = std::move(handler); }
     // The random number we send (3 bytes); without this it is random.
     void setRandom(uint8_t r1, uint8_t r2, uint8_t r3) { m_random[0] = r1; m_random[1] = r2; m_random[2] = r3; m_randomSet = true; }
-    // The identity we send, 7 characters (country digit and six digits).
+    // An identity for the caller; the identity frame itself carries the fixed id 3.
     void setIdentity(const char* id7);
-    // The receiver cannot take more data (NR is sent instead of RR). The sender waits at most 3 s.
+    // The receiver cannot take more data (NR is sent instead of RR).
     void setReady(bool ready);
 
     // This side calls: it sends the first frames (identity, random number) and uses d = 0.
@@ -90,15 +91,20 @@ public:
     // to reach `minQuality` to take a frame sync.
     void pushBit(int bit, double quality, double level);
     void setMinQuality(double quality) { m_minQuality = (quality >= 0.0) ? quality : 0.0; }
-    // Seconds that went by: the pause before frames are sent again (81 ms) and the time the
-    // receiver of the other side may be full (3 s) run on this clock. It has to be called.
+    // Seconds that went by: T, the time an NR of the other side holds new frames back (3 s), the
+    // 81 ms gaps between repeated frames and the closed speech path run on this clock. It has to
+    // be called.
     void advance(double seconds);
 
     bool established() const { return m_established; }
     bool callerSide() const { return m_caller; }
+    // The format of the last random number received decides (8 if it says 8, else 7).
     bool eightBits() const { return m_eightBits; }
     bool idle() const { return m_txList.empty() && m_pending.empty() && !m_rrPending && m_txPos >= m_txBits.size(); }
     bool peerBusy() const { return m_peerBusy; }
+    // The speech path has to be closed in both directions: 200 ms from the start of a frame that
+    // goes out or comes in (Annex 21 para 6.6), on the clock of advance().
+    bool speechClosed() const { return m_speechClosed > 0.0; }
     // The peer answered our random number with a positive response (s = 0): it wants scrambled data,
     // which this link does not do.
     bool positiveResponse() const { return m_positiveResponse; }
@@ -125,8 +131,9 @@ private:
     };
 
     void queueFrame(bool control, const uint8_t data[kDataWords]);
-    void queueRand();
+    void queueRand(char format);
     bool ack(int n);
+    void restartFrom(int n);
     void checkEstablished();
     void flushPending();
     bool scheduleFrame();
@@ -147,16 +154,14 @@ private:
     bool m_randReceived;
     bool m_randSent;
     bool m_randomSet;
-    bool m_peerData;                // a user data frame came from the peer
     bool m_positiveResponse;
     bool m_ready;
     bool m_nrSent;                  // the last answer was an NR
-    bool m_gapPending;              // the pause starts when the frame that is going out is done
     size_t m_maskedBytes;
     uint32_t m_epoch;               // counts reset(): a callback that resets the link ends the frame handling
     std::vector<uint8_t> m_pending; // user bytes that wait for the exchange of the random numbers
-    bool m_peerBusy;
-    double m_peerBusyTime;
+    bool m_peerBusy;                // an NR came: no new frames until an RR, a DT or T
+    double m_peerBusyTime;          // seconds since the last NR
     uint8_t m_random[3];
     char m_identity[8];
     std::vector<uint8_t> m_peerIdentity;
@@ -165,12 +170,12 @@ private:
     std::deque<TxFrame> m_txList;   // not acknowledged, in order, the first at m_txAck
     int m_nTx;                      // number of the next frame we make
     size_t m_txIndex;               // which of the first frames goes next
-    double m_gapTime;               // seconds of pause before the next frame
-    int m_passes;                   // times all frames went out since the last acknowledgement
-    size_t m_sentCount;             // frames of the list that went out at least once
+    int m_passes;                   // repetitions of the frames since the last acknowledgement, at most 4
+    bool m_gapPending;              // the gap starts when the frame that is going out is done
+    double m_gapTime;               // seconds of the gap still to come
+    double m_speechClosed;          // seconds the speech path stays closed
     bool m_rrPending;
     bool m_rrNr;
-    bool m_burst;                   // frames follow each other: no bit sync
     std::vector<uint8_t> m_txBits;
     size_t m_txPos;
     bool m_dataQueued;              // user data waits for the acknowledgement

@@ -31,8 +31,11 @@ namespace modemnmt
 
 // The short message service of NMT (NMT Doc 450-3 and 900-3 Annex 24): the relay layer (RP) and the
 // transfer layer (TP) of GSM 03.40 / 04.11 in the octets that go over the data link. Pure functions,
-// no state. Text is UTF-8 at the interface; messages are sent in the GSM default alphabet.
-// The national 8-bit sets (DCS 0x30..0x3F) are received with their first 128 characters only.
+// no state. Text is UTF-8 at the interface, an escape <0xNN> stands for the character code NN.
+// Text is sent in the GSM default alphabet (DCS 0), characters outside it as '?'; a code of 80h or
+// above sends the message in the NMT 8-bit set 0 (DCS 0x30), one octet per character. Received
+// 8-bit sets (DCS 0x30..0x3F) have their first 128 characters decoded as GSM characters, the
+// octets above come as escapes <0xNN>.
 
 // The time a message was received at the service centre.
 struct SmsTime
@@ -50,6 +53,8 @@ struct SmsTime
 struct SmsDeliver
 {
     std::string originator;     // "+35849654321" or digits
+    int originatorType = -1;    // address type (0..7) and numbering plan (0..15); -1: international
+    int originatorPlan = -1;    // if the number starts with '+' else unknown, plan of the telephone network
     std::string text;           // UTF-8
     SmsTime time;
     bool moreWaiting = false;   // more messages wait for the phone in the service centre
@@ -118,7 +123,7 @@ enum SmsFailureCause : uint8_t
 MODEMNMT_API std::vector<uint8_t> smsHeader(const std::string& destination = "");
 
 // RP-MT-DATA with an SMS-DELIVER: the octets after the header. False if the originator or the text
-// cannot be coded (not a number, characters outside the alphabet are sent as '?', text over 160).
+// cannot be coded (no digit in the originator or over 20 digits, text over 160 characters).
 MODEMNMT_API bool smsBuildDeliver(const SmsDeliver& message, uint8_t rpRef, std::vector<uint8_t>& out);
 // RP-ACK (answer to a submit), RP-ERROR with a cause, and "no messages waiting" (to the phone).
 MODEMNMT_API std::vector<uint8_t> smsRpAckToPhone(uint8_t rpRef);
@@ -131,7 +136,8 @@ MODEMNMT_API SmsParse smsParseFromPhone(const uint8_t* data, size_t length, SmsF
 
 // The pieces, public for the tests.
 // Address: length in semi-octets, type, digits (0 is 1010, * 1011, # 1100, + 1101, filler 1111).
-MODEMNMT_API bool smsEncodeAddress(const std::string& number, std::vector<uint8_t>& out);
+// Up to 20 digits; characters that are no digit are left out. type and plan -1: see SmsDeliver.
+MODEMNMT_API bool smsEncodeAddress(const std::string& number, std::vector<uint8_t>& out, int type = -1, int plan = -1);
 MODEMNMT_API SmsParse smsDecodeAddress(const uint8_t* data, size_t length, std::string& number, size_t& consumed);
 MODEMNMT_API std::vector<uint8_t> smsEncodeTime(const SmsTime& time);
 MODEMNMT_API SmsTime smsDecodeTime(const uint8_t* data);
