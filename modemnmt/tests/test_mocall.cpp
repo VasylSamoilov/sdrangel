@@ -64,13 +64,13 @@ static void testCallFlow()
     CHECK(tc.state() == State::MoComplete);
     CHECK(tc.dspMode() == DspMode::Frame);
 
-    // address complete four times, idle frames, then the call is connected
+    // address complete four times, compandor in four times, then the call is connected
     for (int i = 0; i < 4; i++) {
         CHECK(isLineSignal(pull(tc), 6));
     }
     for (int i = 0; i < 4; i++)
     {
-        CHECK(pull(tc).mt == MessageType::Frame6);
+        CHECK(isLineSignal(pull(tc), 5));
         CHECK(tc.state() == State::MoComplete);
     }
     FrameBits bits;

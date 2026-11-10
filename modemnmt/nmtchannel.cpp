@@ -73,20 +73,6 @@ bool configValid(const ChannelConfig& c, double sampleRate, double deviationFact
         && deviationFactor > 0.0 && deviationFactor <= 100.0;
 }
 
-// Subscriber digits are 1..9 and 0. Anything else is a damaged frame: the code that protects
-// the frames corrects bursts but cannot tell that it failed.
-bool plainDigits(const std::string& digits)
-{
-    for (char c : digits)
-    {
-        if (c < '0' || c > '9') {
-            return false;
-        }
-    }
-
-    return true;
-}
-
 MessageType idleMessageType(ChannelType type)
 {
     switch (type)
@@ -134,6 +120,12 @@ const int kLeaveIdleFrames = 4;
 const int kPowerOrderFrames = 8;
 // Idle frames after the identity before the order to answer by itself (scheme B2: 6 x 6).
 const int kAutoanswerWait = 6;
+// The standard has the forced release of the MFT state (NMT Doc 450-1 4.4.1.9, states 13-16) and
+// the end of a register recall "after timeout" (4.4.1.10, state 9), without values. These are
+// ours: a phone in the MFT state that sends no frame for kMftSilence is let out; a recall waits
+// kRecallFirstDigit for the first digit and kRecallNextDigit for each next one. If phones need
+// longer pauses, the simple fallback is one 30 s timer restarted with every digit, and none for
+// the MFT state.
 const double kMftSilence = 10.0;
 const double kRecallFirstDigit = 30.0;
 const double kRecallNextDigit = 8.0;
@@ -144,9 +136,8 @@ const int kConfirmFrames = 2;
 const double kDiallingTimeout = 1.0;
 // Dial tone frequency
 const double kDialToneHz = 425.0;
-// How long the phone may ring; a message call that rings a phone nobody answers.
+// How long the phone may ring, for a call and for a message call.
 const double kRingingTimeout = 60.0;
-const double kMessageRingTimeout = 15.0;
 // The received audio is muted this long after a frame sync (a little more than two frames).
 const double kMuteSeconds = 0.280;
 // Seconds to detect the supervisory tone after the call is connected, and to lose it before the
@@ -195,11 +186,12 @@ NmtChannel::NmtChannel(const ChannelConfig& config, double sampleRate, double de
     m_newPower(0),
     m_haveLastDigit(false),
     m_lastDigitOdd(false),
-    m_mftIdleSeen(false),
     m_autoanswerGo(false),
     m_autoanswerAcked(false),
     m_mwiLead(0),
-    m_mwiAcked(false)
+    m_mwiAcked(false),
+    m_compandor(8000.0),
+    m_compandorOn(false)
 {
     m_modem.setFrameSource([this](FrameBits& bits) { return nextFrame(bits); });
     m_modem.setFrameSink([this](const RxFrame& rx) { receiveFrame(rx); });
@@ -210,15 +202,23 @@ NmtChannel::NmtChannel(const ChannelConfig& config, double sampleRate, double de
         }
     });
     m_superDetector.setSink([this](bool detected, double) { onSupervisory(detected); });
-    m_rxAudio.setSink([this](const float* samples, int count) {
+    m_rxAudio.setSink([this](float* samples, int count) {
         // the call may have been released by an earlier block of this buffer
-        if (callAudioUp()) {
-            m_host->audioFromMobile(*m_transaction, samples, count);
+        if (!callAudioUp()) {
+            return;
         }
+        if (m_compandorOn) {
+            m_compandor.expand(samples, count);
+        }
+        m_host->audioFromMobile(*m_transaction, samples, count);
     });
     m_txAudio.setPull([this](float* samples, int count) {
-        if (callAudioUp()) {
+        if (callAudioUp())
+        {
             m_host->audioToMobile(*m_transaction, samples, count);
+            if (m_compandorOn) {
+                m_compandor.compress(samples, count);
+            }
         }
     });
 }
@@ -420,6 +420,9 @@ bool NmtChannel::nextFrame(FrameBits& bits)
     case State::PowerChange:
         frame = txPowerChange();
         break;
+    case State::MwiInCall:
+        frame = txMwiInCall();
+        break;
     case State::RecallProceed:
         frame = txRecallProceed();
         break;
@@ -478,7 +481,7 @@ int NmtChannel::render(float* samples, int length, bool add)
             // while the call is switched or a procedure of the call runs, the supervisory tone stays on
             const bool tone = (m_state == State::ScipOrder || m_state == State::ScipIdent || m_state == State::ScipIdentReq
                             || m_state == State::MftIn || m_state == State::MftOut || m_state == State::PowerChange
-                            || m_state == State::RecallProceed || m_state == State::RecallEnd);
+                            || m_state == State::RecallProceed || m_state == State::RecallEnd || m_state == State::MwiInCall);
             const int start = pos;
             const int count = m_valid ? m_modem.renderFrames(samples + pos, length - pos, add) : 0;
             framed += count;
@@ -686,6 +689,7 @@ bool NmtChannel::inCallState(State state)
     case State::RecallDigits:
     case State::RecallEnd:
     case State::ScipOrder:
+    case State::MwiInCall:
         return true;
     default:
         return false;
@@ -811,13 +815,22 @@ Frame NmtChannel::txMtRinging()
     return frame;
 }
 
-// The phone answered: idle frames for 4 frames (the compandor order would be here), then audio.
+// The phone answered: L(5) compandor in for 4 frames (idle frames without the compandor, and
+// for a message call, which has no speech), then audio (scheme B, NMT Doc 450-1 4.4.1.2).
 Frame NmtChannel::txMtComplete()
 {
     Frame frame;
+    const bool compandor = m_config.compandor && !m_transaction->messageCall;
 
-    frame.mt = MessageType::Frame6;
-    if (++m_txFrameCount == 4)
+    if (compandor) {
+        frame = lineSignalFrame(5);
+    } else {
+        frame.mt = MessageType::Frame6;
+    }
+    if (++m_txFrameCount == 1) {
+        startCompandor(compandor);
+    }
+    if (m_txFrameCount == 4)
     {
         // a phone that answered a ringing message call hears nothing: the indicators and the release
         if (m_transaction->messageCall) {
@@ -858,7 +871,8 @@ Frame NmtChannel::txMoConfirm()
     return frame;
 }
 
-// L(6): address complete, four times. Then idle frames, and the call is connected.
+// L(6): address complete, four times. Then L(5) compandor in (idle frames without the
+// compandor) four times, and the call is connected.
 Frame NmtChannel::txMoComplete()
 {
     Frame frame;
@@ -869,7 +883,14 @@ Frame NmtChannel::txMoComplete()
     }
     else
     {
-        frame.mt = MessageType::Frame6;
+        if (m_config.compandor) {
+            frame = lineSignalFrame(5);
+        } else {
+            frame.mt = MessageType::Frame6;
+        }
+        if (m_txFrameCount == kAddressCompleteFrames + 1) {
+            startCompandor(m_config.compandor);
+        }
         if (m_txFrameCount == kActiveFrame) {
             enterActive();
         }
@@ -878,12 +899,19 @@ Frame NmtChannel::txMoComplete()
     return frame;
 }
 
+// The compandor order goes out: the speech of this call is companded from now on, both sides
+// starting from a level of 1.0.
+void NmtChannel::startCompandor(bool on)
+{
+    m_compandorOn = on;
+    m_compandor.reset();
+}
+
 // The call is connected: speech, and the phone has to send its supervisory tone within a few
 // seconds.
 void NmtChannel::enterActive()
 {
     m_state = State::Active;
-    m_mftIdleSeen = false;
     setDspMode(DspMode::Audio);
     m_txAudio.reset();
     m_rxAudio.reset();
@@ -918,9 +946,10 @@ Frame NmtChannel::txMtRelease()
 
 // ---- procedures during the conversation (NMT Doc 450-1 para 4.4.1.8 to 4.4.1.10) ----
 
-// The rule of NMT Doc 450-1 para 4.7.2.1 for digit frames: a frame is a new digit when its position
-// marker (14a: S(0), 14b: S(15)) differs from the one of the digit taken before, however many
-// frames the digit is repeated; the digit is sent three times and has to agree.
+// The rule of NMT Doc 450-1 para 4.7.2.1 for digit frames: the channel number or the identity is
+// ours, the position marker (14a: S(0)S(0), 14b: S(15)S(15)) is correct and the three S(n) agree.
+// A frame is a new digit when its marker differs from the one of the digit taken before, however
+// many frames the digit is repeated; the first digit may come in either frame.
 NmtChannel::DigitResult NmtChannel::takeLooseDigit(const Frame& frame, char& digit)
 {
     const bool odd = (frame.mt == MessageType::Frame14a);
@@ -928,7 +957,8 @@ NmtChannel::DigitResult NmtChannel::takeLooseDigit(const Frame& frame, char& dig
     if (!odd && frame.mt != MessageType::Frame14b) {
         return DigitResult::Foreign;
     }
-    if (!matchChannel(frame) || !matchArea(frame) || !matchSubscriber(frame)) {
+    // the channel number or the identity has to be ours (frame 14 has no area information)
+    if (!matchChannel(frame) && !matchSubscriber(frame)) {
         return DigitResult::Foreign;
     }
     if ((frame.digit >> 12) != (odd ? 0x00u : 0xffu)) {
@@ -951,26 +981,14 @@ NmtChannel::DigitResult NmtChannel::takeLooseDigit(const Frame& frame, char& dig
 // being switched to another channel is left alone.
 void NmtChannel::rxActive(const Frame& frame)
 {
-    // A phone in the converter state sends idle frames while it waits for our answer to L(7).
-    if (frame.mt == MessageType::Frame15) {
-        m_mftIdleSeen = true;
-    }
-    if (frame.mt != MessageType::Frame13a || !matchChannel(frame) || !matchSubscriber(frame) || m_transaction->scipTarget) {
+    // a line signal needs the identity, not the channel number (NMT Doc 450-1 4.7.2.3b)
+    if (frame.mt != MessageType::Frame13a || !matchSubscriber(frame) || m_transaction->scipTarget) {
         return;
     }
 
     const int signal = lineSignalMajority(frame.lineSignal, 5, 3);
 
-    // L(7) again: the phone did not hear our answer and leaves the converter state once more.
-    // The copies of an answer to a forced release that come after we left are not that; the
-    // phone that waits sends idle frames in between.
-    if (signal == 7)
-    {
-        if (m_mftIdleSeen) {
-            beginMftOut();
-        }
-        return;
-    }
+    // L(7) is only taken in the converter state
     if (signal != 8 && signal != 5) {
         return;
     }
@@ -1022,7 +1040,7 @@ void NmtChannel::rxMft(const Frame& frame)
 
     if (frame.mt == MessageType::Frame13a)
     {
-        if (matchChannel(frame) && matchSubscriber(frame) && lineSignalMajority(frame.lineSignal, 5, 3) == 7) {
+        if (matchSubscriber(frame) && lineSignalMajority(frame.lineSignal, 5, 3) == 7) {
             beginMftOut();
         }
         return;
@@ -1160,26 +1178,7 @@ Frame NmtChannel::txRecallProceed()
 
 void NmtChannel::rxRecall(const Frame& frame)
 {
-    // The R button again (after a wrong digit): the digits so far are over, a new recall starts.
-    if (frame.mt == MessageType::Frame13a)
-    {
-        if (matchChannel(frame) && matchSubscriber(frame) && lineSignalMajority(frame.lineSignal, 5, 3) == 5)
-        {
-            NmtTransaction* const transaction = m_transaction;
-            const std::string digits = m_recallDigits;
-
-            m_state = State::RecallProceed;
-            m_txFrameCount = 0;
-            m_digitCount = 0;
-            m_haveLastDigit = false;
-            m_recallDigits.clear();
-            setDspMode(DspMode::Frame);
-            m_timer->start(kStateWatchdog);
-            m_host->recallEnded(*transaction, digits);
-        }
-        return;
-    }
-
+    // only digits are taken here; the recall ends with the timeout (NMT Doc 450-1 4.4.1.10, state 9)
     char digit = 0;
     const DigitResult result = takeLooseDigit(frame, digit);
 
@@ -1457,9 +1456,10 @@ bool NmtChannel::matchSubscriber(const Frame& frame) const
 
 void NmtChannel::process(const Frame& frame)
 {
-    // A frame of the phone of this call shows that it is there: while the alarm for a lost
-    // tone is running, it is started again. (The 3 s for the first tone are not extended.)
-    if (m_state == State::Active && m_alarmRunning && matchSubscriber(frame)) {
+    // Every frame received in the conversation starts the timer for a lost tone again (20 s).
+    // A frame while the tone is there leaves this timer running: only a change of the tone stops
+    // it again, so the call is released 20 s later if the tone stays.
+    if (m_state == State::Active && m_superDetector.enabled() && !m_config.loopback) {
         m_timer->start(kSupervisoryLost);
     }
 
@@ -1483,9 +1483,10 @@ void NmtChannel::process(const Frame& frame)
     if (frame.mt == MessageType::Frame13a && m_state != State::Idle
      && m_state != State::MoRelease && m_state != State::MtRelease && m_state != State::MwiClear && !scipTargetState())
     {
-        // three of five characters have to agree on L(1); other line signals (the answer, for
-        // one) are for the state
-        if (matchChannel(frame) && matchSubscriber(frame) && lineSignalMajority(frame.lineSignal, 5, 3) == 1)
+        // the identity and three of five characters have to agree on L(1), the channel number is
+        // not checked (NMT Doc 450-1 4.7.2.3b); other line signals (the answer, for one) are for
+        // the state
+        if (matchSubscriber(frame) && lineSignalMajority(frame.lineSignal, 5, 3) == 1)
         {
             // the state changes before the exchange is told, so what the handler does lands
             // on a channel that is already releasing
@@ -1589,10 +1590,9 @@ void NmtChannel::rxIdle(const Frame& frame)
         return;
     }
 
+    // the identity is taken as received: a value that is no digit (0 and 11..15) becomes a
+    // letter 'a'..'f' in the number
     NmtSubscriber subscriber = subscriberOf(frame);
-    if (!plainDigits(subscriber.number) || !plainDigits(std::string(1, subscriber.country))) {
-        return;
-    }
 
     if (isCallingChannel() && (frame.mt == MessageType::Frame10a || frame.mt == MessageType::Frame10d
                              || frame.mt == MessageType::Frame11b))
@@ -1891,7 +1891,7 @@ Frame NmtChannel::txMtAutoanswer()
     m_state = State::MtRinging;
     m_txFrameCount = 0;
     m_callerIdCount = 0;
-    m_timer->start(kMessageRingTimeout);
+    m_timer->start(kRingingTimeout);
     return frame;
 }
 
@@ -1914,6 +1914,44 @@ void NmtChannel::rxMtAutoanswer(const Frame& frame)
     const int sent = std::max(0, m_txFrameCount - kAckFrames);
 
     beginMwiClear(std::max(0, kAckIdleFrames - sent), false);
+}
+
+// Frame 5c with all message indicators of the call.
+Frame NmtChannel::mwiFrame() const
+{
+    Frame frame = baseFrame(MessageType::Frame5c);
+
+    frame.msCountry = static_cast<uint8_t>(digitsToValue(std::string(1, m_transaction->subscriber.country)));
+    frame.msNumber = static_cast<uint32_t>(digitsToValue(m_transaction->subscriber.number));
+    frame.waitingInfo = mwiWireInfo(m_transaction->mwiFlags);
+    return frame;
+}
+
+// Indicators that come during the conversation go out at once, 5c twice, and the conversation
+// goes on; they go out again with the clearing.
+bool NmtChannel::beginMwiInCall()
+{
+    if (!m_host || !m_transaction || m_state != State::Active || !m_transaction->callUp || m_transaction->scipTarget) {
+        return false;
+    }
+
+    m_state = State::MwiInCall;
+    m_txFrameCount = 0;
+    m_alarmRunning = false;
+    setDspMode(DspMode::Frame);
+    m_timer->start(kStateWatchdog);
+    return true;
+}
+
+Frame NmtChannel::txMwiInCall()
+{
+    // both frames are out: the frame made now is not sent, the speech comes back
+    if (++m_txFrameCount > 2)
+    {
+        enterActive();
+        return Frame();
+    }
+    return mwiFrame();
 }
 
 // The indicators go out right before the clearing signal (4.4.1.16): 5c twice, L(15) four times.
@@ -1943,12 +1981,8 @@ Frame NmtChannel::txMwiClear()
 
     if (k <= 2)
     {
-        frame = baseFrame(MessageType::Frame5c);
-        frame.msCountry = static_cast<uint8_t>(digitsToValue(std::string(1, m_transaction->subscriber.country)));
-        frame.msNumber = static_cast<uint32_t>(digitsToValue(m_transaction->subscriber.number));
-        frame.waitingInfo = mwiWireInfo(m_transaction->mwiFlags);
         m_transaction->mwiResult = NmtServiceEnd::NoAck;
-        return frame;
+        return mwiFrame();
     }
 
     frame = lineSignalFrame(15);
@@ -2093,6 +2127,7 @@ void NmtChannel::goIdle()
     }
     m_transaction = nullptr;
     m_state = State::Idle;
+    m_compandorOn = false;
     m_txFrameCount = 0;
     m_dialled.clear();
     m_recallDigits.clear();
@@ -2131,6 +2166,7 @@ void NmtChannel::onTimer()
     case State::MftIn:
     case State::MftOut:
     case State::RecallEnd:
+    case State::MwiInCall:
         // this channel stopped sending: the conversation goes on
         enterActive();
         return;

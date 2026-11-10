@@ -100,8 +100,8 @@ private:
 class MODEMNMT_API RxAudioChain
 {
 public:
-    // The samples are valid during the call only.
-    using Sink = std::function<void(const float* samples, int count)>;
+    // The samples are valid during the call only; the sink may change them in place.
+    using Sink = std::function<void(float* samples, int count)>;
 
     // supervisory 1..4 puts the notch on that tone (if it is below 0.45 of the sample rate),
     // other values leave it out

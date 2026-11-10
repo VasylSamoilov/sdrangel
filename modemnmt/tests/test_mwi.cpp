@@ -35,7 +35,7 @@ struct Station
     struct Report { uint8_t flags; NmtServiceEnd result; };
     std::vector<Report> reports;
 
-    explicit Station(bool withTc = true, bool withCc = true) :
+    explicit Station(bool withTc = true, bool withCc = true, bool compandor = false) :
         clock(kRate),
         system(clock)
     {
@@ -47,6 +47,7 @@ struct Station
             ChannelConfig c = config(System::Nmt450, ChannelType::Tc, 100);
 
             c.supervisory = 2;
+            c.compandor = compandor;
             tc = &system.addChannel(c, kRate, 1.0);
         }
         connect(system, calls);
@@ -321,9 +322,11 @@ static void testNoAcknowledgement()
 
 static void testPhoneRings()
 {
-    // a phone that does not know the order is rung; the exchange hears nothing about it
+    // a phone that does not know the order is rung; the exchange hears nothing about it. A
+    // message call has no speech: no compandor order, also with the compandor.
+    for (bool compandor : {false, true})
     {
-        Station s;
+        Station s(true, true, compandor);
 
         s.toAutoanswer();
         s.phoneIdle();
@@ -339,7 +342,7 @@ static void testPhoneRings()
         CHECK(s.tc->state() == State::MtComplete);
         CHECK(s.answered == 0);
         for (int i = 0; i < 4; i++) {
-            pull(*s.tc);
+            CHECK(pull(*s.tc).mt == MessageType::Frame6);
         }
         CHECK(s.tc->state() == State::MwiClear);
         for (int i = 0; i < 2; i++) {
@@ -357,7 +360,7 @@ static void testPhoneRings()
             pull(*s.tc);
         }
         CHECK(s.tc->state() == State::MtRinging);
-        s.wait(14.5);
+        s.wait(59.5);
         CHECK(s.tc->state() == State::MtRinging);
         s.wait(1.0);
         CHECK(s.tc->state() == State::MtRelease);
@@ -479,12 +482,22 @@ static void testIndicatorsAtClearing()
         checkIndicators(pull(*s.tc), s.phone, MwiSms | MwiEmail);
     }
 
-    // a call that ends in a procedure state still carries them
+    // in the conversation they go out at once, twice, and the conversation goes on; in a
+    // procedure of the call they wait for the clearing. A call that ends in a procedure state
+    // still carries them.
     {
         Station s;
 
         s.connectCall();
         CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiSms));
+        CHECK(s.tc->state() == State::MwiInCall);
+        CHECK(s.tc->dspMode() == DspMode::Frame);
+        checkIndicators(pull(*s.tc), s.phone, MwiSms);
+        checkIndicators(pull(*s.tc), s.phone, MwiSms);
+        CHECK(!moreFrames(*s.tc));
+        CHECK(s.tc->state() == State::Active);
+        CHECK(s.tc->dspMode() == DspMode::Audio);
+        CHECK(s.reports.empty());
         phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0x88888), 1);
         CHECK(s.tc->state() == State::MftIn);
         CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiFax));
@@ -519,20 +532,21 @@ static void testIndicatorsAtClearing()
     }
 }
 
-// A message call that is not on a traffic channel yet gives way to the phone and to calls.
+// A message call that is not on a traffic channel yet gives way to the phone; a call from the
+// exchange finds the phone busy.
 static void testPreemption()
 {
     // a call to the phone
     {
         Station s;
+        modemcellular::Cause cause = modemcellular::Cause::Normal;
 
         CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiSms));
-        CHECK(s.system.startCall(s.phone.country, s.phone.number, "5551234", modemcellular::NumberType::National));
-        CHECK(s.reports.empty());                       // the indicators go with the call
+        CHECK(!s.system.startCall(s.phone.country, s.phone.number, "5551234", modemcellular::NumberType::National, &cause));
+        CHECK(cause == modemcellular::Cause::Busy);
+        CHECK(s.reports.empty());
         CHECK(s.system.transactionCount() == 1);
         CHECK(s.system.callPhase(s.phone.country, s.phone.number) == NmtTransaction::CcPhase::Page);
-        CHECK(s.system.releaseCall(s.phone.country, s.phone.number));
-        CHECK(s.reports.size() == 1 && s.reports[0].flags == MwiSms && s.reports[0].result == NmtServiceEnd::Undelivered);
     }
     // the phone calls itself
     {
@@ -568,23 +582,14 @@ static void testPreemption()
 // The indicators of a cancelled message call go out with the call that took its place.
 static void testIndicatorsCarried()
 {
-    // a call to the phone: answered, then cleared by the far end
+    // the phone's own call: connected, then cleared by the far end
     {
         Station s;
 
         CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiSms | MwiFax));
-        CHECK(s.system.startCall(s.phone.country, s.phone.number, "5551234", modemcellular::NumberType::National));
+        s.connectCall();
         CHECK(s.reports.empty());
-        pullCalling(*s.cc);
-        phoneSends(*s.cc, s.acknowledgement(), 1);
-        pullCalling(*s.cc);
-        pull(*s.tc);
-        phoneSends(*s.tc, seizureFrame(*s.tc, s.phone, MessageType::Frame10b), 3);
-        phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0xeeeee), 1);
-        for (int i = 0; i < 4; i++) {
-            moreFrames(*s.tc);
-        }
-        CHECK(s.tc->state() == State::Active);
+        CHECK(s.system.transactionCount() == 1);
         CHECK(s.system.releaseCall(s.phone.country, s.phone.number));
         checkIndicators(pull(*s.tc), s.phone, MwiSms | MwiFax);
         checkIndicators(pull(*s.tc), s.phone, MwiSms | MwiFax);
@@ -595,23 +600,6 @@ static void testIndicatorsCarried()
         CHECK(s.reports.size() == 1 && s.reports[0].flags == (MwiSms | MwiFax) && s.reports[0].result == NmtServiceEnd::Ok);
     }
 
-    // a handler that sends the flags again does not stop a call
-    {
-        Station s;
-        int resends = 0;
-
-        s.system.setMwiHandler([&s, &resends](const NmtSubscriber& sub, uint8_t flags, NmtServiceEnd result) {
-            s.reports.push_back({flags, result});
-            if (result == NmtServiceEnd::Undelivered) {
-                resends++;
-                s.system.sendMwi(sub.country, sub.number, flags);
-            }
-        });
-        CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiSms));
-        CHECK(s.system.startCall(s.phone.country, s.phone.number, "5551234", modemcellular::NumberType::National));
-        CHECK(s.system.transactionCount() == 1);
-        CHECK(resends == 0);
-    }
 
     // the same on a combined channel that receives the phone's own call: no crash, the call is taken
     {
@@ -693,7 +681,7 @@ static void testNotThere()
         phoneSends(*s.cc, s.acknowledgement(), 1);
         pullCalling(*s.cc);
         CHECK(s.system.callPhase(s.phone.country, s.phone.number) == NmtTransaction::CcPhase::Queue);
-        s.wait(9.5);
+        s.wait(59.5);
         CHECK(s.system.callPhase(s.phone.country, s.phone.number) == NmtTransaction::CcPhase::Queue);
         s.wait(1.0);
         CHECK(s.cc->state() == State::Idle);                    // nothing to release
@@ -772,6 +760,10 @@ static void testPhoneHangsUp()
 
         s.connectCall();
         CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiSms));
+        checkIndicators(pull(*s.tc), s.phone, MwiSms);
+        checkIndicators(pull(*s.tc), s.phone, MwiSms);
+        CHECK(!moreFrames(*s.tc));
+        CHECK(s.tc->state() == State::Active);
         s.wait(3.1);
         CHECK(s.tc->state() == State::MtRelease);
         s.wait(2.5);

@@ -20,6 +20,7 @@
 #include <cmath>
 #include <functional>
 
+#include "compandor.h"
 #include "phone.h"
 
 static const double kPi = 3.14159265358979323846;
@@ -421,11 +422,12 @@ struct VoiceCall
     int pulls = 0;
     Phone phone;
 
-    VoiceCall(int supervisory, double rate = kRate, double factor = 1.0) :
+    VoiceCall(int supervisory, double rate = kRate, double factor = 1.0, bool compandor = false) :
         clock(rate), system(clock), tc(nullptr)
     {
         ChannelConfig c = config(System::Nmt450, ChannelType::Tc, 100);
         c.supervisory = supervisory;
+        c.compandor = compandor;
         tc = &system.addChannel(c, rate, factor);
         connect(system, calls);
         system.setAudioHandlers(
@@ -442,8 +444,17 @@ struct VoiceCall
         toDialTone(*tc, phone);
         dial(*tc, phone, "12");
         phoneSends(*tc, idleFromPhone(), 1);
-        for (int i = 0; i < 8; i++) {
-            pull(*tc);
+        // address complete, then compandor in (idle frames without the compandor)
+        for (int i = 0; i < 8; i++)
+        {
+            const Frame f = pull(*tc);
+            if (i < 4) {
+                CHECK(isLineSignal(f, 6));
+            } else if (compandor) {
+                CHECK(isLineSignal(f, 5));
+            } else {
+                CHECK(f.mt == MessageType::Frame6);
+            }
         }
         FrameBits bits;
         CHECK(!tc->nextFrame(bits));
@@ -530,6 +541,49 @@ static void testNoSupervisory()
     CHECK(call.calls.cleared == 0);
 }
 
+// Amplitude of a steady tone at 8 kHz after the compressor or the expander.
+static double companded(double hz, double amplitude, bool compress)
+{
+    modemcellular::Compandor compandor(kCallRate);
+    std::vector<float> x = sine(hz, amplitude, kCallRate, 16000);
+
+    if (compress) {
+        compandor.compress(x.data(), static_cast<int>(x.size()));
+    } else {
+        compandor.expand(x.data(), static_cast<int>(x.size()));
+    }
+    return toneAmplitude(x, x.size() / 2, x.size(), hz, kCallRate);
+}
+
+static void testCompandor()
+{
+    const double rate = 48000.0;
+    const double toPhone = companded(800.0, 0.5, true);
+    const double fromPhone = companded(1000.0, 0.4, false);
+
+    // the compressor lifts the quiet tone, the expander lowers it
+    CHECK(toPhone > 0.6);
+    CHECK(fromPhone < 0.3);
+
+    VoiceCall call(3, rate, 0.8, true);
+    const std::vector<float> sent = call.air(2.0, phoneTones(1000.0, 0.4, 3, rate), rate);
+    const size_t from = sent.size() / 2;
+
+    // towards the phone compressed, times the deviation factor; the supervisory tone is not
+    CHECK(std::fabs(toneAmplitude(sent, from, sent.size(), 800.0, rate) - toPhone * 0.8) < 0.02);
+    CHECK(std::fabs(toneAmplitude(sent, from, sent.size(), kSupervisoryHz[2], rate) - kTxPeakSupervisory * 0.8) < 0.0007);
+
+    // from the phone expanded
+    const size_t half = call.fromPhone.size() / 2;
+    CHECK(std::fabs(toneAmplitude(call.fromPhone, half, call.fromPhone.size(), 1000.0, kCallRate) - fromPhone) < 0.03);
+    CHECK(call.tc->state() == State::Active);
+
+    // without the option the same speech goes out plain
+    VoiceCall plain(3, rate, 0.8, false);
+    const std::vector<float> plainSent = plain.air(2.0, phoneTones(1000.0, 0.4, 3, rate), rate);
+    CHECK(std::fabs(toneAmplitude(plainSent, plainSent.size() / 2, plainSent.size(), 800.0, rate) - 0.5 * 0.8) < 0.01);
+}
+
 static void testSupervisoryAlarm()
 {
     // the phone never sends its tone: released 3 s after the connection
@@ -582,13 +636,16 @@ static void testSupervisoryAlarm()
         CHECK(call.tc->state() == State::MtRelease);
     }
 
-    // a frame from the phone while its tone is fine does not start an alarm
+    // a frame from the phone while its tone is fine starts the 20 s timer as well; only a change
+    // of the tone stops it, so the call is released 20 s later
     {
         VoiceCall call(2);
         call.air(1.0, phoneTones(1000.0, 0.4, 2, kRate));
         phoneSends(*call.tc, lineSignalFrame(*call.tc, call.phone, 0x44444), 1);
-        call.air(30.0, phoneTones(1000.0, 0.4, 2, kRate));
+        call.air(19.5, phoneTones(1000.0, 0.4, 2, kRate));
         CHECK(call.tc->state() == State::Active);
+        call.air(1.0, phoneTones(1000.0, 0.4, 2, kRate));
+        CHECK(call.tc->state() == State::MtRelease);
     }
 
     // another tone is not ours
@@ -633,11 +690,11 @@ static void testConfigLimits()
     CHECK(peak < 0.6f);
 }
 
-// The 3 s limit for the first tone is not extended by frames, a frame of another phone does
-// not extend the alarm, a frame of this phone does.
+// Every frame received in the conversation, of this phone or another one, starts the 20 s timer
+// again: also within the 3 s for the first tone.
 static void testAlarmAndFrames()
 {
-    // frames in the first 3 s (of this phone and of another one): still released after 3 s
+    // a frame in the first 3 s: the call is released 20 s after the frame
     for (int variant = 0; variant < 2; variant++)
     {
         VoiceCall call(2);
@@ -646,13 +703,15 @@ static void testAlarmAndFrames()
 
         call.air(1.0, nullptr);
         phoneSends(*call.tc, lineSignalFrame(*call.tc, variant == 0 ? call.phone : other, 0x44444), 1);
-        call.air(1.8, nullptr);
-        CHECK(call.tc->state() == State::Active);               // 2.8 s
-        call.air(0.4, nullptr);
-        CHECK(call.tc->state() == State::MtRelease);            // 3.2 s
+        call.air(2.2, nullptr);
+        CHECK(call.tc->state() == State::Active);               // 3.2 s
+        call.air(17.5, nullptr);
+        CHECK(call.tc->state() == State::Active);               // 20.7 s
+        call.air(0.6, nullptr);
+        CHECK(call.tc->state() == State::MtRelease);            // 21.3 s
     }
 
-    // alarm running: a frame of another phone does not restart it
+    // alarm running: a frame of another phone restarts it too
     {
         VoiceCall call(2);
         Phone other = call.phone;
@@ -661,9 +720,9 @@ static void testAlarmAndFrames()
         call.air(1.0, phoneTones(1000.0, 0.4, 2, kRate));
         call.air(10.0, nullptr);                                // tone gone at about 1.3 s
         phoneSends(*call.tc, lineSignalFrame(*call.tc, other, 0x44444), 1);
-        call.air(9.0, nullptr);                                 // 20 s since the start: not over yet
-        CHECK(call.tc->state() == State::Active);
-        call.air(1.6, nullptr);                                 // 21.6 s: the alarm of 20 s from 1.3 s is over
+        call.air(19.5, nullptr);
+        CHECK(call.tc->state() == State::Active);               // 19.5 s after the frame
+        call.air(1.0, nullptr);
         CHECK(call.tc->state() == State::MtRelease);
     }
 }
@@ -805,6 +864,7 @@ int main()
     testConfigLimits();
     testSpeechBothWays();
     testNoSupervisory();
+    testCompandor();
     testSupervisoryAlarm();
     testAlarmAndFrames();
     testAudioHandlerReentrancy();
