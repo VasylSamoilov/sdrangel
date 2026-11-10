@@ -398,25 +398,17 @@ SmsParse smsDecodeAddress(const uint8_t* data, size_t length, std::string& numbe
     const size_t digits = data[0];
     const size_t octets = (digits + 1) / 2;
 
-    // the type has its first bit set; names in letters (type 5) are no numbers
-    if (!(data[1] & 0x80) || ((data[1] >> 4) & 7) == 5) {
-        return SmsParse::Error;
-    }
     if (length < 2 + octets) {
         return SmsParse::NeedMore;
     }
+    // Any type is taken and the semi-octets are read as digits; a filler or an unused code inside
+    // the number becomes '?'.
     for (size_t i = 0; i < digits; i++)
     {
         const uint8_t byte = data[2 + i / 2];
         const int nibble = (i & 1) ? (byte >> 4) : (byte & 0xf);
 
-        // no filler or unused code inside the number, a plus only at the start
-        if (nibble == 0xe || nibble == 0xf || (nibble == 0xd && i != 0))
-        {
-            number.clear();
-            return SmsParse::Error;
-        }
-        number.push_back(semiOctetChar(nibble));
+        number.push_back((nibble == 0xe || nibble == 0xf) ? '?' : semiOctetChar(nibble));
     }
     // a number in international format is shown with its plus sign if the digits lack it
     if (((data[1] >> 4) & 7) == 1 && !number.empty() && number[0] != '+') {
@@ -438,8 +430,12 @@ std::vector<uint8_t> smsEncodeTime(const SmsTime& time)
     out.push_back(twoDigits(time.hour));
     out.push_back(twoDigits(time.minute));
     out.push_back(twoDigits(time.second));
-    // the zone: plain digits, the sign in bit 3 of the first semi-octet
-    out.push_back(static_cast<uint8_t>(((zone % 10) << 4) | ((zone / 10) & 7) | (time.zoneQuarters < 0 ? 8 : 0)));
+    // The zone (Annex 24 2.2.3.11): quarters of an hour, the units digit in the high semi-octet
+    // (a zero is 1010, 2.1.2.3); the low one has the tens digit in 3 bits and the sign in bit 3, so
+    // a zero tens digit is 000.
+    const int units = zone % 10;
+
+    out.push_back(static_cast<uint8_t>(((units ? units : 0xa) << 4) | ((zone / 10) & 7) | (time.zoneQuarters < 0 ? 8 : 0)));
 
     return out;
 }
@@ -454,7 +450,10 @@ SmsTime smsDecodeTime(const uint8_t* data)
     time.hour = twoDigitsValue(data[3]);
     time.minute = twoDigitsValue(data[4]);
     time.second = twoDigitsValue(data[5]);
-    time.zoneQuarters = ((data[6] & 7) * 10) + std::min(data[6] >> 4, 9);
+    // a units digit of 1010 or 0000 is zero
+    const int zoneUnits = data[6] >> 4;
+
+    time.zoneQuarters = ((data[6] & 7) * 10) + (zoneUnits > 9 ? 0 : zoneUnits);
     if (data[6] & 8) {
         time.zoneQuarters = -time.zoneQuarters;
     }
@@ -552,8 +551,9 @@ SmsParse parseSubmitTpdu(const uint8_t* data, size_t length, SmsSubmit& out, siz
     }
     const uint8_t first = data[pos++];
 
-    if ((first & 3) != 1 || (first & 0x40)) {
-        return SmsParse::Error;                     // not an SMS-SUBMIT, or one with a user data header (not defined)
+    // the user data header bit is not looked at (a header is not defined; it would come as text)
+    if ((first & 3) != 1) {
+        return SmsParse::Error;                     // not an SMS-SUBMIT
     }
     out.messageRef = data[pos++];
 
@@ -573,13 +573,10 @@ SmsParse parseSubmitTpdu(const uint8_t* data, size_t length, SmsSubmit& out, siz
     (void) pid;
     out.dcs = data[pos++];
 
-    // validity period: none (00), one octet (10) or seven octets (11)
+    // validity period: none (00), one octet (10, also the reserved 01) or seven octets (11)
     const unsigned vpf = (first >> 3) & 3;
-    const size_t vpOctets = (vpf == 2) ? 1 : (vpf == 3 ? 7 : 0);
+    const size_t vpOctets = (vpf == 0) ? 0 : (vpf == 3 ? 7 : 1);
 
-    if (vpf == 1) {
-        return SmsParse::Error;
-    }
     if (length < pos + vpOctets + 1) {
         return SmsParse::NeedMore;
     }
