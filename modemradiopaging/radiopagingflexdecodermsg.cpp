@@ -629,7 +629,8 @@ void RadioPagingFlexDecoder::decodeShortMessage(Message& proto, const AddressCon
 // Reassembly of fragments of alphanumeric, secure and binary messages
 void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& a, int vector, const FragmentInfo& info)
 {
-    const bool signatureUsed = ((vector == 5) || (vector == 0)) && (msg.m_hexNibbleBits == 0);
+    // Only an alphanumeric message has a signature field (3.10.1.3); a secure message has none (3.10.1.4)
+    const bool signatureUsed = (vector == 5);
     const bool secureHex = (vector == 0) && (msg.m_hexNibbleBits != 0);
 
     setRaw(msg, info.m_raw);
@@ -819,6 +820,9 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
     int hdrN = 0;
     int hdrR = 0;
     int hdrM = 0;
+    int hdrU = 0;
+    int hdrV = 0;
+    bool hasFragControl = false;
     int secureType = -1;
     FragmentKind kind = FragmentUnknown;
 
@@ -844,6 +848,15 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
         {
             hdrR = (hdr >> 19) & 1;
             hdrM = (hdr >> 20) & 1;
+        }
+        else
+        {
+            // Fragment control bits U0 V0 of the second and later fragments (3.10.1.3): 00 enhanced
+            // fragmentation not supported, 01 reserved, 10 starts in the default character mode, 11 in the
+            // alternative character mode
+            hdrU = (int) ((hdr >> 19) & 1);
+            hdrV = (int) ((hdr >> 20) & 1);
+            hasFragControl = true;
         }
     }
 
@@ -880,6 +893,9 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
 
     // Characters
     const bool initial = (hdrF == 3);
+    // The first character slot of the first fragment of an alphanumeric message is the signature
+    // (3.10.1.3). A secure message has none: the slot is character a0 (Fig. 3.10.1.4-1)
+    const bool sigSlot = initial && !secure;
     int startWord = a.m_long ? mw1 : (mw1 + 1);
     bool kanji = false;
 
@@ -897,9 +913,11 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
     }
 
     std::string text;
+    std::vector<uint8_t> chars;     // 7-bit characters of the fragment as sent, signature slot excluded
     uint32_t signature = 0;
     uint32_t sum = 0;
     bool wordsOk = true;
+    bool nulError = false;
 
     if (kanji)
     {
@@ -909,13 +927,13 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
             {
                 wordsOk = false;
 
-                if (!((w == startWord) && initial)) {
+                if (!((w == startWord) && sigSlot)) {
                     text += '?';
                 }
                 continue;
             }
 
-            if ((w == startWord) && initial)
+            if ((w == startWord) && sigSlot)
             {
                 signature = m_w[w].m_data & 0x7f;
                 continue;
@@ -939,9 +957,10 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
             {
                 wordsOk = false;
 
-                int lost = ((w == startWord) && initial) ? 2 : 3;
+                int lost = ((w == startWord) && sigSlot) ? 2 : 3;
 
                 text.append(lost, '?');
+                chars.insert(chars.end(), lost, 0xff);  // Neither NUL nor ETX
                 continue;
             }
 
@@ -951,17 +970,40 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
             {
                 uint32_t ch = (dw >> (7 * slot)) & 0x7f;
 
-                if ((slot == 0) && (w == startWord) && initial)
+                if ((slot == 0) && (w == startWord) && sigSlot)
                 {
                     signature = ch;
                     continue;
                 }
 
+                chars.push_back((uint8_t) ch);
+
+                // ETX and NUL are function characters: not displayed, not in the signature sum
+                // (3.10.1.3, Fig. p.65)
                 if (ch != 0x03) {
                     sum += ch;
                 }
                 if ((ch != 0x03) && (ch != 0)) {
                     text += (char) ch;
+                }
+            }
+        }
+
+        // Enhanced Fragmentation (U0 V0 not 00, 3.10.1.3 p.66): NUL ($00) only as the reminder characters at
+        // the end of a fragment; anywhere else it is a reception error
+        if (hdrU || hdrV)
+        {
+            size_t end = chars.size();
+
+            while ((end > 0) && ((chars[end - 1] == 0) || (chars[end - 1] == 0x03))) {
+                end--;
+            }
+            for (size_t i = 0; i < end; i++)
+            {
+                if (chars[i] == 0)
+                {
+                    nulError = true;
+                    break;
                 }
             }
         }
@@ -981,9 +1023,11 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
     msg.m_recovered = recovered;
     msg.m_duplicate = duplicate;
     msg.m_fragmented = (kind == FragmentFirst) || (kind == FragmentMiddle) || (kind == FragmentLast);
+    msg.m_fragmentControl = hasFragControl ? ((hdrU << 1) | hdrV) : -1;
+    msg.m_nulError = nulError;
 
     // Signature of the whole message in the first fragment. Checked here for a message in one piece
-    if (initial)
+    if (sigSlot)
     {
         if (hdrC == 0) {
             msg.m_signature = !wordsOk ? CheckIncomplete : (signature == ((~sum) & 0x7f)) ? CheckOk : CheckFailed;
@@ -1294,6 +1338,7 @@ void RadioPagingFlexDecoder::decodeBinary(Message& proto, const AddressContext& 
     bool displayRtl = false;
     bool headerMessage = false;
     bool statusInfo = false;
+    int reservedBits = 0;
     uint32_t signature = 0;
     bool hasSignature = false;
     bool initial = false;
@@ -1334,7 +1379,9 @@ void RadioPagingFlexDecoder::decodeBinary(Message& proto, const AddressContext& 
                 displayRtl = ((hdr2 >> 2) & 1) != 0;
                 headerMessage = ((hdr2 >> 3) & 1) != 0;
                 blocking = (hdr2 >> 4) & 0xf;
-                statusInfo = ((hdr2 >> 8) & 1) != 0;
+                // R M D H B3-B0 s3-s0 I S7-S0 (STD-43A Fig. 3.10.1.2-1): s in bits 8-11, I in bit 12
+                statusInfo = ((hdr2 >> 12) & 1) != 0;
+                reservedBits = (int) ((hdr2 >> 8) & 0xf);
                 signature = (hdr2 >> 13) & 0xff;
                 hasSignature = true;
             }
@@ -1516,9 +1563,38 @@ void RadioPagingFlexDecoder::decodeBinary(Message& proto, const AddressContext& 
         signatureCheck = lost ? CheckIncomplete : (signature == ((~sum) & 0xff)) ? CheckOk : CheckFailed;
     }
 
+    // K: 12-bit fragment checksum (STD-43A 3.10.1.2): 1's complement of the sum of all words of the fragment
+    // (header word 1, at the second vector word of a long address, and the message field), 3 groups of
+    // bits per word, the K field counted as 0, fill and termination bits included
+    Check kCheck = CheckIncomplete;
+
+    if (hdrOk)
+    {
+        uint32_t kSum = groupSums(m_w[hdrIdx].m_data & ~0xfffu);
+        bool allOk = true;
+
+        for (int w = mw1; (w <= mw2) && (w < wordsPerFrame); w++)
+        {
+            if (!a.m_long && (w == mw1)) {
+                continue;   // Header word 1, counted above
+            }
+            if (!wordOk(w))
+            {
+                allOk = false;
+                break;
+            }
+            kSum += groupSums(m_w[w].m_data);
+        }
+
+        if (allOk) {
+            kCheck = (((~kSum) & 0xfff) == (m_w[hdrIdx].m_data & 0xfff)) ? CheckOk : CheckFailed;
+        }
+    }
+
     Message msg = proto;
 
     msg.m_type = TypeBinary;
+    msg.m_checksum = kCheck;
     msg.m_text = hex;
     msg.m_hexNibbleBits = 4;
     msg.m_hexLsbFirst = true;
@@ -1532,6 +1608,7 @@ void RadioPagingFlexDecoder::decodeBinary(Message& proto, const AddressContext& 
     msg.m_displayRtl = displayRtl;
     msg.m_headerMessage = headerMessage;
     msg.m_statusInfo = statusInfo;
+    msg.m_reservedBits = reservedBits;
     msg.m_signature = signatureCheck;
     msg.m_recovered = recovered;
     msg.m_duplicate = duplicate;

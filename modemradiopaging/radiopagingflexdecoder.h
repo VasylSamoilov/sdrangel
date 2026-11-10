@@ -263,7 +263,10 @@ public:
         int m_blocking = 0;                 //!< B field: bits per character, 0 = 16
         bool m_displayRtl = false;          //!< D
         bool m_headerMessage = false;       //!< H
-        bool m_statusInfo = false;          //!< I
+        bool m_statusInfo = false;          //!< I: the first 8 data bits give the encoding method (reserved)
+        int m_reservedBits = 0;             //!< s3-s0, reserved, 0 by default
+        int m_fragmentControl = -1;         //!< U0 V0 of an alphanumeric fragment after the first (as 2 bits, U0 high), else -1
+        bool m_nulError = false;            //!< Enhanced fragmentation: a NUL character that is not a reminder at the end of the fragment
         int m_dataBits = 0;                 //!< Data bits in m_text without the termination bits (binary, secure hex)
 
         // Short message (vector type 2)

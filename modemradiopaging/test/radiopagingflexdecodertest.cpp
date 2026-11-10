@@ -1268,7 +1268,7 @@ void testMisc()
     const RefFrame *f = findFrame("binary", "hex 8 digits");
     out = d.decodeFrame(toRxFrame((Flex::Mode) f->m_mode, false, fromHex(f->m_sync), fromHex(f->m_data)));
     check(out.size() == 1 && (out[0].m_blocking == 8) && (out[0].m_dataBits == 32) && out[0].m_signature == Dec::CheckOk
-        && out[0].m_checksum == Dec::CheckNone, "binary: blocking, data bits and signature");
+        && out[0].m_checksum == Dec::CheckOk, "binary: blocking, data bits, K checksum and signature");
 
     f = findFrame("binary", "hex 21 digits");
     out = d.decodeFrame(toRxFrame((Flex::Mode) f->m_mode, false, fromHex(f->m_sync), fromHex(f->m_data)));

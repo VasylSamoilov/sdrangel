@@ -834,6 +834,34 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
     record.m_protocolData.insert("fragment_gap", message.m_fragmentGap);
     record.m_protocolData.insert("payload_unknown", message.m_payloadUnknown);
 
+    // Alphanumeric fragment control bits U0 V0 (3.10.1.3): "00" enhanced fragmentation not supported, "01" reserved,
+    // "10" default character mode, "11" alternative character mode. Fragments after the first only
+    if (message.m_fragmentControl >= 0)
+    {
+        static const char *const control[4] = {"00", "01", "10", "11"};
+
+        record.m_protocolData.insert("fragment_control", control[message.m_fragmentControl & 3]);
+        record.m_protocolData.insert("nul_error", message.m_nulError);
+    }
+
+    // HEX/binary header flags (STD-43A 3.10.1.2): blocking length (bits per character, 16 when 0), display
+    // direction, header message, status information enabler, reserved bits
+    if (message.m_type == RadioPagingFlexDecoder::TypeBinary)
+    {
+        record.m_protocolData.insert("blocking", message.m_blocking == 0 ? 16 : message.m_blocking);
+        record.m_protocolData.insert("display_direction", message.m_displayRtl ? "rtl" : "ltr");
+        record.m_protocolData.insert("header_message", message.m_headerMessage);
+        record.m_protocolData.insert("status_info", message.m_statusInfo);
+        record.m_protocolData.insert("reserved_bits", message.m_reservedBits);
+    }
+
+    // Secure message type t1t0 (00 alphanumeric, 10 binary, 01 defined separately, 11 reserved)
+    if (message.m_type == RadioPagingFlexDecoder::TypeSecure)
+    {
+        record.m_protocolData.insert("secure_type", message.m_secureType);
+        record.m_protocolData.insert("registration_ack", message.m_registrationAck);
+    }
+
     // The text is hex: digit size, order of the bits in a digit and the number of data bits
     if (message.m_hexNibbleBits > 0)
     {

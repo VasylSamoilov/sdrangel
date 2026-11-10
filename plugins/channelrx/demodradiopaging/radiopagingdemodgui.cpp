@@ -274,6 +274,29 @@ void RadioPagingDemodGUI::recordInfo(const MessageRecord& record, QString& plain
         if (d.value("payload_unknown").toBool()) {
             add("NO LAYOUT");
         }
+        if (d.contains("fragment_control") && (d.value("fragment_control").toString() != "00")) {
+            add(QString("UV%1").arg(d.value("fragment_control").toString()));
+        }
+        if (d.value("nul_error").toBool()) {
+            add("NUL?");
+        }
+        if (d.contains("blocking"))
+        {
+            add(QString("B%1").arg(d.value("blocking").toInt()));
+            add(d.value("display_direction").toString() == "rtl" ? "RTL" : "LTR");
+            if (d.value("header_message").toBool()) {
+                add("HDR");
+            }
+            if (d.value("status_info").toBool()) {
+                add("STAT");
+            }
+        }
+        if (d.contains("secure_type")) {
+            add(QString("T%1%2").arg(d.value("secure_type").toInt() >> 1 & 1).arg(d.value("secure_type").toInt() & 1));
+        }
+        if (d.value("registration_ack").toBool()) {
+            add("REGACK");
+        }
 
         if (d.contains("group_slot"))
         {

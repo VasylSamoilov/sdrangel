@@ -257,9 +257,9 @@
 {
 	"types", "secure", 0, 0, 3, 31,
 		"aaaaaaaa78f359395555870ca6c63cf805a7",
-		"aed845127b9f8cab08081f4f2d2954409d1f1d0b450a22050f0f35cb41ee2c11"
-		"9ef45636628a0a0a2a2aeaaa8a8aea0a6aeaeaea2aca0a0acaca4a2a6a8a2a8a"
-		"eaaa0aeacaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		"aed845127b8d99b4001d0f4d2b255a42951f0f0f480620000f0f24cf5ceb3600"
+		"89f9402d7a8a8aea0a6aeaeaea2aca0a0acaca2a2a0a4a4aca4a6a2a0a2aea4a"
+		"ca8aca8acaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -275,8 +275,8 @@
 {
 	"types", "secure registration ack", 0, 0, 3, 32,
 		"aaaaaaaa78f359395555870ca6c65c040441",
-		"aed845127bfe8b8c181b0f5f2d245f489a1f1726482304080f0f5da01bf94755"
-		"bc875c2c21aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		"aed845127bed848f180a0f4726285344981f0f2d472800060e0e57b91eea5451"
+		"a584462839aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -653,9 +653,9 @@
 {
 	"long", "secure set 0", 0, 0, 4, 110,
 		"aaaaaaaa78f359395555870ca6c6e2760320",
-		"aed845127bc7ae2d2c242f2f36243aa0ae2f2e342235212227274bc559be4fc9"
-		"3edab233c1aaaaaaaa2aaaaa2aaaaaaa2aaaaaaaaaaa2a2aaaaaaaaaaaaaaaaa"
-		"2a2aaaaa2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		"aed845127bcea422202e272e3c2a35a1aa2f273725332120272742cf56bd4ac0"
+		"35dcb837c52aaaaaaa2aaaaaaaaaaa2a2aaaaaaaaa2a2a2a2a2a2aaaaa2aaaaa"
+		"aa2a2aaa2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -833,9 +833,9 @@
 {
 	"long", "secure set 1", 0, 0, 4, 111,
 		"aaaaaaaa78f359395555870ca6c662f603f1",
-		"aed845127be78e0d0c040f0f16041a808e0f0e140215212227276be5799e4fe9"
-		"1efa9233e1aaaaaaaa2aaaaa2aaaaaaa2aaaaaaaaaaa2a2aaaaaaaaaaaaaaaaa"
-		"2a2aaaaa2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		"aed845127bee8402000e070e1c0a15818a0f071705132120272762ef769d4ae0"
+		"15fc9837e52aaaaaaa2aaaaaaaaaaa2a2aaaaaaaaa2a2a2a2a2a2aaaaa2aaaaa"
+		"aa2a2aaa2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1013,9 +1013,9 @@
 {
 	"long", "secure set 2", 0, 0, 4, 112,
 		"aaaaaaaa78f359395555870ca6c6220e06f7",
-		"aed845127be78e0d0c040f0f16041a808e0f0e144255616267672be579de4fa9"
-		"1ebad233a1aaaaaaaa2aaaaa2aaaaaaa2aaaaaaaaaaa2a2aaaaaaaaaaaaaaaaa"
-		"2a2aaaaa2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		"aed845127bee8402000e070e1c0a15818a0f071745536160676722ef76dd4aa0"
+		"15bcd837a52aaaaaaa2aaaaaaaaaaa2a2aaaaaaaaa2a2a2a2a2a2aaaaa2aaaaa"
+		"aa2a2aaa2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1193,9 +1193,9 @@
 {
 	"long", "secure set 3", 0, 0, 4, 113,
 		"aaaaaaaa78f359395555870ca6c6c28e0448",
-		"aed845127b87ce4d4c444f4f56445ac0ce4f4e546255616267670ba519fe0fa9"
-		"7ebad25381aaaaaaaa2aaaaa2aaaaaaa2aaaaaaaaaaa2a2aaaaaaaaaaaaaaaaa"
-		"2a2aaaaa2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		"aed845127b8ec442404e474e5c4a55c1ca4f475765536160676702af16fd0aa0"
+		"75bcd857852aaaaaaa2aaaaaaaaaaa2a2aaaaaaaaa2a2a2a2a2a2aaaaa2aaaaa"
+		"aa2a2aaa2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1230,10 +1230,10 @@
 	"mixed", "every type", 0, 0, 6, 41,
 		"aaaaaaaa78f359395555870ca6c67694053a",
 		"aed845127baa1978877f7f00000000807f0080007f0000000000ad344c6652cc"
-		"e1ad61074b9cf16180e2ba5624251c0bf700005bd1000c2402242ff28c23d6cb"
-		"f27bbaa01bcf9280c3f86a765291023a8be36a3e8e414d00e060ea601900c97d"
-		"11aee8511e1a3a12d2f21a1a7ada02827272329aca52028252d2a232a23232c2"
-		"32426a628aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		"e1ad61074b9cf16081e2ba5624251c0bf700005ad1000c2402242ff38d22d6ca"
+		"f27abaa11acf9280c3f46a7a5291023a8be36a3e8e414d00e060ea60190cc97d"
+		"11aee45d121a3a0aeada3a3a7aea1a8a6a7a1a9ada4a0a8a5adaaa1a9a3a2aca"
+		"3a7a6a7abaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
