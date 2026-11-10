@@ -394,14 +394,14 @@ static void testPhoneToPhone()
     s.callFrom(*s.a, caller, "1654321");
     s.air(0.05, *s.a, microphone({}));
     CHECK(s.cellular.callCount() == 1);
-    CHECK(s.cc->state() == NmtChannel::State::MtPaging);
-    CHECK(pull(*s.cc).mt == MessageType::Frame2a);
+    CHECK(s.nmt.callPhase(callee.country, callee.number) == NmtTransaction::CcPhase::Page);
+    CHECK(pullCalling(*s.cc).mt == MessageType::Frame2a);
 
     // the callee answers the page and is moved to the free traffic channel (b, as a has a call)
     Frame ack = seizureFrame(*s.cc, callee, MessageType::Frame10a);
     ack.msPassword = 0;
     phoneSends(*s.cc, ack, 1);
-    const Frame allocation = pull(*s.cc);
+    const Frame allocation = pullCalling(*s.cc);
     CHECK(allocation.mt == MessageType::Frame2b);
     CHECK(allocation.tcNo == encodeTc(System::Nmt450, 101, 1));
     CHECK(s.b->state() == NmtChannel::State::MtIdent);
