@@ -36,8 +36,11 @@ const int kCtRand = 82;
 // bits after the frame sync: label + 8 words + 2 CRC words + 2 CRC bits, and two labels + parity
 const int kDtBody = 101;
 const int kRrBody = 20;
-const double kBusyLimit = 3.0;                      // seconds a receiver may say it is full
-const double kGapTime = 0.081;                      // pause before frames are sent again
+const int kIdNumber = 3;                            // the id in the identity frame
+const double kBusyLimit = 3.0;                      // T: seconds an NR holds new frames back (Figure 1)
+const double kGapTime = 0.081;                      // no FFSK after a frame of the fourth repetition
+const int kGapPasses = 4;                           // repetitions before the gaps
+const double kSpeechClosed = 0.200;                 // speech closed from the start of a frame (6.6)
 
 void putBits(std::vector<uint8_t>& out, unsigned value, int count)
 {
@@ -165,12 +168,9 @@ void NmtDmsLink::reset()
     m_epoch++;
     m_ready = true;
     m_nrSent = false;
-    m_gapPending = false;
     m_maskedBytes = 0;
-    m_peerData = false;
     m_positiveResponse = false;
     m_pending.clear();
-    m_sentCount = 0;
     m_lastRrLabel = -1;
     m_bitsSinceRr = 0;
     m_caller = false;
@@ -186,11 +186,12 @@ void NmtDmsLink::reset()
     m_txList.clear();
     m_nTx = 0;
     m_txIndex = 0;
-    m_gapTime = 0.0;
     m_passes = 0;
+    m_gapPending = false;
+    m_gapTime = 0.0;
+    m_speechClosed = 0.0;
     m_rrPending = false;
     m_rrNr = false;
-    m_burst = false;
     m_txBits.clear();
     m_txPos = 0;
     m_dataQueued = false;
@@ -227,7 +228,8 @@ void NmtDmsLink::queueFrame(bool control, const uint8_t data[kDataWords])
     m_txList.push_back(frame);
 }
 
-void NmtDmsLink::queueRand()
+// format: '8' or '7', the last byte of the frame
+void NmtDmsLink::queueRand(char format)
 {
     uint8_t data[kDataWords];
 
@@ -256,7 +258,7 @@ void NmtDmsLink::queueRand()
         data[1 + 2 * i] = static_cast<uint8_t>((m_random[i] >> 7) << 6);
         data[2 + 2 * i] = m_random[i] & 0x7f;
     }
-    data[7] = m_eightBits ? '8' : '7';
+    data[7] = static_cast<uint8_t>(format);
     queueFrame(true, data);
     m_randSent = true;
 }
@@ -274,12 +276,11 @@ void NmtDmsLink::startAsCaller()
     m_dTx = false;
 
     // identity, then the random number
+    std::memset(data, 0, sizeof(data));
     data[0] = kCtId;
-    for (int i = 0; i < 7; i++) {
-        data[1 + i] = static_cast<uint8_t>(m_identity[i] ? m_identity[i] : '0');
-    }
+    data[1] = kIdNumber;
     queueFrame(true, data);
-    queueRand();
+    queueRand(m_eightBits ? '8' : '7');
 }
 
 bool NmtDmsLink::queueData(const uint8_t* data, size_t length)
@@ -354,11 +355,10 @@ void NmtDmsLink::setReady(bool ready)
     m_ready = ready;
 }
 
-// The data may go when our random number is acknowledged and the other side's is known (or it
-// already sends data).
+// The data may go when the other side's random number came or our own was acknowledged.
 void NmtDmsLink::checkEstablished()
 {
-    if (m_established || !m_randAcked || !(m_randReceived || m_peerData)) {
+    if (m_established || !(m_randAcked || m_randReceived)) {
         return;
     }
 
@@ -369,17 +369,22 @@ void NmtDmsLink::checkEstablished()
     }
 }
 
-// An RR(n) acknowledges the frames before n: the ones that went out, at most 4 (a number from
-// the frames before the list is an old one). True if it acknowledged something.
+// An RR(n) acknowledges the frames up to the number before n, if that is one of the first 4 frames
+// of the list. True if it acknowledged something.
 bool NmtDmsLink::ack(int n)
 {
-    if (m_txList.empty()) {
-        return false;
+    const size_t limit = std::min(m_txList.size(), static_cast<size_t>(kWindow));
+    size_t distance = 0;
+
+    for (size_t i = 0; i < limit; i++)
+    {
+        if (m_txList[i].n == ((n - 1) & 7))
+        {
+            distance = i + 1;
+            break;
+        }
     }
-
-    const size_t distance = static_cast<size_t>((n - m_txList.front().n) & 7);
-
-    if (distance == 0 || distance > static_cast<size_t>(kWindow) || distance > m_sentCount || distance > m_txList.size()) {
+    if (distance == 0) {
         return false;
     }
     const uint32_t epoch = m_epoch;
@@ -391,11 +396,9 @@ bool NmtDmsLink::ack(int n)
         }
         m_txList.pop_front();
     }
-    m_sentCount -= distance;
-    m_txIndex = 0;
+    // the frame that goes next stays, if it is still in the list; the repetitions count again
+    m_txIndex = (m_txIndex >= distance) ? m_txIndex - distance : 0;
     m_passes = 0;
-    m_gapTime = 0.0;
-    m_gapPending = false;
 
     checkEstablished();
     if (epoch != m_epoch) {
@@ -412,8 +415,35 @@ bool NmtDmsLink::ack(int n)
     return true;
 }
 
+// An RR/NR(n) that acknowledges nothing (Annex 21 Figure 1, note 2): n = NTX to NTX+4 refers to
+// the frames under transmission and the next one, n = NTX-1 to NTX-3 to previous frames. Those
+// are gone from the list, so the peer lost count: transmission is restarted with NTX = n, the
+// frames that are not acknowledged are numbered again from n.
+void NmtDmsLink::restartFrom(int n)
+{
+    const int first = m_txList.empty() ? m_nTx : m_txList.front().n;
+
+    if (((n - first) & 7) <= 4) {
+        return;
+    }
+    int next = n & 7;
+
+    for (TxFrame& frame : m_txList)
+    {
+        frame.n = next;
+        next = (next + 1) & 7;
+    }
+    m_nTx = next;
+    m_txIndex = 0;
+    m_passes = 0;
+}
+
 void NmtDmsLink::advance(double seconds)
 {
+    if (!(seconds > 0.0)) {
+        return;
+    }
+    m_speechClosed = std::max(0.0, m_speechClosed - seconds);
     if (m_gapTime > 0.0) {
         m_gapTime = std::max(0.0, m_gapTime - seconds);
     }
@@ -427,12 +457,16 @@ void NmtDmsLink::advance(double seconds)
 }
 
 // Makes the next frame: an acknowledgement first, then the frames that are not acknowledged yet.
+// Frames that are not acknowledged go out again, back to back. When they have to be repeated
+// a fourth time, every frame of the repetition is followed by 81 ms without FFSK, and so on
+// until something is acknowledged (Annex 21 para 6.5); the frame after a gap has the bit sync,
+// as every frame here.
 bool NmtDmsLink::scheduleFrame()
 {
     m_txBits.clear();
     m_txPos = 0;
 
-    if (!m_dKnown) {
+    if (!m_dKnown || m_gapTime > 0.0) {
         return false;
     }
 
@@ -440,11 +474,11 @@ bool NmtDmsLink::scheduleFrame()
     {
         m_rrPending = false;
         m_txBits = encodeRr(m_dTx, m_rrNr, false, m_nRx);
-        m_burst = true;
         return true;
     }
 
-    if (m_gapTime > 0.0 || m_txList.empty()) {
+    // a peer that said NR gets no frame but an RR until it sends an RR or a DT, or T is over
+    if (m_peerBusy || m_txList.empty()) {
         return false;
     }
 
@@ -452,7 +486,7 @@ bool NmtDmsLink::scheduleFrame()
     size_t sendable = 0;
 
     while (sendable < m_txList.size() && sendable < static_cast<size_t>(kWindow)
-        && ((m_established && !m_peerBusy) || m_txList[sendable].control)) {
+        && (m_established || m_txList[sendable].control)) {
         sendable++;
     }
     if (sendable == 0) {
@@ -464,16 +498,15 @@ bool NmtDmsLink::scheduleFrame()
 
     const TxFrame& frame = m_txList[m_txIndex];
 
-    m_txBits = encodeDt(m_dTx, frame.control, frame.n, frame.data, !m_burst);
-    m_burst = true;
-    m_sentCount = std::max(m_sentCount, m_txIndex + 1);
+    m_txBits = encodeDt(m_dTx, frame.control, frame.n, frame.data, true);
+    m_gapPending = (m_passes >= kGapPasses);
     m_txIndex++;
     if (m_txIndex >= sendable)
     {
-        // all frames went out; if they go out again they were not acknowledged: a pause between
+        // all frames that may go went out once more
         m_txIndex = 0;
-        if (m_passes++ >= 1) {
-            m_gapPending = true;
+        if (m_passes < kGapPasses) {
+            m_passes++;
         }
     }
 
@@ -488,13 +521,14 @@ bool NmtDmsLink::pullBit(int& bit)
         {
             m_txBits.clear();
             m_txPos = 0;
-            m_burst = false;
             return false;
         }
+        // a frame starts going out: the speech is closed for 200 ms in both directions
+        m_speechClosed = kSpeechClosed;
     }
 
     bit = m_txBits[m_txPos++];
-    // the pause begins when the last bit of the frame is out
+    // the gap begins when the last bit of the frame is out
     if (m_txPos >= m_txBits.size() && m_gapPending)
     {
         m_gapPending = false;
@@ -543,6 +577,9 @@ void NmtDmsLink::pushBit(int bit, double quality, double level)
         if (m_inFrame) {
             m_framesRejected++;
         }
+        // a frame of the other side: the speech is closed for 200 ms from its start, which was
+        // 11 bits ago for a frame without bit sync
+        m_speechClosed = std::max(m_speechClosed, kSpeechClosed - 11.0 / 1200.0);
         m_inFrame = true;
         m_rxBits.clear();
         m_rxNeed = 9;
@@ -593,20 +630,7 @@ void NmtDmsLink::rxFrameDone()
         }
         return value;
     };
-    // the 1 1 after every 7 bits are part of the frame
-    const bool dt = (((word(0) >> 3) & 3) == 3);
-    const int guards = dt ? 11 : 2;
-
-    for (int g = 0; g < guards; g++)
-    {
-        const size_t at = static_cast<size_t>(g) * 9 + 7;
-
-        if (!m_rxBits[at] || !m_rxBits[at + 1])
-        {
-            m_framesRejected++;
-            return;
-        }
-    }
+    // the 1 1 after every 7 bits are not looked at
     const unsigned label = word(0);
     const bool d = ((label >> 6) & 1) != 0;
     const bool control = ((label >> 5) & 1) == 0;
@@ -668,6 +692,9 @@ void NmtDmsLink::rxDt(bool d, bool control, int n, const uint8_t* words)
         m_dTx = !d;
     }
 
+    // a DT of the other side also ends its NR (Annex 21 para 5.3)
+    m_peerBusy = false;
+
     // every frame is answered with the number of the next one wanted: an acknowledgement, or a
     // request for the one that got lost; NR if this side cannot take it
     m_rrPending = true;
@@ -699,13 +726,11 @@ void NmtDmsLink::rxDt(bool d, bool control, int n, const uint8_t* words)
         else if (type == kCtRand)
         {
             m_randReceived = true;
-            // the 7/8 bit format the other side asks for rules (7 wins)
-            if (words[7] == '7') {
-                m_eightBits = false;
-            }
+            // our random number is answered once, always asking for 8 bits
             if (!m_randSent) {
-                queueRand();
+                queueRand('8');
             }
+            m_eightBits = (words[7] == '8');
             checkEstablished();
         }
         if (epoch == m_epoch && m_onControl) {
@@ -714,11 +739,7 @@ void NmtDmsLink::rxDt(bool d, bool control, int n, const uint8_t* words)
         return;
     }
 
-    m_peerData = true;
-    checkEstablished();
-    if (epoch == m_epoch) {
-        deliver(words);
-    }
+    deliver(words);
 }
 
 void NmtDmsLink::deliver(const uint8_t* words)
@@ -751,14 +772,29 @@ void NmtDmsLink::rxRr(bool d, bool nr, bool positive, int n)
 {
     (void) d;
 
-    // NR: the other side is full, wait until it says it is ready, but not longer than 3 s.
-    // Any RR ends that (Fig. 1 of Annex 21).
-    m_peerBusy = nr;
-    m_peerBusyTime = 0.0;
-
     const bool randWasAcked = m_randAcked;
+    const uint32_t epoch = m_epoch;
+    const bool acknowledged = ack(n);
 
-    ack(n);
+    if (epoch != m_epoch) {
+        return;                         // a callback reset the link
+    }
+    if (!acknowledged) {
+        restartFrom(n);
+    }
+    if (nr)
+    {
+        // NR acknowledges like an RR; the other side is full: no new frames until an RR or a
+        // DT, at most T; every NR starts T again
+        m_peerBusy = true;
+        m_peerBusyTime = 0.0;
+        return;
+    }
+    // any RR ends an NR (Figure 1: RR(N) -> HOLD = 0), also one that acknowledges nothing new
+    m_peerBusy = false;
+    if (!acknowledged) {
+        return;                         // an old RR
+    }
     // an RR with s = 0 that acknowledges our random number: the peer wants scrambled data
     if (!randWasAcked && m_randAcked && positive) {
         m_positiveResponse = true;
