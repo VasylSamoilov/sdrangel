@@ -176,7 +176,8 @@ static void testBandAdvertisement()
         CHECK(ch.idleFrame().additionalInfo == 0xe0011f0000ULL + 0x9f6);
     }
 
-    // a traffic channel band alone: no calling channel band
+    // a traffic channel band alone: no calling channel band, and no overdecadic bit (H5H6 is the
+    // band end limit in this frame)
     c = baseConfig(System::Nmt900, ChannelType::Ccb);
     c.tcBandStart = 8;
     c.tcBandEnd = 12;

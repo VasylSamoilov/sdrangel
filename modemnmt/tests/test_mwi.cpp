@@ -95,11 +95,15 @@ struct Station
         CHECK(tc->state() == State::MtAutoanswer);
     }
 
-    // The idle frames the phone sends after its identity.
+    // The idle frames after the identity: the phone sends 4, the exchange 6 (scheme B2); the
+    // order to answer follows.
     void phoneIdle()
     {
         for (int i = 0; i < 4; i++) {
             phoneSends(*tc, idleFromPhone(), 1);
+        }
+        for (int i = 0; i < 6; i++) {
+            CHECK(pull(*tc).mt == MessageType::Frame6);
         }
     }
 
@@ -229,7 +233,8 @@ static void testMessageCall()
 }
 
 // The phone answers while the order is still going out: the order is sent to its end first, then
-// 3 idle frames count from its end (what the phone answered in the tail shortens them).
+// 3 idle frames count from its end (what the phone answered in the tail shortens them). Before the
+// 6 idle frames after the identity are out, an answer is not taken.
 static void testEarlyAnswer()
 {
     for (int pulled = 1; pulled <= 5; pulled++)
@@ -237,12 +242,12 @@ static void testEarlyAnswer()
         Station s;
 
         s.toAutoanswer();
-        // fewer than four idle frames of the phone: the order does not start
-        for (int i = 0; i < 3; i++) {
-            phoneSends(*s.tc, idleFromPhone(), 1);
+        for (int i = 0; i < 5; i++) {
+            CHECK(pull(*s.tc).mt == MessageType::Frame6);
         }
+        phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0xccccc), 1);
+        CHECK(s.tc->state() == State::MtAutoanswer);
         CHECK(pull(*s.tc).mt == MessageType::Frame6);
-        phoneSends(*s.tc, idleFromPhone(), 1);
 
         // pulled frames of the order (1..4) or the order and one idle frame (5)
         for (int i = 0; i < pulled; i++) {
@@ -362,7 +367,7 @@ static void testPhoneRings()
         CHECK(s.alerting == 0 && s.failed == 0 && s.answered == 0);
     }
 
-    // the phone does not send an idle frame: the order goes out after a while
+    // the phone does not send an idle frame: the order goes out after the 6 idle frames all the same
     {
         Station s;
 
@@ -389,7 +394,7 @@ static void testNotDelivered()
         CHECK(s.failed == 0);
     }
 
-    // no traffic channel for 60 s
+    // no traffic channel: the message call is paged and queued until it gives up
     {
         Station s(false);
 
@@ -410,6 +415,7 @@ static void testNotDelivered()
 
         CHECK(!s.system.sendMwi(s.phone.country, s.phone.number, MwiSms));      // no calling channel
     }
+
     {
         Station s;
 
@@ -676,10 +682,13 @@ static void testNotThere()
         CHECK(s.reports.size() == 1 && s.reports[0].result == NmtServiceEnd::Unreachable);
     }
     {
-        Station s(false);
+        Station s;
+        Phone other = s.phone;
 
+        other.number = "654321";
         CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiSms));
         pull(*s.cc);
+        phoneSends(*s.tc, roamingFrame(*s.tc, other), 40);
         phoneSends(*s.cc, s.acknowledgement(), 1);
         pull(*s.cc);
         CHECK(s.cc->state() == State::MtQueue);
@@ -830,6 +839,7 @@ static void testTeardown()
             cc.batteryPeriod = 3;               // the phone sleeps: nothing is on air yet, no channel is bound
             cc.batteryGroup = 8;
             system.addChannel(cc, kRate, 1.0);
+            system.addChannel(config(System::Nmt450, ChannelType::Tc, 100), kRate, 1.0);
             system.setMwiHandler([&reports](const NmtSubscriber&, uint8_t flags, NmtServiceEnd result) {
                 reports.push_back({flags, result});
             });

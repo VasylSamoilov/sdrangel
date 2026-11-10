@@ -296,11 +296,6 @@ namespace
 
 const int kPageTries = 3;
 const double kPagingTimeout = 1.0;
-// A call waits this long for a calling channel that is free (10 s in all).
-const double kPageBusyPoll = 0.2;
-const int kPageBusyPolls = 50;
-// A message call is not urgent: it waits longer for a calling channel (30 s).
-const int kMessagePageBusyPolls = 150;
 
 // Battery saving (NMT Doc 450-1 para 4.3.3.12.3): does the phone whose last digit is x6 belong to
 // the group that H7 addresses?
@@ -339,11 +334,19 @@ int batteryPeriodFrames(int h3)
 
 } // namespace
 
+// An idle calling channel to page on. A call that finds no idle traffic channel when the phone
+// answers is queued (frame 2f/2c, NMT Doc 450-1 para 4.1.1.2 and scheme B step 5).
 bool NmtSystem::canCall() const
 {
     for (const auto& channel : m_channels)
     {
-        if (channel->valid() && channel->isCallingChannel()) {
+        if (!channel->valid() || channel->state() != NmtChannel::State::Idle) {
+            continue;
+        }
+
+        const ChannelType type = channel->config().type;
+
+        if (type == ChannelType::Cc || type == ChannelType::Cca || type == ChannelType::Ccb || type == ChannelType::CcTc) {
             return true;
         }
     }
@@ -352,13 +355,8 @@ bool NmtSystem::canCall() const
 }
 
 bool NmtSystem::startCall(char country, const std::string& number, const std::string& callerId,
-                          modemcellular::NumberType callerType)
+                          modemcellular::NumberType callerType, modemcellular::Cause* cause)
 {
-    // nothing to page with
-    if (!canCall()) {
-        return false;
-    }
-
     // a call waits for nothing a message call could still do; its indicators go with the call
     uint8_t carried = 0;
 
@@ -367,9 +365,30 @@ bool NmtSystem::startCall(char country, const std::string& number, const std::st
     // a phone has one transaction
     for (const NmtTransaction& transaction : m_transactions)
     {
-        if (transaction.subscriber.country == country && transaction.subscriber.number == number) {
+        if (transaction.subscriber.country == country && transaction.subscriber.number == number)
+        {
+            if (cause) {
+                *cause = modemcellular::Cause::Busy;
+            }
             return false;
         }
+    }
+
+    // no calling channel to page on: rejected at once
+    if (!canCall())
+    {
+        if (carried && m_mwiHandler)
+        {
+            NmtSubscriber subscriber;
+
+            subscriber.country = country;
+            subscriber.number = number;
+            m_mwiHandler(subscriber, carried, NmtServiceEnd::Undelivered);
+        }
+        if (cause) {
+            *cause = modemcellular::Cause::NoChannel;
+        }
+        return false;
     }
 
     NmtTransaction& transaction = newPagedTransaction(country, number);
@@ -458,19 +477,57 @@ void NmtSystem::page(NmtTransaction& transaction, int tryNo)
         }
     }
 
-    if (pageChannels([](const NmtChannel&) { return true; }))
+    pageChannels([](const NmtChannel&) { return true; });
+    transaction.pageTry = tryNo;
+    transaction.timer->start(kPagingTimeout);
+}
+
+NmtTransaction* NmtSystem::startPriorityCall(const NmtSubscriber& subscriber, NmtChannel&)
+{
+    uint8_t carried = 0;
+
+    cancelMessageCall(subscriber.country, subscriber.number, &carried);
+
+    for (const NmtTransaction& transaction : m_transactions)
     {
-        transaction.pageTry = tryNo;
-        transaction.pageBusy = 0;
-        transaction.timer->start(kPagingTimeout);
+        if (transaction.subscriber.country == subscriber.country && transaction.subscriber.number == subscriber.number) {
+            return nullptr;
+        }
     }
-    else
+
+    NmtTransaction& transaction = newPagedTransaction(subscriber.country, subscriber.number);
+
+    transaction.mwiFlags = carried;
+    transaction.priority = true;
+    transaction.priorityMo = true;
+    page(transaction, 1);
+
+    return &transaction;
+}
+
+void NmtSystem::pageAgain(NmtTransaction& transaction)
+{
+    transaction.paging = true;
+    page(transaction, 1);
+}
+
+NmtTransaction* NmtSystem::calledPhoneSeized(const NmtSubscriber& subscriber, NmtChannel& channel)
+{
+    for (NmtTransaction& transaction : m_transactions)
     {
-        // every calling channel is busy with another call: this is no failed try, ask again soon
-        transaction.pageTry = tryNo - 1;
-        transaction.pageBusy++;
-        transaction.timer->start(kPageBusyPoll);
+        if (transaction.subscriber.country != subscriber.country || transaction.subscriber.number != subscriber.number) {
+            continue;
+        }
+        // only a call to the phone that is not answered yet can be taken over
+        if (!transaction.mobileTerminated || transaction.answered || transaction.scipTarget) {
+            return nullptr;
+        }
+
+        pagingAnswered(transaction, channel);
+        return &transaction;
     }
+
+    return nullptr;
 }
 
 void NmtSystem::pagingTimeout(NmtTransaction& transaction)
@@ -480,13 +537,6 @@ void NmtSystem::pagingTimeout(NmtTransaction& transaction)
     {
         transaction.pageDeferred = false;
         page(transaction, 1);
-        return;
-    }
-
-    if (transaction.pageBusy > (transaction.messageCall ? kMessagePageBusyPolls : kPageBusyPolls))
-    {
-        callFailed(transaction, modemcellular::Cause::NoChannel);
-        destroyTransaction(&transaction);
         return;
     }
 
@@ -578,7 +628,8 @@ void NmtSystem::callFailed(NmtTransaction& transaction, modemcellular::Cause cau
         return;
     }
 
-    if (m_failed)
+    // a priority phone that places a call has no call in the exchange before it dials
+    if (m_failed && !transaction.priorityMo)
     {
         const NmtSubscriber subscriber = transaction.subscriber;
         m_failed(subscriber, cause);

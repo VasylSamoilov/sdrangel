@@ -218,14 +218,13 @@ static void testPowerChange()
         CHECK(f.msNumber == digitsToValue(s.phone.number));
     }
 
-    // an answer with the old level is not the answer
-    phoneSends(*s.a, seizureFrame(*s.a, s.phone, MessageType::Frame10b), 1);
+    // the identity of the phone on the channel is the answer, whatever level it carries; another
+    // phone's identity is not
+    Phone other = s.phone;
+    other.number = "654321";
+    phoneSends(*s.a, seizureFrame(*s.a, other, MessageType::Frame10b), 1);
     CHECK(s.a->state() == State::PowerChange);
-
-    // the answer carries the new level
-    Frame answer = seizureFrame(*s.a, s.phone, MessageType::Frame10b);
-    answer.channelNo = static_cast<uint16_t>(encodeChannel(System::Nmt450, 100, 2));
-    phoneSends(*s.a, answer, 1);
+    phoneSends(*s.a, seizureFrame(*s.a, s.phone, MessageType::Frame10b), 1);
     CHECK(s.a->state() == State::Active);
     CHECK(s.powers.size() == 1 && s.powers[0].first == 2 && s.powers[0].second);
 

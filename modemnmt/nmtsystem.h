@@ -80,7 +80,7 @@ public:
     // Tells the phone that messages wait (frame 5c, flags of MwiFlag; NMT Doc 450-1 4.4.1.16). A
     // phone in a call hears it when the call is cleared. A phone that is on a calling channel
     // is paged and called without ringing (4.4.1.12). False if the phone is busy with something
-    // else, there is no calling channel, or the flags are invalid. The handler tells how it ended:
+    // else, there is no idle calling channel or traffic channel, or the flags are invalid. The handler tells how it ended:
     // Undelivered flags can be sent again.
     bool sendMwi(char country, const std::string& number, uint8_t flags);
     using MwiHandler = std::function<void(const NmtSubscriber& subscriber, uint8_t flags, NmtServiceEnd result)>;
@@ -109,11 +109,13 @@ public:
     }
 
     // A call to a phone: it is paged on the calling channels and moved to a traffic channel
-    // when it answers. False if the phone has a call or a roaming update going on. The caller
-    // is told through the call handlers set below. The call can be ended with releaseCall().
+    // when it answers. False, and at once, if the phone has a call or a roaming update going on
+    // (cause Busy), or there is no idle calling channel (cause NoChannel); `cause` may be null.
+    // With no idle traffic channel when the phone answers, the call is queued. The caller is told
+    // through the call handlers set below. The call can be ended with releaseCall().
     bool startCall(char country, const std::string& number, const std::string& callerId,
-                   modemcellular::NumberType callerType);
-    // There is a calling channel to page with. Without one startCall() fails at once.
+                   modemcellular::NumberType callerType, modemcellular::Cause* cause = nullptr);
+    // There is an idle calling channel to page with (a combined channel is one too).
     bool canCall() const;
     using CallEventHandler = std::function<void(const NmtSubscriber& subscriber)>;
     using CallFailedHandler = std::function<void(const NmtSubscriber& subscriber, modemcellular::Cause cause)>;
@@ -156,6 +158,9 @@ public:
     void audioFromMobile(NmtTransaction& transaction, const float* samples, int count) override;
     void audioToMobile(NmtTransaction& transaction, float* samples, int count) override;
     NmtChannel* findTrafficChannel(NmtChannel& from) override;
+    NmtTransaction* startPriorityCall(const NmtSubscriber& subscriber, NmtChannel& channel) override;
+    void pageAgain(NmtTransaction& transaction) override;
+    NmtTransaction* calledPhoneSeized(const NmtSubscriber& subscriber, NmtChannel& channel) override;
     void pagingAnswered(NmtTransaction& transaction, NmtChannel& channel) override;
     void moveToTrafficChannel(NmtTransaction& transaction, NmtChannel& from, NmtChannel& to) override;
     void callAlerting(NmtTransaction& transaction) override;

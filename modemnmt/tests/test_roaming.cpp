@@ -300,7 +300,7 @@ static void testRoamingAgain()
     CHECK(system.registeredCount() == 1);
     CHECK(system.registeredSubscriber('1', "123456")->password == "321");       // the last update wins
 
-    // NMT-900 identity request carries the area number as channel 1011..1014
+    // NMT-900 identity request carries the area number as 3F3..3F6
     ChannelConfig area = config(System::Nmt900, ChannelType::AcTc, 501);
     area.areaNo = 3;
     NmtChannel& ac = system.addChannel(area, kRate, 1.0);

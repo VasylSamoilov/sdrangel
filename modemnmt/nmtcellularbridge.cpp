@@ -269,14 +269,16 @@ void NmtCellularBridge::run()
 
         if (event.type == Event::Type::Setup)
         {
-            // a call for the phone: it is paged; a phone that has a call is busy
-            if (!m_nmt.canCall()) {
-                m_cellular.release(event.callref, modemcellular::Cause::NoChannel);
-            }
-            else if (leg.callref() ||
-                !m_nmt.startCall(leg.subscriber().country, leg.subscriber().number, event.callerId, event.callerType))
-            {
+            // a call for the phone: it is paged; a phone that has a call is busy, and the call
+            // is rejected at once if there is no channel for it
+            modemcellular::Cause cause = modemcellular::Cause::Busy;
+
+            if (leg.callref()) {
                 m_cellular.release(event.callref, modemcellular::Cause::Busy);
+            }
+            else if (!m_nmt.startCall(leg.subscriber().country, leg.subscriber().number, event.callerId,
+                                      event.callerType, &cause)) {
+                m_cellular.release(event.callref, cause);
             }
             else {
                 leg.setCallref(event.callref);

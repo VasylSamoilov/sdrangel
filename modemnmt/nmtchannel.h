@@ -62,8 +62,11 @@ struct NmtTransaction
     int pageTry = 0;
     bool pageDeferred = false;              // waiting for the wake-up window of battery saving
     bool pageWaited = false;                // the wake-up window was waited for
-    int pageBusy = 0;                       // polls while no calling channel was free
     bool priority = false;                  // the phone answered as a priority phone
+    // The phone seized a calling channel as a priority phone to place a call (frame 11b): it is
+    // paged to check its identity, gets a traffic channel and is rung to lift the handset, and then
+    // dials like any phone that places a call. There is no call in the exchange before it dials.
+    bool priorityMo = false;
     std::string callerId;
     modemcellular::NumberType callerType = modemcellular::NumberType::NotAvailable;
     std::unique_ptr<modemcellular::Timer> timer;        // paging
@@ -112,6 +115,16 @@ public:
     // The best free traffic channel for a call that is on the calling channel `from`: a traffic
     // channel, or a combined one (the calling channel itself counts as free). Null if none.
     virtual NmtChannel* findTrafficChannel(NmtChannel& from) = 0;
+    // A priority phone seized the calling channel (frame 11b) to place a call: a transaction for
+    // it is paged on the calling channels. Null if the phone has a transaction already.
+    virtual NmtTransaction* startPriorityCall(const NmtSubscriber& subscriber, NmtChannel& channel) = 0;
+    // The paging of the transaction starts again from the first try (a traffic channel became
+    // free for a queued priority phone and it is asked to confirm).
+    virtual void pageAgain(NmtTransaction& transaction) = 0;
+    // A phone seized the traffic channel as the called phone (frame 10c): the transaction that
+    // pages it is bound to this channel and the channels it was on go idle. Null if no call to the
+    // phone is waiting.
+    virtual NmtTransaction* calledPhoneSeized(const NmtSubscriber& subscriber, NmtChannel& channel) = 0;
     // The phone answered the page on this channel: the other channels that page it stop.
     virtual void pagingAnswered(NmtTransaction& transaction, NmtChannel& channel) = 0;
     // The call moves from the calling channel to the traffic channel.
@@ -339,7 +352,7 @@ private:
     void beginRecallEnd();
     void abortInCall(State previous);
     int power() const;
-    enum class DigitResult { Foreign, Repeat, Damaged, Digit, Lost, TooLong };
+    enum class DigitResult { Foreign, Repeat, Damaged, Digit, Lost };
     DigitResult takeDigit(const Frame& frame, size_t count, size_t limit, char& digit);
     // The same for the MFT and register recall states, by the rule of the standard: a frame of
     // the other kind than the last digit is a new digit, whenever it comes.
@@ -410,9 +423,8 @@ private:
     bool m_haveLastDigit;           // MFT / register recall: a digit was taken
     bool m_lastDigitOdd;            // ... in a frame 14a
     bool m_mftIdleSeen;             // conversation: an idle frame of the phone came since the last MFT state
-    bool m_autoanswerGo;            // message call: the phone is ready (idle frames seen), the order goes out
+    bool m_autoanswerGo;            // message call: the idle frames after the identity are out, the order goes out
     bool m_autoanswerAcked;         // message call: the phone answered while the order went out
-    int m_phoneIdle;                // message call: idle frames of the phone since its identity
     int m_mwiLead;                  // idle frames before the indicators
     bool m_mwiAcked;                // the phone cleared / acknowledged already: nothing to wait for after the sequence
 };
