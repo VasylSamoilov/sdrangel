@@ -68,6 +68,14 @@ public:
     // call that can be released.
     bool releaseCall(char country, const std::string& number);
 
+    // Switches a connected call in progress to another traffic channel of this base station
+    // (NMT Doc 450-1 para 4.4.1.4, scheme C2': the short procedure). `channel` is the radio
+    // channel number wanted, 0 for the first free traffic channel. False if the phone has no
+    // connected call on a single channel, a switch is going on, or there is no such free
+    // traffic channel. If the phone does not show up on the new channel, the call stays on the
+    // old one.
+    bool moveCall(char country, const std::string& number, int channel = 0);
+
     // A call to a phone: it is paged on the calling channels and moved to a traffic channel
     // when it answers. False if the phone has a call or a roaming update going on. The caller
     // is told through the call handlers set below. The call can be ended with releaseCall().
@@ -121,6 +129,8 @@ public:
     void callAlerting(NmtTransaction& transaction) override;
     void callAnswered(NmtTransaction& transaction) override;
     void callFailed(NmtTransaction& transaction, modemcellular::Cause cause) override;
+    void scipCompleted(NmtTransaction& transaction) override;
+    void scipEnded(NmtTransaction& transaction, bool forceRelease) override;
 
 private:
     void page(NmtTransaction& transaction, int tryNo);

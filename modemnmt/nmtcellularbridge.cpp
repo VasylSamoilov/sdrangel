@@ -73,8 +73,7 @@ private:
     NmtCellularBridge& m_bridge;
     std::string m_number;
     NmtSubscriber m_subscriber;
-    // set from the call, clear and release paths, read by the audio handlers: the audio threads
-    // of a station are not the same
+    // set from the router (any thread), read by the audio handlers under the station lock
     std::atomic<modemcellular::CallRef> m_callref;
 };
 
