@@ -13,6 +13,7 @@ set(MODEMNMT_LIB_SOURCES
     ../nmtcellularbridge.cpp
     ../nmtchannel.cpp
     ../nmtframe.cpp
+    ../nmtmwi.cpp
     ../nmtmodem.cpp
     ../nmtnumbers.cpp
     ../nmtsystem.cpp
@@ -64,3 +65,4 @@ modemnmt_add_test(modemnmt_bridge_test test_bridge.cpp)
 modemnmt_add_test(modemnmt_mtcall_test test_mtcall.cpp)
 modemnmt_add_test(modemnmt_scip_test test_scip.cpp)
 modemnmt_add_test(modemnmt_incall_test test_incall.cpp)
+modemnmt_add_test(modemnmt_mwi_test test_mwi.cpp)
