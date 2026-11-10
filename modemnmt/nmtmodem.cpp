@@ -80,6 +80,9 @@ void FrameReceiver::receiveBit(int bit, double quality, double level)
         m_sync = 0;
         m_inSync = true;
         m_count = 0;
+        if (m_syncHandler) {
+            m_syncHandler();
+        }
         return;
     }
 
