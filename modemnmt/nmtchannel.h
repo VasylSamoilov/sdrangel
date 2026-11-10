@@ -28,6 +28,7 @@
 
 #include "nmtframe.h"
 #include "nmtmodem.h"
+#include "nmtmwi.h"
 #include "nmtnumbers.h"
 #include "nmtvoice.h"
 #include "timer.h"
@@ -72,6 +73,14 @@ struct NmtTransaction
 
     // power level of the phone for this call, 0..3; -1 for the one of the channel
     int power = -1;
+
+    // A call only to tell the phone about waiting messages: no call in the exchange (callUp stays
+    // false), the phone is not rung but asked to take the call without ringing (L(12)).
+    bool messageCall = false;
+    // Message indicators for the clearing of the call (also of an ordinary call), and how it ended.
+    uint8_t mwiFlags = 0;
+    NmtServiceEnd mwiResult = NmtServiceEnd::Undelivered;
+    bool mwiReported = false;
 };
 
 // What a channel needs from the base station it belongs to (implemented by NmtSystem).
@@ -215,7 +224,9 @@ public:
         PowerChange,        // call: ordering the phone to another power level
         RecallProceed,      // call: register recall, acknowledging
         RecallDigits,       // call: register recall, dial tone, receiving digits
-        RecallEnd           // call: register recall over, back to the conversation
+        RecallEnd,          // call: register recall over, back to the conversation
+        MtAutoanswer,       // traffic channel: asking the phone to answer without ringing
+        MwiClear            // clearing: the message indicators (5c), then the release
     };
 
     struct ReceivedFrame
@@ -256,6 +267,10 @@ public:
     void beginScipRelease();
     // The channel is a calling channel (also a combined one).
     bool isCallingChannel() const;
+    // A call is connected here (also while a procedure of the call runs): clearing it carries the
+    // message indicators.
+    bool inCall() const { return inCallState(m_state); }
+    static bool inCallState(State state);
     State state() const { return m_state; }
 
     void setTimeOfDay(TimeOfDay timeOfDay) { m_timeOfDay = std::move(timeOfDay); }
@@ -311,6 +326,11 @@ private:
     Frame txPowerChange();
     Frame txRecallProceed();
     Frame txRecallEnd();
+    Frame txMtAutoanswer();
+    Frame txMwiClear();
+    void rxMtAutoanswer(const Frame& frame);
+    void rxMwiClear(const Frame& frame);
+    void beginMwiClear(int leadIdle, bool phoneCleared);
     void rxActive(const Frame& frame);
     void rxMft(const Frame& frame);
     void rxPowerChange(const Frame& frame);
@@ -390,6 +410,11 @@ private:
     bool m_haveLastDigit;           // MFT / register recall: a digit was taken
     bool m_lastDigitOdd;            // ... in a frame 14a
     bool m_mftIdleSeen;             // conversation: an idle frame of the phone came since the last MFT state
+    bool m_autoanswerGo;            // message call: the phone is ready (idle frames seen), the order goes out
+    bool m_autoanswerAcked;         // message call: the phone answered while the order went out
+    int m_phoneIdle;                // message call: idle frames of the phone since its identity
+    int m_mwiLead;                  // idle frames before the indicators
+    bool m_mwiAcked;                // the phone cleared / acknowledged already: nothing to wait for after the sequence
 };
 
 } // namespace modemnmt

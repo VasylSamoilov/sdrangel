@@ -68,8 +68,47 @@ void NmtSystem::forEachRegistered(const std::function<void(const NmtSubscriber&)
     }
 }
 
+NmtSystem::~NmtSystem()
+{
+    // transactions that no channel is bound to would end without a word: tell the handler
+    for (NmtTransaction& transaction : m_transactions) {
+        sendMwiReport(mwiReport(transaction));
+    }
+}
+
+// A message call that has not got to a traffic channel yet gives way to anything the phone does or
+// is called for: it ends as undelivered (the flags can be sent again). Once the phone is on a
+// traffic channel the call is short and runs to its end.
+bool NmtSystem::cancelMessageCall(char country, const std::string& number)
+{
+    for (NmtTransaction& transaction : m_transactions)
+    {
+        if (transaction.subscriber.country != country || transaction.subscriber.number != number) {
+            continue;
+        }
+        if (!transaction.messageCall) {
+            return false;
+        }
+        for (const NmtChannel* channel : transaction.channels)
+        {
+            const NmtChannel::State state = channel->state();
+
+            if (state != NmtChannel::State::MtPaging && state != NmtChannel::State::MtQueue
+             && state != NmtChannel::State::MtChannel) {
+                return false;
+            }
+        }
+        destroyTransaction(&transaction);
+        return true;
+    }
+
+    return false;
+}
+
 NmtTransaction* NmtSystem::createTransaction(const NmtSubscriber& subscriber, NmtChannel& channel)
 {
+    cancelMessageCall(subscriber.country, subscriber.number);
+
     // one transaction per subscriber
     for (const NmtTransaction& transaction : m_transactions)
     {
@@ -99,9 +138,70 @@ void NmtSystem::destroyTransaction(NmtTransaction* transaction)
         for (NmtChannel* channel : channels) {
             channel->transactionEnded();
         }
+
+        const MwiReport report = mwiReport(*it);
+
         m_transactions.erase(it);
+        sendMwiReport(report);
         return;
     }
+}
+
+// What the handler is told about message indicators of a transaction that ends.
+NmtSystem::MwiReport NmtSystem::mwiReport(NmtTransaction& transaction)
+{
+    MwiReport report;
+
+    if (transaction.mwiFlags && !transaction.mwiReported)
+    {
+        transaction.mwiReported = true;
+        report.valid = true;
+        report.subscriber = transaction.subscriber;
+        report.flags = transaction.mwiFlags;
+        report.result = transaction.mwiResult;
+    }
+
+    return report;
+}
+
+void NmtSystem::sendMwiReport(const MwiReport& report)
+{
+    if (report.valid && m_mwiHandler) {
+        m_mwiHandler(report.subscriber, report.flags, report.result);
+    }
+}
+
+bool NmtSystem::sendMwi(char country, const std::string& number, uint8_t flags)
+{
+    if (flags == 0 || (flags & ~static_cast<uint8_t>(MwiAll))) {
+        return false;
+    }
+
+    for (NmtTransaction& transaction : m_transactions)
+    {
+        if (transaction.subscriber.country != country || transaction.subscriber.number != number) {
+            continue;
+        }
+        // a phone in a call hears it when the call is cleared; one that is doing anything else is busy
+        if (!transaction.callUp || transaction.channels.size() != 1
+         || !transaction.channels.front()->inCall()) {
+            return false;
+        }
+        transaction.mwiFlags |= flags;
+        return true;
+    }
+
+    if (!canCall()) {
+        return false;
+    }
+
+    NmtTransaction& transaction = newPagedTransaction(country, number);
+
+    transaction.messageCall = true;
+    transaction.mwiFlags = flags;
+    page(transaction, 1);
+
+    return true;
 }
 
 void NmtSystem::detachChannel(NmtChannel& channel, NmtTransaction* transaction)
@@ -131,10 +231,12 @@ void NmtSystem::detachChannel(NmtChannel& channel, NmtTransaction* transaction)
             const bool up = it->callUp;
             const bool failed = it->mobileTerminated && !it->answered;
             NmtTransaction report;
+            const MwiReport mwi = mwiReport(*it);
 
             report.subscriber = it->subscriber;
             // the transaction is gone before the handler runs: it may do anything
             m_transactions.erase(it);
+            sendMwiReport(mwi);
             if (up)
             {
                 if (failed) {
@@ -179,6 +281,8 @@ const double kPagingTimeout = 1.0;
 // A call waits this long for a calling channel that is free (10 s in all).
 const double kPageBusyPoll = 0.2;
 const int kPageBusyPolls = 50;
+// A message call is not urgent: it waits longer for a calling channel (30 s).
+const int kMessagePageBusyPolls = 150;
 
 // Battery saving (NMT Doc 450-1 para 4.3.3.12.3): does the phone whose last digit is x6 belong to
 // the group that H7 addresses?
@@ -232,15 +336,13 @@ bool NmtSystem::canCall() const
 bool NmtSystem::startCall(char country, const std::string& number, const std::string& callerId,
                           modemcellular::NumberType callerType)
 {
-    NmtSubscriber subscriber;
-
-    subscriber.country = country;
-    subscriber.number = number;
-
     // nothing to page with
     if (!canCall()) {
         return false;
     }
+
+    // a call waits for nothing a message call could still do
+    cancelMessageCall(country, number);
 
     // a phone has one transaction
     for (const NmtTransaction& transaction : m_transactions)
@@ -250,23 +352,33 @@ bool NmtSystem::startCall(char country, const std::string& number, const std::st
         }
     }
 
-    m_transactions.emplace_back();
-    NmtTransaction& transaction = m_transactions.back();
-    NmtTransaction* const pointer = &transaction;
+    NmtTransaction& transaction = newPagedTransaction(country, number);
 
-    transaction.subscriber = subscriber;
-    transaction.mobileTerminated = true;
-    transaction.paging = true;
     transaction.callUp = true;
     // the phone does not add the '+' of an international number
     transaction.callerId = (callerType == modemcellular::NumberType::International && !callerId.empty() && callerId[0] != '+')
         ? "+" + callerId : callerId;
     // no number to show: the phone is told so (4.3.3.13: type 3)
     transaction.callerType = callerId.empty() ? modemcellular::NumberType::NotAvailable : callerType;
-    transaction.timer = std::make_unique<modemcellular::Timer>(m_timers, [this, pointer]() { pagingTimeout(*pointer); });
     page(transaction, 1);
 
     return true;
+}
+
+// A transaction for a call to the phone that is paged; the caller checked that the phone has none.
+NmtTransaction& NmtSystem::newPagedTransaction(char country, const std::string& number)
+{
+    m_transactions.emplace_back();
+    NmtTransaction& transaction = m_transactions.back();
+    NmtTransaction* const pointer = &transaction;
+
+    transaction.subscriber.country = country;
+    transaction.subscriber.number = number;
+    transaction.mobileTerminated = true;
+    transaction.paging = true;
+    transaction.timer = std::make_unique<modemcellular::Timer>(m_timers, [this, pointer]() { pagingTimeout(*pointer); });
+
+    return transaction;
 }
 
 // Pages the phone on the calling channels that are idle. With battery saving on a calling channel
@@ -350,7 +462,7 @@ void NmtSystem::pagingTimeout(NmtTransaction& transaction)
         return;
     }
 
-    if (transaction.pageBusy > kPageBusyPolls)
+    if (transaction.pageBusy > (transaction.messageCall ? kMessagePageBusyPolls : kPageBusyPolls))
     {
         callFailed(transaction, modemcellular::Cause::NoChannel);
         destroyTransaction(&transaction);
@@ -420,7 +532,7 @@ void NmtSystem::moveToTrafficChannel(NmtTransaction& transaction, NmtChannel& fr
 
 void NmtSystem::callAlerting(NmtTransaction& transaction)
 {
-    if (m_alerting)
+    if (m_alerting && !transaction.messageCall)
     {
         const NmtSubscriber subscriber = transaction.subscriber;
         m_alerting(subscriber);
@@ -429,7 +541,7 @@ void NmtSystem::callAlerting(NmtTransaction& transaction)
 
 void NmtSystem::callAnswered(NmtTransaction& transaction)
 {
-    if (m_answered)
+    if (m_answered && !transaction.messageCall)
     {
         const NmtSubscriber subscriber = transaction.subscriber;
         m_answered(subscriber);
@@ -438,6 +550,13 @@ void NmtSystem::callAnswered(NmtTransaction& transaction)
 
 void NmtSystem::callFailed(NmtTransaction& transaction, modemcellular::Cause cause)
 {
+    // a message call is no call of the exchange: the outcome goes to the message indicator report
+    if (transaction.messageCall)
+    {
+        transaction.mwiResult = (cause == modemcellular::Cause::NoChannel) ? NmtServiceEnd::NoChannel : NmtServiceEnd::Unreachable;
+        return;
+    }
+
     if (m_failed)
     {
         const NmtSubscriber subscriber = transaction.subscriber;
@@ -470,6 +589,9 @@ bool NmtSystem::releaseCall(char country, const std::string& number)
     {
         if (transaction.subscriber.country != country || transaction.subscriber.number != number) {
             continue;
+        }
+        if (transaction.messageCall) {
+            return cancelMessageCall(country, number);
         }
         // a call that is still paging has no phone on a channel: it just stops
         if (transaction.paging && transaction.callUp)

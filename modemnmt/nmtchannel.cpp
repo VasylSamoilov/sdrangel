@@ -132,6 +132,10 @@ const int kAckIdleFrames = 3;
 const int kAckFrames = 4;
 const int kLeaveIdleFrames = 4;
 const int kPowerOrderFrames = 8;
+// Frames to wait for the idle frame of a phone before the order to answer by itself goes out.
+const int kAutoanswerWait = 6;
+// Idle frames of the phone (scheme B2: 15, 15, 15/16, 15/16) after which the order goes out.
+const int kPhoneIdleFrames = 4;
 const double kMftSilence = 10.0;
 const double kRecallFirstDigit = 30.0;
 const double kRecallNextDigit = 8.0;
@@ -145,6 +149,9 @@ const double kDialToneHz = 425.0;
 // How long a call waits for a free traffic channel, and how long the phone may ring.
 const double kQueueTimeout = 60.0;
 const double kRingingTimeout = 60.0;
+// A message call that rings a phone nobody answers, and one that waits for a traffic channel.
+const double kMessageRingTimeout = 15.0;
+const double kMessageQueueTimeout = 10.0;
 // The received audio is muted this long after a frame sync (a little more than two frames).
 const double kMuteSeconds = 0.280;
 // Seconds to detect the supervisory tone after the call is connected, and to lose it before the
@@ -192,7 +199,12 @@ NmtChannel::NmtChannel(const ChannelConfig& config, double sampleRate, double de
     m_newPower(0),
     m_haveLastDigit(false),
     m_lastDigitOdd(false),
-    m_mftIdleSeen(false)
+    m_mftIdleSeen(false),
+    m_autoanswerGo(false),
+    m_autoanswerAcked(false),
+    m_phoneIdle(0),
+    m_mwiLead(0),
+    m_mwiAcked(false)
 {
     m_modem.setFrameSource([this](FrameBits& bits) { return nextFrame(bits); });
     m_modem.setFrameSink([this](const RxFrame& rx) { receiveFrame(rx); });
@@ -401,6 +413,12 @@ bool NmtChannel::nextFrame(FrameBits& bits)
         break;
     case State::MtRelease:
         frame = txMtRelease();
+        break;
+    case State::MtAutoanswer:
+        frame = txMtAutoanswer();
+        break;
+    case State::MwiClear:
+        frame = txMwiClear();
         break;
     case State::MftIn:
         frame = txMftIn();
@@ -655,6 +673,25 @@ void NmtChannel::failCall(modemcellular::Cause cause)
     }
 }
 
+bool NmtChannel::inCallState(State state)
+{
+    switch (state)
+    {
+    case State::Active:
+    case State::MftIn:
+    case State::Mft:
+    case State::MftOut:
+    case State::PowerChange:
+    case State::RecallProceed:
+    case State::RecallDigits:
+    case State::RecallEnd:
+    case State::ScipOrder:
+        return true;
+    default:
+        return false;
+    }
+}
+
 bool NmtChannel::isCallingChannel() const
 {
     return m_config.type == ChannelType::Cc || m_config.type == ChannelType::Cca
@@ -740,7 +777,8 @@ Frame NmtChannel::txMtChannel()
         // no free traffic channel: the call is queued
         m_state = State::MtQueue;
         m_txFrameCount = 0;
-        m_timer->start(kQueueTimeout);
+        // a message call does not hold the calling channel for long
+        m_timer->start(m_transaction->messageCall ? kMessageQueueTimeout : kQueueTimeout);
         return txMtQueue();
     }
 
@@ -802,8 +840,14 @@ Frame NmtChannel::txMtComplete()
     Frame frame;
 
     frame.mt = MessageType::Frame6;
-    if (++m_txFrameCount == 4) {
-        enterActive();
+    if (++m_txFrameCount == 4)
+    {
+        // a phone that answered a ringing message call hears nothing: the indicators and the release
+        if (m_transaction->messageCall) {
+            beginMwiClear(0, false);
+        } else {
+            enterActive();
+        }
     }
 
     return frame;
@@ -1453,7 +1497,7 @@ void NmtChannel::process(const Frame& frame)
     // The phone clears: acknowledge with the release signal, unless that is already going on
     // (a clearing from the phone that answers our release is handled in MtRelease).
     if (frame.mt == MessageType::Frame13a && m_state != State::Idle
-     && m_state != State::MoRelease && m_state != State::MtRelease && !scipTargetState())
+     && m_state != State::MoRelease && m_state != State::MtRelease && m_state != State::MwiClear && !scipTargetState())
     {
         // three of five characters have to agree on L(1); other line signals (the answer, for
         // one) are for the state
@@ -1479,6 +1523,10 @@ void NmtChannel::process(const Frame& frame)
             m_state = State::MoRelease;
             m_txFrameCount = 0;
             m_timer->start(kStateWatchdog);
+            // message indicators for the phone go out before the release (4.4.1.16)
+            if (transaction->mwiFlags && inCallState(previous) && transaction->mwiResult == NmtServiceEnd::Undelivered) {
+                beginMwiClear(0, true);
+            }
             abortInCall(previous);
             if (wasUp && m_transaction == transaction) {
                 m_host->callCleared(*transaction);
@@ -1514,6 +1562,12 @@ void NmtChannel::process(const Frame& frame)
     case State::ScipIdent:
     case State::ScipIdentReq:
         rxScipIdent(frame);
+        break;
+    case State::MtAutoanswer:
+        rxMtAutoanswer(frame);
+        break;
+    case State::MwiClear:
+        rxMwiClear(frame);
         break;
     case State::Active:
         rxActive(frame);
@@ -1778,12 +1832,177 @@ void NmtChannel::rxMtIdent(const Frame& frame)
     }
 
     m_transaction->subscriber.password = valueToDigits(frame.msPassword, 3);
+
+    // A call that only carries message indicators is not rung: the phone is asked to answer by itself.
+    if (m_transaction->messageCall)
+    {
+        m_state = State::MtAutoanswer;
+        m_txFrameCount = 0;
+        m_autoanswerGo = false;
+        m_autoanswerAcked = false;
+        m_phoneIdle = 0;
+        m_timer->start(kStateWatchdog);
+        return;
+    }
+
     m_state = State::MtRinging;
     // the number of the caller comes before the first ring
     m_txFrameCount = m_config.sendCallerId ? 4 : 0;
     m_callerIdCount = m_config.sendCallerId ? 1 : 0;
     m_timer->start(kRingingTimeout);
     m_host->callAlerting(*m_transaction);
+}
+
+// Automatic answer (scheme B2, NMT Doc 450-1 para 4.4.1.12): the order to receive a short message,
+// L(12) four times once the phone is quiet, then idle frames while it acknowledges with L(12).
+// A phone that does not know the order is rung after all (the call goes on as an ordinary one).
+Frame NmtChannel::txMtAutoanswer()
+{
+    Frame frame;
+
+    frame.mt = MessageType::Frame6;
+
+    if (!m_autoanswerGo)
+    {
+        // the phone sends idle frames after its identity (15, 15, 15, 15); do not start before,
+        // but not forever
+        if (++m_txFrameCount >= kAutoanswerWait) {
+            m_autoanswerGo = true;
+            m_txFrameCount = 0;
+        }
+        return frame;
+    }
+
+    const int n = ++m_txFrameCount;
+
+    if (n <= kAckFrames) {
+        return lineSignalFrame(12);
+    }
+    // the phone answered while the order was going out: the order is complete, then 3 idle frames
+    if (n == kAckFrames + 1 && m_autoanswerAcked)
+    {
+        beginMwiClear(3, false);
+        return txMwiClear();
+    }
+    if (n <= kAckFrames + kLeaveIdleFrames) {
+        return frame;
+    }
+
+    // no acknowledgement: ring the phone
+    m_state = State::MtRinging;
+    m_txFrameCount = m_config.sendCallerId ? 4 : 0;
+    m_callerIdCount = m_config.sendCallerId ? 1 : 0;
+    m_timer->start(kMessageRingTimeout);
+    return frame;
+}
+
+void NmtChannel::rxMtAutoanswer(const Frame& frame)
+{
+    if (frame.mt == MessageType::Frame15 && !m_autoanswerGo)
+    {
+        // identity 4 frames, then idle frames 4 frames: the order follows the last of them
+        if (++m_phoneIdle >= kPhoneIdleFrames)
+        {
+            m_autoanswerGo = true;
+            m_txFrameCount = 0;
+        }
+        return;
+    }
+    if (frame.mt != MessageType::Frame13a || !m_autoanswerGo) {
+        return;
+    }
+    if (!matchChannel(frame) || !matchSubscriber(frame) || lineSignalMajority(frame.lineSignal, 5, 3) != 12) {
+        return;
+    }
+
+    // The phone answers (scheme B2: while the order goes out, it needs one valid copy). The order
+    // is sent to its end, then 3 idle frames count, then the indicators and the release.
+    if (m_txFrameCount < kAckFrames)
+    {
+        m_autoanswerAcked = true;
+        return;
+    }
+    const int sent = std::max(0, m_txFrameCount - kAckFrames);
+
+    beginMwiClear(std::max(0, kAckIdleFrames - sent), false);
+}
+
+// The indicators go out right before the clearing signal (4.4.1.16): 5c twice, L(15) four times.
+// Then the phone acknowledges (L(1)); if it cleared first that was the acknowledgement.
+void NmtChannel::beginMwiClear(int leadIdle, bool phoneCleared)
+{
+    m_state = State::MwiClear;
+    m_txFrameCount = 0;
+    m_mwiLead = leadIdle;
+    m_mwiAcked = phoneCleared;
+    setDspMode(DspMode::Frame);
+    m_timer->start(kStateWatchdog);
+}
+
+Frame NmtChannel::txMwiClear()
+{
+    Frame frame;
+    const int n = ++m_txFrameCount;
+
+    if (n <= m_mwiLead)
+    {
+        frame.mt = MessageType::Frame6;
+        return frame;
+    }
+
+    const int k = n - m_mwiLead;
+
+    if (k <= 2)
+    {
+        frame = baseFrame(MessageType::Frame5c);
+        frame.msCountry = static_cast<uint8_t>(digitsToValue(std::string(1, m_transaction->subscriber.country)));
+        frame.msNumber = static_cast<uint32_t>(digitsToValue(m_transaction->subscriber.number));
+        frame.waitingInfo = mwiWireInfo(m_transaction->mwiFlags);
+        m_transaction->mwiResult = NmtServiceEnd::NoAck;
+        return frame;
+    }
+
+    frame = lineSignalFrame(15);
+    if (k == 2 + kAckFrames)
+    {
+        if (m_mwiAcked)
+        {
+            // the phone cleared first (or answered during the signal): this is the end
+            NmtTransaction* const transaction = m_transaction;
+
+            transaction->mwiResult = NmtServiceEnd::Ok;
+            m_host->destroyTransaction(transaction);
+        }
+        else
+        {
+            m_state = State::MtRelease;
+            m_txFrameCount = 0;
+            m_timer->start(kReleaseTimeout);
+        }
+    }
+
+    return frame;
+}
+
+void NmtChannel::rxMwiClear(const Frame& frame)
+{
+    if (frame.mt != MessageType::Frame13a || !matchChannel(frame) || !matchSubscriber(frame)
+     || lineSignalMajority(frame.lineSignal, 5, 3) != 1) {
+        return;
+    }
+
+    // The phone clears before the indicators went out (the user hung up the short call): it is
+    // released like for any clearing, and nothing was delivered.
+    if (m_txFrameCount <= m_mwiLead && !m_mwiAcked)
+    {
+        m_state = State::MoRelease;
+        m_txFrameCount = 0;
+        m_timer->start(kStateWatchdog);
+        return;
+    }
+
+    // the phone acknowledges the clearing while the signal is on
+    m_mwiAcked = true;
 }
 
 // The phone answers with L(14).
@@ -1819,6 +2038,10 @@ void NmtChannel::rxMtRelease(const Frame& frame)
         return;
     }
 
+    // the clearing that carried the indicators is acknowledged
+    if (m_transaction->mwiResult == NmtServiceEnd::NoAck) {
+        m_transaction->mwiResult = NmtServiceEnd::Ok;
+    }
     m_host->destroyTransaction(m_transaction);
 }
 
@@ -1839,6 +2062,11 @@ void NmtChannel::release()
     m_txFrameCount = 0;
     setDspMode(DspMode::Frame);
     m_timer->start(kReleaseTimeout);
+    // message indicators for the phone go out before the release (4.4.1.16)
+    if (m_transaction && m_transaction->mwiFlags && inCallState(previous)
+     && m_transaction->mwiResult == NmtServiceEnd::Undelivered) {
+        beginMwiClear(0, false);
+    }
     abortInCall(previous);
 }
 
@@ -1969,6 +2197,9 @@ void NmtChannel::onTimer()
     // is released
     if (m_state == State::MtRinging || m_state == State::MtQueue)
     {
+        if (m_state == State::MtQueue && m_transaction->messageCall) {
+            m_transaction->mwiResult = NmtServiceEnd::NoChannel;
+        }
         // no answer is a plain release for the caller, no free channel is congestion
         failCall(m_state == State::MtRinging ? modemcellular::Cause::Normal : modemcellular::Cause::NoChannel);
         if (m_transaction) {
@@ -1982,6 +2213,10 @@ void NmtChannel::onTimer()
     {
         NmtTransaction* const transaction = m_transaction;
 
+        // the phone is gone: the indicators would go nowhere, the host can send them again
+        if (transaction->mwiResult == NmtServiceEnd::Undelivered) {
+            transaction->mwiResult = NmtServiceEnd::Unreachable;
+        }
         if (transaction->callUp)
         {
             transaction->callUp = false;
