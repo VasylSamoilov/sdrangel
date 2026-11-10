@@ -29,8 +29,11 @@ namespace modemcellular
 namespace
 {
 
-// Audio waiting for a mobile in a mobile to mobile call is limited to one second.
-constexpr size_t kMaxQueuedSamples = kAudioSampleRate;
+// Audio waiting for a mobile in a mobile to mobile call: a mobile that starts to listen late
+// (it is still setting up its voice channel) would otherwise stay behind by the time it was
+// missing for the rest of the call. Above 200 ms the oldest audio is dropped down to 60 ms.
+constexpr size_t kMaxQueuedSamples = kAudioSampleRate / 5;
+constexpr size_t kTrimmedQueueSamples = kAudioSampleRate * 3 / 50;
 
 // A tone that announces the end of a call plays for this long, then the call is released.
 constexpr double kDefaultToneTimeout = 30.0;
@@ -41,8 +44,11 @@ void pushAudio(std::deque<float>& queue, const float* samples, int count)
         queue.push_back(samples[i]);
     }
 
-    while (queue.size() > kMaxQueuedSamples) {
-        queue.pop_front();
+    if (queue.size() > kMaxQueuedSamples)
+    {
+        while (queue.size() > kTrimmedQueueSamples) {
+            queue.pop_front();
+        }
     }
 }
 
