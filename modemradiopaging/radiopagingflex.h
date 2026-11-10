@@ -92,6 +92,7 @@ public:
         int m_phase = 0;            //!< Phase index: 0 to phaseCount(mode) - 1
         int m_collapse = 0;         //!< 0-7, sent in the block information word
         int m_carryOn = 0;          //!< 0-3, sent in the block information word
+        std::vector<uint32_t> m_extraBiw;   //!< Block information words 2 to 4 (up to 3, as transmitted): before the address field
     };
 
     struct PhaseResult
@@ -109,6 +110,7 @@ public:
         unsigned m_cycle = 0;       //!< 0-14
         unsigned m_frame = 0;       //!< 0-127
         unsigned m_traffic = 0;     //!< 4 low traffic flags of the frame information word
+        bool m_roaming = false;     //!< Roaming network bit of the frame information word
     };
 
     struct FrameBytes
@@ -139,6 +141,13 @@ public:
     static bool checksumValid(uint32_t data);
 
     static uint32_t frameInfoWord(unsigned cycle, unsigned frame, unsigned roaming, unsigned repeat, unsigned traffic);
+    //!< Simulcast system ID words (STD-43A Table 3.7.2-1, 6.1.1): block information words 000 (local
+    //!< channel ID 9 bits, coverage zone 5 bits) and 111 (country code 10 bits, traffic management flags 4 bits)
+    static uint32_t ssid1Word(unsigned localId, unsigned coverageZone);
+    static uint32_t ssid2Word(unsigned countryCode, unsigned trafficFlags);
+    //!< Phase that carries the SSID words of a frame (STD-43A 6.1.1.3): 4 phases, the phase is the frame
+    //!< modulo 4; 2 phases (a and c), frames 0 and 1 in the first, 2 and 3 in the second; 1 phase, the only one
+    static int ssidPhase(Mode mode, unsigned frame);
     //!< addressStart: number of block information words minus 1, vectorStart: word index of the first vector
     static uint32_t blockInfoWord(unsigned priorityWords, unsigned addressStart, unsigned vectorStart, unsigned carryOn, unsigned collapse);
 

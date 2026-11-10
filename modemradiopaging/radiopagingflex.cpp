@@ -341,6 +341,34 @@ uint32_t RadioPagingFlex::frameInfoWord(unsigned cycle, unsigned frame, unsigned
     return encodeWord(addChecksum(data));
 }
 
+// Word types 000 and 111 in bits 6-4; the checksum is in bits 3-0 as in every information word
+uint32_t RadioPagingFlex::ssid1Word(unsigned localId, unsigned coverageZone)
+{
+    uint32_t data = (coverageZone & 0x1f) << 7;
+    data |= (localId & 0x1ff) << 12;
+    return encodeWord(addChecksum(data));
+}
+
+uint32_t RadioPagingFlex::ssid2Word(unsigned countryCode, unsigned trafficFlags)
+{
+    uint32_t data = 7u << 4;
+    data |= (trafficFlags & 0xf) << 7;
+    data |= (countryCode & 0x3ff) << 11;
+    return encodeWord(addChecksum(data));
+}
+
+int RadioPagingFlex::ssidPhase(Mode mode, unsigned frame)
+{
+    int slot = (int) (frame & 3);
+
+    switch (phaseCount(mode))
+    {
+    case 4: return slot;
+    case 2: return (slot < 2) ? 0 : 1;
+    default: return 0;
+    }
+}
+
 uint32_t RadioPagingFlex::blockInfoWord(unsigned priorityWords, unsigned addressStart, unsigned vectorStart, unsigned carryOn, unsigned collapse)
 {
     uint32_t data = (priorityWords & 0xf) << 4;
@@ -642,7 +670,10 @@ RadioPagingFlex::PhaseResult RadioPagingFlex::buildPhase(const PhaseParams& para
     int totalAddress = 0;
     int totalVector = 0;
     int priorityWords = 0;
-    int capacity = m_wordsPerFrame - biwWords;
+    // Block information word 1 and the others (2 to 4), before the address field
+    const int extra = (int) std::min<size_t>(params.m_extraBiw.size(), 3);
+    const int biwCount = biwWords + extra;
+    int capacity = m_wordsPerFrame - biwCount;
     size_t toneStart = order.size();
 
     for (size_t k = 0; k < order.size(); k++)
@@ -694,7 +725,7 @@ RadioPagingFlex::PhaseResult RadioPagingFlex::buildPhase(const PhaseParams& para
     result.m_addressWords = totalAddress;
     priorityWords = std::min(priorityWords, m_maxPriorityWords);
 
-    unsigned vectorStart = (unsigned) (biwWords + totalAddress);
+    unsigned vectorStart = (unsigned) (biwCount + totalAddress);
     if (vectorStart > 63)
     {
         result.m_error = "Address field too long";
@@ -702,7 +733,11 @@ RadioPagingFlex::PhaseResult RadioPagingFlex::buildPhase(const PhaseParams& para
     }
 
     int fwc = 0;
-    words[fwc++] = blockInfoWord(priorityWords, 0, vectorStart, params.m_carryOn, params.m_collapse);
+    words[fwc++] = blockInfoWord(priorityWords, (unsigned) extra, vectorStart, params.m_carryOn, params.m_collapse);
+
+    for (int i = 0; i < extra; i++) {
+        words[fwc++] = params.m_extraBiw[i];
+    }
 
     // Address field
     for (int idx : order)
@@ -835,7 +870,7 @@ RadioPagingFlex::FrameBytes RadioPagingFlex::assemble(const FrameParams& params,
     out.m_sync.insert(out.m_sync.end(), syncB, syncB + 2);
     out.m_sync.insert(out.m_sync.end(), syncAInv[mode], syncAInv[mode] + 4);
 
-    uint32_t fiw = frameInfoWord(params.m_cycle, params.m_frame, 0, 0, params.m_traffic);
+    uint32_t fiw = frameInfoWord(params.m_cycle, params.m_frame, params.m_roaming ? 1 : 0, 0, params.m_traffic);
     for (int s = 24; s >= 0; s -= 8) {
         out.m_sync.push_back((fiw >> s) & 0xff);
     }

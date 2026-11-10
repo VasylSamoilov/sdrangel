@@ -889,6 +889,26 @@ int RadioPagingMod::webapiSettingsPutPatch(
         errorMessage = "flexCollapse must be 0 to 7";
         return 400;
     }
+    if (channelSettingsKeys.contains("ssidLocalId") && ((swg->getSsidLocalId() < 0) || (swg->getSsidLocalId() > 511)))
+    {
+        errorMessage = "ssidLocalId must be 0 to 511";
+        return 400;
+    }
+    if (channelSettingsKeys.contains("ssidCoverageZone") && ((swg->getSsidCoverageZone() < 0) || (swg->getSsidCoverageZone() > 31)))
+    {
+        errorMessage = "ssidCoverageZone must be 0 to 31";
+        return 400;
+    }
+    if (channelSettingsKeys.contains("ssidCountryCode") && ((swg->getSsidCountryCode() < 0) || (swg->getSsidCountryCode() > 1023)))
+    {
+        errorMessage = "ssidCountryCode must be 0 to 1023";
+        return 400;
+    }
+    if (channelSettingsKeys.contains("ssidTrafficFlags") && ((swg->getSsidTrafficFlags() < 0) || (swg->getSsidTrafficFlags() > 15)))
+    {
+        errorMessage = "ssidTrafficFlags must be 0 to 15";
+        return 400;
+    }
 
     QMutexLocker mutexLocker(&m_settingsMutex);
     RadioPagingModSettings settings = m_settings;
@@ -973,6 +993,21 @@ void RadioPagingMod::webapiUpdateChannelSettings(
     }
     if (channelSettingsKeys.contains("flexCollapse")) {
         settings.m_flexCollapse = swg->getFlexCollapse();
+    }
+    if (channelSettingsKeys.contains("flexRoaming")) {
+        settings.m_flexRoaming = swg->getFlexRoaming() != 0;
+    }
+    if (channelSettingsKeys.contains("ssidLocalId")) {
+        settings.m_ssidLocalId = swg->getSsidLocalId();
+    }
+    if (channelSettingsKeys.contains("ssidCoverageZone")) {
+        settings.m_ssidCoverageZone = swg->getSsidCoverageZone();
+    }
+    if (channelSettingsKeys.contains("ssidCountryCode")) {
+        settings.m_ssidCountryCode = swg->getSsidCountryCode();
+    }
+    if (channelSettingsKeys.contains("ssidTrafficFlags")) {
+        settings.m_ssidTrafficFlags = swg->getSsidTrafficFlags();
     }
     if (channelSettingsKeys.contains("gscMode")) {
         settings.m_gscMode = swg->getGscMode();
@@ -1250,6 +1285,11 @@ void RadioPagingMod::webapiFormatChannelSettings(SWGSDRangel::SWGChannelSettings
     swg->setFlexMode(settings.m_flexMode);
     swg->setFlexInverted(settings.m_flexInverted ? 1 : 0);
     swg->setFlexCollapse(settings.m_flexCollapse);
+    swg->setFlexRoaming(settings.m_flexRoaming ? 1 : 0);
+    swg->setSsidLocalId(settings.m_ssidLocalId);
+    swg->setSsidCoverageZone(settings.m_ssidCoverageZone);
+    swg->setSsidCountryCode(settings.m_ssidCountryCode);
+    swg->setSsidTrafficFlags(settings.m_ssidTrafficFlags);
     swg->setGscMode(settings.m_gscMode);
     swg->setGscInverted(settings.m_gscInverted ? 1 : 0);
     swg->setGscVoiceSeconds(settings.m_gscVoiceSeconds);
@@ -1441,6 +1481,21 @@ void RadioPagingMod::webapiFormatChannelSettings(
     }
     if (channelSettingsKeys.contains("flexCollapse") || force) {
         swg->setFlexCollapse(settings.m_flexCollapse);
+    }
+    if (channelSettingsKeys.contains("flexRoaming") || force) {
+        swg->setFlexRoaming(settings.m_flexRoaming ? 1 : 0);
+    }
+    if (channelSettingsKeys.contains("ssidLocalId") || force) {
+        swg->setSsidLocalId(settings.m_ssidLocalId);
+    }
+    if (channelSettingsKeys.contains("ssidCoverageZone") || force) {
+        swg->setSsidCoverageZone(settings.m_ssidCoverageZone);
+    }
+    if (channelSettingsKeys.contains("ssidCountryCode") || force) {
+        swg->setSsidCountryCode(settings.m_ssidCountryCode);
+    }
+    if (channelSettingsKeys.contains("ssidTrafficFlags") || force) {
+        swg->setSsidTrafficFlags(settings.m_ssidTrafficFlags);
     }
     if (channelSettingsKeys.contains("gscMode") || force) {
         swg->setGscMode(settings.m_gscMode);

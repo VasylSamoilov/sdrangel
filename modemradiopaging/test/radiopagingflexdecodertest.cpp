@@ -1337,9 +1337,134 @@ void testMisc()
 
 } // namespace
 
+// ---------------------------------------------------------------------------
+// Roaming (system ID words)
+// ---------------------------------------------------------------------------
+
+void testRoaming()
+{
+    // Bit layout of STD-43A table 3.7.2-1 (and osmocom flex/frame.c): the check of the words is the same as
+    // any information word, so compare the data bits after decoding the codeword
+    uint32_t w1 = Flex::ssid1Word(0x155, 0x0b);
+    uint32_t w2 = Flex::ssid2Word(0x2a5, 0x9);
+    uint32_t d1 = Flex::wordData(w1);
+    uint32_t d2 = Flex::wordData(w2);
+    bool ok1 = true, ok2 = true;
+
+    check(ok1 && ((d1 >> 4) & 7) == 0 && ((d1 >> 7) & 0x1f) == 0x0b && ((d1 >> 12) & 0x1ff) == 0x155, "ssid1 word layout");
+    check(ok2 && ((d2 >> 4) & 7) == 7 && ((d2 >> 7) & 0xf) == 0x9 && ((d2 >> 11) & 0x3ff) == 0x2a5, "ssid2 word layout");
+
+    const Flex::Mode modes[] = {Flex::Mode1600_2, Flex::Mode3200_2, Flex::Mode3200_4, Flex::Mode6400_4};
+
+    for (Flex::Mode mode : modes)
+    {
+        Enc enc;
+        Dec dec;
+        Enc::Roaming r;
+        r.m_enabled = true;
+        r.m_localId = 0x155;
+        r.m_coverageZone = 0x0b;
+        r.m_countryCode = 0x2a5;
+        r.m_trafficFlags = 0x9;
+        enc.setMode(mode);
+        enc.setRoaming(r);
+
+        // Messages in every frame so that the capacity with the extra words is exercised
+        std::vector<Enc::TxMessage> sent;
+        for (int i = 0; i < 12; i++)
+        {
+            Enc::TxMessage m;
+            m.m_capcode = 1000000 + i * 7;
+            m.m_type = Flex::Alphanumeric;
+            m.m_text = "roaming message " + std::to_string(i);
+            sent.push_back(m);
+            enc.enqueue(m);
+        }
+
+        std::vector<Dec::Message> all;
+        int phases = Flex::phaseCount(mode);
+        bool layoutOk = true;
+        bool flagOk = true;
+
+        for (uint64_t index = 0; index < 12 || enc.pending() > 0; index++)
+        {
+            if (index > 4000) {
+                break;
+            }
+
+            Enc::Frame f = enc.buildFrame(index);
+
+            if (f.m_reserved) {
+                continue;
+            }
+
+            std::vector<Dec::Message> out = dec.decodeFrame(toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data));
+            all.insert(all.end(), out.begin(), out.end());
+            const Dec::FrameReport& rep = dec.lastFrame();
+            flagOk = flagOk && rep.m_roaming;
+
+            unsigned frame = rep.m_frame;
+            int expect = Flex::ssidPhase(mode, frame);
+            int seen1 = 0, seen2 = 0;
+
+            for (size_t b = 0; b < rep.m_blocks.size(); b++)
+            {
+                for (const Dec::ExtraBiw& e : rep.m_blocks[b].m_extra)
+                {
+                    bool here = ((int) b == expect);
+
+                    if (e.m_kind == Dec::ExtraBiw::Ssid1)
+                    {
+                        seen1++;
+                        layoutOk = layoutOk && here && (e.m_localId == 0x155) && (e.m_coverageZone == 0x0b);
+                    }
+                    else if (e.m_kind == Dec::ExtraBiw::Ssid2)
+                    {
+                        seen2++;
+                        layoutOk = layoutOk && here && (e.m_country == 0x2a5) && (e.m_tmf == 0x9);
+                    }
+                    else
+                    {
+                        layoutOk = false;
+                    }
+                }
+            }
+
+            int want2 = (index <= 3) ? 1 : 0;
+            layoutOk = layoutOk && (seen1 == 1) && (seen2 == want2) && ((int) rep.m_blocks.size() == phases);
+        }
+
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "roaming %s: frame information flag", Flex::modeName(mode));
+        check(flagOk, buf);
+        std::snprintf(buf, sizeof(buf), "roaming %s: system ID words in frames and phases", Flex::modeName(mode));
+        check(layoutOk, buf);
+
+        std::vector<std::string> a, b;
+        for (const Enc::TxMessage& m : sent) {
+            a.push_back(std::to_string(m.m_capcode) + m.m_text);
+        }
+        for (const Dec::Message& m : all) {
+            b.push_back(std::to_string(m.m_capcode) + m.m_text);
+        }
+        std::sort(a.begin(), a.end());
+        std::sort(b.begin(), b.end());
+        std::snprintf(buf, sizeof(buf), "roaming %s: messages still delivered (%zu)", Flex::modeName(mode), all.size());
+        check(a == b, buf);
+    }
+
+    // Off by default: no flag, no extra words
+    Enc enc;
+    Dec dec;
+    Enc::Frame f = enc.buildFrame(0);
+    dec.decodeFrame(toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data));
+    check(!dec.lastFrame().m_roaming && dec.lastFrame().m_blocks[0].m_extra.empty(), "roaming off: no flag and no extra words");
+}
+
 int main()
 {
     testReferenceFrames();
+    testRoaming();
     testBiw();
     testRoundTrip();
     testErrors();

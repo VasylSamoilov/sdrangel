@@ -133,6 +133,23 @@ public:
     RadioPagingFlex::Mode mode() const { return m_mode; }
     void setInverted(bool inverted) { m_inverted = inverted; }
     bool inverted() const { return m_inverted; }
+
+    //!< Multi-area/roaming by simulcast system ID (STD-43A Chapter 6). The roaming bit of the frame
+    //!< information word is set; the first system ID word is in every frame and the second in frames 0 to 3,
+    //!< in the phase of 6.1.1.3. The channel has to send frames 0 to 3 in full (the callers do not reserve them).
+    //!< The traffic management flags tell which of the 4 traffic groups of the system this channel serves:
+    //!< they are announced, the channel does not filter the addresses
+    struct Roaming
+    {
+        bool m_enabled = false;
+        unsigned m_localId = 0;             //!< 0-511
+        unsigned m_coverageZone = 0;        //!< 0-31
+        unsigned m_countryCode = 0;         //!< 0-1023 (ITU-T E.212)
+        unsigned m_trafficFlags = 0xf;      //!< 4 flags, T3 to T0
+    };
+
+    void setRoaming(const Roaming& roaming) { m_roaming = roaming; }
+    const Roaming& roaming() const { return m_roaming; }
     //!< Collapse 0-7, a pager listens to one frame in 2^collapse. False and error if out of range
     bool setCollapse(int collapse, std::string& error);
     int collapse() const { return m_collapse; }
@@ -169,6 +186,7 @@ private:
     RadioPagingFlex::Mode m_mode;
     bool m_inverted;
     int m_collapse;
+    Roaming m_roaming;
     std::vector<uint8_t> m_reserved;
     std::list<Item> m_queue;
     uint32_t m_nextId;

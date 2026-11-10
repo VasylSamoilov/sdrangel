@@ -355,6 +355,37 @@ void RadioPagingModGUI::on_collapse_valueChanged(int value)
     applySettings(QStringList("flexCollapse"));
 }
 
+void RadioPagingModGUI::on_roaming_toggled(bool checked)
+{
+    m_settings.m_flexRoaming = checked;
+    applySettings(QStringList("flexRoaming"));
+    displaySettings();
+}
+
+void RadioPagingModGUI::on_ssidZone_valueChanged(int value)
+{
+    m_settings.m_ssidCoverageZone = value;
+    applySettings(QStringList("ssidCoverageZone"));
+}
+
+void RadioPagingModGUI::on_ssidLocalId_valueChanged(int value)
+{
+    m_settings.m_ssidLocalId = value;
+    applySettings(QStringList("ssidLocalId"));
+}
+
+void RadioPagingModGUI::on_ssidCountry_valueChanged(int value)
+{
+    m_settings.m_ssidCountryCode = value;
+    applySettings(QStringList("ssidCountryCode"));
+}
+
+void RadioPagingModGUI::on_ssidFlags_valueChanged(int value)
+{
+    m_settings.m_ssidTrafficFlags = value;
+    applySettings(QStringList("ssidTrafficFlags"));
+}
+
 void RadioPagingModGUI::on_voiceSeconds_valueChanged(int value)
 {
     m_settings.m_gscVoiceSeconds = value;
@@ -1011,6 +1042,11 @@ void RadioPagingModGUI::displayProtocol()
     QSignalBlocker messageSpeedBlocker(ui->messageSpeed);
     QSignalBlocker polarityBlocker(ui->polarity);
     QSignalBlocker collapseBlocker(ui->collapse);
+    QSignalBlocker roamingBlocker(ui->roaming);
+    QSignalBlocker ssidZoneBlocker(ui->ssidZone);
+    QSignalBlocker ssidLocalIdBlocker(ui->ssidLocalId);
+    QSignalBlocker ssidCountryBlocker(ui->ssidCountry);
+    QSignalBlocker ssidFlagsBlocker(ui->ssidFlags);
     QSignalBlocker voiceSecondsBlocker(ui->voiceSeconds);
     QSignalBlocker mixPocsagBlocker(ui->mixPocsag);
     QSignalBlocker mixSharedBlocker(ui->mixShared);
@@ -1110,6 +1146,21 @@ void RadioPagingModGUI::displayProtocol()
 
             ui->messageType->removeItem(3);
         }
+    }
+
+    ui->roaming->setVisible(flex);
+    ui->ssidZone->setVisible(flex);
+    ui->ssidLocalId->setVisible(flex);
+    ui->ssidCountry->setVisible(flex);
+    ui->ssidFlags->setVisible(flex);
+    ui->roaming->setChecked(m_settings.m_flexRoaming);
+    ui->ssidZone->setValue(m_settings.m_ssidCoverageZone);
+    ui->ssidLocalId->setValue(m_settings.m_ssidLocalId);
+    ui->ssidCountry->setValue(m_settings.m_ssidCountryCode);
+    ui->ssidFlags->setValue(m_settings.m_ssidTrafficFlags);
+
+    for (QWidget *w : QList<QWidget*>({ui->ssidZone, ui->ssidLocalId, ui->ssidCountry, ui->ssidFlags})) {
+        w->setEnabled(m_settings.m_flexRoaming);
     }
 
     ui->collapse->setValue(m_settings.m_flexCollapse);
@@ -1378,6 +1429,11 @@ void RadioPagingModGUI::makeUIConnections()
     QObject::connect(ui->rampDown, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &RadioPagingModGUI::on_rampDown_valueChanged);
     QObject::connect(ui->rampRange, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_rampRange_valueChanged);
     QObject::connect(ui->collapse, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_collapse_valueChanged);
+    QObject::connect(ui->roaming, &QCheckBox::toggled, this, &RadioPagingModGUI::on_roaming_toggled);
+    QObject::connect(ui->ssidZone, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_ssidZone_valueChanged);
+    QObject::connect(ui->ssidLocalId, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_ssidLocalId_valueChanged);
+    QObject::connect(ui->ssidCountry, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_ssidCountry_valueChanged);
+    QObject::connect(ui->ssidFlags, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_ssidFlags_valueChanged);
     QObject::connect(ui->voiceSeconds, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_voiceSeconds_valueChanged);
     QObject::connect(ui->mixPocsag, &QCheckBox::toggled, this, &RadioPagingModGUI::on_mixPocsag_toggled);
     QObject::connect(ui->mixShared, &QCheckBox::toggled, this, &RadioPagingModGUI::on_mixShared_toggled);

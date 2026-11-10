@@ -58,6 +58,26 @@ RadioPagingModSettings:
       description: "FLEX collapse 0 to 7: the emergency re-synchronization lasts at least 2^collapse frames. Network: pagers listen to one frame in 2^collapse. One-shot: the frames are sent with collapse 0"
       type: integer
       format: int32
+    flexRoaming:
+      description: "FLEX roaming: send the system ID words (STD-43A 3.7.2 and 6.1.1): the first in every frame, the second in frames 0 to 3, and set the roaming flag of the frame information word. The frames 0 to 3 have to be sent (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    ssidLocalId:
+      description: "Roaming: local ID, 0 to 511"
+      type: integer
+      format: int32
+    ssidCoverageZone:
+      description: "Roaming: coverage zone, 0 to 31"
+      type: integer
+      format: int32
+    ssidCountryCode:
+      description: "Roaming: country code (ITU-T E.212), 0 to 1023"
+      type: integer
+      format: int32
+    ssidTrafficFlags:
+      description: "Roaming: traffic management flags announced in the second system ID word, 0 to 15 (bit 0 is T0). Only announced, the addresses are not filtered"
+      type: integer
+      format: int32
     gscMode:
       description: "GSC transmissions (one-shot only, GSC has no network mode): 0 auto (a batch of messages of the same preamble value, a message alone after its own preamble), 1 single (one message per transmission), 2 batch (a batch even for one message), 3 non battery saver (all queued messages of a polarity after one 1100 pattern)"
       type: integer

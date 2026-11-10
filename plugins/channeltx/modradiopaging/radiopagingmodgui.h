@@ -142,6 +142,11 @@ private slots:
     void on_rampDown_valueChanged(double value);
     void on_rampRange_valueChanged(int value);
     void on_collapse_valueChanged(int value);
+    void on_roaming_toggled(bool checked);
+    void on_ssidZone_valueChanged(int value);
+    void on_ssidLocalId_valueChanged(int value);
+    void on_ssidCountry_valueChanged(int value);
+    void on_ssidFlags_valueChanged(int value);
     void on_voiceSeconds_valueChanged(int value);
     void on_mixPocsag_toggled(bool checked);
     void on_mixShared_toggled(bool checked);

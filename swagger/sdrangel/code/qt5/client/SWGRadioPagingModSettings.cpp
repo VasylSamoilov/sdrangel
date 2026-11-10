@@ -32,6 +32,11 @@ void SWGRadioPagingModSettings::init()
     m_flexMode = 0; m_flexModeIsSet = false;
     m_flexInverted = 0; m_flexInvertedIsSet = false;
     m_flexCollapse = 0; m_flexCollapseIsSet = false;
+    m_flexRoaming = 0; m_flexRoamingIsSet = false;
+    m_ssidLocalId = 0; m_ssidLocalIdIsSet = false;
+    m_ssidCoverageZone = 0; m_ssidCoverageZoneIsSet = false;
+    m_ssidCountryCode = 0; m_ssidCountryCodeIsSet = false;
+    m_ssidTrafficFlags = 0; m_ssidTrafficFlagsIsSet = false;
     m_gscMode = 0; m_gscModeIsSet = false;
     m_gscInverted = 0; m_gscInvertedIsSet = false;
     m_gscVoiceSeconds = 0; m_gscVoiceSecondsIsSet = false;
@@ -77,6 +82,11 @@ void SWGRadioPagingModSettings::fromJsonObject(QJsonObject& json)
     if (json.contains("flexMode")) { ::SWGSDRangel::setValue(&m_flexMode,json["flexMode"],"qint32",""); m_flexModeIsSet = true; }
     if (json.contains("flexInverted")) { ::SWGSDRangel::setValue(&m_flexInverted,json["flexInverted"],"qint32",""); m_flexInvertedIsSet = true; }
     if (json.contains("flexCollapse")) { ::SWGSDRangel::setValue(&m_flexCollapse,json["flexCollapse"],"qint32",""); m_flexCollapseIsSet = true; }
+    if (json.contains("flexRoaming")) { ::SWGSDRangel::setValue(&m_flexRoaming,json["flexRoaming"],"qint32",""); m_flexRoamingIsSet = true; }
+    if (json.contains("ssidLocalId")) { ::SWGSDRangel::setValue(&m_ssidLocalId,json["ssidLocalId"],"qint32",""); m_ssidLocalIdIsSet = true; }
+    if (json.contains("ssidCoverageZone")) { ::SWGSDRangel::setValue(&m_ssidCoverageZone,json["ssidCoverageZone"],"qint32",""); m_ssidCoverageZoneIsSet = true; }
+    if (json.contains("ssidCountryCode")) { ::SWGSDRangel::setValue(&m_ssidCountryCode,json["ssidCountryCode"],"qint32",""); m_ssidCountryCodeIsSet = true; }
+    if (json.contains("ssidTrafficFlags")) { ::SWGSDRangel::setValue(&m_ssidTrafficFlags,json["ssidTrafficFlags"],"qint32",""); m_ssidTrafficFlagsIsSet = true; }
     if (json.contains("gscMode")) { ::SWGSDRangel::setValue(&m_gscMode,json["gscMode"],"qint32",""); m_gscModeIsSet = true; }
     if (json.contains("gscInverted")) { ::SWGSDRangel::setValue(&m_gscInverted,json["gscInverted"],"qint32",""); m_gscInvertedIsSet = true; }
     if (json.contains("gscVoiceSeconds")) { ::SWGSDRangel::setValue(&m_gscVoiceSeconds,json["gscVoiceSeconds"],"qint32",""); m_gscVoiceSecondsIsSet = true; }
@@ -123,6 +133,11 @@ QJsonObject* SWGRadioPagingModSettings::asJsonObject()
     if (m_flexModeIsSet) { object->insert("flexMode",QJsonValue(m_flexMode)); }
     if (m_flexInvertedIsSet) { object->insert("flexInverted",QJsonValue(m_flexInverted)); }
     if (m_flexCollapseIsSet) { object->insert("flexCollapse",QJsonValue(m_flexCollapse)); }
+    if (m_flexRoamingIsSet) { object->insert("flexRoaming",QJsonValue(m_flexRoaming)); }
+    if (m_ssidLocalIdIsSet) { object->insert("ssidLocalId",QJsonValue(m_ssidLocalId)); }
+    if (m_ssidCoverageZoneIsSet) { object->insert("ssidCoverageZone",QJsonValue(m_ssidCoverageZone)); }
+    if (m_ssidCountryCodeIsSet) { object->insert("ssidCountryCode",QJsonValue(m_ssidCountryCode)); }
+    if (m_ssidTrafficFlagsIsSet) { object->insert("ssidTrafficFlags",QJsonValue(m_ssidTrafficFlags)); }
     if (m_gscModeIsSet) { object->insert("gscMode",QJsonValue(m_gscMode)); }
     if (m_gscInvertedIsSet) { object->insert("gscInverted",QJsonValue(m_gscInverted)); }
     if (m_gscVoiceSecondsIsSet) { object->insert("gscVoiceSeconds",QJsonValue(m_gscVoiceSeconds)); }
@@ -151,7 +166,7 @@ QJsonObject* SWGRadioPagingModSettings::asJsonObject()
 }
 bool SWGRadioPagingModSettings::isSet()
 {
-    return m_channelAliasIsSet || m_gscVoiceDirectoryIsSet || m_gscVoiceKeepDaysIsSet || m_gscVoiceKeepMinIsSet || m_inputFrequencyOffsetIsSet || m_protocolIsSet || m_modeIsSet || m_deviationIsSet || m_gainIsSet || m_channelMuteIsSet || m_rampUpMsIsSet || m_rampDownMsIsSet || m_rampRangeIsSet || m_pocsagSpeedIsSet || m_pocsagInvertedIsSet || m_flexModeIsSet || m_flexInvertedIsSet || m_flexCollapseIsSet || m_gscModeIsSet || m_gscInvertedIsSet || m_gscVoiceSecondsIsSet || m_mixPocsagIsSet || m_pocsagDeviationIsSet || m_mixFramesPerMinuteIsSet || m_mixSharedIsSet || m_mixSwitchMs512IsSet || m_mixSwitchMs1200IsSet || m_mixSwitchMs2400IsSet || m_rgbColorIsSet || m_titleIsSet || m_streamIndexIsSet || m_useReverseAPIIsSet || m_reverseAPIAddressIsSet || m_reverseAPIPortIsSet || m_reverseAPIDeviceIndexIsSet || m_reverseAPIChannelIndexIsSet || m_channelMarkerIsSet || m_rollupStateIsSet;
+    return m_channelAliasIsSet || m_gscVoiceDirectoryIsSet || m_gscVoiceKeepDaysIsSet || m_gscVoiceKeepMinIsSet || m_inputFrequencyOffsetIsSet || m_protocolIsSet || m_modeIsSet || m_deviationIsSet || m_gainIsSet || m_channelMuteIsSet || m_rampUpMsIsSet || m_rampDownMsIsSet || m_rampRangeIsSet || m_pocsagSpeedIsSet || m_pocsagInvertedIsSet || m_flexModeIsSet || m_flexInvertedIsSet || m_flexCollapseIsSet || m_flexRoamingIsSet || m_ssidLocalIdIsSet || m_ssidCoverageZoneIsSet || m_ssidCountryCodeIsSet || m_ssidTrafficFlagsIsSet || m_gscModeIsSet || m_gscInvertedIsSet || m_gscVoiceSecondsIsSet || m_mixPocsagIsSet || m_pocsagDeviationIsSet || m_mixFramesPerMinuteIsSet || m_mixSharedIsSet || m_mixSwitchMs512IsSet || m_mixSwitchMs1200IsSet || m_mixSwitchMs2400IsSet || m_rgbColorIsSet || m_titleIsSet || m_streamIndexIsSet || m_useReverseAPIIsSet || m_reverseAPIAddressIsSet || m_reverseAPIPortIsSet || m_reverseAPIDeviceIndexIsSet || m_reverseAPIChannelIndexIsSet || m_channelMarkerIsSet || m_rollupStateIsSet;
 }
 qint64 SWGRadioPagingModSettings::getInputFrequencyOffset() { return m_inputFrequencyOffset; }
 void SWGRadioPagingModSettings::setInputFrequencyOffset(qint64 value) { m_inputFrequencyOffset = value; m_inputFrequencyOffsetIsSet = true; }
@@ -181,6 +196,16 @@ qint32 SWGRadioPagingModSettings::getFlexInverted() { return m_flexInverted; }
 void SWGRadioPagingModSettings::setFlexInverted(qint32 value) { m_flexInverted = value; m_flexInvertedIsSet = true; }
 qint32 SWGRadioPagingModSettings::getFlexCollapse() { return m_flexCollapse; }
 void SWGRadioPagingModSettings::setFlexCollapse(qint32 value) { m_flexCollapse = value; m_flexCollapseIsSet = true; }
+qint32 SWGRadioPagingModSettings::getFlexRoaming() { return m_flexRoaming; }
+void SWGRadioPagingModSettings::setFlexRoaming(qint32 value) { m_flexRoaming = value; m_flexRoamingIsSet = true; }
+qint32 SWGRadioPagingModSettings::getSsidLocalId() { return m_ssidLocalId; }
+void SWGRadioPagingModSettings::setSsidLocalId(qint32 value) { m_ssidLocalId = value; m_ssidLocalIdIsSet = true; }
+qint32 SWGRadioPagingModSettings::getSsidCoverageZone() { return m_ssidCoverageZone; }
+void SWGRadioPagingModSettings::setSsidCoverageZone(qint32 value) { m_ssidCoverageZone = value; m_ssidCoverageZoneIsSet = true; }
+qint32 SWGRadioPagingModSettings::getSsidCountryCode() { return m_ssidCountryCode; }
+void SWGRadioPagingModSettings::setSsidCountryCode(qint32 value) { m_ssidCountryCode = value; m_ssidCountryCodeIsSet = true; }
+qint32 SWGRadioPagingModSettings::getSsidTrafficFlags() { return m_ssidTrafficFlags; }
+void SWGRadioPagingModSettings::setSsidTrafficFlags(qint32 value) { m_ssidTrafficFlags = value; m_ssidTrafficFlagsIsSet = true; }
 qint32 SWGRadioPagingModSettings::getGscMode() { return m_gscMode; }
 void SWGRadioPagingModSettings::setGscMode(qint32 value) { m_gscMode = value; m_gscModeIsSet = true; }
 qint32 SWGRadioPagingModSettings::getGscInverted() { return m_gscInverted; }

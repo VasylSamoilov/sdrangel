@@ -475,6 +475,16 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
         params.m_collapse = m_collapse;
         params.m_carryOn = 0;
 
+        // The simulcast system ID words are in one phase of the frame (STD-43A 6.1.1.3)
+        if (m_roaming.m_enabled && (p == RadioPagingFlex::ssidPhase(m_mode, time.m_frame)))
+        {
+            params.m_extraBiw.push_back(RadioPagingFlex::ssid1Word(m_roaming.m_localId, m_roaming.m_coverageZone));
+
+            if (time.m_frame <= 3) {
+                params.m_extraBiw.push_back(RadioPagingFlex::ssid2Word(m_roaming.m_countryCode, m_roaming.m_trafficFlags));
+            }
+        }
+
         if (!candidates[p].empty())
         {
             std::vector<RadioPagingFlex::PhaseMessage> messages;
@@ -528,6 +538,7 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
     fp.m_cycle = time.m_cycle;
     fp.m_frame = time.m_frame;
     fp.m_traffic = frame.m_traffic;
+    fp.m_roaming = m_roaming.m_enabled;
     frame.m_bytes = RadioPagingFlex::assemble(fp, phaseWords);
     frame.m_blocks = RadioPagingFlex::toSymbols(frame.m_bytes, m_mode, m_inverted);
     return frame;

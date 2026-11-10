@@ -147,6 +147,18 @@ bool RadioPagingModSource::mixing() const
         && m_settings.m_flexMixPocsag;
 }
 
+RadioPagingFlexEncoder::Roaming RadioPagingModSource::roaming(const RadioPagingModSettings& settings)
+{
+    RadioPagingFlexEncoder::Roaming r;
+
+    r.m_enabled = settings.m_flexRoaming;
+    r.m_localId = settings.m_ssidLocalId;
+    r.m_coverageZone = settings.m_ssidCoverageZone;
+    r.m_countryCode = settings.m_ssidCountryCode;
+    r.m_trafficFlags = settings.m_ssidTrafficFlags;
+    return r;
+}
+
 RadioPagingMixTxStream::Config RadioPagingModSource::mixConfig(const RadioPagingModSettings& settings)
 {
     RadioPagingMixTxStream::Config config;
@@ -156,6 +168,7 @@ RadioPagingMixTxStream::Config RadioPagingModSource::mixConfig(const RadioPaging
     config.m_collapse = settings.m_flexCollapse;
     config.m_framesPerMinute = settings.m_mixFramesPerMinute;
     config.m_shared = settings.m_mixShared;
+    config.m_roaming = roaming(settings);
     config.m_flexDeviation = settings.m_deviation;
     config.m_pocsagDeviation = settings.m_pocsagDeviation;
     config.m_pocsagBaud = settings.m_pocsagSpeed;
@@ -203,6 +216,7 @@ void RadioPagingModSource::applyStreamDefaults()
             // The re-synchronization length; network: also the schedule of the frames
             flex->setCollapse(m_settings.m_flexCollapse, error);
             flex->setInverted(m_settings.m_flexInverted);
+            flex->setRoaming(roaming(m_settings));
         }
 
         // Another network polarity: the transmission ends, it starts again with the

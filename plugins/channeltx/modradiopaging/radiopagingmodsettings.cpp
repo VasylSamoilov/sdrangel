@@ -65,6 +65,11 @@ void RadioPagingModSettings::resetToDefaults()
     m_flexMode = (int) RadioPagingFlex::Mode1600_2;
     m_flexInverted = false;
     m_flexCollapse = 0;
+    m_flexRoaming = false;
+    m_ssidLocalId = 0;
+    m_ssidCoverageZone = 0;
+    m_ssidCountryCode = 0;
+    m_ssidTrafficFlags = 0xf;
     m_gscMode = (int) RadioPagingGsc::Auto;
     m_gscInverted = false;
     m_gscVoiceSeconds = 30;
@@ -114,6 +119,10 @@ void RadioPagingModSettings::validate()
         m_gscMode = (int) RadioPagingGsc::Auto;
     }
 
+    m_ssidLocalId = std::max(0, std::min(511, m_ssidLocalId));
+    m_ssidCoverageZone = std::max(0, std::min(31, m_ssidCoverageZone));
+    m_ssidCountryCode = std::max(0, std::min(1023, m_ssidCountryCode));
+    m_ssidTrafficFlags = std::max(0, std::min(15, m_ssidTrafficFlags));
     m_gscVoiceSeconds = std::max(1, std::min(50, m_gscVoiceSeconds));
     m_pocsagDeviation = std::max(500.0f, std::min(10000.0f, m_pocsagDeviation));
     m_mixFramesPerMinute = std::max(0, std::min(m_mixShared ? 128 : 32, m_mixFramesPerMinute));
@@ -223,6 +232,11 @@ QByteArray RadioPagingModSettings::serialize() const
     s.writeString(45, m_gscVoiceDirectory);
     s.writeS32(46, m_gscVoiceKeepDays);
     s.writeS32(47, m_gscVoiceKeepMin);
+    s.writeBool(48, m_flexRoaming);
+    s.writeS32(49, m_ssidLocalId);
+    s.writeS32(50, m_ssidCoverageZone);
+    s.writeS32(51, m_ssidCountryCode);
+    s.writeS32(52, m_ssidTrafficFlags);
 
     return s.final();
 }
@@ -314,6 +328,11 @@ bool RadioPagingModSettings::deserialize(const QByteArray& data)
         d.readString(45, &m_gscVoiceDirectory, "");
         d.readS32(46, &m_gscVoiceKeepDays, 3);
         d.readS32(47, &m_gscVoiceKeepMin, 50);
+        d.readBool(48, &m_flexRoaming, false);
+        d.readS32(49, &m_ssidLocalId, 0);
+        d.readS32(50, &m_ssidCoverageZone, 0);
+        d.readS32(51, &m_ssidCountryCode, 0);
+        d.readS32(52, &m_ssidTrafficFlags, 0xf);
         m_gscVoiceKeepDays = std::max(0, std::min(3650, m_gscVoiceKeepDays));
         m_gscVoiceKeepMin = std::max(0, std::min(100000, m_gscVoiceKeepMin));
 
@@ -371,6 +390,21 @@ void RadioPagingModSettings::applySettings(const QStringList& settingsKeys, cons
     }
     if (settingsKeys.contains("flexCollapse")) {
         m_flexCollapse = settings.m_flexCollapse;
+    }
+    if (settingsKeys.contains("flexRoaming")) {
+        m_flexRoaming = settings.m_flexRoaming;
+    }
+    if (settingsKeys.contains("ssidLocalId")) {
+        m_ssidLocalId = settings.m_ssidLocalId;
+    }
+    if (settingsKeys.contains("ssidCoverageZone")) {
+        m_ssidCoverageZone = settings.m_ssidCoverageZone;
+    }
+    if (settingsKeys.contains("ssidCountryCode")) {
+        m_ssidCountryCode = settings.m_ssidCountryCode;
+    }
+    if (settingsKeys.contains("ssidTrafficFlags")) {
+        m_ssidTrafficFlags = settings.m_ssidTrafficFlags;
     }
     if (settingsKeys.contains("gscMode")) {
         m_gscMode = settings.m_gscMode;
@@ -494,6 +528,21 @@ QString RadioPagingModSettings::getDebugString(const QStringList& settingsKeys, 
     }
     if (settingsKeys.contains("flexCollapse") || force) {
         ostr << " m_flexCollapse: " << m_flexCollapse;
+    }
+    if (settingsKeys.contains("flexRoaming") || force) {
+        ostr << " m_flexRoaming: " << m_flexRoaming;
+    }
+    if (settingsKeys.contains("ssidLocalId") || force) {
+        ostr << " m_ssidLocalId: " << m_ssidLocalId;
+    }
+    if (settingsKeys.contains("ssidCoverageZone") || force) {
+        ostr << " m_ssidCoverageZone: " << m_ssidCoverageZone;
+    }
+    if (settingsKeys.contains("ssidCountryCode") || force) {
+        ostr << " m_ssidCountryCode: " << m_ssidCountryCode;
+    }
+    if (settingsKeys.contains("ssidTrafficFlags") || force) {
+        ostr << " m_ssidTrafficFlags: " << m_ssidTrafficFlags;
     }
     if (settingsKeys.contains("gscMode") || force) {
         ostr << " m_gscMode: " << m_gscMode;

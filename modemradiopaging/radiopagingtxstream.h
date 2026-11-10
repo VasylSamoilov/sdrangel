@@ -184,6 +184,8 @@ public:
     //!< Mode of the frames from the next one (each frame announces its mode in sync 1)
     void setMode(RadioPagingFlex::Mode mode);
     RadioPagingFlex::Mode mode() const { return m_encoders[0].mode(); }
+    //!< Roaming by simulcast system ID in every frame sent (see RadioPagingFlexEncoder::Roaming)
+    void setRoaming(const RadioPagingFlexEncoder::Roaming& roaming);
     //!< Polarity of the network from the next transmission (begin())
     void setInverted(bool inverted) { m_nextInverted = inverted; }
     bool inverted() const { return m_inverted; }
@@ -365,6 +367,7 @@ public:
         int m_pocsagBaud = 1200;            //!< Default group
         bool m_pocsagInverted = false;
         int m_switchMs[3] = {400, 200, 100};    //!< 750 bps pattern before POCSAG: 512, 1200, 2400
+        RadioPagingFlexEncoder::Roaming m_roaming;  //!< Frames 0-3 are FLEX whatever the plan; with roaming they carry the system ID
     };
 
     static const int m_minuteFrames = 32;   //!< Frames of a minute

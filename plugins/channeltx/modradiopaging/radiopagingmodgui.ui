@@ -719,6 +719,71 @@
       </property>
      </widget>
     </item>
+    <item row="7" column="0" colspan="4">
+     <widget class="QCheckBox" name="roaming">
+      <property name="toolTip">
+       <string>FLEX roaming: send the system ID words (STD-43A 3.7.2, 6.1.1): the first in every frame, the second in frames 0 to 3. Frames 0 to 3 are always sent</string>
+      </property>
+      <property name="text">
+       <string>Roaming</string>
+      </property>
+     </widget>
+    </item>
+    <item row="8" column="0">
+     <widget class="QSpinBox" name="ssidZone">
+      <property name="toolTip">
+       <string>Coverage zone, 0 to 31</string>
+      </property>
+      <property name="prefix">
+       <string>Z </string>
+      </property>
+      <property name="maximum">
+       <number>31</number>
+      </property>
+     </widget>
+    </item>
+    <item row="8" column="1">
+     <widget class="QSpinBox" name="ssidLocalId">
+      <property name="toolTip">
+       <string>Local ID, 0 to 511</string>
+      </property>
+      <property name="prefix">
+       <string>ID </string>
+      </property>
+      <property name="maximum">
+       <number>511</number>
+      </property>
+     </widget>
+    </item>
+    <item row="8" column="2">
+     <widget class="QSpinBox" name="ssidCountry">
+      <property name="toolTip">
+       <string>Country code (ITU-T E.212), 0 to 1023</string>
+      </property>
+      <property name="prefix">
+       <string>C </string>
+      </property>
+      <property name="maximum">
+       <number>1023</number>
+      </property>
+     </widget>
+    </item>
+    <item row="8" column="3">
+     <widget class="QSpinBox" name="ssidFlags">
+      <property name="toolTip">
+       <string>Traffic management flags announced in the second system ID word, 0 to 15 (the addresses are not filtered)</string>
+      </property>
+      <property name="prefix">
+       <string>T </string>
+      </property>
+      <property name="maximum">
+       <number>15</number>
+      </property>
+      <property name="value">
+       <number>15</number>
+      </property>
+     </widget>
+    </item>
    </layout>
   </widget>
   <widget class="QWidget" name="messageContainer" native="true">

@@ -421,6 +421,12 @@ void RadioPagingFlexTxStream::setMode(RadioPagingFlex::Mode mode)
     m_encoders[1].setMode(mode);
 }
 
+void RadioPagingFlexTxStream::setRoaming(const RadioPagingFlexEncoder::Roaming& roaming)
+{
+    m_encoders[0].setRoaming(roaming);
+    m_encoders[1].setRoaming(roaming);
+}
+
 bool RadioPagingFlexTxStream::mandatory(uint64_t frameIndex) const
 {
     (void) frameIndex;
@@ -1010,6 +1016,7 @@ bool RadioPagingMixTxStream::setConfig(const Config& config, std::string& error)
 
     m_flex.setMode(c.m_flexMode);
     m_flex.setInverted(c.m_flexInverted);
+    m_flex.setRoaming(c.m_roaming);
 
     // 7.1.2: N frames a minute, the system collapse of the minute (5, 7 for 4 minutes), which
     // is also what the re-synchronization has to reach; the capcodes of the other frames can

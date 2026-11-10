@@ -58,6 +58,11 @@ struct RadioPagingModSettings
     int m_flexMode;                             //!< RadioPagingFlex::Mode: 1600/2, 3200/2, 3200/4, 6400/4
     bool m_flexInverted;                        //!< Set: symbol levels reversed (normal: symbol 3 is the highest frequency)
     int m_flexCollapse;                         //!< 0-7: re-synchronization of 2^collapse frames at least; network: frames scheduled with it
+    bool m_flexRoaming;                         //!< Send the system ID words of the roaming frames (STD-43A 3.7.2, 6.1.1)
+    int m_ssidLocalId;                          //!< 0-511
+    int m_ssidCoverageZone;                     //!< 0-31
+    int m_ssidCountryCode;                      //!< 0-1023
+    int m_ssidTrafficFlags;                     //!< 0-15: traffic management flags announced in the second system ID word
     int m_gscMode;                              //!< RadioPagingGsc::Mode: auto, single, batch, non battery saver. One-shot only
     bool m_gscInverted;                         //!< Set: binary 1 is a negative deviation (normal: positive)
     int m_gscVoiceSeconds;                      //!< Length of the voice of a GSC voice page in seconds, a longer sound file is cut

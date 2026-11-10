@@ -115,6 +115,7 @@ public:
     void setClock(const std::function<qint64()>& clock) { m_clock = clock; }
 
     //! The configuration of the mixed stream (FLEX network with POCSAG) of the settings
+    static RadioPagingFlexEncoder::Roaming roaming(const RadioPagingModSettings& settings);
     static RadioPagingMixTxStream::Config mixConfig(const RadioPagingModSettings& settings);
 
     void addRequest(const Request& request);

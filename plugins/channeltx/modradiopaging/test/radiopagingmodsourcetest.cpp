@@ -709,6 +709,31 @@ void testFlexNetwork()
     check(loop.m_source.getStatus().m_state == RadioPagingModSource::Idle, "FLEX network to POCSAG one-shot: the transmission ends");
 }
 
+// Roaming: the system ID words are sent, the messages are still received (plain FLEX and mixed with POCSAG)
+void testFlexRoaming(bool mixed)
+{
+    const int sampleRate = 48000;
+    Loop loop(sampleRate, 0, RadioPagingModSettings::Flex, RadioPagingModSettings::Network);
+    loop.m_settings.m_flexMode = RadioPagingFlex::Mode3200_4;
+    loop.m_settings.m_flexRoaming = true;
+    loop.m_settings.m_ssidLocalId = 300;
+    loop.m_settings.m_ssidCoverageZone = 17;
+    loop.m_settings.m_ssidCountryCode = 262;
+    loop.m_settings.m_ssidTrafficFlags = 5;
+    loop.m_settings.m_flexMixPocsag = mixed;
+    loop.apply(QStringList({"flexMode", "flexRoaming", "ssidLocalId", "ssidCoverageZone", "ssidCountryCode", "ssidTrafficFlags", "mixPocsag"}));
+    loop.runSeconds(3.0);
+
+    loop.m_source.addRequest(flexRequest(200, 2101300, "ROAMING TEXT", true));
+    loop.m_source.addRequest(flexRequest(201, 1234567, "ROAMING TWO", false));
+    loop.runSeconds(9.0);
+    const Received& received = loop.take();
+    check(contains(received, { flexKey(RadioPagingFlex::Mode3200_4, 2101300, true, "ROAMING TEXT"),
+            flexKey(RadioPagingFlex::Mode3200_4, 1234567, false, "ROAMING TWO") })
+        && (loop.m_source.getStatus().m_sent == 2),
+        mixed ? "FLEX roaming mixed: messages received" : "FLEX roaming: messages received");
+}
+
 // ---------------------------------------------------------------------------
 // GSC
 // ---------------------------------------------------------------------------
@@ -1021,6 +1046,8 @@ int main()
     testFlexOneShot(38400, -5000, RadioPagingFlex::Mode1600_2, false, true);
     testFlexOneShot(62500, 10000, RadioPagingFlex::Mode6400_4, false, true);
     testFlexNetwork();
+    testFlexRoaming(false);
+    testFlexRoaming(true);
     testFlexCutAccounting();
     testMixed(48000, 0);
     testMixed(38400, -5000);
