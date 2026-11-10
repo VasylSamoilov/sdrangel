@@ -118,13 +118,13 @@ public:
     struct Frame
     {
         bool m_reserved = false;    //!< Frame reserved for another transmitter: no output
-        bool m_idle = false;        //!< No message in the frame
+        bool m_idle = false;        //!< No message in the frame (a fragment that is not the last is a message)
         uint32_t m_cycle = 0;
         uint32_t m_frame = 0;
         RadioPagingFlex::Mode m_mode = RadioPagingFlex::Mode1600_2;
         bool m_inverted = false;
         unsigned m_traffic = 0;     //!< Low traffic flags of the frame information word
-        std::vector<uint32_t> m_sentIds;
+        std::vector<uint32_t> m_sentIds;                    //!< Messages sent: in one piece, or their last fragment
         std::vector<uint32_t> m_sentNumbers;                //!< Message number of each sent id
         RadioPagingFlex::FrameBytes m_bytes;
         std::vector<RadioPagingFlex::SymbolBlock> m_blocks; //!< Sync part then data part; empty if reserved
@@ -162,8 +162,11 @@ public:
     const std::vector<uint8_t>& reservedFrames() const { return m_reserved; }
 
     //!< Queue a message. Rejected if the capcode or text is invalid, the message does not fit
-    //!< in a frame, or every frame the capcode is eligible in is reserved
+    //!< in a frame, or every frame the capcode is eligible in is reserved. A HEX/binary or secure
+    //!< message longer than a frame is split into fragments (RadioPagingFlex::fragmentMessage), sent
+    //!< in successive frames of the capcode under the one id
     EnqueueResult enqueue(const TxMessage& message);
+    //!< Queued messages and fragments still to send
     size_t pending() const { return m_queue.size(); }
     //!< Ids of the queued messages that no frame can carry with the current collapse and reservations
     std::vector<uint32_t> unschedulable() const;
@@ -172,6 +175,8 @@ public:
     //!< Queued messages a frame of the frame index would carry if it had room (their capcode
     //!< listens to the frame, the frame is not reserved)
     size_t eligible(uint64_t frameIndex) const;
+    //!< A fragment after the first of a message is due in the frame of the frame index
+    bool continuationDue(uint64_t frameIndex) const;
 
     //!< The frame of a frame index. Messages placed in it are removed from the queue
     Frame buildFrame(uint64_t frameIndex);
@@ -179,12 +184,18 @@ public:
 private:
     struct Item
     {
-        uint32_t m_id;
-        TxMessage m_message;
-        int m_number;       //!< -1 until the first placement attempt
+        uint32_t m_id;      //!< The same for all the fragments of a message
+        TxMessage m_message;    //!< The text of the fragment
+        int m_number;       //!< -1 until the first placement attempt; the fragments take the number of the first
+        int m_fragment = 0;     //!< Fragment index (HEX/binary and secure), in queue order
+        int m_fragments = 1;
+        int m_signature = -1;   //!< HEX/binary first fragment: signature of the whole message
     };
 
     bool schedulable(uint64_t capcode) const;
+    //!< A fragment goes in a frame after the one of the fragment before it: no earlier fragment is queued
+    bool fragmentReady(const Item& item) const;
+    static RadioPagingFlex::PhaseMessage phaseMessage(const Item& item);
 
     RadioPagingFlex::Mode m_mode;
     bool m_inverted;

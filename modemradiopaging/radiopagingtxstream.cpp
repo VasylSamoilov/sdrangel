@@ -429,8 +429,8 @@ void RadioPagingFlexTxStream::setRoaming(const RadioPagingFlexEncoder::Roaming& 
 
 bool RadioPagingFlexTxStream::mandatory(uint64_t frameIndex) const
 {
-    (void) frameIndex;
-    return false;
+    // A fragment of a message whose first fragment has gone: the next one is in this frame
+    return m_encoders[m_inverted ? 1 : 0].continuationDue(frameIndex);
 }
 
 bool RadioPagingFlexTxStream::setCollapse(int collapse, std::string& error)

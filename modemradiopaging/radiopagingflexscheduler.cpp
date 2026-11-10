@@ -198,6 +198,41 @@ bool RadioPagingFlexEncoder::schedulable(uint64_t capcode) const
     return false;
 }
 
+RadioPagingFlex::PhaseMessage RadioPagingFlexEncoder::phaseMessage(const Item& item)
+{
+    RadioPagingFlex::PhaseMessage pm;
+    const TxMessage& m = item.m_message;
+
+    pm.m_capcode = m.m_capcode;
+    pm.m_type = m.m_type;
+    pm.m_text = m.m_text;
+    pm.m_priority = m.m_priority;
+    pm.m_number = item.m_number;
+    pm.m_shortType = m.m_shortType;
+    pm.m_source = m.m_source;
+    pm.m_binary = m.m_binary;
+    pm.m_fragment = item.m_fragment;
+    pm.m_fragments = item.m_fragments;
+    pm.m_signature = item.m_signature;
+    return pm;
+}
+
+bool RadioPagingFlexEncoder::fragmentReady(const Item& item) const
+{
+    if (item.m_fragment == 0) {
+        return true;
+    }
+
+    for (const Item& other : m_queue)
+    {
+        if ((other.m_id == item.m_id) && (other.m_fragment < item.m_fragment)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 RadioPagingFlexEncoder::EnqueueResult RadioPagingFlexEncoder::enqueue(const TxMessage& message)
 {
     EnqueueResult result;
@@ -211,15 +246,32 @@ RadioPagingFlexEncoder::EnqueueResult RadioPagingFlexEncoder::enqueue(const TxMe
     pm.m_source = message.m_source;
     pm.m_binary = message.m_binary;
 
-    int cost = RadioPagingFlex::messageCost(pm, &result.m_error);
+    // HEX/binary and secure messages are split into fragments of a frame each; the others are one piece
+    std::vector<RadioPagingFlex::PhaseMessage> parts;
 
-    if (cost < 0) {
-        return result;
-    }
-    if (cost > RadioPagingFlex::m_wordsPerFrame - 1)
+    if ((pm.m_type == RadioPagingFlex::Binary) || (pm.m_type == RadioPagingFlex::Secure))
     {
-        result.m_error = "Message does not fit in a frame";
-        return result;
+        if (!RadioPagingFlex::fragmentMessage(pm, parts, result.m_error)) {
+            return result;
+        }
+    }
+    else
+    {
+        parts.push_back(pm);
+    }
+
+    for (const RadioPagingFlex::PhaseMessage& part : parts)
+    {
+        int cost = RadioPagingFlex::messageCost(part, &result.m_error);
+
+        if (cost < 0) {
+            return result;
+        }
+        if (cost > RadioPagingFlex::m_wordsPerFrame - 1)
+        {
+            result.m_error = "Message does not fit in a frame";
+            return result;
+        }
     }
     if (!schedulable(message.m_capcode))
     {
@@ -227,15 +279,23 @@ RadioPagingFlexEncoder::EnqueueResult RadioPagingFlexEncoder::enqueue(const TxMe
         return result;
     }
 
-    Item item;
-    item.m_id = m_nextId++;
-    item.m_message = message;
-    item.m_message.m_text = pm.m_text;
-    item.m_number = -1;
-    m_queue.push_back(item);
+    const uint32_t id = m_nextId++;
+
+    for (const RadioPagingFlex::PhaseMessage& part : parts)
+    {
+        Item item;
+        item.m_id = id;
+        item.m_message = message;
+        item.m_message.m_text = part.m_text;
+        item.m_number = -1;
+        item.m_fragment = part.m_fragment;
+        item.m_fragments = part.m_fragments;
+        item.m_signature = part.m_signature;
+        m_queue.push_back(item);
+    }
 
     result.m_ok = true;
-    result.m_id = item.m_id;
+    result.m_id = id;
     return result;
 }
 
@@ -245,7 +305,8 @@ std::vector<uint32_t> RadioPagingFlexEncoder::unschedulable() const
 
     for (const Item& item : m_queue)
     {
-        if (!schedulable(item.m_message.m_capcode)) {
+        // Once per message (its first queued fragment)
+        if (!schedulable(item.m_message.m_capcode) && (std::find(ids.begin(), ids.end(), item.m_id) == ids.end())) {
             ids.push_back(item.m_id);
         }
     }
@@ -255,16 +316,23 @@ std::vector<uint32_t> RadioPagingFlexEncoder::unschedulable() const
 
 bool RadioPagingFlexEncoder::remove(uint32_t id)
 {
-    for (auto it = m_queue.begin(); it != m_queue.end(); ++it)
+    // All the fragments still queued of the message
+    bool found = false;
+
+    for (auto it = m_queue.begin(); it != m_queue.end();)
     {
         if (it->m_id == id)
         {
-            m_queue.erase(it);
-            return true;
+            it = m_queue.erase(it);
+            found = true;
+        }
+        else
+        {
+            ++it;
         }
     }
 
-    return false;
+    return found;
 }
 
 size_t RadioPagingFlexEncoder::eligible(uint64_t frameIndex) const
@@ -278,12 +346,31 @@ size_t RadioPagingFlexEncoder::eligible(uint64_t frameIndex) const
 
     for (const Item& item : m_queue)
     {
-        if (RadioPagingFlexScheduler::frameEligible(item.m_message.m_capcode, frame, m_collapse)) {
+        if (RadioPagingFlexScheduler::frameEligible(item.m_message.m_capcode, frame, m_collapse) && fragmentReady(item)) {
             n++;
         }
     }
 
     return n;
+}
+
+bool RadioPagingFlexEncoder::continuationDue(uint64_t frameIndex) const
+{
+    uint32_t frame = RadioPagingFlexScheduler::frameTime(frameIndex).m_frame;
+
+    if (m_reserved[frame]) {
+        return false;
+    }
+
+    for (const Item& item : m_queue)
+    {
+        if ((item.m_fragment > 0) && RadioPagingFlexScheduler::frameEligible(item.m_message.m_capcode, frame, m_collapse)
+            && fragmentReady(item)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameIndex)
@@ -343,6 +430,11 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
             if (!RadioPagingFlexScheduler::frameEligible(m.m_capcode, time.m_frame, m_collapse)) {
                 continue;
             }
+            // A fragment waits for a frame after the one of the fragment before it (that one is erased from the
+            // queue once its frame is built)
+            if (!fragmentReady(*it)) {
+                continue;
+            }
             if ((pass == 0) && !(m.m_priority && !isTone)) {
                 continue;
             }
@@ -353,16 +445,7 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
                 continue;
             }
 
-            RadioPagingFlex::PhaseMessage pm;
-            pm.m_capcode = m.m_capcode;
-            pm.m_type = m.m_type;
-            pm.m_text = m.m_text;
-            pm.m_priority = m.m_priority;
-            pm.m_shortType = m.m_shortType;
-            pm.m_source = m.m_source;
-            pm.m_binary = m.m_binary;
-
-            int cost = RadioPagingFlex::messageCost(pm);
+            int cost = RadioPagingFlex::messageCost(phaseMessage(*it));
             if (cost < 0) {
                 continue;
             }
@@ -508,21 +591,21 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
             for (const Candidate& c : candidates[p])
             {
                 Item& item = *c.m_item;
-                RadioPagingFlex::PhaseMessage pm;
 
-                if (item.m_number < 0) {
+                if (item.m_number < 0)
+                {
                     item.m_number = m_numbers.next(item.m_message.m_capcode);
+
+                    // The fragments of a message have the number of its first fragment (N, 3.10.1.2 p.60)
+                    for (Item& other : m_queue)
+                    {
+                        if ((other.m_id == item.m_id) && (other.m_number < 0)) {
+                            other.m_number = item.m_number;
+                        }
+                    }
                 }
 
-                pm.m_capcode = item.m_message.m_capcode;
-                pm.m_type = item.m_message.m_type;
-                pm.m_text = item.m_message.m_text;
-                pm.m_priority = item.m_message.m_priority;
-                pm.m_number = item.m_number;
-                pm.m_shortType = item.m_message.m_shortType;
-                pm.m_source = item.m_message.m_source;
-                pm.m_binary = item.m_message.m_binary;
-                messages.push_back(pm);
+                messages.push_back(phaseMessage(item));
             }
 
             RadioPagingFlex::PhaseResult result = RadioPagingFlex::buildPhase(params, messages);
@@ -546,8 +629,12 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
 
     for (auto it : sent)
     {
-        frame.m_sentIds.push_back(it->m_id);
-        frame.m_sentNumbers.push_back((uint32_t) it->m_number);
+        // A message is sent with its last fragment
+        if (it->m_fragment == it->m_fragments - 1)
+        {
+            frame.m_sentIds.push_back(it->m_id);
+            frame.m_sentNumbers.push_back((uint32_t) it->m_number);
+        }
         m_queue.erase(it);
     }
     frame.m_idle = sent.empty();

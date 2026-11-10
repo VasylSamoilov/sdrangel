@@ -2018,10 +2018,12 @@ void testBinaryTx()
         {"blocking length 0", Flex::Binary, "12", hexParams(0, false, false, false, false)},
         {"not a hex digit", Flex::Binary, "12G4", hexParams(4, false, false, false, false)},
         {"empty", Flex::Binary, "", hexParams(4, false, false, false, false)},
-        {"too long", Flex::Binary, std::string(431, 'A'), hexParams(4, false, false, false, false)},
+        // B=4: 430 digits in the first fragment (82 data words, 2 bits left), 435 in the others (83 data words,
+        // 3 bits left): 64 fragments and one digit more
+        {"more than 64 fragments", Flex::Binary, std::string(430 + 63 * 435 + 1, 'A'), hexParams(4, false, false, false, false)},
         {"secure type 11 reserved", Flex::Secure, "1234", reserved},
         {"secure binary not hex", Flex::Secure, "xyz", secParams(Flex::SecureBinary)},
-        {"secure alphanumeric too long", Flex::Secure, std::string(250, 'a'), secParams(Flex::SecureAlphanumeric)},
+        {"secure alphanumeric more than 64 fragments", Flex::Secure, std::string(64 * 249 + 1, 'a'), secParams(Flex::SecureAlphanumeric)},
     };
 
     for (const Bad& b : bad)
@@ -2058,6 +2060,173 @@ void testBinaryTx()
         out = runEncoder(enc, dec);
         check(er.m_ok && (out.size() == 1) && (out[0].m_text == m.m_text) && (out[0].m_checksum == Dec::CheckOk),
             "tx secure: 249 characters (83 data words) in one frame");
+    }
+
+    // Messages longer than a frame: fragments packed full in successive frames, the message reassembled
+    struct Frag
+    {
+        const char *m_label;
+        uint64_t m_capcode;
+        Flex::MessageType m_type;
+        std::string m_text;
+        Flex::BinaryParams m_binary;
+        std::vector<int> m_bits;    // Data bits of each fragment
+        Flex::Mode m_mode;
+    };
+
+    std::string digits;
+    for (int i = 0; i < 300; i++) {
+        digits += "1A2B3C4D5E6F7890"[i % 16];
+    }
+    std::string chars;
+    for (int i = 0; i < 600; i++) {
+        chars += (char) ('a' + (i % 26));
+    }
+    const std::string hex600 = digits.substr(0, 300) + digits.substr(0, 300);
+    const std::string hex1000 = hex600 + hex600.substr(0, 400);
+
+    const Frag frags[] = {
+        // B=8: 82 data words, 1720 bits (2 left) then the rest
+        {"hex B=8 600 digits", 1234567, Flex::Binary, hex600, hexParams(8, false, false, false, false), {1720, 680}, Flex::Mode1600_2},
+        // B=7: a multiple of 28 bits with fewer than 7 left: 80 words (1680 bits)
+        {"hex B=7 595 digits", 1234567, Flex::Binary, hex600.substr(0, 595), hexParams(7, false, true, false, false), {1680, 700},
+            Flex::Mode1600_2},
+        // B=16: first 1712 bits (82 words, 10 left), then 83 words: 1728 bits (15 left) is not a multiple of 16
+        // with fewer than 16 left: 1728 - 1743 = 15 < 16 yes
+        {"hex B=16 1000 digits", 1234567, Flex::Binary, hex1000, hexParams(16, true, false, false, false), {1712, 1728, 560},
+            Flex::Mode1600_2},
+        // Last fragment of 84 bits ending exactly at a word end, last character 1111: padding word
+        {"hex B=4 last fragment exact end, padding word", 1234567, Flex::Binary, hex600.substr(0, 430) + "123456789ABCDEF12345F",
+            hexParams(4, false, false, false, false), {1720, 84}, Flex::Mode1600_2},
+        {"hex long address 600 digits", 2101300, Flex::Binary, hex600, hexParams(8, false, false, false, false), {1720, 680},
+            Flex::Mode1600_2},
+        {"hex 6400/4 600 digits", 1234567, Flex::Binary, hex600, hexParams(8, false, false, false, false), {1720, 680}, Flex::Mode6400_4},
+        // Secure alphanumeric: 249 characters a fragment (83 full words, no ETX)
+        {"secure alphanumeric 600 characters", 1234567, Flex::Secure, chars, secParams(Flex::SecureAlphanumeric), {}, Flex::Mode1600_2},
+        // Secure binary: whole words of 1-bit characters, a multiple of 4: 80 words (1680 bits)
+        {"secure binary 600 digits", 1234567, Flex::Secure, hex600, secParams(Flex::SecureBinary), {1680, 720}, Flex::Mode1600_2},
+        // Last fragment ending exactly at a word end: termination word
+        {"secure binary last fragment exact end", 1234567, Flex::Secure, hex600.substr(0, 420) + "123456789ABCDEF123455",
+            secParams(Flex::SecureBinary), {1680, 84}, Flex::Mode1600_2},
+        {"secure data defined separately 500 digits", 1234567, Flex::Secure, hex600.substr(0, 500), secParams(Flex::SecureSeparate),
+            {1680, 336}, Flex::Mode1600_2},
+    };
+
+    for (const Frag& c : frags)
+    {
+        Enc enc;
+        enc.setMode(c.m_mode);
+        Enc::TxMessage m;
+        m.m_capcode = c.m_capcode;
+        m.m_type = c.m_type;
+        m.m_text = c.m_text;
+        m.m_binary = c.m_binary;
+        Enc::EnqueueResult er = enc.enqueue(m);
+        size_t queued = enc.pending();
+
+        Dec dec;
+        dec.setReportFragments(true);
+        std::vector<Dec::RxFrame> rxFrames;
+        int frames = 0;
+        std::vector<Dec::Message> out = runEncoder(enc, dec, &rxFrames, &frames);
+
+        std::vector<const Dec::Message *> parts;
+        const Dec::Message *whole = nullptr;
+        for (const Dec::Message& r : out)
+        {
+            if (r.m_isFragment) {
+                parts.push_back(&r);
+            } else {
+                whole = &r;
+            }
+        }
+
+        bool binary = (c.m_type == Flex::Binary);
+        bool hexData = binary || (c.m_binary.m_secureType != Flex::SecureAlphanumeric);
+        size_t expected = c.m_bits.empty() ? (c.m_text.size() + 248) / 249 : c.m_bits.size();
+        bool ok = er.m_ok && (queued == expected) && whole && (parts.size() == expected) && (frames >= (int) expected);
+        std::string why;
+
+        for (size_t k = 0; ok && (k < parts.size()); k++)
+        {
+            const Dec::Message& p = *parts[k];
+            ok = (p.m_checksum == Dec::CheckOk) && (p.m_messageNumber == 1)
+                && (p.m_fragment == ((k == 0) ? Dec::FragmentFirst : (k + 1 == parts.size()) ? Dec::FragmentLast : Dec::FragmentMiddle));
+            if (ok && hexData && !c.m_bits.empty()) {
+                ok = (p.m_dataBits == c.m_bits[k]) && (p.m_fillState == 0);
+            }
+            if (!ok)
+            {
+                why = "fragment " + std::to_string(k) + ": K " + std::to_string((int) p.m_checksum) + " N " + std::to_string(p.m_messageNumber)
+                    + " kind " + std::to_string((int) p.m_fragment) + " bits " + std::to_string(p.m_dataBits) + " fill "
+                    + std::to_string(p.m_fillState);
+            }
+        }
+        if (ok)
+        {
+            // Data defined separately are not terminated: the last word of the last fragment is read whole
+            bool separate = !binary && (c.m_binary.m_secureType == Flex::SecureSeparate);
+            ok = whole->m_complete && (separate ? (whole->m_text.compare(0, c.m_text.size(), c.m_text) == 0) : (whole->m_text == c.m_text))
+                && (whole->m_fragmentCount == (int) expected) && !whole->m_fragmentGap;
+            if (ok && separate) {
+                int bits = 0;
+                for (int b : c.m_bits) {
+                    bits += b;
+                }
+                ok = (whole->m_dataBits == bits);
+            }
+            if (ok && binary) {
+                ok = (whole->m_signature == Dec::CheckOk) && (whole->m_dataBits == (int) c.m_text.size() * 4)
+                    && (whole->m_blocking == (c.m_binary.m_blocking & 0xf)) && (whole->m_displayRtl == c.m_binary.m_rightToLeft)
+                    && (whole->m_mailDrop == c.m_binary.m_mailDrop);
+            }
+            if (!ok && whole)
+            {
+                why = "whole: complete " + std::to_string(whole->m_complete) + " fragments " + std::to_string(whole->m_fragmentCount)
+                    + " sig " + std::to_string((int) whole->m_signature) + " bits " + std::to_string(whole->m_dataBits)
+                    + " text " + whole->m_text.substr(0, 40);
+            }
+        }
+        if (!er.m_ok) {
+            why = er.m_error;
+        } else if (!why.size() && !ok) {
+            why = "queued " + std::to_string(queued) + " fragments " + std::to_string(parts.size()) + " frames " + std::to_string(frames)
+                + (whole ? "" : " no message");
+        }
+
+        std::string label = std::string("tx fragments: ") + c.m_label + (why.empty() ? "" : " (" + why + ")");
+        check(ok, label.c_str());
+    }
+
+    // The id is sent with the last fragment; removing it drops the fragments still queued
+    {
+        Enc enc;
+        std::string error;
+        enc.setCollapse(0, error);  // The capcode listens to every frame
+        Enc::TxMessage m;
+        m.m_capcode = 1234567;
+        m.m_type = Flex::Binary;
+        m.m_text = hex1000;
+        m.m_binary = hexParams(16, false, false, false, false);
+        Enc::EnqueueResult er = enc.enqueue(m);
+        uint64_t index = RadioPagingFlexScheduler::capcodeSlot(1234567).m_frame;
+        bool ok = er.m_ok && (enc.pending() == 3);
+        Enc::Frame f1 = enc.buildFrame(index);
+        ok = ok && f1.m_sentIds.empty() && !f1.m_idle && (enc.pending() == 2);
+        Enc::Frame f2 = enc.buildFrame(index + 1);
+        ok = ok && f2.m_sentIds.empty() && (enc.pending() == 1);
+        Enc::Frame f3 = enc.buildFrame(index + 2);
+        ok = ok && (f3.m_sentIds.size() == 1) && (f3.m_sentIds[0] == er.m_id) && (enc.pending() == 0);
+        std::string label = "tx fragments: one fragment a frame, the id sent with the last one";
+        if (!ok) {
+            label += " (sent " + std::to_string(f1.m_sentIds.size()) + " " + std::to_string(f2.m_sentIds.size()) + " "
+                + std::to_string(f3.m_sentIds.size()) + " idle " + std::to_string(f1.m_idle) + " pending " + std::to_string(enc.pending()) + ")";
+        }
+        check(ok, label.c_str());
+
+        er = enc.enqueue(m);
+        enc.buildFrame(index);
+        check(enc.remove(er.m_id) && (enc.pending() == 0), "tx fragments: remove drops the fragments still queued");
     }
 }
 

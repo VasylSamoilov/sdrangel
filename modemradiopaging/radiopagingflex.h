@@ -118,7 +118,21 @@ public:
         ShortType m_shortType = ShortNumeric;   //!< Short message only
         int m_source = 0;           //!< Short message source and numbered types: source code S2-S0, 0-7
         BinaryParams m_binary;      //!< HEX/binary and secure messages only
+        int m_fragment = 0;         //!< HEX/binary and secure: fragment index, 0 the first (fragmentMessage)
+        int m_fragments = 1;        //!< HEX/binary and secure: fragments of the message
+        int m_signature = -1;       //!< HEX/binary first fragment: signature of the whole message, -1 of the text
     };
+
+    static const int m_maxFragments = 64;   //!< Fragments of a HEX/binary or secure message (an implementation limit)
+
+    //!< Split a HEX/binary or secure message into fragments of one frame each (STD-43A 3.10.1.2, 3.10.1.4).
+    //!< A fragment that is not the last is packed full: its data end on a character boundary with fewer
+    //!< than a character of bits left in its last word, no fill and no padding word (binary data: a
+    //!< multiple of the blocking length and of 4 bits, the hex digits; secure binary and data defined
+    //!< separately: whole words; secure alphanumeric: 3 characters a word, no ETX). The last fragment takes
+    //!< the rest with its termination. The fragments carry m_fragment, m_fragments and, HEX/binary, the
+    //!< signature of the whole message. False and an error if the message is not valid
+    static bool fragmentMessage(const PhaseMessage& message, std::vector<PhaseMessage>& fragments, std::string& error);
 
     struct PhaseParams
     {
@@ -228,14 +242,20 @@ public:
     static bool validateMessage(uint64_t capcode, MessageType type, const std::string& text, std::string& error,
         const BinaryParams& binary);
 
-    //!< Message words (headers, data and termination) of a HEX/binary message in one fragment, data bits d0
-    //!< in bit 0. number: message number N, retrieval: R. Empty if the parameters or the digits are not valid
-    static std::vector<uint32_t> binaryBody(const std::string& hex, const BinaryParams& binary, int number, bool retrieval);
-    //!< Message words of a secure message in one fragment, data bits d0 in bit 0
-    static std::vector<uint32_t> secureBody(const std::string& text, SecureType type, int number);
-    //!< Message words of a HEX/binary (2 header words) or secure binary (1 header word) message in one
-    //!< fragment: the data words and the termination word, -1 if the digits are not valid
-    static int binaryWords(const std::string& hex, int blocking, int headerWords);
+    //!< Message words (headers, data and termination) of a fragment of a HEX/binary message, data bits d0
+    //!< in bit 0. number: message number N, retrieval: R. The first fragment has header word 2 with the
+    //!< signature (signature: of the whole message, -1 of hex); the last one the termination. Empty if the
+    //!< parameters or the digits are not valid
+    static std::vector<uint32_t> binaryBody(const std::string& hex, const BinaryParams& binary, int number, bool retrieval,
+        int fragment = 0, int fragments = 1, int signature = -1);
+    //!< Message words of a fragment of a secure message, data bits d0 in bit 0
+    static std::vector<uint32_t> secureBody(const std::string& text, SecureType type, int number, int fragment = 0, int fragments = 1);
+    //!< Message words of a fragment of a HEX/binary (header words: 2 in the first fragment, 1 in the others) or
+    //!< secure binary (1 header word) message: the header and data words, and the termination word of a last
+    //!< fragment. -1 if the digits are not valid
+    static int binaryWords(const std::string& hex, int blocking, int headerWords, bool lastFragment = true);
+    //!< Fragment number F of fragment index k (0 the first): 11, then 00, 01, 10, 00, ... (3.10.1.2 p.59)
+    static unsigned fragmentNumber(int k) { return (k == 0) ? 3u : (unsigned) ((k - 1) % 3); }
 
     //!< Place messages (priority addresses first, then others, tone only addresses last) in
     //!< a phase and interleave. Messages that do not fit are left out

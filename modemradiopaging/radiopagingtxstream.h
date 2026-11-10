@@ -191,7 +191,7 @@ public:
     bool inverted() const { return m_inverted; }
     //!< The network has content that must go in the frame (group message registration and
     //!< delivery, fragments, roaming and time frames): the frame can not go to the other
-    //!< polarity. None of these is sent yet: false
+    //!< polarity. Of these, the fragments after the first of a message are sent
     bool mandatory(uint64_t frameIndex) const;
     //!< False and an error if out of range. Applies to the next re-synchronization
     bool setCollapse(int collapse, std::string& error);

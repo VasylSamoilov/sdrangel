@@ -27,7 +27,7 @@ tx() {
 }
 sent() { curl -s "$U/deviceset/0/channel/0/report" | tr -d "\n " | grep -o "\"sent\":[0-9]*" | cut -d: -f2; }
 # The received record of a capcode (the log is a JSON list of records, one per line once split)
-rxRecord() { report | sed 's/},{/}\n{/g' | grep "\"direction\":\"rx\"" | grep "\"address\":\"0*$1\"" | head -1; }
+rxRecord() { report | sed 's/},{/}\n{/g' | grep "\"direction\":\"rx\"" | grep "\"address\":\"0*$1\"" | grep -v "\"is_fragment\":true" | head -1; }
 
 mkdir -p "$WORK/config"
 (cd "$BUILD" && XDG_CONFIG_HOME="$WORK/config" LD_LIBRARY_PATH="$BUILD/lib" ./sdrangelsrv --scratch -a 127.0.0.1 -p "$PORT" > "$WORK/server.log" 2>&1 &)
@@ -57,13 +57,18 @@ check "binary bits not a multiple of B are refused" '[ "$(tx "{\"protocol\":\"fl
 check "binary right to left with B=1 is refused" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000006,\"type\":\"binary\",\"rightToLeft\":1,\"text\":\"12\"}")" = 400 ]'
 check "binary not hex is refused" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000006,\"type\":\"binary\",\"text\":\"12G4\"}")" = 400 ]'
 check "secure type 3 is refused" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000006,\"type\":\"secure\",\"secureType\":3,\"text\":\"12\"}")" = 400 ]'
+# Longer than a frame: 600 digits B=8 in 2 fragments (1720 and 680 bits); 600 secure characters in 3
+HEX600=$(for i in $(seq 75); do printf '1A2B3C4D'; done)
+ALPHA600=$(for i in $(seq 60); do printf 'abcdefghij'; done)
+check "binary of 600 digits (fragmented) is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000009,\"type\":\"binary\",\"blocking\":8,\"text\":\"$HEX600\"}")" = 202 ]'
+check "secure alphanumeric of 600 characters (fragmented) is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000010,\"type\":\"secure\",\"secureType\":0,\"text\":\"$ALPHA600\"}")" = 202 ]'
 
 # A page of the message center, claimed by the modulator once it has announced itself (every 5 s)
 check "a binary page is accepted by the message center" '[ "$(curl_code POST /featureset/feature/0/actions "{\"featureType\":\"MessageCenter\",\"MessageCenterActions\":{\"post\":{\"id\":\"p-bin\",\"transmitter\":\"t1\",\"protocol\":\"flex\",\"address\":\"1000007\",\"type\":\"binary\",\"blocking\":8,\"mailDrop\":1,\"text\":\"A5A5\"}}}")" = 202 ]'
 check "a secure page of type 3 is refused by the message center" '[ "$(curl_code POST /featureset/feature/0/actions "{\"featureType\":\"MessageCenter\",\"MessageCenterActions\":{\"post\":{\"id\":\"p-sec\",\"transmitter\":\"t1\",\"protocol\":\"flex\",\"address\":\"1000008\",\"type\":\"secure\",\"secureType\":3,\"text\":\"12\"}}}")" = 400 ]'
 
-for i in $(seq 60); do [ "$(sent)" = "6" ] && break; sleep 1; done
-check "the modulator sent the six messages" '[ "$(sent)" = "6" ]'
+for i in $(seq 60); do [ "$(sent)" = "8" ] && break; sleep 1; done
+check "the modulator sent the eight messages" '[ "$(sent)" = "8" ]'
 R=$(report)
 check "the sent binary record has its header fields" '[[ "$R" == *"\"blocking\":7"*"\"display_direction\":\"rtl\""* || "$R" == *"\"display_direction\":\"rtl\""*"\"blocking\":7"* ]]'
 sleep 2
@@ -80,7 +85,7 @@ curl_code PATCH /deviceset/1/channel/0/settings '{"channelType":"RadioPagingDemo
 curl_code POST /deviceset/1/device/run > /dev/null
 
 SECS=$(( $(stat -c %s "$OUT") / (48000 * 4) + 5 ))
-for i in $(seq "$SECS"); do [ -n "$(rxRecord 1000005)" ] && [ -n "$(rxRecord 1000007)" ] && break; sleep 1; done
+for i in $(seq "$SECS"); do [ -n "$(rxRecord 1000007)" ] && [ -n "$(rxRecord 1000009)" ] && [ -n "$(rxRecord 1000010)" ] && break; sleep 1; done
 
 A=$(rxRecord 1000001)
 check "binary B=8: text, 64 bits, K and signature" '[[ "$A" == *"\"text\":\"0123456789ABCDEF\""* && "$A" == *"\"hex_bits\":64"* && "$A" == *"\"blocking\":8"* && "$A" == *"\"checksum\":\"ok\""* && "$A" == *"\"signature\":\"ok\""* ]]'
@@ -94,6 +99,10 @@ A=$(rxRecord 1000005)
 check "secure binary exact end: termination word removed, 84 bits" '[[ "$A" == *"\"text\":\"123456789ABCDEF123455\""* && "$A" == *"\"secure_type\":2"* && "$A" == *"\"hex_bits\":84"* && "$A" == *"\"checksum\":\"ok\""* ]]'
 A=$(rxRecord 1000007)
 check "message center binary page: B=8 and mail drop received" '[[ "$A" == *"\"text\":\"A5A5\""* && "$A" == *"\"blocking\":8"* && "$A" == *"\"maildrop\":true"* && "$A" == *"\"signature\":\"ok\""* ]]'
+A=$(rxRecord 1000009)
+check "fragmented binary: reassembled, 2400 bits, signature of the whole message" '[[ "$A" == *"\"text\":\"$HEX600\""* && "$A" == *"\"hex_bits\":2400"* && "$A" == *"\"signature\":\"ok\""* && "$A" == *"\"checksum\":\"ok\""* ]]'
+A=$(rxRecord 1000010)
+check "fragmented secure alphanumeric: reassembled" '[[ "$A" == *"\"text\":\"$ALPHA600\""* && "$A" == *"\"secure_type\":0"* && "$A" == *"\"checksum\":\"ok\""* ]]'
 
 if [ "$failed" -ne 0 ]; then
     report | sed 's/},{/}\n{/g' | grep "\"direction\":\"rx\""
