@@ -676,6 +676,149 @@ static void testBothCall()
     CHECK(!p.a.established() && !p.b.established());
 }
 
+// The pause of 81 ms is real time: it starts when the last frame of a pass is out.
+static void testPauseRealTime()
+{
+    NmtDmsLink a;
+    std::vector<int> silent;
+    int bit;
+    size_t sent = 0;
+
+    a.startAsCaller();
+    for (int step = 0; step < 1200; step++)
+    {
+        if (a.pullBit(bit)) {
+            sent++;
+        } else {
+            silent.push_back(step);
+        }
+        a.advance(1.0 / 1200.0);
+    }
+    // two passes of two frames in one burst, then 97 or 98 steps of silence
+    CHECK(sent > 463);
+    CHECK(!silent.empty() && silent.front() == 463);
+    size_t run = 0;
+
+    while (run < silent.size() && silent[run] == silent.front() + static_cast<int>(run)) {
+        run++;
+    }
+    CHECK(run >= 97 && run <= 98);
+    // an acknowledgement ends the pause at once
+    NmtDmsLink b;
+    b.startAsCaller();
+    drain(b);
+    feed(b, NmtDmsLink::encodeRr(true, false, false, 1));
+    CHECK(b.pullBit(bit));
+}
+
+static void testPendingAndMasked()
+{
+    NmtDmsLink b;
+    const uint8_t data[] = {'a', 'b', 'c'};
+
+    CHECK(b.queueData(data, sizeof(data)));
+    CHECK(!b.idle() && b.pendingBytes() == 3);
+    CHECK(!b.queueData(data, static_cast<size_t>(-1)));
+    std::vector<uint8_t> big(65536, 1);
+    NmtDmsLink c;
+    CHECK(c.queueData(big.data(), big.size()));
+    CHECK(!c.queueData(big.data(), 1));
+
+    // a 7-bit peer: the eighth bits are lost, and the link says how many
+    NmtDmsLink a8(true), b7(false);
+    Pair p;
+    std::vector<uint8_t> got;
+    bool done = false;
+
+    std::swap(p.a, a8);
+    std::swap(p.b, b7);
+    p.b.setDataHandler([&](const std::vector<uint8_t>& dd) { got.insert(got.end(), dd.begin(), dd.end()); });
+    p.a.setAllSentHandler([&] { done = true; });
+    p.a.startAsCaller();
+    const uint8_t mixed[] = {0xc1, 0xc2, 0x41};
+    p.a.queueData(mixed, sizeof(mixed));
+    p.run(8000, [&] { return done; });
+    CHECK(done && !p.a.eightBits());
+    CHECK(got == std::vector<uint8_t>({0x41, 0x42, 0x41}));
+    CHECK(p.a.maskedBytes() == 2);
+}
+
+// A receiver that was full says when it can take data again.
+static void testReadyAgain()
+{
+    NmtDmsLink b;
+    const uint8_t data[8] = {0x41, 0x42, 0, 0, 0, 0, 0, 0};
+
+    feed(b, NmtDmsLink::encodeDt(false, false, 0, data, true));
+    drain(b);
+    b.setReady(false);
+    feed(b, NmtDmsLink::encodeDt(false, false, 1, data, true));
+    drain(b);                                                      // NR(1)
+    b.setReady(true);
+    std::vector<uint8_t> out = drain(b);
+    CHECK(out.size() == 77 && text(out, 26, 7) == "1101001");     // RR(1)
+}
+
+// The first frame needs no history of good bits; the minimum quality cannot be NaN; wrong stuffing is no frame.
+static void testQualityStart()
+{
+    const uint8_t id[8] = {73, '1', '1', '2', '3', '4', '5', '6'};
+    const std::vector<uint8_t> frame = NmtDmsLink::encodeDt(false, true, 0, id, false);
+    NmtDmsLink b;
+
+    feed(b, frame, 0.9);
+    CHECK(b.framesReceived() == 1);
+
+    NmtDmsLink c;
+    c.setMinQuality(std::nan(""));
+    feed(c, frame, 0.1);
+    CHECK(c.framesReceived() == 1);                                // NaN means no minimum
+
+    std::vector<uint8_t> bad = NmtDmsLink::encodeDt(false, true, 0, id, true);
+    bad[15 + 11 + 7] = 0;
+    NmtDmsLink d;
+    feed(d, bad);
+    CHECK(d.framesReceived() == 0 && d.framesRejected() == 1);
+}
+
+// A callback that resets the link ends the handling of that frame.
+static void testResetInCallback()
+{
+    Pair p;
+    int controls = 0;
+
+    p.a.setControlHandler([&](uint8_t, const uint8_t*) { controls++; });
+    bool once = true;
+
+    p.a.setEstablishedHandler([&] {
+        if (once)
+        {
+            once = false;
+            p.a.reset();
+        }
+    });
+    p.a.startAsCaller();
+    p.run(3000);                                        // no crash, no frame of the old session handled after the reset
+    CHECK(!once && controls <= 1);
+
+    // a second message from the end-of-message callback
+    Pair q;
+    int sent = 0;
+    std::vector<uint8_t> got;
+    const uint8_t data[] = {'x', 'y', 'z', 'w', 'v', 'u', 't', 's', 'r', 'q'};
+
+    q.b.setDataHandler([&](const std::vector<uint8_t>& dd) { got.insert(got.end(), dd.begin(), dd.end()); });
+    q.a.setAllSentHandler([&] {
+        if (++sent == 1) {
+            q.a.queueData(data, sizeof(data));
+        }
+    });
+    q.a.startAsCaller();
+    q.a.queueData(data, sizeof(data));
+    q.run(20000, [&] { return sent == 2; });
+    CHECK(sent == 2 && got.size() == 20);
+}
+
 int main()
 {
     testAcknowledgementWindow();
@@ -687,6 +830,11 @@ int main()
     testRecovery();
     testPause();
     testBothCall();
+    testPauseRealTime();
+    testPendingAndMasked();
+    testReadyAgain();
+    testQualityStart();
+    testResetInCallback();
     testCrcAndFrames();
     testHandshakeAndData();
     testSevenBit();

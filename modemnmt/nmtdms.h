@@ -73,7 +73,7 @@ public:
     // The identity we send, 7 characters (country digit and six digits).
     void setIdentity(const char* id7);
     // The receiver cannot take more data (NR is sent instead of RR). The sender waits at most 3 s.
-    void setReady(bool ready) { m_ready = ready; }
+    void setReady(bool ready);
 
     // This side calls: it sends the first frames (identity, random number) and uses d = 0.
     void startAsCaller();
@@ -89,7 +89,7 @@ public:
     // A bit from the demodulator with its quality and level (0..1). Quality of the last 16 bits has
     // to reach `minQuality` to take a frame sync.
     void pushBit(int bit, double quality, double level);
-    void setMinQuality(double quality) { m_minQuality = quality; }
+    void setMinQuality(double quality) { m_minQuality = (quality >= 0.0) ? quality : 0.0; }
     // Seconds that went by: the pause before frames are sent again (81 ms) and the time the
     // receiver of the other side may be full (3 s) run on this clock. It has to be called.
     void advance(double seconds);
@@ -97,12 +97,16 @@ public:
     bool established() const { return m_established; }
     bool callerSide() const { return m_caller; }
     bool eightBits() const { return m_eightBits; }
-    bool idle() const { return m_txList.empty() && !m_rrPending && m_txPos >= m_txBits.size(); }
+    bool idle() const { return m_txList.empty() && m_pending.empty() && !m_rrPending && m_txPos >= m_txBits.size(); }
     bool peerBusy() const { return m_peerBusy; }
     // The peer answered our random number with a positive response (s = 0): it wants scrambled data,
     // which this link does not do.
     bool positiveResponse() const { return m_positiveResponse; }
+    // frames that wait for an acknowledgement; bytes that wait for the exchange of the random numbers
     size_t unacknowledged() const { return m_txList.size(); }
+    size_t pendingBytes() const { return m_pending.size(); }
+    // bytes with the eighth bit set that went out in the 7-bit format the peer asked for
+    size_t maskedBytes() const { return m_maskedBytes; }
     // Counters for the tests and the log
     uint64_t framesReceived() const { return m_framesReceived; }
     uint64_t framesRejected() const { return m_framesRejected; }
@@ -146,12 +150,15 @@ private:
     bool m_peerData;                // a user data frame came from the peer
     bool m_positiveResponse;
     bool m_ready;
+    bool m_nrSent;                  // the last answer was an NR
+    bool m_gapPending;              // the pause starts when the frame that is going out is done
+    size_t m_maskedBytes;
+    uint32_t m_epoch;               // counts reset(): a callback that resets the link ends the frame handling
     std::vector<uint8_t> m_pending; // user bytes that wait for the exchange of the random numbers
     bool m_peerBusy;
     double m_peerBusyTime;
     uint8_t m_random[3];
     char m_identity[8];
-    bool m_haveIdentity;
     std::vector<uint8_t> m_peerIdentity;
 
     // transmission

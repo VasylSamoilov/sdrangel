@@ -18,6 +18,8 @@
 
 // The short message codec, against the examples of Annex 24 (pages 28 and 29).
 
+#include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -73,8 +75,10 @@ static void testAlphabet()
     }
     CHECK(smsGsmEncode(smsGsmDecode(all)) == all);
     CHECK(smsGsmDecode(smsGsmEncode("[A\xe2\x82\xac]")) == "[A\xe2\x82\xac]");
-    CHECK(smsGsmDecode(Bytes({0x1b, 0x7f})) == " ");                  // an unknown escape is a blank
-    CHECK(smsGsmDecode(Bytes({0x41, 0x1b})) == "A\x1b" || smsGsmDecode(Bytes({0x41, 0x1b})).size() >= 1);
+    CHECK(smsGsmDecode(Bytes({0x1b, 0x7f})) == "\xc3\xa0");           // not in the extension table: the character itself
+    CHECK(smsGsmDecode(Bytes({0x41, 0x1b})) == "A ");                 // a dangling escape is a blank
+    CHECK(smsGsmDecode(Bytes({0x1b, 0x1b})) == " ");
+    CHECK(smsGsmDecode(Bytes({0x1b, 0x0a})) == "\x0c");              // form feed
 
     // 160 characters in 140 octets and back
     const Bytes long160(160, 0x5a);
@@ -114,8 +118,22 @@ static void testAddresses()
     CHECK(smsDecodeAddress(international.data(), 5, number, used) == SmsParse::NeedMore);
     const Bytes noTypeBit = {0x02, 0x11, 0x21};
     CHECK(smsDecodeAddress(noTypeBit.data(), noTypeBit.size(), number, used) == SmsParse::Error);
-    const Bytes tooLong = {0x30, 0x91, 0, 0, 0};
-    CHECK(smsDecodeAddress(tooLong.data(), tooLong.size(), number, used) == SmsParse::Error);
+    const Bytes longer = {0x30, 0x91, 0x21, 0, 0};
+    CHECK(smsDecodeAddress(longer.data(), longer.size(), number, used) == SmsParse::NeedMore);   // 48 digits need 24 octets
+    // filler or unused codes inside the number, a plus in the middle, a name in letters
+    const Bytes filler = {0x02, 0x91, 0xf1};
+    CHECK(smsDecodeAddress(filler.data(), filler.size(), number, used) == SmsParse::Error);
+    const Bytes unused = {0x04, 0x81, 0x21, 0xe3};
+    CHECK(smsDecodeAddress(unused.data(), unused.size(), number, used) == SmsParse::Error);
+    const Bytes midPlus = {0x03, 0x81, 0xd1, 0x32};
+    CHECK(smsDecodeAddress(midPlus.data(), midPlus.size(), number, used) == SmsParse::Error);
+    const Bytes odd = {0x03, 0x81, 0x21, 0xf3};
+    CHECK(smsDecodeAddress(odd.data(), odd.size(), number, used) == SmsParse::Ok && number == "123" && used == 4);
+    const Bytes alpha = {0x04, 0xd0, 0x00, 0x00};
+    CHECK(smsDecodeAddress(alpha.data(), alpha.size(), number, used) == SmsParse::Error);
+    out.clear();
+    CHECK(!smsEncodeAddress("+", out));
+    CHECK(smsEncodeAddress(std::string(20, '7'), out) && out[0] == 20 && out.size() == 12);
 
     // what cannot be coded
     out.clear();
@@ -295,7 +313,15 @@ static void testSubmitExample()
     bad[12] = 0x09;                                     // reserved validity format
     CHECK(smsParseFromPhone(bad.data(), bad.size(), m, used) == SmsParse::Error);
     bad = kSubmit;
-    bad[0] = 0x08;                                      // spare bits
+    bad[0] = 0x08;                                      // spare bits are ignored
+    CHECK(smsParseFromPhone(bad.data(), bad.size(), m, used) == SmsParse::Ok && m.submit.text == "HELLO");
+    bad[0] = 0x01;                                      // a message to the phone, not from it
+    CHECK(smsParseFromPhone(bad.data(), bad.size(), m, used) == SmsParse::Error && used == bad.size());
+    bad = kSubmit;
+    bad[12] = 0x51;                                     // a user data header (concatenation): not defined
+    CHECK(smsParseFromPhone(bad.data(), bad.size(), m, used) == SmsParse::Error);
+    bad = kSubmit;
+    bad[12] = 0x03;                                     // a reserved kind of TPDU
     CHECK(smsParseFromPhone(bad.data(), bad.size(), m, used) == SmsParse::Error);
     bad = kSubmit;
     bad[26] = 0xa1;                                     // 161 characters
@@ -389,6 +415,149 @@ static void testPieces()
     }
 }
 
+static void testTexts()
+{
+    // the table of GSM 03.38, entry by entry
+    const char* expected[] = {
+        "@", "\xc2\xa3", "$", "\xc2\xa5", "\xc3\xa8", "\xc3\xa9", "\xc3\xb9", "\xc3\xac", "\xc3\xb2", "\xc3\x87",
+        "\n", "\xc3\x98", "\xc3\xb8", "\r", "\xc3\x85", "\xc3\xa5",
+        "\xce\x94", "_", "\xce\xa6", "\xce\x93", "\xce\x9b", "\xce\xa9", "\xce\xa0", "\xce\xa8", "\xce\xa3", "\xce\x98",
+        "\xce\x9e", nullptr, "\xc3\x86", "\xc3\xa6", "\xc3\x9f", "\xc3\x89"
+    };
+
+    for (int i = 0; i < 32; i++)
+    {
+        if (expected[i]) {
+            CHECK(smsGsmDecode(Bytes({static_cast<uint8_t>(i)})) == expected[i]);
+        }
+    }
+    CHECK(smsGsmDecode(Bytes({0x24})) == "\xc2\xa4");
+    CHECK(smsGsmDecode(Bytes({0x40})) == "\xc2\xa1");
+    CHECK(smsGsmDecode(Bytes({0x5b, 0x5c, 0x5d, 0x5e, 0x5f})) == "\xc3\x84\xc3\x96\xc3\x91\xc3\x9c\xc2\xa7");
+    CHECK(smsGsmDecode(Bytes({0x60, 0x7b, 0x7c, 0x7d, 0x7e, 0x7f})) == "\xc2\xbf\xc3\xa4\xc3\xb6\xc3\xb1\xc3\xbc\xc3\xa0");
+    CHECK(smsGsmEncode("\xc2\xa4") == Bytes({0x24}));
+    CHECK(smsGsmEncode("@") == Bytes({0x00}));
+    CHECK(smsGsmEncode("\x0c") == Bytes({0x1b, 0x0a}));
+
+    // broken UTF-8 becomes question marks, one for each broken byte, and does not eat what follows
+    CHECK(smsGsmEncode("\xc3\x28") == Bytes({0x3f, 0x28}));
+    CHECK(smsGsmEncode("\xc1\x80") == Bytes({0x3f, 0x3f}));
+    CHECK(smsGsmEncode("\xe2" "AB") == Bytes({0x3f, 0x41, 0x42}));
+    CHECK(smsGsmEncode("\xc3" "A") == Bytes({0x3f, 0x41}));
+    CHECK(smsGsmEncode("\xf0\x9f\x98\x80") == Bytes({0x3f}));
+    CHECK(smsGsmEncode("\xed\xa0\x80") == Bytes({0x3f, 0x3f, 0x3f}));
+    CHECK(smsGsmEncode("\xe0\x80\xaf") == Bytes({0x3f, 0x3f, 0x3f}));
+    CHECK(smsGsmEncode("\xe2\x82") == Bytes({0x3f, 0x3f}));
+
+    // unpacking never reads or makes more than the octets hold
+    const Bytes five = {1, 2, 3, 4, 5};
+    CHECK(smsUnpackSeptets(five.data(), five.size(), 100).size() == 5 * 8 / 7);
+    CHECK(smsUnpackSeptets(nullptr, 0, 3).empty());
+
+    // pack and unpack for every length
+    for (size_t n = 0; n <= 160; n++)
+    {
+        Bytes septets;
+
+        for (size_t i = 0; i < n; i++) {
+            septets.push_back(static_cast<uint8_t>((i * 5 + 3) & 0x7f));
+        }
+        const Bytes packed = smsPackSeptets(septets);
+
+        CHECK(packed.size() == (n * 7 + 7) / 8);
+        CHECK(smsUnpackSeptets(packed.data(), packed.size(), n) == septets);
+    }
+}
+
+static void testTimeRange()
+{
+    SmsDeliver m;
+    Bytes out;
+
+    m.originator = "+1";
+    m.text = "x";
+    CHECK(smsBuildDeliver(m, 0, out));
+
+    m.time.zoneQuarters = 79;
+    CHECK(smsBuildDeliver(m, 0, out));
+    m.time.zoneQuarters = 80;
+    CHECK(!smsBuildDeliver(m, 0, out));
+    m.time.zoneQuarters = -80;
+    CHECK(!smsBuildDeliver(m, 0, out));
+    m.time = SmsTime();
+    m.time.year = -1;
+    CHECK(!smsBuildDeliver(m, 0, out));
+    m.time.year = 100;
+    CHECK(!smsBuildDeliver(m, 0, out));
+    m.time = SmsTime();
+    m.time.month = 13;
+    CHECK(!smsBuildDeliver(m, 0, out));
+    m.time = SmsTime();
+    m.time.hour = 24;
+    CHECK(!smsBuildDeliver(m, 0, out));
+
+    // zeros and a leap second
+    SmsTime t;
+
+    t.year = 0;
+    t.month = 0;
+    t.day = 0;
+    t.hour = 0;
+    t.minute = 0;
+    t.second = 60;
+    const Bytes b = smsEncodeTime(t);
+    CHECK(b == Bytes({0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xa6, 0x00}));
+    // a time stamp of nibbles that are no digits stays below 100
+    const Bytes wild = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+    const SmsTime w = smsDecodeTime(wild.data());
+    CHECK(w.year <= 99 && w.month <= 99 && w.second <= 99 && w.zoneQuarters >= -79 && w.zoneQuarters <= 79);
+}
+
+static void testErrorsWithMore()
+{
+    SmsFromPhone m;
+    size_t used = 0;
+
+    // the length of the cause element rules, and a user data element behind it is part of the message
+    const Bytes two = {0x04, 0x01, 0x42, 0x02, 0x6f, 0x00};
+    CHECK(smsParseFromPhone(two.data(), two.size(), m, used) == SmsParse::Ok && m.cause == 0x6f && used == 6);
+    const Bytes withReport = {0x04, 0x01, 0x42, 0x01, 0x16, 0x41, 0x02, 0x00, 0xd3};
+    CHECK(smsParseFromPhone(withReport.data(), withReport.size(), m, used) == SmsParse::Ok && m.cause == 0x16 && used == 9);
+    for (size_t n = 5; n < withReport.size(); n++) {
+        CHECK(smsParseFromPhone(withReport.data(), n, m, used) == SmsParse::NeedMore || n == 5);
+    }
+    const Bytes ackReport = {0x02, 0x01, 0x41, 0x02, 0x00, 0x00};
+    CHECK(smsParseFromPhone(ackReport.data(), ackReport.size(), m, used) == SmsParse::Ok && used == 6);
+    CHECK(smsParseFromPhone(ackReport.data(), 4, m, used) == SmsParse::NeedMore);
+
+    // an error leaves nothing in the stream
+    const Bytes junk = {0x55, 0x01, 0x02};
+    CHECK(smsParseFromPhone(junk.data(), junk.size(), m, used) == SmsParse::Ok || used == junk.size());
+    const Bytes header = smsHeader();
+    CHECK(smsParseFromPhone(header.data(), header.size(), m, used) == SmsParse::Error && used == header.size());
+
+    // two messages in a row
+    Bytes both = kSubmit;
+    both.insert(both.end(), kSubmit.begin(), kSubmit.end());
+    CHECK(smsParseFromPhone(both.data(), both.size(), m, used) == SmsParse::Ok && used == kSubmit.size());
+    CHECK(smsParseFromPhone(both.data() + used, both.size() - used, m, used) == SmsParse::Ok && used == kSubmit.size());
+
+    // an 8-bit message: the escape and the extension table work, national letters are question marks
+    Bytes eight = kSubmit;
+    eight[24] = 0x30;
+    eight.resize(27);
+    for (uint8_t c : {uint8_t(0x1b), uint8_t(0x3c), uint8_t('A'), uint8_t(0x1b)}) {
+        eight.push_back(c);
+    }
+    eight[26] = 4;
+    CHECK(smsParseFromPhone(eight.data(), eight.size(), m, used) == SmsParse::Ok && m.submit.text == "[A ");
+
+    // the header: an address with a 02h in it is left out
+    CHECK(smsHeader("12") == smsHeader());
+    CHECK(smsHeader("+1") == smsHeader());
+    CHECK(smsHeader("123") != smsHeader());
+}
+
 int main()
 {
     testAlphabet();
@@ -398,6 +567,9 @@ int main()
     testSubmitExample();
     testOtherMessages();
     testPieces();
+    testTexts();
+    testTimeRange();
+    testErrorsWithMore();
 
     if (g_failures) {
         std::fprintf(stderr, "%d failures\n", g_failures);
