@@ -303,6 +303,10 @@
 #include "SWGPERTesterActions.h"
 #include "SWGPERTesterActions_aos.h"
 #include "SWGPERTesterReport.h"
+#include "SWGMessageCenterActions.h"
+#include "SWGMessageCenterPost.h"
+#include "SWGMessageCenterReport.h"
+#include "SWGMessageCenterSettings.h"
 #include "SWGPERTesterSettings.h"
 #include "SWGPSK31ModActions.h"
 #include "SWGPSK31ModActions_payload.h"
@@ -1914,6 +1918,26 @@ namespace SWGSDRangel {
     }
     if(QString("SWGPERTesterReport").compare(type) == 0) {
       SWGPERTesterReport *obj = new SWGPERTesterReport();
+      obj->init();
+      return obj;
+    }
+    if(QString("SWGMessageCenterActions").compare(type) == 0) {
+      SWGMessageCenterActions *obj = new SWGMessageCenterActions();
+      obj->init();
+      return obj;
+    }
+    if(QString("SWGMessageCenterPost").compare(type) == 0) {
+      SWGMessageCenterPost *obj = new SWGMessageCenterPost();
+      obj->init();
+      return obj;
+    }
+    if(QString("SWGMessageCenterReport").compare(type) == 0) {
+      SWGMessageCenterReport *obj = new SWGMessageCenterReport();
+      obj->init();
+      return obj;
+    }
+    if(QString("SWGMessageCenterSettings").compare(type) == 0) {
+      SWGMessageCenterSettings *obj = new SWGMessageCenterSettings();
       obj->init();
       return obj;
     }

@@ -5849,6 +5849,12 @@ bool WebAPIRequestMapper::getFeatureSettings(
             featureSettings->setMorseDecoderSettings(new SWGSDRangel::SWGMorseDecoderSettings());
             featureSettings->getMorseDecoderSettings()->fromJsonObject(settingsJsonObject);
         }
+        else if (featureSettingsKey == "MessageCenterSettings")
+        {
+            featureSettings->setMessageCenterSettings(new SWGSDRangel::SWGMessageCenterSettings());
+            featureSettings->getMessageCenterSettings()->init();
+            featureSettings->getMessageCenterSettings()->fromJsonObject(settingsJsonObject);
+        }
         else if (featureSettingsKey == "PERTesterSettings")
         {
             featureSettings->setPerTesterSettings(new SWGSDRangel::SWGPERTesterSettings());
@@ -5958,6 +5964,12 @@ bool WebAPIRequestMapper::getFeatureActions(
         {
             featureActions->setMapActions(new SWGSDRangel::SWGMapActions());
             featureActions->getMapActions()->fromJsonObject(actionsJsonObject);
+        }
+        else if (featureActionsKey == "MessageCenterActions")
+        {
+            featureActions->setMessageCenterActions(new SWGSDRangel::SWGMessageCenterActions());
+            featureActions->getMessageCenterActions()->init();
+            featureActions->getMessageCenterActions()->fromJsonObject(actionsJsonObject);
         }
         else if (featureActionsKey == "PERTesterActions")
         {
@@ -6285,6 +6297,7 @@ void WebAPIRequestMapper::resetFeatureSettings(SWGSDRangel::SWGFeatureSettings& 
     featureSettings.setFreqDisplaySettings(nullptr);
     featureSettings.setGs232ControllerSettings(nullptr);
     featureSettings.setMapSettings(nullptr);
+    featureSettings.setMessageCenterSettings(nullptr);
     featureSettings.setPerTesterSettings(nullptr);
     featureSettings.setSatelliteTrackerSettings(nullptr);
     featureSettings.setSidSettings(nullptr);
@@ -6304,6 +6317,7 @@ void WebAPIRequestMapper::resetFeatureReport(SWGSDRangel::SWGFeatureReport& feat
     featureReport.setAircraftReport(nullptr);
     featureReport.setFreqDisplayReport(nullptr);
     featureReport.setGs232ControllerReport(nullptr);
+    featureReport.setMessageCenterReport(nullptr);
     featureReport.setPerTesterReport(nullptr);
     featureReport.setRigCtlServerReport(nullptr);
     featureReport.setMcpServerReport(nullptr);
@@ -6323,6 +6337,7 @@ void WebAPIRequestMapper::resetFeatureActions(SWGSDRangel::SWGFeatureActions& fe
     featureActions.setAircraftActions(nullptr);
     featureActions.setGs232ControllerActions(nullptr);
     featureActions.setMapActions(nullptr);
+    featureActions.setMessageCenterActions(nullptr);
     featureActions.setPerTesterActions(nullptr);
     featureActions.setRigCtlServerActions(nullptr);
     featureActions.setMcpServerActions(nullptr);

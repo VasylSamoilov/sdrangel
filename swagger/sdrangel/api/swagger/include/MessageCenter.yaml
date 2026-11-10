@@ -1,0 +1,100 @@
+MessageCenterSettings:
+  description: "Message Center settings. The lists are JSON texts."
+  properties:
+    title:
+      type: string
+    rgbColor:
+      type: integer
+      format: int64
+    logSize:
+      description: "Messages kept in the log"
+      type: integer
+    claimTimeoutSec:
+      description: "A page given to a transmitter that does not claim it in this time goes back to the queue"
+      type: integer
+    silentSec:
+      description: "A channel that does not announce itself for this time is offline"
+      type: integer
+    routes:
+      description: "JSON array of routes: name, enabled, stop, sinks (names: log, queue or a sink added) and filter (protocols, aliases, direction, kind, polarity, speeds, address, text, msgType, frequencyMin, frequencyMax, timeFrom, timeTo, hideDuplicates, voiceOnly). The records go through the routes in order; a record that no route selects is logged"
+      type: string
+    sinks:
+      description: "JSON array of files records are written to: name, path, format (0 JSON lines, 1 CSV)"
+      type: string
+    sources:
+      description: "JSON array of JSON lines files records are read from: name, path"
+      type: string
+
+MessageCenterReport:
+  description: "Message Center report. The lists are JSON texts."
+  properties:
+    logged:
+      description: "Records stored in the log since the start"
+      type: integer
+    routed:
+      description: "Records a route selected since the start"
+      type: integer
+    endpoints:
+      description: "JSON array of the channels that announced themselves: alias, role (rx, tx), status (offline, idle, busy), protocols, speeds, polarities, queueDepth, capacity, frequency, lastSeen"
+      type: string
+    pages:
+      description: "JSON array of the pages: id, transmitter, protocol, address, text, state (pending, queued, claimed, transmitted, sent, dead), attempts, retransmits, reason"
+      type: string
+    log:
+      description: "JSON array of the last 50 records of the log (MessageRecord)"
+      type: string
+    errors:
+      description: "Errors of the sinks and sources since the last report, one a line"
+      type: string
+
+MessageCenterPost:
+  description: "A page to transmit. The transmitter is the channel alias it announced. A page is for a modulator that handles its protocol. No live voice: a voice page is a sound file"
+  properties:
+    id:
+      description: "Id of the page, optional (generated if empty). The records of the message have this id"
+      type: string
+    transmitter:
+      description: "Alias of the transmitter channel"
+      type: string
+    protocol:
+      description: "pocsag, flex or gsc"
+      type: string
+    address:
+      description: "POCSAG: the address. FLEX: the capcode. GSC: the address of up to 6 digits"
+      type: string
+    function:
+      description: "POCSAG function 0 to 3 (A to D). GSC: address number 0 to 3 (1 to 4)"
+      type: integer
+    priority:
+      description: "FLEX: priority address (1 for yes)"
+      type: integer
+    type:
+      description: "alphanumeric, numeric, tone_only or voice (GSC)"
+      type: string
+    text:
+      description: "The text of the message"
+      type: string
+    voiceFile:
+      description: "voice: the path of the WAV file, on the host of SDRangel"
+      type: string
+    speed:
+      description: "POCSAG speed in baud: 512, 1200 or 2400. 0: the channel setting"
+      type: integer
+    polarity:
+      description: "normal or inverted. Empty: the channel setting"
+      type: string
+
+MessageCenterActions:
+  description: "Message Center actions. One at a time"
+  properties:
+    post:
+      $ref: "http://swgserver:8081/api/swagger/include/MessageCenter.yaml#/MessageCenterPost"
+    requeue:
+      description: "Id of a dead page: it goes back to pending with its attempts reset"
+      type: string
+    cancel:
+      description: "Id of a page nobody has claimed or a dead page: it is withdrawn"
+      type: string
+    clearSent:
+      description: "1: the pages that were sent are forgotten"
+      type: integer
