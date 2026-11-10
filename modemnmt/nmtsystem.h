@@ -176,7 +176,7 @@ private:
         uint8_t flags = 0;
         NmtServiceEnd result = NmtServiceEnd::Undelivered;
     };
-    bool cancelMessageCall(char country, const std::string& number);
+    bool cancelMessageCall(char country, const std::string& number, uint8_t* carried);
     MwiReport mwiReport(NmtTransaction& transaction);
     void sendMwiReport(const MwiReport& report);
     NmtTransaction& newPagedTransaction(char country, const std::string& number);
