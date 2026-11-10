@@ -41,7 +41,7 @@ static int g_failures = 0;
 
 static const double kRate = 48000.0;
 
-static ChannelConfig config(System system, ChannelType type, int channel)
+[[maybe_unused]] static ChannelConfig config(System system, ChannelType type, int channel)
 {
     ChannelConfig c;
 

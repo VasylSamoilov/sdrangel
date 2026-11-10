@@ -10,6 +10,7 @@ set(MODEMNMT_LIB_SOURCES
     ../biquad.cpp
     ../ffsk.cpp
     ../hagelbarger.cpp
+    ../nmtbasestation.cpp
     ../nmtdms.cpp
     ../nmtcellularbridge.cpp
     ../nmtchannel.cpp
@@ -17,10 +18,12 @@ set(MODEMNMT_LIB_SOURCES
     ../nmtmwi.cpp
     ../nmtmodem.cpp
     ../nmtnumbers.cpp
+    ../nmtplan.cpp
     ../nmtsms.cpp
     ../nmtsystem.cpp
     ../nmtvoice.cpp
     ../../modemcellular/callrouter.cpp
+    ../../modemcellular/carrierqueue.cpp
     ../../modemcellular/cellularsystem.cpp
     ../../modemcellular/clock.cpp
     ../../modemcellular/compandor.cpp
@@ -73,3 +76,5 @@ modemnmt_add_test(modemnmt_mwi_test test_mwi.cpp)
 modemnmt_add_test(modemnmt_dms_test test_dms.cpp)
 modemnmt_add_test(modemnmt_sms_test test_sms.cpp)
 modemnmt_add_test(modemnmt_smscall_test test_smscall.cpp)
+modemnmt_add_test(modemnmt_plan_test test_plan.cpp)
+modemnmt_add_test(modemnmt_basestation_test test_basestation.cpp)
