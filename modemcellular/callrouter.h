@@ -35,6 +35,10 @@
 namespace modemcellular
 {
 
+// Audio between two mobiles waits in a queue for the one that listens. The queue is bounded:
+// above 200 ms the oldest audio is dropped down to 60 ms, so a mobile that starts to listen late
+// does not stay behind for the rest of the call (one click, at the moment of the cut).
+//
 // Routes calls placed by mobiles and acts as the network for them. A dialed number that
 // is registered goes to that mobile. Any other number ends on a fallback endpoint (music,
 // echo, later SIP).

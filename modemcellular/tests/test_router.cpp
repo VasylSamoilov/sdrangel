@@ -208,6 +208,61 @@ static void testAudioBeforeAnswerIsDropped()
     f.router.audioFromMobile(r.callref, loud.data(), 160);  // ignored, must not crash
 }
 
+// A mobile that does not listen for a while does not stay behind for the rest of the call: above
+// 200 ms the queue is cut down to the newest 60 ms (480 samples). Both directions.
+static void testAudioQueueIsBounded()
+{
+    Fixture f;
+    FakeLeg a("A");
+    FakeLeg b("B");
+    f.router.registerSubscriber("100", a);
+    f.router.registerSubscriber("200", b);
+
+    const CallRef refA = f.router.setup(a, "100", "200").callref;
+    const CallRef refB = b.lastRef;
+    f.run();
+    f.router.alerting(refB);
+    f.router.answer(refB);
+    readAudio(f.router, refA, 800);
+    readAudio(f.router, refB, 800);
+
+    for (int direction = 0; direction < 2; direction++)
+    {
+        const CallRef from = direction ? refB : refA;
+        const CallRef to = direction ? refA : refB;
+
+        // 0.5 s in blocks of 160 samples, numbered; nobody reads
+        for (int block = 0; block < 25; block++)
+        {
+            std::vector<float> samples(160);
+
+            for (int i = 0; i < 160; i++) {
+                samples[i] = static_cast<float>(block * 160 + i + 1);
+            }
+            f.router.audioFromMobile(from, samples.data(), 160);
+        }
+
+        // what is left are the newest samples, at most 200 ms, at least 60 ms
+        std::vector<float> got = readAudio(f.router, to, 4000);
+        size_t first = 0;
+
+        while (first < got.size() && got[first] == 0.0f) {
+            first++;
+        }
+        std::vector<float> heard(got.begin() + static_cast<long>(first), got.end());
+        while (!heard.empty() && heard.back() == 0.0f) {
+            heard.pop_back();
+        }
+
+        CHECK(!heard.empty());
+        CHECK(heard.size() >= 480 && heard.size() <= 1600);
+        CHECK(heard.back() == 4000.0f);                         // 25 * 160, the newest sample
+        for (size_t i = 1; i < heard.size(); i++) {
+            CHECK(heard[i] == heard[i - 1] + 1.0f);             // one piece, in order
+        }
+    }
+}
+
 static void testRegisteredNumberRoutesToMobileWithRingback()
 {
     Fixture f;
@@ -731,6 +786,7 @@ int main()
     testAnswerDelayOfEndpoint();
     testAudioBeforeAnswerIsDropped();
     testRegisteredNumberRoutesToMobileWithRingback();
+    testAudioQueueIsBounded();
     testCallerHangsUpWhileRinging();
     testCalledMobileCannotBeReachedGivesCongestionTone();
     testCallerHangsUpDuringTone();
