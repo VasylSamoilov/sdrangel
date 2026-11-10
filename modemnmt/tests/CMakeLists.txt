@@ -23,6 +23,7 @@ set(MODEMNMT_LIB_SOURCES
     ../../modemcellular/callrouter.cpp
     ../../modemcellular/cellularsystem.cpp
     ../../modemcellular/clock.cpp
+    ../../modemcellular/dtmfgenerator.cpp
     ../../modemcellular/echoendpoint.cpp
     ../../modemcellular/musicendpoint.cpp
     ../../modemcellular/timer.cpp
