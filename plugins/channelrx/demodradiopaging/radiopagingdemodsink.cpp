@@ -834,6 +834,14 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
     record.m_protocolData.insert("fragment_gap", message.m_fragmentGap);
     record.m_protocolData.insert("payload_unknown", message.m_payloadUnknown);
 
+    // The text is hex: digit size, order of the bits in a digit and the number of data bits
+    if (message.m_hexNibbleBits > 0)
+    {
+        record.m_protocolData.insert("hex_nibble_bits", message.m_hexNibbleBits);
+        record.m_protocolData.insert("hex_bit_order", message.m_hexLsbFirst ? "lsb_first" : "msb_first");
+        record.m_protocolData.insert("hex_bits", message.m_dataBits);
+    }
+
     if (message.m_nidSystemMessage)
     {
         record.m_protocolData.insert("nid_system_message", true);

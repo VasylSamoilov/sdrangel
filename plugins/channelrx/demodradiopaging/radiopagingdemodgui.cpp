@@ -266,8 +266,13 @@ void RadioPagingDemodGUI::recordInfo(const MessageRecord& record, QString& plain
         } else if (d.value("nid_system_message").toBool()) {
             add("NID MSG");
         }
+        if (d.contains("hex_nibble_bits"))
+        {
+            add(QString("HEX%1 %2 %3b").arg(d.value("hex_nibble_bits").toInt())
+                .arg(d.value("hex_bit_order").toString() == "lsb_first" ? "LSB" : "MSB").arg(d.value("hex_bits").toInt()));
+        }
         if (d.value("payload_unknown").toBool()) {
-            add("HEX");
+            add("NO LAYOUT");
         }
 
         if (d.contains("group_slot"))

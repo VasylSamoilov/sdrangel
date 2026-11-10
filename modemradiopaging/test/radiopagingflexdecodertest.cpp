@@ -1613,14 +1613,23 @@ void testShortMessage()
 
     // The network address twice (FLEX-93001 3.9.2 p.44): the first with the NID, the second with a secure message
     // t = 01, the System NID Change Instruction (3.9.7 p.48). Its layout is not published: the data words as hex
-    // On a short address the secure type 01 (data defined separately, STD-43A 3.10.1.4) is hex as well, not an NID change
-    for (bool network : {true, false})
+    // On a short address the secure type 01 (data defined separately, STD-43A 3.10.1.4) is hex as well, not an NID
+    // change. Type 10 is binary: the termination word (the inverse of the last data bit) is not data. The hex is the
+    // bit stream, d0 of each word first, 4 bits a digit with the first bit the least significant
+    struct SecureCase { bool m_network; uint32_t m_t; uint32_t m_data2; const char *m_hex; int m_bits; };
+    const SecureCase secureCases[] = {
+        { true, 1, 0x0abcde, "65432DB9751", 42 },
+        { false, 1, 0x0abcde, "65432DB9751", 42 },
+        { false, 2, 0x000000, "654321", 21 },
+    };
+    for (const SecureCase& sc : secureCases)
     {
+        const bool network = sc.m_network;
         uint32_t words[Flex::m_wordsPerFrame];
         Flex::fillIdle(words, 0, Flex::Mode1600_2);
         const uint32_t net = 0x1F6800u + 7;
-        const uint32_t data1 = 0x123456, data2 = 0x0abcde;
-        uint32_t hdr = (3u << 11) | (1u << 19);     // C = 0, F = 3, N = 0, t = 01
+        const uint32_t data1 = 0x123456, data2 = sc.m_data2;
+        uint32_t hdr = (3u << 11) | (sc.m_t << 19);     // C = 0, F = 3, N = 0, t
         auto sums = [](uint32_t w) { return (w & 0xff) + ((w >> 8) & 0xff) + ((w >> 16) & 0x1f); };
         hdr |= (~(sums(hdr) + sums(data1) + sums(data2))) & 0x3ff;
         words[0] = Flex::blockInfoWord(0, 0, 3, 0, 0);
@@ -1641,10 +1650,45 @@ void testShortMessage()
         bool ok = (out.size() == 2) && out[0].m_networkId && !out[0].m_nidSystemMessage
             && (out[1].m_type == Dec::TypeSecure) && (out[1].m_nidSystemMessage == network) && (out[1].m_nidChange == network)
             && (out[1].m_addressType == (network ? Dec::AddressNetwork : Dec::AddressShort))
-            && out[1].m_payloadUnknown && (out[1].m_secureType == 1) && (out[1].m_text == "123456 0ABCDE")
-            && (out[1].m_checksum == Dec::CheckOk) && (out[1].m_signature == Dec::CheckNone);
+            && (out[1].m_payloadUnknown == (sc.m_t != 2)) && (out[1].m_secureType == (int) sc.m_t)
+            && (out[1].m_text == sc.m_hex) && (out[1].m_dataBits == sc.m_bits) && (out[1].m_hexNibbleBits == 4)
+            && out[1].m_hexLsbFirst && (out[1].m_checksum == Dec::CheckOk) && (out[1].m_signature == Dec::CheckNone);
         check(ok, network ? "network address: NID, then the NID change instruction with its payload as hex"
-                          : "secure type 01 on a short address: payload as hex, no NID change");
+                 : (sc.m_t == 1) ? "secure type 01 on a short address: payload as hex, no NID change"
+                                 : "secure type 10: binary as hex, termination word removed");
+    }
+
+    // Fragments of a secure type 01 message: one bit stream (a fragment need not end on a digit); a lost fragment is '|'
+    {
+        auto secureFrame = [](uint32_t c, uint32_t f, uint32_t data) {
+            uint32_t words[Flex::m_wordsPerFrame];
+            Flex::fillIdle(words, 0, Flex::Mode1600_2);
+            uint32_t hdr = (c << 10) | (f << 11) | (5u << 13) | (1u << 19);     // N = 5, t = 01
+            auto sums = [](uint32_t w) { return (w & 0xff) + ((w >> 8) & 0xff) + ((w >> 16) & 0x1f); };
+            hdr |= (~(sums(hdr) + sums(data))) & 0x3ff;
+            words[0] = Flex::blockInfoWord(0, 0, 2, 0, 0);
+            words[1] = Flex::encodeWord(1234567u + 32768u);
+            words[2] = Flex::encodeWord(Flex::addChecksum((0u << 4) | (3u << 7) | (2u << 14)));
+            words[3] = Flex::encodeWord(hdr);
+            words[4] = Flex::encodeWord(data);
+            for (int b = 0; b < Flex::m_blocksPerFrame; b++) {
+                Flex::interleaveBlock(words + b * Flex::m_wordsPerBlock);
+            }
+            Flex::FrameParams fp;
+            Flex::FrameBytes bytes = Flex::assemble(fp, {std::vector<uint32_t>(words, words + Flex::m_wordsPerFrame)});
+            return toRxFrame(Flex::Mode1600_2, false, bytes.m_sync, bytes.m_data);
+        };
+
+        for (bool lost : {false, true})
+        {
+            Dec dec;
+            std::vector<Dec::Message> first = dec.decodeFrame(secureFrame(1, 3, 0x123456));
+            std::vector<Dec::Message> last = dec.decodeFrame(secureFrame(0, lost ? 1 : 0, 0x0abcde));
+            bool ok = first.empty() && (last.size() == 1) && (last[0].m_fragmentCount == 2)
+                && (last[0].m_text == (lost ? "654321|EDCBA0" : "65432DB9751")) && (last[0].m_dataBits == 42)
+                && (last[0].m_fragmentGap == lost) && (last[0].m_complete == !lost);
+            check(ok, lost ? "secure hex fragments: a lost fragment is marked" : "secure hex fragments: joined as one bit stream");
+        }
     }
 
     // Too many digits, characters that are not numeric, digits in the source type, source out of range

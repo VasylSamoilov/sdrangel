@@ -172,6 +172,55 @@ char statusChar(uint8_t status)
     }
 }
 
+// Hex of a bit stream (0, 1, -1 lost, 2 lost fragments): 4 bits a digit, the first bit in the least significant
+// bit, the last digit padded with 0. A digit with a lost bit is '?', lost fragments are '|'
+std::string hexFromBits(const std::vector<int8_t>& bits)
+{
+    static const char hexDigits[17] = "0123456789ABCDEF";
+    std::string hex;
+    unsigned value = 0;
+    int count = 0;
+    bool lost = false;
+
+    auto flush = [&]() {
+        if (count > 0) {
+            hex += lost ? '?' : hexDigits[value & 0xf];
+        }
+        value = 0;
+        count = 0;
+        lost = false;
+    };
+
+    for (int8_t bit : bits)
+    {
+        if (bit == 2)
+        {
+            flush();
+            hex += '|';
+            continue;
+        }
+
+        if (bit < 0) {
+            lost = true;
+        } else {
+            value |= (unsigned) bit << count;
+        }
+
+        if (++count == 4) {
+            flush();
+        }
+    }
+
+    flush();
+    return hex;
+}
+
+// Number of data bits in a stream, without the lost fragment marks
+int dataBitCount(const std::vector<int8_t>& bits)
+{
+    return (int) std::count_if(bits.begin(), bits.end(), [](int8_t b) { return b != 2; });
+}
+
 } // namespace
 
 RadioPagingFlexDecoder::Check RadioPagingFlexDecoder::combineChecks(Check a, Check b)
@@ -580,7 +629,8 @@ void RadioPagingFlexDecoder::decodeShortMessage(Message& proto, const AddressCon
 // Reassembly of fragments of alphanumeric, secure and binary messages
 void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& a, int vector, const FragmentInfo& info)
 {
-    const bool signatureUsed = ((vector == 5) || (vector == 0)) && !msg.m_payloadUnknown;
+    const bool signatureUsed = ((vector == 5) || (vector == 0)) && (msg.m_hexNibbleBits == 0);
+    const bool secureHex = (vector == 0) && (msg.m_hexNibbleBits != 0);
 
     setRaw(msg, info.m_raw);
 
@@ -617,6 +667,7 @@ void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& 
         slot.m_kanji = info.m_kanji;
         slot.m_text = msg.m_text;
         slot.m_raw = info.m_raw;
+        slot.m_bits = info.m_bits;
         slot.m_fragments = 1;
         slot.m_expected = 0;
         slot.m_message = msg;
@@ -651,8 +702,17 @@ void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& 
 
         Reassembly& slot = pol().m_reassembly[index];
 
-        if (msg.m_fragmentNumber != slot.m_expected) {
+        if (msg.m_fragmentNumber != slot.m_expected)
+        {
             slot.m_gap = true;
+
+            if (secureHex) {
+                slot.m_bits.push_back(2);
+            }
+        }
+
+        if (secureHex) {
+            slot.m_bits.insert(slot.m_bits.end(), info.m_bits.begin(), info.m_bits.end());
         }
 
         slot.m_signatureSum += info.m_signatureSum;
@@ -661,7 +721,8 @@ void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& 
             slot.m_signatureValid = false;
         }
 
-        slot.m_text += msg.m_text;
+        // The hex of a secure message is made of the joined bit stream: a fragment need not end on a digit
+        slot.m_text = secureHex ? hexFromBits(slot.m_bits) : (slot.m_text + msg.m_text);
         slot.m_raw.insert(slot.m_raw.end(), info.m_raw.begin(), info.m_raw.end());
         slot.m_fragments++;
         slot.m_lastFrame = m_ctx.m_frame;
@@ -968,34 +1029,39 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
         msg.m_registrationAck = true;
     }
 
-    // Secure type 01 is data defined separately, 11 is reserved (STD-43A 3.10.1.4 p.70): not characters, no
-    // published layout, the words after the header are output as hex. Type 01 on a network address is the
-    // System NID Change Instruction (FLEX-93001 3.9.7 p.48)
-    if (secure && ((secureType == 1) || (secureType == 3)))
-    {
-        static const char hexDigits[] = "0123456789ABCDEF";
-        std::string hex;
+    // Secure messages other than t = 00 are not characters (STD-43A 3.10.1.4 p.70): 10 is binary data, 01 data
+    // defined separately, 11 reserved. Their data bits after the header are output as hex. The last fragment of
+    // binary data ends with fill bits, the inverse of the last data bit, or with a termination word of them; the
+    // termination of 01 is not defined. Type 01 on a network address is the System NID Change Instruction
+    // (FLEX-93001 3.9.7 p.48)
+    std::vector<int8_t> secureBits;
 
+    if (secure && hdrOk && (secureType != 0))
+    {
         for (int w = startWord; (w <= mw2) && (w < wordsPerFrame); w++)
         {
-            if (!hex.empty()) {
-                hex += ' ';
-            }
+            bool lost = (m_w[w].m_status == WordUncorrectable) || (m_w[w].m_status == WordNotReceived);
 
-            if ((m_w[w].m_status == WordUncorrectable) || (m_w[w].m_status == WordNotReceived))
-            {
-                hex += "??????";
-                continue;
-            }
-
-            for (int shift = 20; shift >= 0; shift -= 4) {
-                hex += hexDigits[(m_w[w].m_data >> shift) & 0xf];
+            for (int b = 0; b < 21; b++) {
+                secureBits.push_back(lost ? -1 : (int8_t) ((m_w[w].m_data >> b) & 1));
             }
         }
 
-        msg.m_text = hex;
+        if ((secureType == 2) && (hdrC == 0) && !secureBits.empty() && (secureBits.back() >= 0))
+        {
+            int8_t fill = secureBits.back();
+
+            while (!secureBits.empty() && (secureBits.back() == fill)) {
+                secureBits.pop_back();
+            }
+        }
+
+        msg.m_text = hexFromBits(secureBits);
+        msg.m_hexNibbleBits = 4;
+        msg.m_hexLsbFirst = true;
+        msg.m_dataBits = dataBitCount(secureBits);
         msg.m_nidChange = (secureType == 1) && (a.m_type == AddressNetwork);
-        msg.m_payloadUnknown = true;
+        msg.m_payloadUnknown = (secureType != 2);
         msg.m_signature = CheckNone;
     }
 
@@ -1019,6 +1085,7 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
     info.m_signatureSum = sum;
     info.m_wordsOk = wordsOk;
     info.m_kanji = kanji;
+    info.m_bits = secureBits;
 
     handleFragment(msg, a, vecType, info);
 }
@@ -1453,6 +1520,8 @@ void RadioPagingFlexDecoder::decodeBinary(Message& proto, const AddressContext& 
 
     msg.m_type = TypeBinary;
     msg.m_text = hex;
+    msg.m_hexNibbleBits = 4;
+    msg.m_hexLsbFirst = true;
     msg.m_dataBits = (int) digitCount * 4;
     msg.m_fragment = kind;
     msg.m_fragmentNumber = hexF;

@@ -208,10 +208,14 @@ public:
         int m_rawBits = 0;
         //! Alphanumeric: 7-bit characters (the default charset), lost characters are '?', unprintable characters
         //! stay (or two bytes per character if the kanji mode is set). Numeric: digits 0-9 . U space - ] [,
-        //! lost digits '?'. Binary: hex digits of the data bits. Short message: digits. A payload of unknown
-        //! layout (m_payloadUnknown): the data words as hex, 6 digits d20-d0 each, lost words '??????'. Else empty
+        //! lost digits '?'. Binary, and secure messages of type t = 01, 10, 11: hex digits of the data bits (see
+        //! m_hexNibbleBits). Short message: digits. Else empty
         std::string m_text;
-        bool m_payloadUnknown = false;      //!< The layout of the payload is not published: m_text is its hex
+        //! m_text is hex: the data bits as one stream in transmission order (d0 of each word first), this many bits
+        //! a digit, 0 if m_text is not hex. A digit with a lost bit is '?'; for a secure message a lost fragment is '|'
+        int m_hexNibbleBits = 0;
+        bool m_hexLsbFirst = true;          //!< The first bit of a digit is its least significant bit
+        bool m_payloadUnknown = false;      //!< The layout of the payload is not published
         std::string m_wordMap;              //!< One character for each message word: . clean, c corrected, X lost; fragments split by |
 
         // Errors in the address, vector and message words
@@ -260,7 +264,7 @@ public:
         bool m_displayRtl = false;          //!< D
         bool m_headerMessage = false;       //!< H
         bool m_statusInfo = false;          //!< I
-        int m_dataBits = 0;                 //!< Data bits in m_text without the termination bits
+        int m_dataBits = 0;                 //!< Data bits in m_text without the termination bits (binary, secure hex)
 
         // Short message (vector type 2)
         int m_shortType = -1;               //!< t: 0 digits, 1 source, 2 source with number, 3 reserved
@@ -436,6 +440,7 @@ private:
         bool m_wordsOk = true;              //!< No lost words in the fragment
         bool m_kanji = false;
         std::vector<uint32_t> m_raw;        //!< Message words of the fragment
+        std::vector<int8_t> m_bits;         //!< Data bits of a secure hex fragment: 0, 1, -1 lost
     };
 
     static const int m_maxSubframeWords = 44;   //!< Subframe of a 2x multiple transmission
@@ -489,6 +494,7 @@ private:
         bool m_checksumFailed = false;
         std::string m_text;
         std::vector<uint32_t> m_raw;
+        std::vector<int8_t> m_bits;         //!< Secure hex: data bits of the fragments, 2 where fragments are lost
         Message m_message;                  //!< Fields of the first fragment, counters of all
     };
 
