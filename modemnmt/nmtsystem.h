@@ -44,6 +44,7 @@ public:
     using RegistrationListener = std::function<void(const NmtSubscriber& subscriber)>;
 
     explicit NmtSystem(const modemcellular::Clock& clock);
+    ~NmtSystem();
     NmtSystem(const NmtSystem&) = delete;
     NmtSystem& operator=(const NmtSystem&) = delete;
 
@@ -75,6 +76,15 @@ public:
     // traffic channel. If the phone does not show up on the new channel, the call stays on the
     // old one.
     bool moveCall(char country, const std::string& number, int channel = 0);
+
+    // Tells the phone that messages wait (frame 5c, flags of MwiFlag; NMT Doc 450-1 4.4.1.16). A
+    // phone in a call hears it when the call is cleared. A phone that is on a calling channel
+    // is paged and called without ringing (4.4.1.12). False if the phone is busy with something
+    // else, there is no calling channel, or the flags are invalid. The handler tells how it ended:
+    // Undelivered flags can be sent again.
+    bool sendMwi(char country, const std::string& number, uint8_t flags);
+    using MwiHandler = std::function<void(const NmtSubscriber& subscriber, uint8_t flags, NmtServiceEnd result)>;
+    void setMwiHandler(MwiHandler handler) { m_mwiHandler = std::move(handler); }
 
     // Orders the phone of a connected call to another power level 0..3 (NMT Doc 450-1 4.4.1.8).
     // False if the phone has no connected call, or it has that level already. The result is
@@ -159,6 +169,17 @@ public:
     void powerChanged(NmtTransaction& transaction, int level, bool done) override;
 
 private:
+    struct MwiReport
+    {
+        bool valid = false;
+        NmtSubscriber subscriber;
+        uint8_t flags = 0;
+        NmtServiceEnd result = NmtServiceEnd::Undelivered;
+    };
+    bool cancelMessageCall(char country, const std::string& number);
+    MwiReport mwiReport(NmtTransaction& transaction);
+    void sendMwiReport(const MwiReport& report);
+    NmtTransaction& newPagedTransaction(char country, const std::string& number);
     void page(NmtTransaction& transaction, int tryNo);
     void pagingTimeout(NmtTransaction& transaction);
 
@@ -170,6 +191,7 @@ private:
     ClearHandler m_clearHandler;
     AudioFromMobile m_audioFromMobile;
     AudioToMobile m_audioToMobile;
+    MwiHandler m_mwiHandler;
     PowerHandler m_powerHandler;
     DigitHandler m_mftHandler;
     RecallDigitHandler m_recallDigitHandler;

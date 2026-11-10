@@ -7,6 +7,7 @@ set(modemnmt_SOURCES
     nmtcellularbridge.cpp
     nmtchannel.cpp
     nmtframe.cpp
+    nmtmwi.cpp
     nmtmodem.cpp
     nmtnumbers.cpp
     nmtsystem.cpp
@@ -20,6 +21,7 @@ set(modemnmt_HEADERS
     nmtcellularbridge.h
     nmtchannel.h
     nmtframe.h
+    nmtmwi.h
     nmtmodem.h
     nmtnumbers.h
     nmtsystem.h
