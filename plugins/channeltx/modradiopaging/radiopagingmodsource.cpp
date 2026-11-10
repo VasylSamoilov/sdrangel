@@ -101,8 +101,8 @@ Real RadioPagingModSource::rampStep(Real ms) const
 void RadioPagingModSource::makeStream()
 {
     m_streamProtocol = m_settings.m_protocol;
-    m_streamMode = m_settings.m_mode;
-    bool network = (m_settings.m_mode == RadioPagingModSettings::Network);
+    m_streamMode = effectiveMode();
+    bool network = (m_streamMode == RadioPagingModSettings::Network);
 
     m_streamMixed = mixing();
     m_mix = nullptr;
@@ -124,10 +124,20 @@ void RadioPagingModSource::makeStream()
                 m_settings.m_flexInverted, m_settings.m_flexCollapse));
         }
         break;
+    case RadioPagingModSettings::Gsc:
+        // GSC has no network mode: always one-shot
+        m_stream.reset(new RadioPagingGscTxStream((RadioPagingGsc::Mode) m_settings.m_gscMode));
+        break;
     default:
         m_stream.reset();
         break;
     }
+}
+
+// GSC has no network mode: it is one-shot whatever the setting
+RadioPagingModSettings::Mode RadioPagingModSource::effectiveMode() const
+{
+    return (m_settings.m_protocol == RadioPagingModSettings::Gsc) ? RadioPagingModSettings::OneShot : m_settings.m_mode;
 }
 
 // FLEX network with POCSAG mixed in
@@ -170,6 +180,10 @@ void RadioPagingModSource::applyStreamDefaults()
     {
         ((RadioPagingPocsagTxStream*) m_stream.get())->setDefaultGroup(m_settings.m_pocsagSpeed, m_settings.m_pocsagInverted);
     }
+    else if (m_streamProtocol == RadioPagingModSettings::Gsc)
+    {
+        ((RadioPagingGscTxStream*) m_stream.get())->setMode((RadioPagingGsc::Mode) m_settings.m_gscMode);
+    }
     else if (m_streamProtocol == RadioPagingModSettings::Flex)
     {
         RadioPagingFlexTxStream *flex = m_mix ? &m_mix->flex() : (RadioPagingFlexTxStream*) m_stream.get();
@@ -210,11 +224,11 @@ void RadioPagingModSource::applyStreamDefaults()
 void RadioPagingModSource::dropInFlight()
 {
     if (m_stream) {
-        m_status.m_dropped += m_stream->cut().size();
+        drop(m_stream->cut());
     }
 
     for (const InFlight& entry : m_inFlight) {
-        m_status.m_dropped += entry.m_ids.size();
+        drop(entry.m_ids);
     }
 
     m_inFlight.clear();
@@ -285,7 +299,7 @@ void RadioPagingModSource::feed()
     if (!m_mod.push(block.m_baud, block.m_levels, block.m_shaping, block.m_deviation))
     {
         qWarning() << "RadioPagingModSource::feed: baud rate not supported:" << block.m_baud;
-        m_status.m_dropped += block.m_ids.size();
+        drop(block.m_ids);
         m_streamEnded = true;
         return;
     }
@@ -314,6 +328,14 @@ void RadioPagingModSource::complete()
     {
         m_status.m_sent += m_inFlight.front().m_ids.size();
         m_status.m_lastSentId = m_inFlight.front().m_ids.back();
+
+        if (m_notify)
+        {
+            for (uint64_t id : m_inFlight.front().m_ids) {
+                m_notify(id, true);
+            }
+        }
+
         m_inFlight.pop_front();
     }
 }
@@ -415,7 +437,15 @@ void RadioPagingModSource::addRequest(const Request& request)
     }
     else if (m_stream && (request.m_protocol == m_streamProtocol))
     {
-        if (m_streamProtocol == RadioPagingModSettings::Pocsag) {
+        if (m_streamProtocol == RadioPagingModSettings::Gsc) {
+            RadioPagingGscTxStream *gsc = (RadioPagingGscTxStream*) m_stream.get();
+
+            if (request.m_live) {
+                ok = gsc->addLive(request.m_gsc, request.m_gscInverted, request.m_id, error, m_settings.m_gscVoiceSeconds);
+            } else {
+                ok = gsc->add(request.m_gsc, request.m_gscInverted, request.m_id, error, request.m_voice);
+            }
+        } else if (m_streamProtocol == RadioPagingModSettings::Pocsag) {
             ok = ((RadioPagingPocsagTxStream*) m_stream.get())->add(request.m_pocsag, request.m_pocsagBaud,
                 request.m_pocsagInverted, request.m_id, error);
         } else if (m_streamProtocol == RadioPagingModSettings::Flex) {
@@ -430,7 +460,20 @@ void RadioPagingModSource::addRequest(const Request& request)
         }
 
         qWarning() << "RadioPagingModSource::addRequest: message" << request.m_id << "dropped:" << QString::fromStdString(error);
-        m_status.m_dropped++;
+        drop({request.m_id});
+    }
+}
+
+// Messages that will not be sent: counted, and reported
+void RadioPagingModSource::drop(const std::vector<uint64_t>& ids)
+{
+    m_status.m_dropped += ids.size();
+
+    if (m_notify)
+    {
+        for (uint64_t id : ids) {
+            m_notify(id, false);
+        }
     }
 }
 
@@ -439,7 +482,26 @@ void RadioPagingModSource::clear()
     QMutexLocker mutexLocker(&m_mutex);
 
     if (m_stream) {
-        m_status.m_dropped += m_stream->clear().size();
+        drop(m_stream->clear());
+    }
+}
+
+// Voice of a live voice page: resampled to the rate of the modulator
+void RadioPagingModSource::pushLive(const std::vector<float>& samples)
+{
+    QMutexLocker mutexLocker(&m_mutex);
+
+    if (m_stream && (m_streamProtocol == RadioPagingModSettings::Gsc)) {
+        ((RadioPagingGscTxStream*) m_stream.get())->pushLive(samples.data(), samples.size());
+    }
+}
+
+void RadioPagingModSource::endLive()
+{
+    QMutexLocker mutexLocker(&m_mutex);
+
+    if (m_stream && (m_streamProtocol == RadioPagingModSettings::Gsc)) {
+        ((RadioPagingGscTxStream*) m_stream.get())->endLive();
     }
 }
 
@@ -454,7 +516,7 @@ void RadioPagingModSource::abort()
         return;
     }
 
-    m_status.m_dropped += m_stream->clear().size();
+    drop(m_stream->clear());
 
     if (!m_stream->continuous() && ((m_state == RampUp) || (m_state == Tx)))
     {
@@ -476,6 +538,14 @@ RadioPagingModSource::Status RadioPagingModSource::getStatus() const
     }
 
     status.m_currentId = m_inFlight.empty() ? 0 : m_inFlight.front().m_ids.front();
+
+    if (m_stream && (m_streamProtocol == RadioPagingModSettings::Gsc))
+    {
+        RadioPagingGscTxStream *gsc = (RadioPagingGscTxStream*) m_stream.get();
+        status.m_liveActive = gsc->liveActive();
+        status.m_liveOpen = gsc->liveOpen();
+        status.m_liveId = gsc->liveId();
+    }
 
     // The re-synchronization is on air while one of its symbols is being sent
     quint64 finished = m_pushed - std::min<quint64>(m_pushed, m_mod.queued());
@@ -503,12 +573,12 @@ void RadioPagingModSource::applySettings(const QStringList& settingsKeys, const 
     }
 
     // Another protocol or mode: the transmission ends and what is queued is dropped
-    if (!m_stream || (m_settings.m_protocol != m_streamProtocol) || (m_settings.m_mode != m_streamMode)
+    if (!m_stream || (m_settings.m_protocol != m_streamProtocol) || (effectiveMode() != m_streamMode)
         || (mixing() != m_streamMixed))
     {
         if (m_stream)
         {
-            m_status.m_dropped += m_stream->clear().size();
+            drop(m_stream->clear());
             dropInFlight();
             endTransmission();
         }

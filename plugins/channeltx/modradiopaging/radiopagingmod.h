@@ -22,10 +22,13 @@
 #include <QRecursiveMutex>
 
 #include <atomic>
+#include <map>
+#include <vector>
 
 #include "dsp/basebandsamplesource.h"
 #include "channel/channelapi.h"
 #include "util/message.h"
+#include "util/messagerecord.h"
 
 #include "radiopagingpocsag.h"
 #include "radiopagingflexscheduler.h"
@@ -51,6 +54,10 @@ public:
         int m_speed = 0;                //!< POCSAG baud, 0 for the channel setting
         int m_polarity = -1;            //!< -1 for the channel setting, 0 normal, 1 inverted
         RadioPagingFlexEncoder::TxMessage m_flex;
+        RadioPagingGsc::TxMessage m_gsc;
+        QString m_voiceFile;            //!< GSC voice page: the path of the WAV file
+        RadioPagingGscTxStream::Voice m_voice;  //!< The file loaded when the request was checked, not loaded again
+        bool m_live = false;            //!< GSC voice page from the microphone: the voice comes with MsgLiveVoice, up to MsgLiveEnd
     };
 
     class MsgConfigureRadioPagingMod : public Message {
@@ -105,20 +112,97 @@ public:
     public:
         quint64 getId() const { return m_id; }
         const QString& getError() const { return m_error; }
+        const QString& getWarning() const { return m_warning; }
 
-        static MsgReportTx* create(quint64 id, const QString& error) {
-            return new MsgReportTx(id, error);
+        static MsgReportTx* create(quint64 id, const QString& error, const QString& warning = QString()) {
+            return new MsgReportTx(id, error, warning);
         }
 
     private:
         quint64 m_id;
         QString m_error;
+        QString m_warning;              //!< The message was queued but not as asked (a sound file cut)
 
-        MsgReportTx(quint64 id, const QString& error) :
+        MsgReportTx(quint64 id, const QString& error, const QString& warning) :
             Message(),
             m_id(id),
-            m_error(error)
+            m_error(error),
+            m_warning(warning)
         { }
+    };
+
+    //! A message was sent or will not be (from the source, through the input queue)
+    class MsgTxEvent : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        quint64 getId() const { return m_id; }
+        bool getSent() const { return m_sent; }
+
+        static MsgTxEvent* create(quint64 id, bool sent) {
+            return new MsgTxEvent(id, sent);
+        }
+
+    private:
+        quint64 m_id;
+        bool m_sent;
+
+        MsgTxEvent(quint64 id, bool sent) : Message(), m_id(id), m_sent(sent) { }
+    };
+
+    //! To the GUI: a message of the log of the messages transmitted, as it was queued, sent or dropped
+    class MsgTxLog : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        const MessageRecord& getRecord() const { return m_record; }
+        const QString& getStatus() const { return m_status; }    //!< queued, sent or dropped
+
+        static MsgTxLog* create(const MessageRecord& record, const QString& status) {
+            return new MsgTxLog(record, status);
+        }
+
+    private:
+        MessageRecord m_record;
+        QString m_status;
+
+        MsgTxLog(const MessageRecord& record, const QString& status) : Message(), m_record(record), m_status(status) { }
+    };
+
+    //! Voice of the live voice page id, at the rate of the modulator
+    class MsgLiveVoice : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        quint64 getId() const { return m_id; }
+        const std::vector<float>& getSamples() const { return m_samples; }
+
+        static MsgLiveVoice* create(quint64 id, const std::vector<float>& samples) {
+            return new MsgLiveVoice(id, samples);
+        }
+
+    private:
+        quint64 m_id;
+        std::vector<float> m_samples;
+
+        MsgLiveVoice(quint64 id, const std::vector<float>& samples) : Message(), m_id(id), m_samples(samples) { }
+    };
+
+    //! The live voice page id ends
+    class MsgLiveEnd : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        quint64 getId() const { return m_id; }
+
+        static MsgLiveEnd* create(quint64 id) {
+            return new MsgLiveEnd(id);
+        }
+
+    private:
+        quint64 m_id;
+
+        MsgLiveEnd(quint64 id) : Message(), m_id(id) { }
     };
 
     //! Drop the messages waiting; with abort (one-shot), end the transmission being sent as well
@@ -218,7 +302,7 @@ public:
     RadioPagingModSource::Status getStatus() const;
 
     //! Queue a message: its id, or 0 and an error. Main thread
-    quint64 transmit(const TxRequest& request, QString& error);
+    quint64 transmit(const TxRequest& request, QString& error, QString *warning = nullptr);
     void clear(bool abort);
 
     static const char* const m_channelIdURI;
@@ -235,12 +319,28 @@ private:
 
     QNetworkAccessManager *m_networkManager;
     QNetworkRequest m_networkRequest;
+    qint64 m_centerFrequency = 0;               //!< Centre frequency of the device, Hz
+
+    // Messages queued and not sent or dropped yet (main thread only): the record they will be
+    // logged with, and the voice to record
+    struct PendingTx
+    {
+        MessageRecord m_record;
+        RadioPagingGscTxStream::Voice m_voice;  //!< Voice page from a file
+        std::vector<float> m_live;              //!< Live voice page: the voice sent, at the rate of the modulator
+        bool m_isVoice = false;
+    };
+    std::map<quint64, PendingTx> m_pending;
+    void fillRecord(const TxRequest& request, const RadioPagingModSource::Request& sourceRequest, quint64 id, PendingTx& pending);
+    void txEvent(quint64 id, bool sent);
+    QString recordVoice(const PendingTx& pending, double& seconds);
+    void publishRecord(const MessageRecord& record);
 
     virtual bool handleMessage(const Message& cmd);
     void applySettings(const QStringList& settingsKeys, const RadioPagingModSettings& settings, bool force = false);
     //! Checks of a request against the channel (protocol, speed or mode, polarity, message,
     //! queue) and its source request; an error, empty if it can be sent
-    QString checkRequest(const TxRequest& request, RadioPagingModSource::Request& sourceRequest);
+    QString checkRequest(const TxRequest& request, RadioPagingModSource::Request& sourceRequest, QString *warning = nullptr);
     int outstanding() const;
     void sendSampleRateToDemodAnalyzer();
     void webapiFormatChannelReport(SWGSDRangel::SWGChannelReport& response);

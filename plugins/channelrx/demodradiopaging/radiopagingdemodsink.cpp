@@ -17,7 +17,9 @@
 
 #include <QDateTime>
 #include <QDebug>
+#include <QDir>
 #include <QMutexLocker>
+#include <QStorageInfo>
 #include <QUuid>
 
 #include <algorithm>
@@ -32,6 +34,7 @@
 #include "radiopagingflex.h"
 #include "radiopaginggsc.h"
 
+#include "radiopagingvoicestore.h"
 #include "radiopagingdemodsink.h"
 
 namespace {
@@ -39,6 +42,8 @@ namespace {
 const int legFilterTaps = 65;
 const int statusPeriodSamples = RadioPagingDemodSettings::m_channelSampleRate / 10;   // 100 ms
 const double voiceCutoff = 3000.0;      // Hz, upper edge of the voice band
+const int voiceWriteSamples = 4096;     // Voice samples written to the file at a time
+const qint64 voiceMinFreeBytes = 500LL * 1024 * 1024;  // No recording on a disk with less free space
 const Real dcBlockPole = 0.995f;        // About 30 Hz at 38400 Hz
 const int audioBufferSize = 1 << 12;
 const double huntCentreDecay = 0.967216;    // exp(-1 s / 30 s), per second
@@ -332,7 +337,7 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
             m_gsc.offsetLevels(delta);
         }
 
-        if (m_settings.m_gscAudio) {
+        if (m_settings.m_gscAudio || m_settings.m_gscVoiceRecord) {
             processAudio(fm);
         }
     }
@@ -408,9 +413,16 @@ void RadioPagingDemodSink::applySettings(const QStringList& settingsKeys, const 
     if (settingsKeys.contains("flexEnabled") && !m_settings.m_flexEnabled) {
         m_flex.reset();
     }
-    if ((settingsKeys.contains("gscAudio") && !m_settings.m_gscAudio)
+    if ((settingsKeys.contains("gscAudio") && !m_settings.m_gscAudio && !m_settings.m_gscVoiceRecord)
+        || (settingsKeys.contains("gscVoiceRecord") && !m_settings.m_gscVoiceRecord && !m_settings.m_gscAudio)
         || (settingsKeys.contains("gscEnabled") && !m_settings.m_gscEnabled)) {
         closeAudio();
+    }
+    if (settingsKeys.contains("gscVoiceRecord") && !m_settings.m_gscVoiceRecord) {
+        finishVoiceRecording();
+    }
+    if (settingsKeys.contains("gscVoiceRecord") && m_settings.m_gscVoiceRecord && m_audioOpen && !m_voiceRecorder) {
+        startVoiceRecording();
     }
     if (settingsKeys.contains("gscEnabled") && !m_settings.m_gscEnabled)
     {
@@ -455,6 +467,10 @@ void RadioPagingDemodSink::processAudio(Real fm)
         m_audioDistanceRemain = m_audioDistance;
         m_dcIn = fm;
         m_dcOut = 0.0f;
+
+        if (m_settings.m_gscVoiceRecord) {
+            startVoiceRecording();
+        }
     }
 
     Real y = fm - m_dcIn + dcBlockPole * m_dcOut;
@@ -469,18 +485,112 @@ void RadioPagingDemodSink::processAudio(Real fm)
         while (!m_audioInterpolator.interpolate(&m_audioDistanceRemain, c, &out))
         {
             pushAudio(out.real());
+            recordAudio(out.real());
             m_audioDistanceRemain += m_audioDistance;
         }
     }
     else if (m_audioInterpolator.decimate(&m_audioDistanceRemain, c, &out))
     {
         pushAudio(out.real());
+        recordAudio(out.real());
         m_audioDistanceRemain += m_audioDistance;
     }
 }
 
+// A file per voice message, named by the time it started. The voice is not scaled: the
+// discriminator gives +/-1 at the GSC deviation, as the transmitter takes the samples of a
+// sound file. Without a directory to write to nothing is recorded
+void RadioPagingDemodSink::startVoiceRecording()
+{
+    QString directory = m_settings.voiceDirectory();
+
+    m_voiceRecorder.reset();
+    m_voiceFile.clear();
+    m_voiceFileDone.clear();
+    m_voiceBuffer.clear();
+
+    if (!QDir().mkpath(directory))
+    {
+        qWarning() << "RadioPagingDemodSink::startVoiceRecording: cannot create" << directory;
+        return;
+    }
+
+    // A disk that fills up is not written to
+    QStorageInfo storage(directory);
+
+    if (storage.isValid() && (storage.bytesAvailable() < voiceMinFreeBytes))
+    {
+        qWarning() << "RadioPagingDemodSink::startVoiceRecording: not enough free space in" << directory;
+        return;
+    }
+
+    std::unique_ptr<WavFileRecord> recorder(new WavFileRecord((quint32) m_audioSampleRate));
+    recorder->setMono(true);
+    // Named after the alias of the demodulator, by default its frequency
+    recorder->setFileName(RadioPagingVoiceStore::filePrefix(directory,
+        m_settings.effectiveChannelAlias(m_centerFrequency + m_channelFrequencyOffset), "rx"));
+
+    if (!recorder->startRecording())
+    {
+        qWarning() << "RadioPagingDemodSink::startVoiceRecording: cannot write in" << directory;
+        return;
+    }
+
+    m_voiceFile = recorder->getCurrentFileName();
+    m_voiceBuffer.reserve(voiceWriteSamples);
+    m_voiceRecorder = std::move(recorder);
+}
+
+void RadioPagingDemodSink::recordAudio(Real sample)
+{
+    if (!m_voiceRecorder) {
+        return;
+    }
+
+    Real v = sample * std::numeric_limits<int16_t>::max();
+    m_voiceBuffer.push_back((qint16) std::max<Real>(std::numeric_limits<int16_t>::min(),
+        std::min<Real>(std::numeric_limits<int16_t>::max(), v)));
+
+    // Written in blocks, not sample by sample
+    if (m_voiceBuffer.size() >= voiceWriteSamples)
+    {
+        m_voiceRecorder->writeMono(m_voiceBuffer.data(), (int) m_voiceBuffer.size());
+        m_voiceBuffer.clear();
+    }
+}
+
+// The file of the voice message is kept for the record of its end, which can come after the
+// audio closed (the record is sent by the receiver, the audio follows its state)
+QString RadioPagingDemodSink::finishVoiceRecording()
+{
+    if (!m_voiceRecorder) {
+        return QString();
+    }
+
+    if (!m_voiceBuffer.empty())
+    {
+        m_voiceRecorder->writeMono(m_voiceBuffer.data(), (int) m_voiceBuffer.size());
+        m_voiceBuffer.clear();
+    }
+
+    m_voiceRecorder->stopRecording();
+    m_voiceRecorder.reset();
+    m_voiceFileDone = m_voiceFile;
+    m_voiceFile.clear();
+
+    // The old files go a few at a time, when a new one is complete
+    RadioPagingVoiceStore::cleanup(m_settings.voiceDirectory(), m_settings.m_gscVoiceKeepDays, m_settings.m_gscVoiceKeepMin,
+        RadioPagingVoiceStore::m_autoCleanupBatch, m_voiceFileDone);
+
+    return m_voiceFileDone;
+}
+
 void RadioPagingDemodSink::pushAudio(Real sample)
 {
+    if (!m_settings.m_gscAudio) {
+        return;
+    }
+
     // The discriminator gives +/-1 at the GSC deviation
     Real v = sample * m_settings.m_volume * std::numeric_limits<int16_t>::max();
     qint16 s = (qint16) std::max<Real>(std::numeric_limits<int16_t>::min(), std::min<Real>(std::numeric_limits<int16_t>::max(), v));
@@ -509,6 +619,7 @@ void RadioPagingDemodSink::closeAudio()
     }
 
     m_audioOpen = false;
+    finishVoiceRecording();
 }
 
 // The filters are rebuilt when the bandwidth or a deviation changes. All POCSAG speeds
@@ -802,6 +913,15 @@ void RadioPagingDemodSink::sendGsc(const RadioPagingGscDecoder::Message& message
             m_gscVoiceId[pol].clear();
             record.m_protocolData.insert("voice_end", ends[(int) message.m_voiceEnd]);
             record.m_protocolData.insert("voice_seconds", message.m_voiceSeconds);
+
+            // The file is closed before the record goes out, the message log plays it from there
+            finishVoiceRecording();
+
+            if (!m_voiceFileDone.isEmpty())
+            {
+                record.m_protocolData.insert("voice_file", m_voiceFileDone);
+                m_voiceFileDone.clear();
+            }
         }
         else
         {

@@ -15,7 +15,10 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.          //
 ///////////////////////////////////////////////////////////////////////////////////
 
+#include <algorithm>
+
 #include <QDebug>
+#include <QDir>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QBuffer>
@@ -190,7 +193,7 @@ bool RadioPagingDemod::handleMessage(const Message& cmd)
 void RadioPagingDemod::publishRecord(MessageRecord record)
 {
     record.m_frequency = m_centerFrequency + m_settings.m_inputFrequencyOffset;
-    record.m_channelAlias = m_settings.m_title;
+    record.m_channelAlias = m_settings.effectiveChannelAlias(record.m_frequency);
     record.m_deviceSetIndex = getDeviceSetIndex();
     record.m_channelIndex = getIndexInDeviceSet();
     record.m_centerFrequency = m_centerFrequency;
@@ -330,9 +333,16 @@ int RadioPagingDemod::webapiSettingsPutPatch(
         SWGSDRangel::SWGChannelSettings& response,
         QString& errorMessage)
 {
-    (void) errorMessage;
     RadioPagingDemodSettings settings = m_settings;
     webapiUpdateChannelSettings(settings, channelSettingsKeys, response);
+
+    // The files are written where the host says: an absolute path without parent directory references
+    if (channelSettingsKeys.contains("gscVoiceDirectory") && !settings.m_gscVoiceDirectory.isEmpty()
+        && (!QDir::isAbsolutePath(settings.m_gscVoiceDirectory) || settings.m_gscVoiceDirectory.split('/').contains("..")))
+    {
+        errorMessage = "gscVoiceDirectory must be an absolute path without ..";
+        return 400;
+    }
 
     MsgConfigureRadioPagingDemod *msg = MsgConfigureRadioPagingDemod::create(channelSettingsKeys, settings, force);
     m_inputMessageQueue.push(msg);
@@ -388,6 +398,21 @@ void RadioPagingDemod::webapiUpdateChannelSettings(
     }
     if (channelSettingsKeys.contains("gscAudio")) {
         settings.m_gscAudio = model->getGscAudio() != 0;
+    }
+    if (channelSettingsKeys.contains("gscVoiceRecord")) {
+        settings.m_gscVoiceRecord = model->getGscVoiceRecord() != 0;
+    }
+    if (channelSettingsKeys.contains("gscVoiceDirectory") && model->getGscVoiceDirectory()) {
+        settings.m_gscVoiceDirectory = *model->getGscVoiceDirectory();
+    }
+    if (channelSettingsKeys.contains("gscVoiceKeepDays")) {
+        settings.m_gscVoiceKeepDays = std::max(0, std::min(3650, model->getGscVoiceKeepDays()));
+    }
+    if (channelSettingsKeys.contains("gscVoiceKeepMin")) {
+        settings.m_gscVoiceKeepMin = std::max(0, std::min(100000, model->getGscVoiceKeepMin()));
+    }
+    if (channelSettingsKeys.contains("channelAlias") && model->getChannelAlias()) {
+        settings.m_channelAlias = *model->getChannelAlias();
     }
     if (channelSettingsKeys.contains("volume")) {
         settings.m_volume = model->getVolume();
@@ -451,7 +476,23 @@ void RadioPagingDemod::webapiFormatChannelSettings(SWGSDRangel::SWGChannelSettin
     model->setGscDeviation(settings.m_gscDeviation);
     model->setGscVoiceTimeout(settings.m_gscVoiceTimeout);
     model->setGscAudio(settings.m_gscAudio ? 1 : 0);
+    model->setGscVoiceRecord(settings.m_gscVoiceRecord ? 1 : 0);
     model->setVolume(settings.m_volume);
+
+    model->setGscVoiceKeepDays(settings.m_gscVoiceKeepDays);
+    model->setGscVoiceKeepMin(settings.m_gscVoiceKeepMin);
+
+    if (model->getChannelAlias()) {
+        *model->getChannelAlias() = settings.m_channelAlias;
+    } else {
+        model->setChannelAlias(new QString(settings.m_channelAlias));
+    }
+
+    if (model->getGscVoiceDirectory()) {
+        *model->getGscVoiceDirectory() = settings.m_gscVoiceDirectory;
+    } else {
+        model->setGscVoiceDirectory(new QString(settings.m_gscVoiceDirectory));
+    }
 
     if (model->getAudioDeviceName()) {
         *model->getAudioDeviceName() = settings.m_audioDeviceName;
@@ -580,6 +621,21 @@ void RadioPagingDemod::webapiFormatChannelSettings(
     }
     if (channelSettingsKeys.contains("gscAudio") || force) {
         model->setGscAudio(settings.m_gscAudio ? 1 : 0);
+    }
+    if (channelSettingsKeys.contains("gscVoiceRecord") || force) {
+        model->setGscVoiceRecord(settings.m_gscVoiceRecord ? 1 : 0);
+    }
+    if (channelSettingsKeys.contains("gscVoiceDirectory") || force) {
+        model->setGscVoiceDirectory(new QString(settings.m_gscVoiceDirectory));
+    }
+    if (channelSettingsKeys.contains("gscVoiceKeepDays") || force) {
+        model->setGscVoiceKeepDays(settings.m_gscVoiceKeepDays);
+    }
+    if (channelSettingsKeys.contains("gscVoiceKeepMin") || force) {
+        model->setGscVoiceKeepMin(settings.m_gscVoiceKeepMin);
+    }
+    if (channelSettingsKeys.contains("channelAlias") || force) {
+        model->setChannelAlias(new QString(settings.m_channelAlias));
     }
     if (channelSettingsKeys.contains("volume") || force) {
         model->setVolume(settings.m_volume);

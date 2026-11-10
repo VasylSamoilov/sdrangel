@@ -21,7 +21,11 @@
 #include <QMutex>
 #include <QString>
 
+#include <memory>
+#include <vector>
+
 #include "dsp/channelsamplesink.h"
+#include "dsp/wavfilerecord.h"
 #include "dsp/phasediscri.h"
 #include "dsp/nco.h"
 #include "dsp/interpolator.h"
@@ -93,6 +97,8 @@ public:
     double getMagSq() const { return m_magsq; }
     AudioFifo *getAudioFifo() { return &m_audioFifo; }
     void setAudioFifoLabel(const QString& label) { m_audioFifo.setLabel(label); }
+    //!< Centre frequency of the device, Hz: with the channel offset it names the voice files
+    void setCenterFrequency(qint64 frequency) { m_centerFrequency = frequency; }
     void applyAudioSampleRate(int sampleRate);
     int getAudioSampleRate() const { return m_audioSampleRate; }
     Status getStatus() const;
@@ -211,6 +217,12 @@ private:
     Real m_audioDistance;
     Real m_audioDistanceRemain;
     bool m_audioOpen;
+    // One voice message at a time is recorded, that of the GSC receiver in a voice message
+    std::unique_ptr<WavFileRecord> m_voiceRecorder; //!< Set while the voice message is recorded
+    QString m_voiceFile;                //!< The file being recorded
+    qint64 m_centerFrequency = 0;
+    QString m_voiceFileDone;            //!< The file of the voice message that ended, for its record
+    std::vector<qint16> m_voiceBuffer;  //!< Samples waiting to be written to the file
     Real m_dcIn;
     Real m_dcOut;
 
@@ -228,6 +240,11 @@ private:
     void decayHuntCentres();
     void processAudio(Real fm);
     void pushAudio(Real sample);
+    //!< The voice is written to a WAV file in the voice directory, at the audio rate, whatever the volume
+    void startVoiceRecording();
+    void recordAudio(Real sample);
+    //!< Closes the file; its name, empty if none was recorded
+    QString finishVoiceRecording();
     void closeAudio();
     void updateStatus();
     void sendRecord(MessageRecord& record, int protocol);

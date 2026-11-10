@@ -174,6 +174,37 @@
      </layout>
     </item>
     <item>
+     <layout class="QHBoxLayout" name="aliasLayout">
+      <item>
+       <widget class="QLabel" name="channelAliasLabel">
+        <property name="text">
+         <string>Alias</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="channelAlias">
+        <property name="toolTip">
+         <string>Name of this transmitter, in the records of the messages it sends (channel alias) and in the names of the files of the voice sent. Empty: the frequency of the channel in Hz</string>
+        </property>
+        <property name="placeholderText">
+         <string>frequency</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="voiceFiles">
+        <property name="toolTip">
+         <string>The files of the voice sent: how many are kept, the space they take, and deleting the old ones</string>
+        </property>
+        <property name="text">
+         <string>Files</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+    <item>
      <layout class="QHBoxLayout" name="protocolLayout">
       <item>
        <widget class="QComboBox" name="protocol">
@@ -665,6 +696,29 @@
       </property>
      </widget>
     </item>
+    <item row="2" column="0">
+     <widget class="QLabel" name="voiceSecondsLabel">
+      <property name="text">
+       <string>Voice s</string>
+      </property>
+     </widget>
+    </item>
+    <item row="2" column="1">
+     <widget class="QSpinBox" name="voiceSeconds">
+      <property name="toolTip">
+       <string>GSC voice pages: length of the voice in seconds. A longer sound file is cut</string>
+      </property>
+      <property name="minimum">
+       <number>1</number>
+      </property>
+      <property name="maximum">
+       <number>50</number>
+      </property>
+      <property name="value">
+       <number>30</number>
+      </property>
+     </widget>
+    </item>
    </layout>
   </widget>
   <widget class="QWidget" name="messageContainer" native="true">
@@ -869,6 +923,33 @@
      </widget>
     </item>
     <item row="3" column="1">
+     <widget class="QComboBox" name="voiceSource">
+      <property name="toolTip">
+       <string>Voice of the page: a sound file, or the microphone. The microphone is taken 2 s after the page (the alert time) until End or the voice length</string>
+      </property>
+      <item>
+       <property name="text">
+        <string>File</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>Microphone</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="3" column="2" colspan="2">
+     <widget class="QToolButton" name="micInput">
+      <property name="toolTip">
+       <string>Select the audio input of the microphone</string>
+      </property>
+      <property name="text">
+       <string>Audio input...</string>
+      </property>
+     </widget>
+    </item>
+    <item row="3" column="1">
      <widget class="QComboBox" name="messageProtocol">
       <property name="toolTip">
        <string>Protocol of this message: a FLEX network with the mixing option also sends POCSAG</string>
@@ -967,6 +1048,52 @@
        </widget>
       </item>
      </layout>
+    </item>
+    <item>
+     <widget class="QTableWidget" name="txLog">
+      <property name="toolTip">
+       <string>The last messages transmitted: queued, sent or dropped. Double-click a voice message to play the voice recorded</string>
+      </property>
+      <property name="editTriggers">
+       <set>QAbstractItemView::NoEditTriggers</set>
+      </property>
+      <property name="selectionBehavior">
+       <enum>QAbstractItemView::SelectRows</enum>
+      </property>
+      <property name="columnCount">
+       <number>6</number>
+      </property>
+      <column>
+       <property name="text">
+        <string>Time</string>
+       </property>
+      </column>
+      <column>
+       <property name="text">
+        <string>Protocol</string>
+       </property>
+      </column>
+      <column>
+       <property name="text">
+        <string>Address</string>
+       </property>
+      </column>
+      <column>
+       <property name="text">
+        <string>Type</string>
+       </property>
+      </column>
+      <column>
+       <property name="text">
+        <string>Text</string>
+       </property>
+      </column>
+      <column>
+       <property name="text">
+        <string>State</string>
+       </property>
+      </column>
+     </widget>
     </item>
     <item>
      <widget class="QPlainTextEdit" name="log">

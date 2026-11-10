@@ -45,6 +45,11 @@ struct RadioPagingDemodSettings
     Real m_gscDeviation;                        //!< Hz
     int m_gscVoiceTimeout;                      //!< Longest voice message, seconds
     bool m_gscAudio;                            //!< Play the voice of GSC voice pages
+    bool m_gscVoiceRecord;                      //!< Record the voice of GSC voice pages to a WAV file
+    QString m_gscVoiceDirectory;                //!< Directory of the voice files, empty for the default (see voiceDirectory)
+    int m_gscVoiceKeepDays;                     //!< Voice files older than this many days may be deleted, 0 to keep them all
+    int m_gscVoiceKeepMin;                      //!< The newest voice files this many are not deleted
+    QString m_channelAlias;                     //!< Name of the demodulator in the message records and voice file names, empty for its frequency
     Real m_volume;                              //!< Voice audio gain
     QString m_audioDeviceName;                  //!< Voice audio output
 
@@ -83,6 +88,11 @@ struct RadioPagingDemodSettings
     double pocsagBandwidth() const;
     double flexBandwidth() const;
     double gscBandwidth() const;
+
+    //!< The directory of the voice files: the one set, or radiopaging/voice in the application data
+    QString voiceDirectory() const;
+    //!< The name of the demodulator: the alias set, or the frequency of the channel in Hz
+    QString effectiveChannelAlias(qint64 frequency) const;
 };
 
 #endif // INCLUDE_RADIOPAGINGDEMODSETTINGS_H

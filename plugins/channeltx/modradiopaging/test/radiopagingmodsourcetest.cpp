@@ -22,6 +22,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <memory>
 #include <random>
 #include <set>
 #include <string>
@@ -97,6 +98,9 @@ struct Received
 {
     std::set<std::string> m_keys;       //!< "protocol mode address polarity text"
     int m_records = 0;
+    int m_voiceStarts = 0;              //!< Voice page records (partial)
+    std::vector<std::string> m_voiceEnds;   //!< The end of each voice message: the reason
+    double m_voiceSeconds = 0.0;        //!< Length of the last voice message
 };
 
 // The source output, with noise, into the demodulator sink at the same rate and offset
@@ -121,6 +125,9 @@ struct Loop
         m_source.setClock([]() { return flexEpochMs; });
         m_source.applySettings(QStringList(), m_settings, true);
         m_source.applyChannelSettings(sampleRate, offset, true);
+        RadioPagingDemodSettings rxSettings;
+        rxSettings.m_gscVoiceRecord = false;    // The voice recording has a test of its own
+        m_sink.applySettings(QStringList(), rxSettings, true);
         m_sink.setMessageQueueToChannel(&m_queue);
         m_sink.applyChannelSettings(sampleRate, offset, true);
     }
@@ -189,6 +196,19 @@ struct Loop
             if (MainCore::MsgMessageRecord::match(*message))
             {
                 const MessageRecord& rec = ((MainCore::MsgMessageRecord *) message)->getRecord();
+
+                if (rec.m_msgType == "voice")
+                {
+                    if (rec.m_protocolData.contains("voice_end"))
+                    {
+                        m_received.m_voiceEnds.push_back(rec.m_protocolData["voice_end"].toString().toStdString());
+                        m_received.m_voiceSeconds = rec.m_protocolData["voice_seconds"].toDouble();
+                    }
+                    else {
+                        m_received.m_voiceStarts++;
+                    }
+                }
+
                 m_received.m_records++;
                 m_received.m_keys.insert((rec.m_protocol + " " + rec.m_mode + " " + rec.m_address + " "
                     + (rec.m_polarity == MessageRecord::PolarityInverted ? "inverted " : "normal ") + rec.m_text).toStdString());
@@ -689,6 +709,201 @@ void testFlexNetwork()
     check(loop.m_source.getStatus().m_state == RadioPagingModSource::Idle, "FLEX network to POCSAG one-shot: the transmission ends");
 }
 
+// ---------------------------------------------------------------------------
+// GSC
+// ---------------------------------------------------------------------------
+
+RadioPagingModSource::Request gscRequest(quint64 id, const std::string& address, int number, RadioPagingGsc::MessageType type,
+    const std::string& text, bool inverted)
+{
+    RadioPagingModSource::Request request;
+    request.m_id = id;
+    request.m_protocol = RadioPagingModSettings::Gsc;
+    request.m_gsc.m_address = address;
+    request.m_gsc.m_addressNumber = number;
+    request.m_gsc.m_type = type;
+    request.m_gsc.m_text = text;
+    request.m_gscInverted = inverted;
+    return request;
+}
+
+int gscPreambleOf(const std::string& address)
+{
+    RadioPagingGsc::TxMessage m;
+    RadioPagingGsc::EncodeOptions options;
+    m.m_address = address;
+    options.m_mode = RadioPagingGsc::Single;
+    return RadioPagingGsc::encode({ m }, options).m_preamble;
+}
+
+std::string gscKey(const std::string& address, int number, bool inverted, const std::string& text)
+{
+    return "gsc 600 " + address + std::to_string(number) + (inverted ? " inverted " : " normal ") + text;
+}
+
+// Messages in each mode and polarity: two of one preamble value, one of another, a tone page
+void testGsc(int sampleRate, int offset, RadioPagingGsc::Mode mode, bool inverted)
+{
+    Loop loop(sampleRate, offset, RadioPagingModSettings::Gsc);
+    loop.m_settings.m_gscMode = (int) mode;
+    loop.m_settings.m_gscInverted = inverted;
+    loop.apply(QStringList({"gscMode", "gscInverted"}));
+
+    std::string a = "123456";
+    std::string same, other;
+    for (int i = 0; (i < 1000) && (same.empty() || other.empty()); i++)
+    {
+        char address[8];
+        std::snprintf(address, sizeof(address), "%06d", 200000 + i * 7);
+        int p = gscPreambleOf(address);
+
+        if (p >= 0) {
+            (p == gscPreambleOf(a) ? same : other) = address;
+        }
+    }
+
+    loop.m_source.addRequest(gscRequest(300, a, 2, RadioPagingGsc::Alphanumeric, "GSC FROM THE MODULATOR", inverted));
+    loop.m_source.addRequest(gscRequest(301, same, 1, RadioPagingGsc::Numeric, "0123456789", inverted));
+    loop.m_source.addRequest(gscRequest(302, other, 3, RadioPagingGsc::Alphanumeric, "OTHER PAGE", inverted));
+    loop.m_source.addRequest(gscRequest(303, a, 4, RadioPagingGsc::Tone, "", inverted));
+    loop.run(sampleRate / 2);
+    loop.runToEnd();
+    const Received& received = loop.take();
+    RadioPagingModSource::Status status = loop.m_source.getStatus();
+
+    // Without the preamble of a non battery saver transmission the index digit of the address is not known: N
+    auto shown = [mode](const std::string& address) {
+        return (mode == RadioPagingGsc::NonBatterySaver) ? "N" + address.substr(1) : address;
+    };
+
+    std::set<std::string> keys = {
+        gscKey(shown(a), 2, inverted, "GSC FROM THE MODULATOR"),
+        gscKey(shown(same), 1, inverted, "0123456789"),
+        gscKey(shown(other), 3, inverted, "OTHER PAGE"),
+        gscKey(shown(a), 4, inverted, "")
+    };
+    static const char *names[] = {"auto", "single", "batch", "non battery saver"};
+    char what[200];
+    std::snprintf(what, sizeof(what), "GSC %s %s at %d Hz, offset %d Hz: 4 pages received, sent 4", names[(int) mode],
+        inverted ? "inverted" : "normal", sampleRate, offset);
+    check(contains(received, keys) && (status.m_sent == 4) && (status.m_dropped == 0) && (status.m_lastSentId >= 300)
+        && (status.m_inFlight == 0) && (status.m_queued == 0) && (status.m_state == RadioPagingModSource::Idle), what);
+}
+
+// A voice page: the page, the alert, the voice and the turn-off word, received as a voice message
+// that ends at the turn-off word, followed by a tone page in the same transmission stream
+void testGscVoice(int sampleRate, int offset, bool inverted)
+{
+    Loop loop(sampleRate, offset, RadioPagingModSettings::Gsc);
+    loop.m_settings.m_gscInverted = inverted;
+    loop.apply(QStringList("gscInverted"));
+
+    RadioPagingWav::Audio audio;
+    audio.m_rate = RadioPagingWav::m_sampleRate;
+
+    for (int i = 0; i < 2 * RadioPagingWav::m_sampleRate; i++) {
+        audio.m_samples.push_back(0.5f * std::sin(2.0 * M_PI * 1000.0 * i / RadioPagingWav::m_sampleRate));
+    }
+
+    RadioPagingModSource::Request voice = gscRequest(320, "123456", 2, RadioPagingGsc::Voice, "", inverted);
+    voice.m_voice = std::make_shared<const RadioPagingWav::Audio>(audio);
+    loop.m_source.addRequest(voice);
+    loop.m_source.addRequest(gscRequest(321, "123456", 3, RadioPagingGsc::Tone, "", inverted));
+    loop.run(sampleRate / 2);
+    loop.runToEnd();
+    const Received& received = loop.take();
+    RadioPagingModSource::Status status = loop.m_source.getStatus();
+    char what[220];
+
+    std::snprintf(what, sizeof(what), "GSC voice page %s at %d Hz, offset %d Hz: one voice message ended by the turn-off word, 2 s alert and 2 s voice, sent 2",
+        inverted ? "inverted" : "normal", sampleRate, offset);
+    check((status.m_sent == 2) && (status.m_dropped == 0) && (received.m_voiceStarts == 1) && (received.m_voiceEnds.size() == 1)
+        && (received.m_voiceEnds[0] == "turn_off") && (std::fabs(received.m_voiceSeconds - 4.0) < 0.3)
+        && contains(received, { gscKey("123456", 3, inverted, "") }), what);
+}
+
+// A live voice page: the page and the alert time, then the voice pushed as it comes (the carrier
+// unmodulated when none is waiting), the turn-off word after End
+void testGscLive(int sampleRate)
+{
+    Loop loop(sampleRate, 0, RadioPagingModSettings::Gsc);
+    std::vector<std::pair<quint64, bool>> events;
+    loop.m_source.setNotify([&events](quint64 id, bool sent) { events.push_back({id, sent}); });
+
+    RadioPagingModSource::Request live = gscRequest(330, "123456", 2, RadioPagingGsc::Voice, "", false);
+    live.m_live = true;
+    loop.m_source.addRequest(live);
+    loop.m_source.addRequest(gscRequest(331, "123456", 3, RadioPagingGsc::Tone, "", false));
+
+    // Until the alert time is over the voice is not taken
+    int steps = 0;
+
+    while (!loop.m_source.getStatus().m_liveOpen && (steps++ < 200)) {
+        loop.runSeconds(0.05);
+    }
+
+    RadioPagingModSource::Status open = loop.m_source.getStatus();
+    bool opened = open.m_liveActive && open.m_liveOpen && (open.m_liveId == 330) && (steps > 60) && (steps < 120);
+
+    // 1.5 s of 1 kHz at the rate of the modulator, 20 ms at a time, with a gap
+    std::vector<float> chunk(RadioPagingWav::m_sampleRate / 50);
+    size_t at = 0;
+
+    for (int i = 0; i < 75; i++)
+    {
+        for (float& v : chunk) {
+            v = 0.5f * std::sin(2.0 * M_PI * 1000.0 * (at++) / RadioPagingWav::m_sampleRate);
+        }
+
+        loop.m_source.pushLive(chunk);
+        loop.runSeconds(0.02);
+    }
+
+    loop.runSeconds(0.3);                   // No voice: the carrier stays on
+    bool stillOn = loop.m_source.getStatus().m_liveOpen && (loop.m_source.getStatus().m_state == RadioPagingModSource::Tx);
+    loop.m_source.endLive();
+    loop.runToEnd();
+    const Received& received = loop.take();
+    RadioPagingModSource::Status status = loop.m_source.getStatus();
+
+    check(opened && stillOn && (status.m_sent == 2) && (status.m_dropped == 0) && !status.m_liveActive
+        && (received.m_voiceStarts == 1) && (received.m_voiceEnds.size() == 1) && (received.m_voiceEnds[0] == "turn_off")
+        && (received.m_voiceSeconds > 3.6) && (received.m_voiceSeconds < 4.4)
+        && contains(received, { gscKey("123456", 3, false, "") })
+        && (events.size() == 2) && (events[0] == std::make_pair<quint64, bool>(330, true)) && events[1].second,
+        "GSC live voice page: the voice is taken after the alert time, ends on End, both pages sent and reported");
+
+    // Aborted while the alert time goes on: dropped and reported
+    Loop aborted(sampleRate, 0, RadioPagingModSettings::Gsc);
+    std::vector<std::pair<quint64, bool>> abortEvents;
+    aborted.m_source.setNotify([&abortEvents](quint64 id, bool sent) { abortEvents.push_back({id, sent}); });
+    aborted.m_source.addRequest(live);
+    aborted.runSeconds(1.0);
+    aborted.m_source.abort();
+    aborted.runToEnd();
+    check((abortEvents.size() == 1) && (abortEvents[0] == std::make_pair<quint64, bool>(330, false))
+        && !aborted.m_source.getStatus().m_liveActive, "GSC live voice page: an abort during the alert time drops it and reports it");
+}
+
+// GSC has no network mode; no voice; the mode setting is ignored
+void testGscNoNetwork()
+{
+    Loop loop(48000, 0, RadioPagingModSettings::Gsc, RadioPagingModSettings::Network);
+    RadioPagingModSource::Status idle;
+
+    loop.runSeconds(1.0);
+    idle = loop.m_source.getStatus();
+    check(idle.m_state == RadioPagingModSource::Idle, "GSC: network mode setting ignored, no carrier without a message");
+
+    loop.m_source.addRequest(gscRequest(310, "123456", 1, RadioPagingGsc::Voice, "", false));
+    check(loop.m_source.getStatus().m_dropped == 1, "GSC: a voice page without a sound is refused");
+
+    loop.m_source.addRequest(gscRequest(311, "123456", 1, RadioPagingGsc::Tone, "", false));
+    loop.runToEnd();
+    check((loop.m_source.getStatus().m_sent == 1) && (loop.m_source.getStatus().m_state == RadioPagingModSource::Idle),
+        "GSC with the network setting: one-shot, carrier off after the page");
+}
+
 // FLEX network mixed with POCSAG: FLEX and POCSAG (all speeds, both polarities) messages of one
 // transmission are received; one re-synchronization; the option off restarts the network
 void testMixed(int sampleRate, int offset)
@@ -806,6 +1021,21 @@ int main()
     testMixed(48000, 0);
     testMixed(38400, -5000);
     testMixed(62500, 10000);
+
+    for (int mode = (int) RadioPagingGsc::Auto; mode <= (int) RadioPagingGsc::NonBatterySaver; mode++)
+    {
+        for (bool inverted : {false, true}) {
+            testGsc(48000, 0, (RadioPagingGsc::Mode) mode, inverted);
+        }
+    }
+
+    testGsc(38400, -5000, RadioPagingGsc::Auto, false);
+    testGsc(62500, 10000, RadioPagingGsc::Batch, true);
+    testGscLive(48000);
+    testGscVoice(48000, 0, false);
+    testGscVoice(48000, 0, true);
+    testGscVoice(62500, 10000, false);
+    testGscNoNetwork();
 
     std::printf("%d passed, %d failed\n", passes, failures);
     return failures ? 1 : 0;

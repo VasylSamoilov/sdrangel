@@ -16,12 +16,15 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include <QColor>
+#include <QStandardPaths>
 
+#include <algorithm>
 #include <sstream>
 
 #include "util/simpleserializer.h"
 #include "settings/serializable.h"
 #include "audio/audiodevicemanager.h"
+#include "radiopagingvoicestore.h"
 #include "radiopagingdemodsettings.h"
 
 const int RadioPagingDemodSettings::m_nbPocsagSpeeds;
@@ -40,6 +43,21 @@ const int gscRate = 600;
 
 
 } // namespace
+
+QString RadioPagingDemodSettings::voiceDirectory() const
+{
+    if (!m_gscVoiceDirectory.isEmpty()) {
+        return m_gscVoiceDirectory;
+    }
+
+    return RadioPagingVoiceStore::defaultDirectory("rx");
+}
+
+QString RadioPagingDemodSettings::effectiveChannelAlias(qint64 frequency) const
+{
+    QString alias = m_channelAlias.trimmed();
+    return alias.isEmpty() ? QString::number(frequency) : alias;
+}
 
 RadioPagingDemodSettings::RadioPagingDemodSettings() :
     m_channelMarker(nullptr),
@@ -60,6 +78,11 @@ void RadioPagingDemodSettings::resetToDefaults()
     m_gscDeviation = 4500.0f;
     m_gscVoiceTimeout = 50;
     m_gscAudio = false;
+    m_gscVoiceRecord = true;
+    m_gscVoiceDirectory = "";
+    m_gscVoiceKeepDays = 3;
+    m_gscVoiceKeepMin = 50;
+    m_channelAlias = "";
     m_volume = 1.0f;
     m_audioDeviceName = AudioDeviceManager::m_defaultDeviceName;
 
@@ -113,6 +136,11 @@ QByteArray RadioPagingDemodSettings::serialize() const
     s.writeS32(28, m_workspaceIndex);
     s.writeBlob(29, m_geometryBytes);
     s.writeBool(30, m_hidden);
+    s.writeBool(31, m_gscVoiceRecord);
+    s.writeString(32, m_gscVoiceDirectory);
+    s.writeS32(33, m_gscVoiceKeepDays);
+    s.writeS32(34, m_gscVoiceKeepMin);
+    s.writeString(35, m_channelAlias);
 
     return s.final();
 }
@@ -178,6 +206,13 @@ bool RadioPagingDemodSettings::deserialize(const QByteArray& data)
         d.readS32(28, &m_workspaceIndex, 0);
         d.readBlob(29, &m_geometryBytes);
         d.readBool(30, &m_hidden, false);
+        d.readBool(31, &m_gscVoiceRecord, true);
+        d.readString(32, &m_gscVoiceDirectory, "");
+        d.readS32(33, &m_gscVoiceKeepDays, 3);
+        d.readS32(34, &m_gscVoiceKeepMin, 50);
+        d.readString(35, &m_channelAlias, "");
+        m_gscVoiceKeepDays = std::max(0, std::min(3650, m_gscVoiceKeepDays));
+        m_gscVoiceKeepMin = std::max(0, std::min(100000, m_gscVoiceKeepMin));
 
         return true;
     }
@@ -219,6 +254,21 @@ void RadioPagingDemodSettings::applySettings(const QStringList& settingsKeys, co
     }
     if (settingsKeys.contains("gscAudio")) {
         m_gscAudio = settings.m_gscAudio;
+    }
+    if (settingsKeys.contains("gscVoiceRecord")) {
+        m_gscVoiceRecord = settings.m_gscVoiceRecord;
+    }
+    if (settingsKeys.contains("gscVoiceDirectory")) {
+        m_gscVoiceDirectory = settings.m_gscVoiceDirectory;
+    }
+    if (settingsKeys.contains("gscVoiceKeepDays")) {
+        m_gscVoiceKeepDays = settings.m_gscVoiceKeepDays;
+    }
+    if (settingsKeys.contains("gscVoiceKeepMin")) {
+        m_gscVoiceKeepMin = settings.m_gscVoiceKeepMin;
+    }
+    if (settingsKeys.contains("channelAlias")) {
+        m_channelAlias = settings.m_channelAlias;
     }
     if (settingsKeys.contains("volume")) {
         m_volume = settings.m_volume;
@@ -291,6 +341,21 @@ QString RadioPagingDemodSettings::getDebugString(const QStringList& settingsKeys
     }
     if (settingsKeys.contains("gscAudio") || force) {
         ostr << " m_gscAudio: " << m_gscAudio;
+    }
+    if (settingsKeys.contains("gscVoiceRecord") || force) {
+        ostr << " m_gscVoiceRecord: " << m_gscVoiceRecord;
+    }
+    if (settingsKeys.contains("gscVoiceDirectory") || force) {
+        ostr << " m_gscVoiceDirectory: " << m_gscVoiceDirectory.toStdString();
+    }
+    if (settingsKeys.contains("gscVoiceKeepDays") || force) {
+        ostr << " m_gscVoiceKeepDays: " << m_gscVoiceKeepDays;
+    }
+    if (settingsKeys.contains("gscVoiceKeepMin") || force) {
+        ostr << " m_gscVoiceKeepMin: " << m_gscVoiceKeepMin;
+    }
+    if (settingsKeys.contains("channelAlias") || force) {
+        ostr << " m_channelAlias: " << m_channelAlias.toStdString();
     }
     if (settingsKeys.contains("volume") || force) {
         ostr << " m_volume: " << m_volume;

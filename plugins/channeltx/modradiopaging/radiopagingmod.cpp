@@ -17,9 +17,15 @@
 
 #include <QDebug>
 #include <QBuffer>
+#include <QDateTime>
+#include <QDir>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <QStorageInfo>
 #include <QThread>
+#include <QUuid>
+
+#include <algorithm>
 
 #include "SWGChannelSettings.h"
 #include "SWGWorkspaceInfo.h"
@@ -33,8 +39,11 @@
 #include "dsp/dspcommands.h"
 #include "device/deviceapi.h"
 #include "settings/serializable.h"
+#include "dsp/wavfilerecord.h"
 #include "util/db.h"
 #include "maincore.h"
+#include "radiopagingwav.h"
+#include "radiopagingvoicestore.h"
 
 #include "radiopagingmodbaseband.h"
 #include "radiopagingmod.h"
@@ -42,6 +51,10 @@
 MESSAGE_CLASS_DEFINITION(RadioPagingMod::MsgConfigureRadioPagingMod, Message)
 MESSAGE_CLASS_DEFINITION(RadioPagingMod::MsgTx, Message)
 MESSAGE_CLASS_DEFINITION(RadioPagingMod::MsgReportTx, Message)
+MESSAGE_CLASS_DEFINITION(RadioPagingMod::MsgTxEvent, Message)
+MESSAGE_CLASS_DEFINITION(RadioPagingMod::MsgTxLog, Message)
+MESSAGE_CLASS_DEFINITION(RadioPagingMod::MsgLiveVoice, Message)
+MESSAGE_CLASS_DEFINITION(RadioPagingMod::MsgLiveEnd, Message)
 MESSAGE_CLASS_DEFINITION(RadioPagingMod::MsgClear, Message)
 
 const char* const RadioPagingMod::m_channelIdURI = "sdrangel.channeltx.modradiopaging";
@@ -62,6 +75,10 @@ RadioPagingMod::RadioPagingMod(DeviceAPI *deviceAPI) :
     m_basebandSource = new RadioPagingModBaseband();
     m_basebandSource->setChannel(this);
     m_basebandSource->moveToThread(m_thread);
+    // Sent or dropped: the main thread logs the message and records its voice
+    m_basebandSource->setNotify([this](quint64 id, bool sent) {
+        getInputMessageQueue()->push(MsgTxEvent::create(id, sent));
+    });
 
     applySettings(QStringList(), m_settings, true);
 
@@ -138,7 +155,7 @@ int RadioPagingMod::outstanding() const
 
 // The request is resolved with the channel settings and tried on a stream of its own (the
 // message encodes; FLEX: some frame of the collapse carries its capcode)
-QString RadioPagingMod::checkRequest(const TxRequest& request, RadioPagingModSource::Request& sourceRequest)
+QString RadioPagingMod::checkRequest(const TxRequest& request, RadioPagingModSource::Request& sourceRequest, QString *warning)
 {
     QMutexLocker mutexLocker(&m_settingsMutex);
     std::string error;
@@ -210,6 +227,64 @@ QString RadioPagingMod::checkRequest(const TxRequest& request, RadioPagingModSou
             return QString::fromStdString(error);
         }
     }
+    else if (protocol == RadioPagingModSettings::Gsc)
+    {
+        if (request.m_gsc.m_text.size() > (size_t) m_maxTextLength) {
+            return QString("Message text longer than %1 characters").arg(m_maxTextLength);
+        }
+
+        // GSC has no network mode: it is sent one-shot whatever the mode setting
+        sourceRequest.m_gsc = request.m_gsc;
+        sourceRequest.m_gscInverted = (request.m_polarity < 0) ? m_settings.m_gscInverted : (request.m_polarity == 1);
+        RadioPagingGscTxStream trial((RadioPagingGsc::Mode) m_settings.m_gscMode);
+
+        if ((request.m_gsc.m_type == RadioPagingGsc::Voice) && request.m_live)
+        {
+            // The voice comes from the microphone: nothing to load
+            sourceRequest.m_live = true;
+
+            if (!trial.addLive(sourceRequest.m_gsc, sourceRequest.m_gscInverted, 0, error, m_settings.m_gscVoiceSeconds)) {
+                return QString::fromStdString(error);
+            }
+
+            if (outstanding() + m_inputMessageQueue.size() >= m_maxQueued) {
+                return QString("Queue full (%1 messages not sent yet)").arg(m_maxQueued);
+            }
+
+            return QString();
+        }
+        else if ((request.m_gsc.m_type == RadioPagingGsc::Voice) && request.m_voice) {
+            sourceRequest.m_voice = request.m_voice;    // Loaded by the check of the WebAPI request
+        }
+        else if (request.m_gsc.m_type == RadioPagingGsc::Voice)
+        {
+            // The sound file, cut at the voice length of the settings
+            std::shared_ptr<RadioPagingWav::Audio> audio = std::make_shared<RadioPagingWav::Audio>();
+
+            if (request.m_voiceFile.isEmpty()) {
+                return "A voice page needs a sound file";
+            }
+            if (!RadioPagingWav::load(request.m_voiceFile.toStdString(), *audio, error, m_settings.m_gscVoiceSeconds, true)) {
+                return QString("%1: %2").arg(request.m_voiceFile).arg(QString::fromStdString(error));
+            }
+            if (audio->m_trimmed)
+            {
+                QString text = QString("%1 is %2 s long, cut at %3 s").arg(request.m_voiceFile)
+                    .arg(audio->m_fileSeconds, 0, 'f', 1).arg(m_settings.m_gscVoiceSeconds);
+                qWarning() << "RadioPagingMod::checkRequest:" << text;
+
+                if (warning) {
+                    *warning = text;
+                }
+            }
+
+            sourceRequest.m_voice = audio;
+        }
+
+        if (!trial.add(sourceRequest.m_gsc, sourceRequest.m_gscInverted, 0, error, sourceRequest.m_voice)) {
+            return QString::fromStdString(error);
+        }
+    }
     else
     {
         return QString("%1 transmission is not implemented").arg(RadioPagingModSettings::protocolName(m_settings.m_protocol));
@@ -222,11 +297,11 @@ QString RadioPagingMod::checkRequest(const TxRequest& request, RadioPagingModSou
     return QString();
 }
 
-quint64 RadioPagingMod::transmit(const TxRequest& request, QString& error)
+quint64 RadioPagingMod::transmit(const TxRequest& request, QString& error, QString *warning)
 {
     QMutexLocker mutexLocker(&m_settingsMutex);
     RadioPagingModSource::Request sourceRequest;
-    error = checkRequest(request, sourceRequest);
+    error = checkRequest(request, sourceRequest, warning);
 
     if (!error.isEmpty()) {
         return 0;
@@ -234,9 +309,181 @@ quint64 RadioPagingMod::transmit(const TxRequest& request, QString& error)
 
     sourceRequest.m_id = m_nextId++;
     m_accepted++;
+
+    // The record of the message in the log of the transmitter, and for the message center once sent
+    PendingTx pending;
+    fillRecord(request, sourceRequest, sourceRequest.m_id, pending);
+    m_pending[sourceRequest.m_id] = pending;
+
+    if (getMessageQueueToGUI()) {
+        getMessageQueueToGUI()->push(MsgTxLog::create(pending.m_record, "queued"));
+    }
+
     m_basebandSource->getInputMessageQueue()->push(RadioPagingModBaseband::MsgRequest::create(sourceRequest));
 
     return sourceRequest.m_id;
+}
+
+// The message as the receivers show it (see the records of the demodulator), with the channel
+// alias of the transmitter
+void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSource::Request& sourceRequest, quint64 id, PendingTx& pending)
+{
+    MessageRecord& record = pending.m_record;
+    record.resetToDefaults();
+    record.m_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    record.m_timestamp = QDateTime::currentMSecsSinceEpoch();
+    record.m_direction = MessageRecord::DirectionTX;
+    record.m_kind = MessageRecord::KindMessage;
+    record.m_frequency = m_centerFrequency + m_settings.m_inputFrequencyOffset;
+    record.m_channelAlias = m_settings.effectiveChannelAlias(record.m_frequency);
+    record.m_deviceSetIndex = getDeviceSetIndex();
+    record.m_channelIndex = getIndexInDeviceSet();
+    record.m_centerFrequency = m_centerFrequency;
+    record.m_channelOffset = m_settings.m_inputFrequencyOffset;
+    record.m_protocolData.insert("tx_id", (qulonglong) id);
+    bool inverted = false;
+
+    if (sourceRequest.m_protocol == RadioPagingModSettings::Pocsag)
+    {
+        const RadioPagingPocsag::TxMessage& m = sourceRequest.m_pocsag;
+        record.m_protocol = "pocsag";
+        record.m_mode = QString::number(sourceRequest.m_pocsagBaud);
+        record.m_speed = sourceRequest.m_pocsagBaud;
+        record.m_address = QString("%1%2").arg(m.m_address, 7, 10, QChar('0')).arg(QChar('A' + (m.m_function & 3)));
+        record.m_msgType = (m.m_type == RadioPagingPocsag::Tone) ? "tone_only"
+            : (m.m_type == RadioPagingPocsag::Numeric) ? "numeric" : "alphanumeric";
+        record.m_text = QString::fromStdString(m.m_text);
+        inverted = sourceRequest.m_pocsagInverted;
+    }
+    else if (sourceRequest.m_protocol == RadioPagingModSettings::Flex)
+    {
+        const RadioPagingFlexEncoder::TxMessage& m = sourceRequest.m_flex;
+        RadioPagingFlex::Mode mode = (RadioPagingFlex::Mode) m_settings.m_flexMode;
+        record.m_protocol = "flex";
+        record.m_mode = RadioPagingFlex::modeName(mode);
+        record.m_speed = RadioPagingFlex::bitRate(mode);
+        record.m_address = QString::number((qulonglong) m.m_capcode);
+        record.m_msgType = (m.m_type == RadioPagingFlex::Tone) ? "tone_only"
+            : (m.m_type == RadioPagingFlex::Numeric) ? "numeric" : "alphanumeric";
+        record.m_text = QString::fromStdString(m.m_text);
+        inverted = sourceRequest.m_flexInverted;
+    }
+    else
+    {
+        const RadioPagingGsc::TxMessage& m = sourceRequest.m_gsc;
+        record.m_protocol = "gsc";
+        record.m_mode = "600";
+        record.m_speed = 600;
+        record.m_address = QString::fromStdString(m.m_address) + QChar('0' + m.m_addressNumber);
+        record.m_msgType = (m.m_type == RadioPagingGsc::Voice) ? "voice" : (m.m_type == RadioPagingGsc::Tone) ? "tone_only"
+            : (m.m_type == RadioPagingGsc::Numeric) ? "numeric" : "alphanumeric";
+        record.m_text = QString::fromStdString(m.m_text);
+        inverted = sourceRequest.m_gscInverted;
+        pending.m_isVoice = (m.m_type == RadioPagingGsc::Voice);
+        pending.m_voice = sourceRequest.m_voice;
+    }
+
+    record.m_polarity = inverted ? MessageRecord::PolarityInverted : MessageRecord::PolarityNormal;
+    (void) request;
+}
+
+// A message was sent or dropped: the voice is recorded, the record goes to the log and, if sent, to
+// the message pipes
+void RadioPagingMod::txEvent(quint64 id, bool sent)
+{
+    auto it = m_pending.find(id);
+
+    if (it == m_pending.end()) {
+        return;
+    }
+
+    PendingTx pending = it->second;
+    m_pending.erase(it);
+
+    if (sent && pending.m_isVoice)
+    {
+        double seconds = 0.0;
+        QString file = recordVoice(pending, seconds);
+
+        pending.m_record.m_protocolData.insert("voice_seconds", seconds);
+
+        if (!file.isEmpty()) {
+            pending.m_record.m_protocolData.insert("voice_file", file);
+        }
+    }
+
+    if (getMessageQueueToGUI()) {
+        getMessageQueueToGUI()->push(MsgTxLog::create(pending.m_record, sent ? "sent" : "dropped"));
+    }
+
+    if (sent) {
+        publishRecord(pending.m_record);
+    }
+}
+
+// The voice sent, as it was modulated (the samples at the rate of the modulator) in a WAV file of the
+// directory of the voice sent; the old files go a few at a time
+QString RadioPagingMod::recordVoice(const PendingTx& pending, double& seconds)
+{
+    const std::vector<float>& samples = pending.m_voice ? pending.m_voice->m_samples : pending.m_live;
+    seconds = (double) samples.size() / RadioPagingWav::m_sampleRate;
+
+    if (samples.empty()) {
+        return QString();
+    }
+
+    QString directory = m_settings.voiceDirectory();
+
+    if (!QDir().mkpath(directory))
+    {
+        qWarning() << "RadioPagingMod::recordVoice: cannot create" << directory;
+        return QString();
+    }
+
+    QStorageInfo storage(directory);
+
+    if (storage.isValid() && (storage.bytesAvailable() < 500LL * 1024 * 1024))
+    {
+        qWarning() << "RadioPagingMod::recordVoice: not enough free space in" << directory;
+        return QString();
+    }
+
+    WavFileRecord recorder((quint32) RadioPagingWav::m_sampleRate);
+    recorder.setMono(true);
+    recorder.setFileName(RadioPagingVoiceStore::filePrefix(directory,
+        pending.m_record.m_channelAlias, "tx"));
+
+    if (!recorder.startRecording())
+    {
+        qWarning() << "RadioPagingMod::recordVoice: cannot write in" << directory;
+        return QString();
+    }
+
+    std::vector<qint16> block;
+    block.reserve(samples.size());
+
+    for (float sample : samples) {
+        block.push_back((qint16) std::max(-32768.0f, std::min(32767.0f, sample * 32767.0f)));
+    }
+
+    recorder.writeMono(block.data(), (int) block.size());
+    recorder.stopRecording();
+    QString file = recorder.getCurrentFileName();
+    RadioPagingVoiceStore::cleanup(directory, m_settings.m_gscVoiceKeepDays, m_settings.m_gscVoiceKeepMin,
+        RadioPagingVoiceStore::m_autoCleanupBatch, file);
+    return file;
+}
+
+void RadioPagingMod::publishRecord(const MessageRecord& record)
+{
+    QList<ObjectPipe*> pipes;
+    MainCore::instance()->getMessagePipes().getMessagePipes(this, MessageRecord::m_pipeName, pipes);
+
+    for (const auto& pipe : pipes)
+    {
+        MessageQueue *messageQueue = qobject_cast<MessageQueue*>(pipe->m_element);
+        messageQueue->push(MainCore::MsgMessageRecord::create(this, record));
+    }
 }
 
 void RadioPagingMod::clear(bool abort)
@@ -259,7 +506,8 @@ bool RadioPagingMod::handleMessage(const Message& cmd)
     {
         MsgTx& tx = (MsgTx&) cmd;
         QString error;
-        quint64 id = transmit(tx.getRequest(), error);
+        QString warning;
+        quint64 id = transmit(tx.getRequest(), error, &warning);
 
         // A WebAPI request was checked when posted; settings applied since may refuse it
         if (id == 0) {
@@ -267,8 +515,34 @@ bool RadioPagingMod::handleMessage(const Message& cmd)
         }
 
         if (getMessageQueueToGUI()) {
-            getMessageQueueToGUI()->push(MsgReportTx::create(id, error));
+            getMessageQueueToGUI()->push(MsgReportTx::create(id, error, warning));
         }
+
+        return true;
+    }
+    else if (MsgTxEvent::match(cmd))
+    {
+        const MsgTxEvent& event = (const MsgTxEvent&) cmd;
+        txEvent(event.getId(), event.getSent());
+
+        return true;
+    }
+    else if (MsgLiveVoice::match(cmd))
+    {
+        const MsgLiveVoice& voice = (const MsgLiveVoice&) cmd;
+        auto it = m_pending.find(voice.getId());
+
+        if (it != m_pending.end())
+        {
+            it->second.m_live.insert(it->second.m_live.end(), voice.getSamples().begin(), voice.getSamples().end());
+            m_basebandSource->pushLive(voice.getSamples());
+        }
+
+        return true;
+    }
+    else if (MsgLiveEnd::match(cmd))
+    {
+        m_basebandSource->endLive();
 
         return true;
     }
@@ -290,6 +564,7 @@ bool RadioPagingMod::handleMessage(const Message& cmd)
     {
         // Forward to the source
         DSPSignalNotification& notif = (DSPSignalNotification&) cmd;
+        m_centerFrequency = notif.getCenterFrequency();
         DSPSignalNotification* rep = new DSPSignalNotification(notif); // make a copy
         qDebug() << "RadioPagingMod::handleMessage: DSPSignalNotification";
         m_basebandSource->getInputMessageQueue()->push(rep);
@@ -448,6 +723,24 @@ int RadioPagingMod::webapiSettingsPutPatch(
         errorMessage = "flexMode must be 0 (1600/2), 1 (3200/2), 2 (3200/4) or 3 (6400/4)";
         return 400;
     }
+    if (channelSettingsKeys.contains("gscMode")
+     && ((swg->getGscMode() < (int) RadioPagingGsc::Auto) || (swg->getGscMode() > (int) RadioPagingGsc::NonBatterySaver)))
+    {
+        errorMessage = "gscMode must be 0 (auto), 1 (single), 2 (batch) or 3 (non battery saver)";
+        return 400;
+    }
+    if (channelSettingsKeys.contains("gscVoiceDirectory") && swg->getGscVoiceDirectory() && !swg->getGscVoiceDirectory()->isEmpty()
+     && (!QDir::isAbsolutePath(*swg->getGscVoiceDirectory()) || swg->getGscVoiceDirectory()->split('/').contains("..")))
+    {
+        errorMessage = "gscVoiceDirectory must be an absolute path without ..";
+        return 400;
+    }
+    if (channelSettingsKeys.contains("gscVoiceSeconds")
+     && ((swg->getGscVoiceSeconds() < 1) || (swg->getGscVoiceSeconds() > 50)))
+    {
+        errorMessage = "gscVoiceSeconds must be 1 to 50";
+        return 400;
+    }
     if (channelSettingsKeys.contains("flexCollapse")
      && ((swg->getFlexCollapse() < 0) || (swg->getFlexCollapse() > RadioPagingFlex::m_maxCollapse)))
     {
@@ -538,6 +831,27 @@ void RadioPagingMod::webapiUpdateChannelSettings(
     }
     if (channelSettingsKeys.contains("flexCollapse")) {
         settings.m_flexCollapse = swg->getFlexCollapse();
+    }
+    if (channelSettingsKeys.contains("gscMode")) {
+        settings.m_gscMode = swg->getGscMode();
+    }
+    if (channelSettingsKeys.contains("gscInverted")) {
+        settings.m_gscInverted = swg->getGscInverted() != 0;
+    }
+    if (channelSettingsKeys.contains("gscVoiceSeconds")) {
+        settings.m_gscVoiceSeconds = swg->getGscVoiceSeconds();
+    }
+    if (channelSettingsKeys.contains("channelAlias") && swg->getChannelAlias()) {
+        settings.m_channelAlias = *swg->getChannelAlias();
+    }
+    if (channelSettingsKeys.contains("gscVoiceDirectory") && swg->getGscVoiceDirectory()) {
+        settings.m_gscVoiceDirectory = *swg->getGscVoiceDirectory();
+    }
+    if (channelSettingsKeys.contains("gscVoiceKeepDays")) {
+        settings.m_gscVoiceKeepDays = std::max(0, std::min(3650, swg->getGscVoiceKeepDays()));
+    }
+    if (channelSettingsKeys.contains("gscVoiceKeepMin")) {
+        settings.m_gscVoiceKeepMin = std::max(0, std::min(100000, swg->getGscVoiceKeepMin()));
     }
     if (channelSettingsKeys.contains("mixPocsag")) {
         settings.m_flexMixPocsag = swg->getMixPocsag() != 0;
@@ -668,15 +982,18 @@ int RadioPagingMod::webapiActionsPost(
             protocol = RadioPagingModSettings::Pocsag;
         } else if (messageProtocol == "flex") {
             protocol = RadioPagingModSettings::Flex;
+        } else if (messageProtocol == "gsc") {
+            protocol = RadioPagingModSettings::Gsc;
         } else if (!messageProtocol.isEmpty())
         {
-            errorMessage = "Message protocol must be pocsag or flex";
+            errorMessage = "Message protocol must be pocsag, flex or gsc";
             return 400;
         }
 
-        if (!type.isEmpty() && (type != "tone") && (type != "numeric") && (type != "alphanumeric"))
+        if (!type.isEmpty() && (type != "tone") && (type != "numeric") && (type != "alphanumeric")
+         && !((type == "voice") && (protocol == RadioPagingModSettings::Gsc)))
         {
-            errorMessage = "Message type must be tone, numeric or alphanumeric";
+            errorMessage = "Message type must be tone, numeric or alphanumeric (GSC: or voice)";
             return 400;
         }
 
@@ -729,11 +1046,35 @@ int RadioPagingMod::webapiActionsPost(
             request.m_flex.m_text = text;
             request.m_flex.m_priority = swgTx->getPriority() != 0;
         }
+        else if (protocol == RadioPagingModSettings::Gsc)
+        {
+            // The address as an integer of up to 6 digits (zero padded: index, group, 3 address
+            // digits), the function 0 to 3 as the address number 1 to 4
+            if ((swgTx->getCapcode() < 0) || (swgTx->getCapcode() > 999999))
+            {
+                errorMessage = "GSC address (capcode) must be 0 to 999999";
+                return 400;
+            }
+            if ((swgTx->getFunction() < 0) || (swgTx->getFunction() > 3))
+            {
+                errorMessage = "GSC address number (function) must be 0 to 3, for 1 to 4";
+                return 400;
+            }
+
+            request.m_gsc.m_address = QString("%1").arg((qlonglong) swgTx->getCapcode(), 6, 10, QChar('0')).toStdString();
+            request.m_gsc.m_addressNumber = swgTx->getFunction() + 1;
+            request.m_gsc.m_type = (type == "tone") ? RadioPagingGsc::Tone
+                : (type == "voice") ? RadioPagingGsc::Voice
+                : (type == "numeric") ? RadioPagingGsc::Numeric : RadioPagingGsc::Alphanumeric;
+            request.m_gsc.m_text = ((type == "tone") || (type == "voice")) ? std::string() : text;
+            request.m_voiceFile = (type == "voice") ? QString::fromStdString(text) : QString();
+        }
 
         // Checked here for the reply; it is checked again when queued, after the settings
         // posted before it
         RadioPagingModSource::Request sourceRequest;
-        QString error = checkRequest(request, sourceRequest);
+        QString warning;
+        QString error = checkRequest(request, sourceRequest, &warning);
 
         if (!error.isEmpty())
         {
@@ -741,6 +1082,7 @@ int RadioPagingMod::webapiActionsPost(
             return 400;
         }
 
+        request.m_voice = sourceRequest.m_voice;        // The sound file is read once
         m_inputMessageQueue.push(MsgTx::create(request));
 
         return 202;
@@ -765,6 +1107,13 @@ void RadioPagingMod::webapiFormatChannelSettings(SWGSDRangel::SWGChannelSettings
     swg->setFlexMode(settings.m_flexMode);
     swg->setFlexInverted(settings.m_flexInverted ? 1 : 0);
     swg->setFlexCollapse(settings.m_flexCollapse);
+    swg->setGscMode(settings.m_gscMode);
+    swg->setGscInverted(settings.m_gscInverted ? 1 : 0);
+    swg->setGscVoiceSeconds(settings.m_gscVoiceSeconds);
+    swg->setGscVoiceKeepDays(settings.m_gscVoiceKeepDays);
+    swg->setGscVoiceKeepMin(settings.m_gscVoiceKeepMin);
+    swg->setChannelAlias(new QString(settings.m_channelAlias));
+    swg->setGscVoiceDirectory(new QString(settings.m_gscVoiceDirectory));
     swg->setMixPocsag(settings.m_flexMixPocsag ? 1 : 0);
     swg->setPocsagDeviation(settings.m_pocsagDeviation);
     swg->setMixFramesPerMinute(settings.m_mixFramesPerMinute);
@@ -949,6 +1298,27 @@ void RadioPagingMod::webapiFormatChannelSettings(
     }
     if (channelSettingsKeys.contains("flexCollapse") || force) {
         swg->setFlexCollapse(settings.m_flexCollapse);
+    }
+    if (channelSettingsKeys.contains("gscMode") || force) {
+        swg->setGscMode(settings.m_gscMode);
+    }
+    if (channelSettingsKeys.contains("gscInverted") || force) {
+        swg->setGscInverted(settings.m_gscInverted ? 1 : 0);
+    }
+    if (channelSettingsKeys.contains("gscVoiceSeconds") || force) {
+        swg->setGscVoiceSeconds(settings.m_gscVoiceSeconds);
+    }
+    if (channelSettingsKeys.contains("channelAlias") || force) {
+        swg->setChannelAlias(new QString(settings.m_channelAlias));
+    }
+    if (channelSettingsKeys.contains("gscVoiceDirectory") || force) {
+        swg->setGscVoiceDirectory(new QString(settings.m_gscVoiceDirectory));
+    }
+    if (channelSettingsKeys.contains("gscVoiceKeepDays") || force) {
+        swg->setGscVoiceKeepDays(settings.m_gscVoiceKeepDays);
+    }
+    if (channelSettingsKeys.contains("gscVoiceKeepMin") || force) {
+        swg->setGscVoiceKeepMin(settings.m_gscVoiceKeepMin);
     }
     if (channelSettingsKeys.contains("mixPocsag") || force) {
         swg->setMixPocsag(settings.m_flexMixPocsag ? 1 : 0);

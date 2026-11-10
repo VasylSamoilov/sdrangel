@@ -21,6 +21,8 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -730,7 +732,6 @@ void testMixed()
         RadioPagingMixTxStream stream(mixConfig());
         stream.begin(0);
         stream.next(block);
-        uint64_t first = stream.currentFrame();
         stream.addPocsag(pocsag(100, "CLEARED"), 1200, false, 99, error);
         int64_t total = 0;
         bool gotSwitch = false;
@@ -769,8 +770,547 @@ void testMixed()
     }
 }
 
+// ---------------------------------------------------------------------------
+// GSC
+// ---------------------------------------------------------------------------
+
+RadioPagingGsc::TxMessage gsc(const std::string& address, int number, const char *text,
+    RadioPagingGsc::MessageType type = RadioPagingGsc::Alphanumeric)
+{
+    RadioPagingGsc::TxMessage m;
+    m.m_address = address;
+    m.m_addressNumber = number;
+    m.m_type = type;
+    m.m_text = text;
+    return m;
+}
+
+int gscPreamble(const std::string& address)
+{
+    RadioPagingGsc::EncodeOptions options;
+    options.m_mode = RadioPagingGsc::Single;
+    return RadioPagingGsc::encode({ gsc(address, 1, "") }, options).m_preamble;
+}
+
+// An address with the preamble value of the other one, or without it
+std::string gscAddressLike(const std::string& other, bool same)
+{
+    int wanted = gscPreamble(other);
+
+    for (int i = 0; i < 1000; i++)
+    {
+        char address[8];
+        std::snprintf(address, sizeof(address), "%06d", 100000 + i * 7);
+        int p = gscPreamble(address);
+
+        if (p >= 0 && ((p == wanted) == same) && (address != other)) {
+            return address;
+        }
+    }
+
+    return std::string();
+}
+
+// Number of transmissions and the ids of each
+std::vector<std::vector<uint64_t>> gscTransmissions(RadioPagingGscTxStream& stream, std::vector<float> *firstLevels = nullptr)
+{
+    std::vector<std::vector<uint64_t>> out;
+    RadioPagingTxBlock block;
+
+    while (stream.hasWork())
+    {
+        stream.begin(0);
+
+        if (!stream.next(block)) {
+            break;
+        }
+
+        if (firstLevels && out.empty()) {
+            *firstLevels = block.m_levels;
+        }
+
+        out.push_back(block.m_ids);
+
+        if (stream.next(block)) {
+            break;      // A transmission is one block
+        }
+    }
+
+    return out;
+}
+
+void testGsc()
+{
+    std::string error;
+    std::string a = "123456";
+    std::string same = gscAddressLike(a, true);
+    std::string other = gscAddressLike(a, false);
+
+    // Auto: the messages of one preamble value in a batch, the other one after
+    {
+        RadioPagingGscTxStream stream(RadioPagingGsc::Auto);
+        check(stream.add(gsc(a, 1, "ONE"), false, 1, error) && stream.add(gsc(other, 2, "TWO"), false, 2, error)
+            && stream.add(gsc(same, 3, "THREE"), false, 3, error), "GSC: messages queued");
+        std::vector<std::vector<uint64_t>> t = gscTransmissions(stream);
+        check((t.size() == 2) && (t[0] == std::vector<uint64_t>{1, 3}) && (t[1] == std::vector<uint64_t>{2}) && !stream.hasWork(),
+            "GSC auto: the messages of the same preamble value in one batch, the other message after it");
+    }
+
+    // Single, Batch (one message in a batch), NonBatterySaver
+    {
+        RadioPagingGscTxStream single(RadioPagingGsc::Single);
+        single.add(gsc(a, 1, "ONE"), false, 1, error);
+        single.add(gsc(same, 1, "TWO"), false, 2, error);
+        check(gscTransmissions(single).size() == 2, "GSC single: one message per transmission");
+
+        RadioPagingGscTxStream nbs(RadioPagingGsc::NonBatterySaver);
+        nbs.add(gsc(a, 1, "ONE"), false, 1, error);
+        nbs.add(gsc(other, 1, "TWO"), false, 2, error);
+        nbs.add(gsc(same, 1, "THREE"), true, 3, error);
+        std::vector<std::vector<uint64_t>> t = gscTransmissions(nbs);
+        check((t.size() == 2) && (t[0] == std::vector<uint64_t>{1, 2}) && (t[1] == std::vector<uint64_t>{3}),
+            "GSC non battery saver: all messages of a polarity in one transmission, whatever their preamble value");
+
+        RadioPagingGscTxStream one(RadioPagingGsc::Auto);
+        RadioPagingGscTxStream batch(RadioPagingGsc::Batch);
+        one.add(gsc(a, 1, "ONE"), false, 1, error);
+        batch.add(gsc(a, 1, "ONE"), false, 1, error);
+        std::vector<float> alone, inBatch;
+        gscTransmissions(one, &alone);
+        gscTransmissions(batch, &inBatch);
+        check(alone.size() != inBatch.size(), "GSC batch: a batch even for one message (different from a single message)");
+    }
+
+    // Polarity: the levels flip, polarities are not mixed in a transmission
+    {
+        RadioPagingGscTxStream normal(RadioPagingGsc::Single);
+        RadioPagingGscTxStream inverted(RadioPagingGsc::Single);
+        normal.add(gsc(a, 1, "POLARITY"), false, 1, error);
+        inverted.add(gsc(a, 1, "POLARITY"), true, 1, error);
+        std::vector<float> n, i;
+        gscTransmissions(normal, &n);
+        gscTransmissions(inverted, &i);
+        bool flipped = (n.size() == i.size()) && !n.empty();
+        for (size_t k = 0; flipped && (k < n.size()); k++) {
+            flipped = (n[k] == -i[k]) && (std::fabs(n[k]) == 1.0f);
+        }
+
+        RadioPagingGscTxStream mixed(RadioPagingGsc::Auto);
+        mixed.add(gsc(a, 1, "ONE"), false, 1, error);
+        mixed.add(gsc(same, 1, "TWO"), true, 2, error);
+        check(flipped && (gscTransmissions(mixed).size() == 2), "GSC: inverted polarity flips the levels; polarities are not mixed in a transmission");
+    }
+
+    // At most 32 messages in a transmission; the others stay queued, in order, for the next
+    {
+        RadioPagingGscTxStream batch(RadioPagingGsc::Auto);
+        RadioPagingGscTxStream nbs(RadioPagingGsc::NonBatterySaver);
+
+        int queued = 0;
+
+        for (int n = 0; (n < 2000) && (queued < 33); n++)
+        {
+            char address[8];
+            std::snprintf(address, sizeof(address), "%06d", 100000 + n * 7);
+
+            if (gscPreamble(address) < 0) {
+                continue;       // Not an address
+            }
+
+            bool ok = batch.add(gsc(a, 1, "X"), false, 1000 + queued, error);      // One preamble value
+            ok = nbs.add(gsc(address, 1, "X"), false, 2000 + queued, error) && ok;     // Any
+            queued += ok ? 1 : 0;
+        }
+
+        std::vector<std::vector<uint64_t>> tb = gscTransmissions(batch);
+        std::vector<std::vector<uint64_t>> tn = gscTransmissions(nbs);
+        bool batchOk = (tb.size() == 2) && (tb[0].size() == 32) && (tb[1] == std::vector<uint64_t>{1032}) && (tb[0].front() == 1000) && (tb[0].back() == 1031);
+        bool nbsOk = (tn.size() == 2) && (tn[0].size() == 32) && (tn[1] == std::vector<uint64_t>{2032});
+        check(batchOk && nbsOk, "GSC: 33 messages go in 32 and 1, in order, none lost");
+    }
+
+    // The group is built from the first message queued; the others keep their order
+    {
+        RadioPagingGscTxStream stream(RadioPagingGsc::Auto);
+        std::string otherB = gscAddressLike(other, true);
+        stream.add(gsc(a, 1, "A"), false, 1, error);
+        stream.add(gsc(other, 1, "B"), false, 2, error);
+        stream.add(gsc(same, 1, "C"), false, 3, error);
+        stream.add(gsc(otherB, 1, "D"), false, 4, error);
+        std::vector<std::vector<uint64_t>> t = gscTransmissions(stream);
+        check((t.size() == 2) && (t[0] == std::vector<uint64_t>{1, 3}) && (t[1] == std::vector<uint64_t>{2, 4}),
+            "GSC auto: the first message queued sets the group, the others keep their order");
+    }
+
+    // Block parameters
+    {
+        RadioPagingGscTxStream stream(RadioPagingGsc::Single);
+        RadioPagingTxBlock block;
+        stream.add(gsc(a, 1, "BLOCK"), false, 7, error);
+        stream.begin(0);
+        bool ok = stream.next(block);
+        check(ok && (block.m_baud == 600.0) && (block.m_shaping == 600.0) && (block.m_ids == std::vector<uint64_t>{7}) && !stream.next(block),
+            "GSC: 600 baud, shaping at the baud rate, the ids of the transmission, then it ends");
+    }
+
+    // Refusals and clear
+    {
+        RadioPagingGscTxStream stream(RadioPagingGsc::Auto);
+        std::string e1, e2, e3, e4;
+        bool voice = !stream.add(gsc(a, 1, "", RadioPagingGsc::Voice), false, 1, e1) && !e1.empty()
+            && !stream.add(gsc(a, 1, "X", RadioPagingGsc::Data), false, 1, e1);
+        bool badAddress = !stream.add(gsc("12345", 1, "X"), false, 2, e2) && !e2.empty();
+        bool badNumber = !stream.add(gsc(a, 5, "X"), false, 3, e3) && !e3.empty();
+        std::string text(400, 'A');
+        bool tooLong = !stream.add(gsc(a, 1, text.c_str()), false, 4, e4) && !e4.empty();
+        stream.add(gsc(a, 1, "KEEP"), false, 5, error);
+        stream.add(gsc(other, 1, "KEEP"), false, 6, error);
+        std::vector<uint64_t> cleared = stream.clear();
+        check(voice && badAddress && badNumber && tooLong && (cleared == std::vector<uint64_t>{5, 6}) && (stream.pending() == 0),
+            "GSC: voice, bad address, address number and too long a text refused; clear returns the ids");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GSC voice pages: sound file and transmission
+// ---------------------------------------------------------------------------
+
+void put16(std::vector<uint8_t>& b, uint16_t v) { b.push_back(v & 0xff); b.push_back(v >> 8); }
+void put32(std::vector<uint8_t>& b, uint32_t v) { put16(b, v & 0xffff); put16(b, v >> 16); }
+
+// A WAV file of a sine wave: format 1 (PCM) or 3 (float), bits, channels, rate, seconds. The right
+// channel (if any) has the same sine
+std::vector<uint8_t> makeWav(int format, int bits, int channels, int rate, double seconds, double hz = 1000.0, double amplitude = 0.5)
+{
+    std::vector<uint8_t> b;
+    size_t frames = (size_t) (seconds * rate);
+    size_t dataSize = frames * channels * (bits / 8);
+
+    b.insert(b.end(), {'R', 'I', 'F', 'F'});
+    put32(b, (uint32_t) (36 + dataSize));
+    b.insert(b.end(), {'W', 'A', 'V', 'E', 'f', 'm', 't', ' '});
+    put32(b, 16);
+    put16(b, (uint16_t) format);
+    put16(b, (uint16_t) channels);
+    put32(b, (uint32_t) rate);
+    put32(b, (uint32_t) (rate * channels * (bits / 8)));
+    put16(b, (uint16_t) (channels * (bits / 8)));
+    put16(b, (uint16_t) bits);
+    b.insert(b.end(), {'d', 'a', 't', 'a'});
+    put32(b, (uint32_t) dataSize);
+
+    for (size_t i = 0; i < frames; i++)
+    {
+        double v = amplitude * std::sin(2.0 * M_PI * hz * i / rate);
+
+        for (int c = 0; c < channels; c++)
+        {
+            if (format == 3)
+            {
+                float f = (float) v;
+                uint32_t u;
+                std::memcpy(&u, &f, 4);
+                put32(b, u);
+            }
+            else if (bits == 8) {
+                b.push_back((uint8_t) (128 + (int) std::lround(v * 127.0)));
+            } else if (bits == 16) {
+                put16(b, (uint16_t) (int16_t) std::lround(v * 32767.0));
+            } else if (bits == 24)
+            {
+                int32_t x = (int32_t) std::lround(v * 8388607.0);
+                b.push_back(x & 0xff);
+                b.push_back((x >> 8) & 0xff);
+                b.push_back((x >> 16) & 0xff);
+            }
+            else {
+                put32(b, (uint32_t) (int32_t) std::lround(v * 2147483647.0));
+            }
+        }
+    }
+
+    return b;
+}
+
+double peak(const std::vector<float>& v, size_t from = 0)
+{
+    double p = 0.0;
+
+    for (size_t i = from; i < v.size(); i++) {
+        p = std::max(p, (double) std::fabs(v[i]));
+    }
+
+    return p;
+}
+
+int zeroCrossings(const std::vector<float>& v)
+{
+    // With hysteresis: the filter start-up and tail leave samples near zero
+    int n = 0;
+    int state = 0;
+
+    for (size_t i = 0; i < v.size(); i++)
+    {
+        int s = (v[i] > 0.1f) ? 1 : ((v[i] < -0.1f) ? -1 : 0);
+
+        if (s != 0)
+        {
+            n += ((state != 0) && (s != state)) ? 1 : 0;
+            state = s;
+        }
+    }
+
+    return n;
+}
+
+void testGscVoice()
+{
+    std::string error;
+
+    // The rate of the modulator: the samples as they are, no gain, no filter
+    {
+        std::vector<uint8_t> file = makeWav(1, 16, 1, 38400, 0.5);
+        RadioPagingWav::Audio audio;
+        bool ok = RadioPagingWav::decode(file, audio, error, 50.0, false);
+        bool exact = ok && (audio.m_samples.size() == 19200) && (audio.m_rate == 38400.0);
+
+        for (size_t i = 0; exact && (i < audio.m_samples.size()); i++)
+        {
+            int16_t raw = (int16_t) (file[44 + 2 * i] | (file[45 + 2 * i] << 8));
+            exact = (audio.m_samples[i] == (float) (raw / 32768.0));
+        }
+
+        check(exact, "WAV 38400 Hz 16 bit mono: the samples as they are");
+    }
+
+    // Resampled to 38400 Hz with the Interpolator: the length, the level and the pitch stay
+    for (int rate : {8000, 22050, 44100, 48000})
+    {
+        std::vector<uint8_t> file = makeWav(1, 16, (rate == 48000) ? 2 : 1, rate, 1.0);
+        RadioPagingWav::Audio audio;
+        bool ok = RadioPagingWav::decode(file, audio, error, 50.0, false);
+        double level = ok ? peak(audio.m_samples, 2000) : 0.0;
+        int crossings = ok ? zeroCrossings(audio.m_samples) : 0;
+        char what[160];
+
+        std::snprintf(what, sizeof(what), "WAV %d Hz: 1 s, 1 kHz, 0.5 to 38400 Hz (%zu samples, peak %.3f, %d crossings)",
+            rate, audio.m_samples.size(), level, crossings);
+        check(ok && (std::abs((int) audio.m_samples.size() - 38400) <= 40) && (std::fabs(level - 0.5) < 0.03)
+            && (std::abs(crossings - 2000) <= 40), what);
+    }
+
+    // Other formats; refusals
+    {
+        RadioPagingWav::Audio audio;
+        bool formats = true;
+
+        for (const auto& f : { makeWav(1, 8, 1, 16000, 0.2), makeWav(1, 24, 1, 16000, 0.2), makeWav(1, 32, 1, 16000, 0.2),
+                makeWav(3, 32, 1, 16000, 0.2) })
+        {
+            formats = formats && RadioPagingWav::decode(f, audio, error, 50.0, false) && (std::fabs(peak(audio.m_samples, 500) - 0.5) < 0.03);
+        }
+
+        std::string e1, e2, e3;
+        bool badFile = !RadioPagingWav::decode(std::vector<uint8_t>(100, 'X'), audio, e1, 50.0, false) && !e1.empty();
+        bool fast = !RadioPagingWav::decode(makeWav(1, 16, 1, 96000, 0.1), audio, e2, 50.0, false) && !e2.empty();
+        bool missing = !RadioPagingWav::load("/nonexistent/voice.wav", audio, e3, 50.0, false) && !e3.empty();
+        check(formats && badFile && fast && missing, "WAV: 8, 24, 32 bit and float read; a file that is not WAV, above 76.8 kHz or missing refused");
+    }
+
+    // The voice length of the transmitter: refused, or cut at the limit (just cut)
+    {
+        std::vector<uint8_t> file = makeWav(1, 16, 1, 38400, 3.0);
+        RadioPagingWav::Audio refused, cut;
+        std::string e1;
+        bool no = !RadioPagingWav::decode(file, refused, e1, 2.0, false) && !e1.empty();
+        bool yes = RadioPagingWav::decode(file, cut, error, 2.0, true) && cut.m_trimmed && (cut.m_samples.size() == 76800)
+            && (std::fabs(cut.m_fileSeconds - 3.0) < 1e-9);
+        RadioPagingWav::Audio whole;
+        bool fits = RadioPagingWav::decode(file, whole, error, 5.0, true) && !whole.m_trimmed && (whole.m_samples.size() == 115200);
+        // Just cut: the first samples are the samples of the file
+        bool same = yes;
+        for (size_t i = 0; same && (i < cut.m_samples.size()); i++) {
+            same = (cut.m_samples[i] == whole.m_samples[i]);
+        }
+        check(no && yes && fits && same, "WAV longer than the voice length: refused, or cut at the limit without changing the samples");
+    }
+
+    // A voice page: the page, the alert time and the voice, the turn-off word
+    {
+        std::vector<uint8_t> file = makeWav(1, 16, 1, 38400, 0.5);
+        RadioPagingWav::Audio audio;
+        RadioPagingWav::decode(file, audio, error, 50.0, false);
+        RadioPagingGscTxStream::Voice voice = std::make_shared<const RadioPagingWav::Audio>(audio);
+
+        for (bool inverted : {false, true})
+        {
+            RadioPagingGscTxStream stream(RadioPagingGsc::Auto);
+            RadioPagingTxBlock page, sound, end, more;
+            std::string e1;
+            bool refused = !stream.add(gsc("123456", 1, "", RadioPagingGsc::Voice), inverted, 1, e1) && !e1.empty();
+            bool added = stream.add(gsc("123456", 2, "", RadioPagingGsc::Voice), inverted, 5, error, voice);
+            stream.begin(0);
+            bool ok = stream.next(page) && stream.next(sound) && stream.next(end) && !stream.next(more);
+
+            // The voice is inverted with the polarity of the transmission
+            bool voiceOk = ok && (sound.m_baud == 38400.0) && (sound.m_levels.size() == 76800 + audio.m_samples.size()) && sound.m_ids.empty();
+            for (size_t i = 0; voiceOk && (i < 76800); i++) {
+                voiceOk = (sound.m_levels[i] == 0.0f);
+            }
+            for (size_t i = 0; voiceOk && (i < audio.m_samples.size()); i++) {
+                voiceOk = (sound.m_levels[76800 + i] == (inverted ? -audio.m_samples[i] : audio.m_samples[i]));
+            }
+
+            // The page ends with the activation code; the turn-off word is the activation code after a comma
+            std::vector<uint8_t> expectedEnd;
+            RadioPagingGsc::appendActivationCode(expectedEnd);
+            bool endOk = ok && (end.m_baud == 600.0) && (end.m_levels.size() == expectedEnd.size()) && (end.m_ids == std::vector<uint64_t>{5})
+                && page.m_ids.empty();
+            for (size_t i = 0; endOk && (i < expectedEnd.size()); i++) {
+                endOk = (end.m_levels[i] > 0.0f) == ((expectedEnd[i] != 0) != inverted);
+            }
+
+            RadioPagingGsc::EncodeOptions options;
+            options.m_mode = RadioPagingGsc::Single;
+            RadioPagingGsc::EncodeResult expectedPage = RadioPagingGsc::encode({ gsc("123456", 2, "", RadioPagingGsc::Voice) }, options);
+            bool pageOk = ok && (page.m_baud == 600.0) && (page.m_levels.size() == expectedPage.m_bits.size());
+            for (size_t i = 0; pageOk && (i < expectedPage.m_bits.size()); i++) {
+                pageOk = (page.m_levels[i] > 0.0f) == ((expectedPage.m_bits[i] != 0) != inverted);
+            }
+
+            char what[160];
+            std::snprintf(what, sizeof(what), "GSC voice page %s: page, 2 s alert and the voice, turn-off word with the id; no voice file refused",
+                inverted ? "inverted" : "normal");
+            check(refused && added && voiceOk && endOk && pageOk, what);
+        }
+    }
+
+    // A voice page is a transmission of its own, in any mode
+    {
+        std::vector<float> samples(3840, 0.25f);
+        RadioPagingWav::Audio audio;
+        audio.m_samples = samples;
+        audio.m_rate = 38400.0;
+        RadioPagingGscTxStream::Voice voice = std::make_shared<const RadioPagingWav::Audio>(audio);
+        std::string error2;
+
+        for (RadioPagingGsc::Mode mode : {RadioPagingGsc::Auto, RadioPagingGsc::Batch, RadioPagingGsc::NonBatterySaver})
+        {
+            RadioPagingGscTxStream stream(mode);
+            stream.add(gsc("123456", 1, "BEFORE"), false, 1, error2);
+            stream.add(gsc("123456", 1, "", RadioPagingGsc::Voice), false, 2, error2, voice);
+            stream.add(gsc("123456", 2, "AFTER"), false, 3, error2);
+            std::vector<std::vector<uint64_t>> t;
+            RadioPagingTxBlock block;
+
+            while (stream.hasWork())
+            {
+                stream.begin(0);
+                std::vector<uint64_t> ids;
+
+                while (stream.next(block)) {
+                    ids.insert(ids.end(), block.m_ids.begin(), block.m_ids.end());
+                }
+
+                t.push_back(ids);
+            }
+
+            check((t.size() == 2) && (t[0] == std::vector<uint64_t>{1, 3}) && (t[1] == std::vector<uint64_t>{2}),
+                "GSC: a voice page is a transmission of its own, the other pages are grouped around it");
+        }
+    }
+
+    // A live voice page: the page, the alert time, then the voice pushed (silence when none waits), the turn-off word
+    {
+        RadioPagingGscTxStream stream(RadioPagingGsc::Auto);
+        std::string error2;
+        RadioPagingTxBlock block;
+        bool added = stream.addLive(gsc("123456", 1, "", RadioPagingGsc::Voice), false, 77, error2, 2);
+        stream.begin(0);
+        bool page = stream.next(block) && (block.m_baud == 600) && block.m_ids.empty();
+        bool alert = stream.next(block) && (block.m_levels.size() == 76800) && (block.m_levels[100] == 0.0f) && !stream.liveOpen();
+        bool silent = stream.next(block) && stream.liveOpen() && (block.m_levels.size() == 384) && (block.m_levels[0] == 0.0f);
+        std::vector<float> voice(2000, 0.5f);
+        stream.pushLive(voice.data(), voice.size());
+        size_t got = 0;
+        bool voiced = true;
+
+        while (got < voice.size())
+        {
+            voiced = stream.next(block) && voiced && (block.m_baud == 38400) && (block.m_levels[0] == 0.5f);
+            got += block.m_levels.size();
+        }
+
+        stream.endLive();
+        bool end = stream.next(block) && (block.m_baud == 600) && (block.m_ids == std::vector<uint64_t>{77});
+        bool over = !stream.next(block) && !stream.liveActive();
+        check(added && page && alert && silent && voiced && (got == 2000) && end && over,
+            "GSC live voice page: page, alert, silence then the voice pushed, turn-off word with the id");
+
+        // The longest voice: the page ends by itself
+        RadioPagingGscTxStream limited(RadioPagingGsc::Auto);
+        limited.addLive(gsc("123456", 1, "", RadioPagingGsc::Voice), true, 78, error2, 1);
+        limited.begin(0);
+        limited.next(block);
+        limited.next(block);
+        size_t total = 0;
+        bool ended = false;
+
+        for (int i = 0; (i < 1000) && !ended; i++)
+        {
+            limited.next(block);
+            ended = !block.m_ids.empty();
+            total += ended ? 0 : block.m_levels.size();
+        }
+
+        check(ended && (total >= 38400) && (total < 38400 + 1000), "GSC live voice page: ends at the longest voice length");
+
+        // Cut while the voice is open: the id is returned once
+        RadioPagingGscTxStream cutting(RadioPagingGsc::Auto);
+        cutting.addLive(gsc("123456", 1, "", RadioPagingGsc::Voice), false, 79, error2, 5);
+        cutting.begin(0);
+        cutting.next(block);
+        cutting.next(block);
+        cutting.next(block);
+        check((cutting.cut() == std::vector<uint64_t>{79}) && !cutting.liveActive() && cutting.cut().empty(),
+            "GSC live voice page: a cut returns its id once");
+    }
+
+    // Cut in a voice page: the id of the turn-off block is returned; clear leaves the transmission going
+    {
+        std::vector<float> samples(3840, 0.25f);
+        RadioPagingWav::Audio audio;
+        audio.m_samples = samples;
+        audio.m_rate = 38400.0;
+        RadioPagingGscTxStream::Voice voice = std::make_shared<const RadioPagingWav::Audio>(audio);
+        RadioPagingGscTxStream stream(RadioPagingGsc::Auto);
+        RadioPagingTxBlock block;
+        std::string error2;
+
+        stream.add(gsc("123456", 1, "", RadioPagingGsc::Voice), false, 7, error2, voice);
+        stream.add(gsc("123456", 1, "WAITING"), false, 8, error2);
+        stream.begin(0);
+        stream.next(block);        // The page
+        std::vector<uint64_t> cleared = stream.clear();
+        bool goesOn = stream.next(block) && stream.next(block) && (block.m_ids == std::vector<uint64_t>{7});
+
+        stream.begin(0);
+        stream.next(block);        // A new transmission? the waiting page was cleared: none
+        check((cleared == std::vector<uint64_t>{8}) && goesOn, "GSC voice page: clear drops the waiting pages, the voice page goes on to its turn-off word");
+
+        RadioPagingGscTxStream cutStream(RadioPagingGsc::Auto);
+        cutStream.add(gsc("123456", 1, "", RadioPagingGsc::Voice), false, 9, error2, voice);
+        cutStream.begin(0);
+        cutStream.next(block);
+        std::vector<uint64_t> cut = cutStream.cut();
+        check((cut == std::vector<uint64_t>{9}) && !cutStream.next(block), "GSC voice page: a cut transmission returns the id of the turn-off word not sent");
+    }
+}
+
 int main()
 {
+    testGscVoice();
+    testGsc();
     testMixed();
     testPocsagNetwork();
     testPocsagNetworkTurns();

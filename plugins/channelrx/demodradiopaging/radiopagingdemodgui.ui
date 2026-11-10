@@ -203,6 +203,27 @@
      </layout>
     </item>
     <item>
+     <layout class="QHBoxLayout" name="aliasLayout">
+      <item>
+       <widget class="QLabel" name="channelAliasLabel">
+        <property name="text">
+         <string>Alias</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="channelAlias">
+        <property name="toolTip">
+         <string>Name of this demodulator, in every message it outputs (channel alias) and in the names of the voice files. Empty: the frequency of the channel in Hz</string>
+        </property>
+        <property name="placeholderText">
+         <string>frequency</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+    <item>
      <widget class="Line" name="line_2">
       <property name="orientation">
        <enum>Qt::Orientation::Horizontal</enum>
@@ -449,6 +470,29 @@
           </property>
           <property name="checkable">
            <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QToolButton" name="gscVoiceRecord">
+          <property name="toolTip">
+           <string>Left: record the voice message of GSC voice pages to a WAV file; its path is in the message record (voice_file). Right: select the directory of the files</string>
+          </property>
+          <property name="text">
+           <string>Rec</string>
+          </property>
+          <property name="checkable">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QToolButton" name="gscVoiceFiles">
+          <property name="toolTip">
+           <string>The voice files: how many are kept, the space they take, and deleting the old ones</string>
+          </property>
+          <property name="text">
+           <string>Files</string>
           </property>
          </widget>
         </item>

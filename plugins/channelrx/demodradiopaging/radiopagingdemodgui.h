@@ -129,6 +129,11 @@ private slots:
     void on_gscVoiceTimeout_valueChanged(int value);
     void on_gscDeviation_valueChanged(int value);
     void on_gscAudio_toggled(bool checked);
+    void on_gscVoiceRecord_toggled(bool checked);
+    void on_gscVoiceFiles_clicked();
+    void on_channelAlias_editingFinished();
+    void voiceDirectorySelect(const QPoint& p);
+    void displayVoiceRecordToolTip();
     void on_volume_valueChanged(int value);
     void audioSelect(const QPoint& p);
     void on_clearTable_clicked();

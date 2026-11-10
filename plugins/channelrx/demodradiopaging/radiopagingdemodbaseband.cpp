@@ -149,6 +149,7 @@ bool RadioPagingDemodBaseband::handleMessage(const Message& cmd)
         QMutexLocker mutexLocker(&m_mutex);
         const DSPSignalNotification& notif = (const DSPSignalNotification&) cmd;
         qDebug() << "RadioPagingDemodBaseband::handleMessage: DSPSignalNotification: basebandSampleRate: " << notif.getSampleRate();
+        m_sink.setCenterFrequency(notif.getCenterFrequency());
         setBasebandSampleRate(notif.getSampleRate());
         m_sampleFifo.setSize(SampleSinkFifo::getSizePolicy(notif.getSampleRate()));
 

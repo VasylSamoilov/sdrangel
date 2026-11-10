@@ -22,8 +22,22 @@
 
 #include "util/simpleserializer.h"
 #include "settings/serializable.h"
+#include "audio/audiodevicemanager.h"
 #include "radiopagingflex.h"
+#include "radiopaginggsc.h"
+#include "radiopagingvoicestore.h"
 #include "radiopagingmodsettings.h"
+
+QString RadioPagingModSettings::voiceDirectory() const
+{
+    return m_gscVoiceDirectory.isEmpty() ? RadioPagingVoiceStore::defaultDirectory("tx") : m_gscVoiceDirectory;
+}
+
+QString RadioPagingModSettings::effectiveChannelAlias(qint64 frequency) const
+{
+    QString alias = m_channelAlias.trimmed();
+    return alias.isEmpty() ? QString::number(frequency) : alias;
+}
 
 const int RadioPagingModSettings::m_nbPocsagSpeeds;
 const int RadioPagingModSettings::m_pocsagSpeeds[m_nbPocsagSpeeds] = { 512, 1200, 2400 };
@@ -51,6 +65,14 @@ void RadioPagingModSettings::resetToDefaults()
     m_flexMode = (int) RadioPagingFlex::Mode1600_2;
     m_flexInverted = false;
     m_flexCollapse = 0;
+    m_gscMode = (int) RadioPagingGsc::Auto;
+    m_gscInverted = false;
+    m_gscVoiceSeconds = 30;
+    m_audioInputDeviceName = AudioDeviceManager::m_defaultDeviceName;
+    m_channelAlias = "";
+    m_gscVoiceDirectory = "";
+    m_gscVoiceKeepDays = 3;
+    m_gscVoiceKeepMin = 50;
     m_flexMixPocsag = false;
     m_pocsagDeviation = 4500.0f;
     m_mixFramesPerMinute = 0;
@@ -88,6 +110,11 @@ void RadioPagingModSettings::validate()
     }
 
     m_flexCollapse = std::max(0, std::min(RadioPagingFlex::m_maxCollapse, m_flexCollapse));
+    if ((m_gscMode < (int) RadioPagingGsc::Auto) || (m_gscMode > (int) RadioPagingGsc::NonBatterySaver)) {
+        m_gscMode = (int) RadioPagingGsc::Auto;
+    }
+
+    m_gscVoiceSeconds = std::max(1, std::min(50, m_gscVoiceSeconds));
     m_pocsagDeviation = std::max(500.0f, std::min(10000.0f, m_pocsagDeviation));
     m_mixFramesPerMinute = std::max(0, std::min(m_mixShared ? 128 : 32, m_mixFramesPerMinute));
 
@@ -140,7 +167,7 @@ QString RadioPagingModSettings::protocolName(Protocol protocol)
     return "";
 }
 
-// Tags 1 to 14 and 33 to 39 are the modulator settings, 20 to 32 the usual channel tags. New tags are only appended
+// Tags 1 to 14 and 33 to 47 are the modulator settings, 20 to 32 the usual channel tags. New tags are only appended
 QByteArray RadioPagingModSettings::serialize() const
 {
     SimpleSerializer s(1);
@@ -188,6 +215,14 @@ QByteArray RadioPagingModSettings::serialize() const
     s.writeS32(37, m_mixSwitchMs[0]);
     s.writeS32(38, m_mixSwitchMs[1]);
     s.writeS32(39, m_mixSwitchMs[2]);
+    s.writeS32(40, m_gscMode);
+    s.writeBool(41, m_gscInverted);
+    s.writeS32(42, m_gscVoiceSeconds);
+    s.writeString(43, m_audioInputDeviceName);
+    s.writeString(44, m_channelAlias);
+    s.writeString(45, m_gscVoiceDirectory);
+    s.writeS32(46, m_gscVoiceKeepDays);
+    s.writeS32(47, m_gscVoiceKeepMin);
 
     return s.final();
 }
@@ -271,6 +306,16 @@ bool RadioPagingModSettings::deserialize(const QByteArray& data)
         d.readS32(37, &m_mixSwitchMs[0], 400);
         d.readS32(38, &m_mixSwitchMs[1], 200);
         d.readS32(39, &m_mixSwitchMs[2], 100);
+        d.readS32(40, &m_gscMode, (int) RadioPagingGsc::Auto);
+        d.readBool(41, &m_gscInverted, false);
+        d.readS32(42, &m_gscVoiceSeconds, 30);
+        d.readString(43, &m_audioInputDeviceName, AudioDeviceManager::m_defaultDeviceName);
+        d.readString(44, &m_channelAlias, "");
+        d.readString(45, &m_gscVoiceDirectory, "");
+        d.readS32(46, &m_gscVoiceKeepDays, 3);
+        d.readS32(47, &m_gscVoiceKeepMin, 50);
+        m_gscVoiceKeepDays = std::max(0, std::min(3650, m_gscVoiceKeepDays));
+        m_gscVoiceKeepMin = std::max(0, std::min(100000, m_gscVoiceKeepMin));
 
         validate();
 
@@ -326,6 +371,30 @@ void RadioPagingModSettings::applySettings(const QStringList& settingsKeys, cons
     }
     if (settingsKeys.contains("flexCollapse")) {
         m_flexCollapse = settings.m_flexCollapse;
+    }
+    if (settingsKeys.contains("gscMode")) {
+        m_gscMode = settings.m_gscMode;
+    }
+    if (settingsKeys.contains("gscInverted")) {
+        m_gscInverted = settings.m_gscInverted;
+    }
+    if (settingsKeys.contains("gscVoiceSeconds")) {
+        m_gscVoiceSeconds = settings.m_gscVoiceSeconds;
+    }
+    if (settingsKeys.contains("audioInputDeviceName")) {
+        m_audioInputDeviceName = settings.m_audioInputDeviceName;
+    }
+    if (settingsKeys.contains("channelAlias")) {
+        m_channelAlias = settings.m_channelAlias;
+    }
+    if (settingsKeys.contains("gscVoiceDirectory")) {
+        m_gscVoiceDirectory = settings.m_gscVoiceDirectory;
+    }
+    if (settingsKeys.contains("gscVoiceKeepDays")) {
+        m_gscVoiceKeepDays = settings.m_gscVoiceKeepDays;
+    }
+    if (settingsKeys.contains("gscVoiceKeepMin")) {
+        m_gscVoiceKeepMin = settings.m_gscVoiceKeepMin;
     }
     if (settingsKeys.contains("mixPocsag")) {
         m_flexMixPocsag = settings.m_flexMixPocsag;
@@ -425,6 +494,30 @@ QString RadioPagingModSettings::getDebugString(const QStringList& settingsKeys, 
     }
     if (settingsKeys.contains("flexCollapse") || force) {
         ostr << " m_flexCollapse: " << m_flexCollapse;
+    }
+    if (settingsKeys.contains("gscMode") || force) {
+        ostr << " m_gscMode: " << m_gscMode;
+    }
+    if (settingsKeys.contains("gscInverted") || force) {
+        ostr << " m_gscInverted: " << m_gscInverted;
+    }
+    if (settingsKeys.contains("gscVoiceSeconds") || force) {
+        ostr << " m_gscVoiceSeconds: " << m_gscVoiceSeconds;
+    }
+    if (settingsKeys.contains("audioInputDeviceName") || force) {
+        ostr << " m_audioInputDeviceName: " << m_audioInputDeviceName.toStdString();
+    }
+    if (settingsKeys.contains("channelAlias") || force) {
+        ostr << " m_channelAlias: " << m_channelAlias.toStdString();
+    }
+    if (settingsKeys.contains("gscVoiceDirectory") || force) {
+        ostr << " m_gscVoiceDirectory: " << m_gscVoiceDirectory.toStdString();
+    }
+    if (settingsKeys.contains("gscVoiceKeepDays") || force) {
+        ostr << " m_gscVoiceKeepDays: " << m_gscVoiceKeepDays;
+    }
+    if (settingsKeys.contains("gscVoiceKeepMin") || force) {
+        ostr << " m_gscVoiceKeepMin: " << m_gscVoiceKeepMin;
     }
     if (settingsKeys.contains("mixPocsag") || force) {
         ostr << " m_flexMixPocsag: " << m_flexMixPocsag;

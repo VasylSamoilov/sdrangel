@@ -62,6 +62,10 @@ public:
         bool m_pocsagInverted = false;
         RadioPagingFlexEncoder::TxMessage m_flex;
         bool m_flexInverted = false;    //!< The network polarity, or the other one (frames given to it when free)
+        RadioPagingGsc::TxMessage m_gsc;
+        bool m_gscInverted = false;     //!< The polarity of the transmission the message goes in
+        RadioPagingGscTxStream::Voice m_voice;  //!< GSC voice page: the sound, at the rate of the modulator
+        bool m_live = false;            //!< GSC live voice page: the voice comes with pushLive, up to the voice length setting
     };
 
     enum State {
@@ -84,6 +88,9 @@ public:
         bool m_ers = false;             //!< FLEX emergency re-synchronization being sent
         int m_ersMs = 0;                //!< Length of the last re-synchronization, ms
         quint64 m_ersCount = 0;         //!< Re-synchronizations sent
+        bool m_liveActive = false;      //!< A live voice page is being sent
+        bool m_liveOpen = false;        //!< Its alert time is over: the voice is taken
+        quint64 m_liveId = 0;
     };
 
     RadioPagingModSource();
@@ -111,6 +118,13 @@ public:
     static RadioPagingMixTxStream::Config mixConfig(const RadioPagingModSettings& settings);
 
     void addRequest(const Request& request);
+    //! Called (from the thread of the source, with its lock held: do not call it back) when a message
+    //! was sent (true) or will not be (false)
+    void setNotify(const std::function<void(quint64 id, bool sent)>& notify) { m_notify = notify; }
+    //! Voice of the live voice page being sent (taken once its alert time is over)
+    void pushLive(const std::vector<float>& samples);
+    //! The live voice page ends: the turn-off word follows
+    void endLive();
     //! Drop the messages queued
     void clear();
     //! Drop the messages queued; one-shot: end the transmission being sent (ramp down)
@@ -161,8 +175,11 @@ private:
     Real m_levelSum;
     static const int m_levelNbSamples = 480;    // 10 ms at 48 kHz
 
+    std::function<void(quint64, bool)> m_notify;
+    void drop(const std::vector<uint64_t>& ids);
     void makeStream();
     bool mixing() const;
+    RadioPagingModSettings::Mode effectiveMode() const;
     void applyStreamDefaults();
     void dropInFlight();
     void endTransmission();

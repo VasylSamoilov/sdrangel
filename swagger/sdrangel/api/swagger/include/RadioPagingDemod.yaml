@@ -42,6 +42,24 @@ RadioPagingDemodSettings:
       description: "Play the voice of GSC voice pages (1 for yes, 0 for no)"
       type: integer
       format: int32
+    gscVoiceRecord:
+      description: "Record the voice of GSC voice pages to a WAV file, the path is voice_file in the protocol data of the message record (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    gscVoiceDirectory:
+      description: "Directory of the voice files. Empty: radiopaging/voice in the application data directory"
+      type: string
+    gscVoiceKeepDays:
+      description: "Voice files older than this many days are deleted when a new voice file is written (0 to keep them all). The newest gscVoiceKeepMin files are kept whatever their age"
+      type: integer
+      format: int32
+    gscVoiceKeepMin:
+      description: "The number of the newest voice files that are not deleted"
+      type: integer
+      format: int32
+    channelAlias:
+      description: "Name of the demodulator, set in the channel alias of every message record and in the names of the voice files. Empty: the frequency of the channel in Hz"
+      type: string
     volume:
       description: Voice audio gain
       type: number

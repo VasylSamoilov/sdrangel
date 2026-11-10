@@ -627,6 +627,353 @@ bool RadioPagingFlexTxStream::next(RadioPagingTxBlock& block)
 }
 
 // ---------------------------------------------------------------------------
+// GSC
+// ---------------------------------------------------------------------------
+
+const int RadioPagingGscTxStream::m_baud;
+const int RadioPagingGscTxStream::m_alertMs;
+
+RadioPagingGscTxStream::RadioPagingGscTxStream(RadioPagingGsc::Mode mode) :
+    m_mode(mode),
+    m_inTransmission(false)
+{
+}
+
+bool RadioPagingGscTxStream::add(const RadioPagingGsc::TxMessage& message, bool inverted, uint64_t id, std::string& error,
+    const Voice& voice)
+{
+    if (message.m_type == RadioPagingGsc::Data)
+    {
+        error = "GSC message type must be tone, voice, numeric or alphanumeric";
+        return false;
+    }
+    if ((message.m_type == RadioPagingGsc::Voice) && (!voice || voice->m_samples.empty()))
+    {
+        error = "A GSC voice page needs a sound file";
+        return false;
+    }
+
+    RadioPagingGsc::EncodeOptions options;
+    options.m_mode = RadioPagingGsc::Single;
+    RadioPagingGsc::EncodeResult trial = RadioPagingGsc::encode({ message }, options);
+
+    if (!trial.m_ok)
+    {
+        error = trial.m_error;
+        return false;
+    }
+
+    m_queue.push_back(Item{message, inverted, trial.m_preamble, id, (message.m_type == RadioPagingGsc::Voice) ? voice : Voice()});
+    return true;
+}
+
+bool RadioPagingGscTxStream::addLive(const RadioPagingGsc::TxMessage& message, bool inverted, uint64_t id, std::string& error,
+    int maxSeconds)
+{
+    if (message.m_type != RadioPagingGsc::Voice)
+    {
+        error = "A live page is a voice page";
+        return false;
+    }
+    if (maxSeconds < 1)
+    {
+        error = "A live voice page needs a voice length";
+        return false;
+    }
+
+    RadioPagingGsc::EncodeOptions options;
+    options.m_mode = RadioPagingGsc::Single;
+    RadioPagingGsc::EncodeResult trial = RadioPagingGsc::encode({ message }, options);
+
+    if (!trial.m_ok)
+    {
+        error = trial.m_error;
+        return false;
+    }
+
+    Item item{message, inverted, trial.m_preamble, id, Voice()};
+    item.m_live = true;
+    item.m_liveSeconds = maxSeconds;
+    m_queue.push_back(item);
+    return true;
+}
+
+void RadioPagingGscTxStream::pushLive(const float *samples, size_t count)
+{
+    // About a second of voice at most waits: the voice is sent as it comes
+    const size_t maxWaiting = RadioPagingWav::m_sampleRate;
+
+    if ((m_live != LiveVoice) || m_liveEnding) {
+        return;
+    }
+
+    for (size_t i = 0; (i < count) && (m_liveSamples.size() < maxWaiting); i++) {
+        m_liveSamples.push_back(samples[i]);
+    }
+}
+
+void RadioPagingGscTxStream::endLive()
+{
+    if (m_live != LiveNone) {
+        m_liveEnding = true;
+    }
+}
+
+// The live page: the voice pushed, then the turn-off word. With no voice waiting the carrier is
+// left unmodulated for 10 ms at a time. The voice ends at the longest voice length, counted in
+// time (what is waiting is sent first)
+bool RadioPagingGscTxStream::nextLive(RadioPagingTxBlock& block)
+{
+    const size_t chunk = RadioPagingWav::m_sampleRate / 40;     // 25 ms
+    const size_t silence = RadioPagingWav::m_sampleRate / 100;  // 10 ms
+
+    if (m_live == LiveAlert)
+    {
+        m_live = LiveVoice;
+        m_liveSent = 0;
+    }
+
+    bool limit = (m_liveSent >= m_liveLimit);
+
+    if (limit || (m_liveEnding && m_liveSamples.empty()))
+    {
+        block = m_liveEnd;
+        m_live = LiveNone;
+        m_liveEnding = false;
+        m_liveSamples.clear();
+        return true;
+    }
+
+    block.m_baud = RadioPagingWav::m_sampleRate;
+    block.m_shaping = RadioPagingWav::m_sampleRate / 2.0;
+
+    if (m_liveSamples.empty())
+    {
+        block.m_levels.assign(silence, 0.0f);
+        m_liveSent += silence;
+        return true;
+    }
+
+    size_t n = std::min(chunk, m_liveSamples.size());
+
+    for (size_t i = 0; i < n; i++)
+    {
+        block.m_levels.push_back(m_liveInverted ? -m_liveSamples.front() : m_liveSamples.front());
+        m_liveSamples.pop_front();
+    }
+
+    m_liveSent += n;
+    return true;
+}
+
+void RadioPagingGscTxStream::begin(int64_t epochMs)
+{
+    (void) epochMs;
+    m_inTransmission = false;
+}
+
+// The messages waiting, and the ones taken from the queue that could not be encoded. The
+// transmission being sent goes on
+std::vector<uint64_t> RadioPagingGscTxStream::clear()
+{
+    std::vector<uint64_t> ids;
+
+    ids.swap(m_failed);
+
+    for (const Item& item : m_queue) {
+        ids.push_back(item.m_id);
+    }
+
+    m_queue.clear();
+    return ids;
+}
+
+// The transmission is cut: the messages of the blocks not returned yet (the end of a voice page)
+// and the ones that could not be encoded
+std::vector<uint64_t> RadioPagingGscTxStream::cut()
+{
+    std::vector<uint64_t> ids;
+
+    ids.swap(m_failed);
+
+    for (const RadioPagingTxBlock& block : m_blocks) {
+        ids.insert(ids.end(), block.m_ids.begin(), block.m_ids.end());
+    }
+
+    m_blocks.clear();
+
+    // A live page: its id is on the turn-off word, not sent yet
+    if (m_live != LiveNone)
+    {
+        ids.push_back(m_liveId);
+        m_live = LiveNone;
+        m_liveEnding = false;
+        m_liveSamples.clear();
+    }
+
+    return ids;
+}
+
+// One transmission: the first message queued and the ones that go with it in the mode. A voice
+// page is a transmission of its own: the page, the alert time and the voice, the turn-off word
+bool RadioPagingGscTxStream::next(RadioPagingTxBlock& block)
+{
+    block = RadioPagingTxBlock();
+
+    if (!m_blocks.empty())
+    {
+        block = m_blocks.front();
+        m_blocks.pop_front();
+        return true;
+    }
+
+    if (m_live != LiveNone) {
+        return nextLive(block);
+    }
+
+    if (m_inTransmission || m_queue.empty())
+    {
+        m_inTransmission = false;
+        return false;
+    }
+
+    const Item first = m_queue.front();
+    const bool voicePage = (first.m_message.m_type == RadioPagingGsc::Voice);
+    std::vector<Item> group;
+    bool together = (m_mode != RadioPagingGsc::Single) && !voicePage;
+
+    for (auto it = m_queue.begin(); (it != m_queue.end()) && (group.size() < (size_t) RadioPagingGsc::m_maxBatchMessages);)
+    {
+        bool take = group.empty()
+            || (together && (it->m_message.m_type != RadioPagingGsc::Voice) && (it->m_inverted == first.m_inverted)
+                && ((m_mode == RadioPagingGsc::NonBatterySaver) || (it->m_preamble == first.m_preamble)));
+
+        if (take)
+        {
+            group.push_back(*it);
+            it = m_queue.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+
+    RadioPagingGsc::EncodeOptions options;
+    options.m_mode = voicePage ? RadioPagingGsc::Single : m_mode;
+    std::vector<RadioPagingGsc::TxMessage> messages;
+
+    for (const Item& item : group) {
+        messages.push_back(item.m_message);
+    }
+
+    RadioPagingGsc::EncodeResult result = RadioPagingGsc::encode(messages, options);
+
+    // The messages were encoded one by one when queued: if the group does not encode, the
+    // first goes alone and the others stay queued, in their order
+    if (!result.m_ok && (group.size() > 1))
+    {
+        for (size_t i = group.size() - 1; i > 0; i--) {
+            m_queue.push_front(group[i]);
+        }
+
+        group.resize(1);
+        options.m_mode = RadioPagingGsc::Single;
+        result = RadioPagingGsc::encode({ group[0].m_message }, options);
+    }
+
+    // Not reached: the message was encoded when queued. If it ever happens the ids are reported
+    // with the messages dropped (cut, clear) and the transmission ends
+    if (!result.m_ok)
+    {
+        for (const Item& item : group) {
+            m_failed.push_back(item.m_id);
+        }
+
+        return false;
+    }
+
+    auto symbols = [&first](const std::vector<uint8_t>& bits) {
+        std::vector<float> levels;
+
+        for (uint8_t bit : bits) {
+            levels.push_back((bit != 0) != first.m_inverted ? 1.0f : -1.0f);
+        }
+
+        return levels;
+    };
+
+    block.m_baud = m_baud;
+    block.m_shaping = m_baud;
+    block.m_levels = symbols(result.m_bits);
+
+    if (!voicePage)
+    {
+        for (const Item& item : group) {
+            block.m_ids.push_back(item.m_id);
+        }
+    }
+    else if (first.m_live)
+    {
+        // The alert time, then the voice as it comes (nextLive); the turn-off word is prepared with
+        // the id of the page
+        RadioPagingTxBlock alert;
+        alert.m_baud = RadioPagingWav::m_sampleRate;
+        alert.m_shaping = RadioPagingWav::m_sampleRate / 2.0;
+        alert.m_levels.assign((size_t) (m_alertMs * RadioPagingWav::m_sampleRate / 1000), 0.0f);
+
+        std::vector<uint8_t> turnOff;
+        RadioPagingGsc::appendActivationCode(turnOff);
+        m_liveEnd = RadioPagingTxBlock();
+        m_liveEnd.m_baud = m_baud;
+        m_liveEnd.m_shaping = m_baud;
+        m_liveEnd.m_levels = symbols(turnOff);
+        m_liveEnd.m_ids.push_back(first.m_id);
+
+        m_blocks.push_back(alert);
+        m_live = LiveAlert;
+        m_liveId = first.m_id;
+        m_liveInverted = first.m_inverted;
+        m_liveEnding = false;
+        m_liveLimit = (size_t) first.m_liveSeconds * RadioPagingWav::m_sampleRate;
+        m_liveSent = 0;
+        m_liveSamples.clear();
+    }
+    else
+    {
+        // The alert time (the carrier unmodulated) and the voice, as they are; inverted with the
+        // polarity of the transmission. Then the activation code again after a comma: the
+        // turn-off word, with the id of the page
+        RadioPagingTxBlock audio;
+        const RadioPagingWav::Audio& voice = *first.m_voice;
+        size_t alert = (size_t) (m_alertMs * voice.m_rate / 1000.0);
+
+        audio.m_baud = voice.m_rate;
+        audio.m_shaping = voice.m_rate / 2.0;
+        audio.m_levels.assign(alert, 0.0f);
+
+        for (float sample : voice.m_samples) {
+            audio.m_levels.push_back(first.m_inverted ? -sample : sample);
+        }
+
+        std::vector<uint8_t> turnOff;
+        RadioPagingGsc::appendActivationCode(turnOff);
+
+        RadioPagingTxBlock end;
+        end.m_baud = m_baud;
+        end.m_shaping = m_baud;
+        end.m_levels = symbols(turnOff);
+        end.m_ids.push_back(first.m_id);
+
+        m_blocks.push_back(audio);
+        m_blocks.push_back(end);
+    }
+
+    m_inTransmission = true;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // FLEX mixed with POCSAG
 // ---------------------------------------------------------------------------
 

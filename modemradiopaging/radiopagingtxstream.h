@@ -31,7 +31,9 @@
 #include "export.h"
 #include "radiopagingflex.h"
 #include "radiopagingflexscheduler.h"
+#include "radiopaginggsc.h"
 #include "radiopagingpocsag.h"
+#include "radiopagingwav.h"
 
 // Symbols of a transmitter, a block at a time, for the modulator (RadioPagingFskMod).
 //
@@ -238,6 +240,98 @@ private:
     std::deque<RadioPagingTxBlock> m_blocks;    //!< Blocks of the frame being sent
 
     void buildFrame();
+};
+
+// GSC (Golay Sequential Code, Rep. ITU-R M.900-2), one-shot only: GSC has no network mode.
+// The queued messages make transmissions of one polarity (the same for a whole transmission):
+//   Auto               messages of the same preamble value in a batch (up to 32), a message
+//                      alone after its own preamble
+//   Single             one message per transmission
+//   Batch              as Auto, a batch even for one message
+//   NonBatterySaver    the queued messages of the polarity after one 1100 pattern, whatever
+//                      their preamble values
+// At most 32 messages (RadioPagingGsc::m_maxBatchMessages) go in a transmission in any mode;
+// the others stay queued, in order, for the next one.
+// A voice page is a transmission of its own, in any mode (Motorola GSC manual, Figure 6-1):
+//   the page (preamble, start code, address, activation code), the alert time of 2 s (the
+//   carrier unmodulated), the voice message (the samples of a sound file, FM with the full
+//   scale at the deviation, no emphasis) and the turn-off word (a comma and the activation
+//   code again). The voice is a block at the rate of the sound file, its samples as they are
+//   (RadioPagingWav); the modulator smooths the held samples with a Gaussian filter of a
+//   cutoff at half the sample rate.
+// Normal polarity: a binary 1 is a positive deviation; the voice is inverted with it.
+class MODEMRADIOPAGING_API RadioPagingGscTxStream : public RadioPagingTxStream
+{
+public:
+    typedef std::shared_ptr<const RadioPagingWav::Audio> Voice;
+
+    static const int m_alertMs = 2000;          //!< Alert time of a voice page, the carrier unmodulated
+
+    explicit RadioPagingGscTxStream(RadioPagingGsc::Mode mode);
+
+    //!< Queue a message in a polarity. False and an error if it can not be encoded. A voice
+    //!< page needs the voice (the other types none)
+    bool add(const RadioPagingGsc::TxMessage& message, bool inverted, uint64_t id, std::string& error,
+        const Voice& voice = Voice());
+    //!< Queue a live voice page: the page and the alert time, then the voice as it is pushed with
+    //!< pushLive (the carrier unmodulated when none is waiting), until endLive or maxSeconds of
+    //!< voice, then the turn-off word. The voice message of the live page is sent once it has ended
+    bool addLive(const RadioPagingGsc::TxMessage& message, bool inverted, uint64_t id, std::string& error, int maxSeconds);
+    //!< The alert time is over: the voice is taken. False for a page not in this phase
+    bool liveOpen() const { return m_live == LiveVoice; }
+    //!< A live page is being sent (any phase), and its id
+    bool liveActive() const { return m_live != LiveNone; }
+    uint64_t liveId() const { return m_liveId; }
+    //!< Voice samples of the live page, at m_sampleRate, -1 to +1 (taken when the voice is open)
+    void pushLive(const float *samples, size_t count);
+    //!< The voice is over: the turn-off word follows what is pushed
+    void endLive();
+    void setMode(RadioPagingGsc::Mode mode) { m_mode = mode; }
+    RadioPagingGsc::Mode mode() const { return m_mode; }
+
+    bool hasWork() const override { return !m_queue.empty(); }
+    void begin(int64_t epochMs) override;
+    bool next(RadioPagingTxBlock& block) override;
+    size_t pending() const override { return m_queue.size(); }
+    std::vector<uint64_t> clear() override;
+    std::vector<uint64_t> cut() override;
+    bool continuous() const override { return false; }
+
+    static const int m_baud = 600;      //!< Rep. ITU-R M.900-2: 600 bit/s
+
+private:
+    struct Item
+    {
+        RadioPagingGsc::TxMessage m_message;
+        bool m_inverted;
+        int m_preamble;                 //!< Preamble value index of the address
+        uint64_t m_id;
+        Voice m_voice;                  //!< Voice page only
+        bool m_live = false;            //!< Live voice page: no voice yet
+        int m_liveSeconds = 0;          //!< Longest voice of a live page
+    };
+
+    enum LivePhase {
+        LiveNone,
+        LiveAlert,                      //!< The page and the alert time are being sent
+        LiveVoice,                      //!< The voice is taken as it is pushed
+    };
+
+    LivePhase m_live = LiveNone;
+    uint64_t m_liveId = 0;
+    bool m_liveInverted = false;
+    bool m_liveEnding = false;          //!< endLive was called
+    size_t m_liveLimit = 0;             //!< Samples of the longest voice
+    size_t m_liveSent = 0;              //!< Voice samples sent
+    std::deque<float> m_liveSamples;    //!< Voice waiting to be sent
+    RadioPagingTxBlock m_liveEnd;       //!< The turn-off word
+    bool nextLive(RadioPagingTxBlock& block);
+
+    RadioPagingGsc::Mode m_mode;
+    std::deque<Item> m_queue;
+    std::deque<RadioPagingTxBlock> m_blocks;    //!< Blocks of the transmission being sent
+    std::vector<uint64_t> m_failed;     //!< Ids of messages taken from the queue that did not encode
+    bool m_inTransmission;
 };
 
 // FLEX mixed with POCSAG (STD-43A Chapter 7), network only. FLEX frames stay on their time

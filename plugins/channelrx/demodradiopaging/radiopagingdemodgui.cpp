@@ -17,7 +17,14 @@
 
 #include <QDateTime>
 #include <QDebug>
+#include <QDialog>
+#include <QFileDialog>
+#include <QFormLayout>
 #include <QLabel>
+#include <QMessageBox>
+#include <QPushButton>
+#include <QSpinBox>
+#include <QVBoxLayout>
 #include <QPainter>
 #include <QScrollBar>
 #include <QStyledItemDelegate>
@@ -42,6 +49,7 @@
 #include "maincore.h"
 
 #include "radiopagingdemod.h"
+#include "radiopagingvoicestore.h"
 
 const int RadioPagingDemodGUI::m_maxRows;
 
@@ -550,6 +558,120 @@ void RadioPagingDemodGUI::on_gscAudio_toggled(bool checked)
     applySettings(QStringList("gscAudio"));
 }
 
+void RadioPagingDemodGUI::on_gscVoiceRecord_toggled(bool checked)
+{
+    m_settings.m_gscVoiceRecord = checked;
+    applySettings(QStringList("gscVoiceRecord"));
+}
+
+void RadioPagingDemodGUI::on_channelAlias_editingFinished()
+{
+    m_settings.m_channelAlias = ui->channelAlias->text().trimmed();
+    applySettings(QStringList("channelAlias"));
+}
+
+namespace {
+
+QString sizeText(qint64 bytes)
+{
+    return RadioPagingVoiceStore::sizeText(bytes);
+}
+
+} // namespace
+
+// The voice files: the statistics of the directory, the files kept, the deletion of the old ones
+void RadioPagingDemodGUI::on_gscVoiceFiles_clicked()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle("Voice files");
+    QVBoxLayout *layout = new QVBoxLayout(&dialog);
+    QFormLayout *form = new QFormLayout();
+    QSpinBox *days = new QSpinBox(&dialog);
+    QSpinBox *minimum = new QSpinBox(&dialog);
+    QLabel *stats = new QLabel(&dialog);
+    QPushButton *clean = new QPushButton("Delete the old files...", &dialog);
+    QPushButton *close = new QPushButton("Close", &dialog);
+
+    days->setRange(0, 3650);
+    days->setValue(m_settings.m_gscVoiceKeepDays);
+    days->setSpecialValueText("Keep all");
+    days->setSuffix(" days");
+    days->setToolTip("Files older than this are deleted, a few at a time, when a new voice file is written. "
+        "Keep all: no file is deleted for its age");
+    minimum->setRange(0, 100000);
+    minimum->setValue(m_settings.m_gscVoiceKeepMin);
+    minimum->setToolTip("The newest files kept whatever their age");
+    form->addRow("Delete after", days);
+    form->addRow("Always keep the newest", minimum);
+    layout->addLayout(form);
+    layout->addWidget(stats);
+    layout->addWidget(clean);
+    layout->addWidget(close);
+
+    auto refresh = [this, &dialog, days, minimum, stats, clean]()
+    {
+        RadioPagingVoiceStore::Stats s = RadioPagingVoiceStore::stats(m_settings.voiceDirectory(), days->value(), minimum->value());
+        stats->setText(QString("Directory: %1\nFiles: %2, %3\nOldest: %4\nNewest: %5\nTo delete now: %6 files, %7\nFree space on the disk: %8")
+            .arg(m_settings.voiceDirectory())
+            .arg(s.m_files).arg(sizeText(s.m_bytes))
+            .arg(s.m_oldest.isValid() ? s.m_oldest.toString("yyyy-MM-dd HH:mm") : QString("-"))
+            .arg(s.m_newest.isValid() ? s.m_newest.toString("yyyy-MM-dd HH:mm") : QString("-"))
+            .arg(s.m_expired).arg(sizeText(s.m_expiredBytes))
+            .arg(sizeText(s.m_freeBytes)));
+        clean->setEnabled(s.m_expired > 0);
+        (void) dialog;
+    };
+
+    QObject::connect(days, QOverload<int>::of(&QSpinBox::valueChanged), &dialog, [this, refresh](int value) {
+        m_settings.m_gscVoiceKeepDays = value;
+        applySettings(QStringList("gscVoiceKeepDays"));
+        refresh();
+    });
+    QObject::connect(minimum, QOverload<int>::of(&QSpinBox::valueChanged), &dialog, [this, refresh](int value) {
+        m_settings.m_gscVoiceKeepMin = value;
+        applySettings(QStringList("gscVoiceKeepMin"));
+        refresh();
+    });
+    QObject::connect(clean, &QPushButton::clicked, &dialog, [this, &dialog, refresh]()
+    {
+        RadioPagingVoiceStore::Stats s = RadioPagingVoiceStore::stats(m_settings.voiceDirectory(),
+            m_settings.m_gscVoiceKeepDays, m_settings.m_gscVoiceKeepMin);
+
+        if (QMessageBox::question(&dialog, "Delete the old files",
+            QString("Delete %1 voice files (%2) from\n%3 ?\nThis cannot be undone.").arg(s.m_expired).arg(sizeText(s.m_expiredBytes))
+            .arg(m_settings.voiceDirectory())) == QMessageBox::Yes)
+        {
+            RadioPagingVoiceStore::cleanup(m_settings.voiceDirectory(), m_settings.m_gscVoiceKeepDays, m_settings.m_gscVoiceKeepMin, -1);
+        }
+
+        refresh();
+    });
+    QObject::connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
+
+    refresh();
+    dialog.exec();
+}
+
+void RadioPagingDemodGUI::voiceDirectorySelect(const QPoint& p)
+{
+    (void) p;
+    QString directory = QFileDialog::getExistingDirectory(this, "Directory of the voice files", m_settings.voiceDirectory());
+
+    if (!directory.isEmpty())
+    {
+        m_settings.m_gscVoiceDirectory = directory;
+        displayVoiceRecordToolTip();
+        applySettings(QStringList("gscVoiceDirectory"));
+    }
+}
+
+void RadioPagingDemodGUI::displayVoiceRecordToolTip()
+{
+    ui->gscVoiceRecord->setToolTip(QString("Left: record the voice message of GSC voice pages to a WAV file; its path is in the "
+        "message record (voice_file). Right: select the directory of the files, used from the next voice message. Now: %1")
+        .arg(m_settings.voiceDirectory()));
+}
+
 void RadioPagingDemodGUI::on_volume_valueChanged(int value)
 {
     ui->volumeText->setText(QString::number(value));
@@ -686,6 +808,8 @@ RadioPagingDemodGUI::RadioPagingDemodGUI(PluginAPI* pluginAPI, DeviceUISet *devi
 
     CRightClickEnabler *audioRightClickEnabler = new CRightClickEnabler(ui->gscAudio);
     connect(audioRightClickEnabler, SIGNAL(rightClick(const QPoint &)), this, SLOT(audioSelect(const QPoint &)));
+    CRightClickEnabler *recordRightClickEnabler = new CRightClickEnabler(ui->gscVoiceRecord);
+    connect(recordRightClickEnabler, SIGNAL(rightClick(const QPoint &)), this, SLOT(voiceDirectorySelect(const QPoint &)));
     resizeTable();
 
     displaySettings();
@@ -740,6 +864,9 @@ void RadioPagingDemodGUI::displaySettings()
     ui->gscVoiceTimeout->setValue(m_settings.m_gscVoiceTimeout);
     ui->gscDeviation->setValue(m_settings.m_gscDeviation);
     ui->gscAudio->setChecked(m_settings.m_gscAudio);
+    ui->gscVoiceRecord->setChecked(m_settings.m_gscVoiceRecord);
+    ui->channelAlias->setText(m_settings.m_channelAlias);
+    displayVoiceRecordToolTip();
     ui->volume->setValue(std::round(m_settings.m_volume * 100.0f));
     ui->volumeText->setText(QString::number(ui->volume->value()));
 
@@ -988,6 +1115,9 @@ void RadioPagingDemodGUI::makeUIConnections()
     QObject::connect(ui->gscVoiceTimeout, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingDemodGUI::on_gscVoiceTimeout_valueChanged);
     QObject::connect(ui->gscDeviation, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingDemodGUI::on_gscDeviation_valueChanged);
     QObject::connect(ui->gscAudio, &QToolButton::toggled, this, &RadioPagingDemodGUI::on_gscAudio_toggled);
+    QObject::connect(ui->gscVoiceRecord, &QToolButton::toggled, this, &RadioPagingDemodGUI::on_gscVoiceRecord_toggled);
+    QObject::connect(ui->gscVoiceFiles, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_gscVoiceFiles_clicked);
+    QObject::connect(ui->channelAlias, &QLineEdit::editingFinished, this, &RadioPagingDemodGUI::on_channelAlias_editingFinished);
     QObject::connect(ui->volume, &QDial::valueChanged, this, &RadioPagingDemodGUI::on_volume_valueChanged);
     QObject::connect(ui->clearTable, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_clearTable_clicked);
 }

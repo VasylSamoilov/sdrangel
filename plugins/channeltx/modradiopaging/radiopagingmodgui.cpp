@@ -17,6 +17,19 @@
 
 #include <QDateTime>
 #include <QDebug>
+#include <QFileDialog>
+#include <QAction>
+#include <QDesktopServices>
+#include <QDialog>
+#include <QFileInfo>
+#include <QFormLayout>
+#include <QLabel>
+#include <QMessageBox>
+#include <QPushButton>
+#include <QSpinBox>
+#include <QUrl>
+#include <QVBoxLayout>
+#include <QStyle>
 #include <QSignalBlocker>
 #include <QStandardItemModel>
 
@@ -27,6 +40,12 @@
 #include "gui/basicchannelsettingsdialog.h"
 #include "gui/dialpopup.h"
 #include "gui/dialogpositioner.h"
+#include "gui/audioselectdialog.h"
+#include "gui/crightclickenabler.h"
+#include "dsp/dspengine.h"
+#include "audio/audiodevicemanager.h"
+#include "radiopagingwav.h"
+#include "radiopagingvoicestore.h"
 #include "maincore.h"
 
 #include "ui_radiopagingmodgui.h"
@@ -135,11 +154,54 @@ bool RadioPagingModGUI::handleMessage(const Message& message)
     {
         const RadioPagingMod::MsgReportTx& report = (RadioPagingMod::MsgReportTx&) message;
 
-        if (report.getId() != 0) {
+        if (m_liveWaiting)
+        {
+            // The live voice page is queued: the button becomes End, or the request was refused
+            m_liveWaiting = false;
+            ui->send->setEnabled(true);
+
+            if (report.getId() != 0)
+            {
+                m_liveId = report.getId();
+                m_liveSeen = false;
+                ui->send->setText("End (alert time)");
+            }
+            else
+            {
+                displayMessageType();
+            }
+        }
+
+        if (report.getId() != 0)
+        {
             log(QString("#%1 queued").arg(report.getId()));
-        } else {
+
+            if (!report.getWarning().isEmpty()) {
+                log(QString("Warning: %1").arg(report.getWarning()));
+            }
+        }
+        else {
             log(QString("Refused: %1").arg(report.getError()));
         }
+        return true;
+    }
+    else if (RadioPagingMod::MsgTxLog::match(message))
+    {
+        const RadioPagingMod::MsgTxLog& entry = (const RadioPagingMod::MsgTxLog&) message;
+        showTx(entry.getRecord(), entry.getStatus());
+
+        // A live voice page that is dropped (aborted, cleared) is over
+        if ((entry.getStatus() == "dropped") && (m_liveId != 0)
+         && (entry.getRecord().m_protocolData.value("tx_id").toULongLong() == m_liveId))
+        {
+            log("Voice page dropped");
+            m_liveId = 0;
+            stopMic();
+            m_liveSeen = false;
+            ui->send->setEnabled(true);
+            displayMessageType();
+        }
+
         return true;
     }
     else if (DSPSignalNotification::match(message))
@@ -243,7 +305,15 @@ void RadioPagingModGUI::on_speed_currentIndexChanged(int index)
         return;
     }
 
-    if (m_settings.m_protocol == RadioPagingModSettings::Flex)
+    if (m_settings.m_protocol == RadioPagingModSettings::Gsc)
+    {
+        if (index <= (int) RadioPagingGsc::NonBatterySaver)
+        {
+            m_settings.m_gscMode = index;
+            applySettings(QStringList("gscMode"));
+        }
+    }
+    else if (m_settings.m_protocol == RadioPagingModSettings::Flex)
     {
         if (index <= (int) RadioPagingFlex::Mode6400_4)
         {
@@ -262,7 +332,12 @@ void RadioPagingModGUI::on_speed_currentIndexChanged(int index)
 
 void RadioPagingModGUI::on_polarity_currentIndexChanged(int index)
 {
-    if (m_settings.m_protocol == RadioPagingModSettings::Flex)
+    if (m_settings.m_protocol == RadioPagingModSettings::Gsc)
+    {
+        m_settings.m_gscInverted = (index == 1);
+        applySettings(QStringList("gscInverted"));
+    }
+    else if (m_settings.m_protocol == RadioPagingModSettings::Flex)
     {
         m_settings.m_flexInverted = (index == 1);
         applySettings(QStringList("flexInverted"));
@@ -278,6 +353,12 @@ void RadioPagingModGUI::on_collapse_valueChanged(int value)
 {
     m_settings.m_flexCollapse = value;
     applySettings(QStringList("flexCollapse"));
+}
+
+void RadioPagingModGUI::on_voiceSeconds_valueChanged(int value)
+{
+    m_settings.m_gscVoiceSeconds = value;
+    applySettings(QStringList("gscVoiceSeconds"));
 }
 
 void RadioPagingModGUI::on_rampUp_valueChanged(double value)
@@ -307,10 +388,23 @@ void RadioPagingModGUI::send()
     static const RadioPagingFlex::MessageType flexTypes[3] = {
         RadioPagingFlex::Alphanumeric, RadioPagingFlex::Numeric, RadioPagingFlex::Tone
     };
+    // The button is End while a live voice page is going on
+    if (m_liveId != 0)
+    {
+        log("Voice: ended");
+        endLive();
+        return;
+    }
+    if (m_liveWaiting) {
+        return;
+    }
+
     RadioPagingMod::TxRequest request;
-    int typeIndex = std::max(0, std::min(2, ui->messageType->currentIndex()));
+    bool gscMessage = (m_settings.m_protocol == RadioPagingModSettings::Gsc);
+    int typeIndex = std::max(0, std::min(gscMessage ? 3 : 2, ui->messageType->currentIndex()));
     bool tone = (typeIndex == 2);
-    std::string text = tone ? std::string() : ui->text->text().toStdString();
+    bool voice = (typeIndex == 3);
+    std::string text = (tone || voice) ? std::string() : ui->text->text().toStdString();
     int overrideIndex = ui->messageSpeed->currentIndex();     // POCSAG speed
 
     bool flexMessage = messageIsFlex();
@@ -320,7 +414,38 @@ void RadioPagingModGUI::send()
         ? (int) (flexMessage ? RadioPagingModSettings::Flex : RadioPagingModSettings::Pocsag) : (int) m_settings.m_protocol;
     request.m_polarity = ui->messagePolarity->currentIndex() - 1;
 
-    if (flexMessage)
+    if (m_settings.m_protocol == RadioPagingModSettings::Gsc)
+    {
+        // Digits only, zero padded to the 6 digits of the address (as the WebAPI integer)
+        QString gscAddress = ui->capcode->text().trimmed();
+
+        if (!gscAddress.isEmpty() && (gscAddress.size() < 6)) {
+            gscAddress = gscAddress.rightJustified(6, QChar('0'));
+        }
+
+        request.m_gsc.m_address = gscAddress.toStdString();
+        request.m_gsc.m_addressNumber = ui->function->currentIndex() + 1;
+        request.m_gsc.m_type = voice ? RadioPagingGsc::Voice : (typeIndex == 2) ? RadioPagingGsc::Tone
+            : (typeIndex == 1) ? RadioPagingGsc::Numeric : RadioPagingGsc::Alphanumeric;
+        request.m_gsc.m_text = text;
+        bool microphone = voice && (ui->voiceSource->currentIndex() == 1);
+        request.m_voiceFile = (voice && !microphone) ? ui->text->text().trimmed() : QString();
+        request.m_live = microphone;
+        m_liveWaiting = microphone;
+
+        if (microphone)
+        {
+            // The page goes out, the microphone is taken after the alert time
+            ui->send->setEnabled(false);
+        }
+
+        log(QString("%1/%2 %3: %4")
+            .arg(gscAddress)
+            .arg(request.m_gsc.m_addressNumber)
+            .arg(ui->messageType->currentText())
+            .arg(microphone ? QString("microphone") : voice ? request.m_voiceFile : QString::fromStdString(text)));
+    }
+    else if (flexMessage)
     {
         bool ok;
         qulonglong capcode = ui->capcode->text().trimmed().toULongLong(&ok);
@@ -362,6 +487,346 @@ void RadioPagingModGUI::on_send_clicked()
 void RadioPagingModGUI::on_text_returnPressed()
 {
     send();
+}
+
+void RadioPagingModGUI::on_messageType_currentIndexChanged(int index)
+{
+    (void) index;
+    displayMessageType();
+}
+
+void RadioPagingModGUI::displayMessageType()
+{
+    bool voice = (m_settings.m_protocol == RadioPagingModSettings::Gsc) && (ui->messageType->currentIndex() == 3);
+
+    if (m_browseAction) {
+        m_browseAction->setVisible(voice);
+    }
+
+    // A voice page: the voice comes from a file, or from the microphone after the alert time
+    bool microphone = voice && (ui->voiceSource->currentIndex() == 1);
+    ui->voiceSource->setVisible(voice);
+    ui->micInput->setVisible(microphone);
+    ui->text->setVisible(!microphone);
+    ui->textLabel->setVisible(!microphone);
+
+    if (m_browseAction) {
+        m_browseAction->setVisible(voice && !microphone);
+    }
+
+    if (!microphone) {
+        ui->send->setText("Send");
+    } else if (m_liveId == 0) {
+        ui->send->setText("Send voice");
+    }
+
+    ui->textLabel->setText(voice ? "File" : "Text");
+    ui->text->setPlaceholderText(voice ? "WAV file" : QString());
+    ui->text->setToolTip(voice
+        ? "Path of a WAV file (8 to 32 bit PCM or float, up to 76.8 kHz). Sent after an alert of 2 s, "
+          "cut at the voice length. Enter to send"
+        : "Message text. Numeric: 0-9, space, U, -, ], [. Alphanumeric: 7-bit characters. Enter to send");
+}
+
+void RadioPagingModGUI::micAudioSelect(const QPoint& p)
+{
+    AudioSelectDialog audioSelect(DSPEngine::instance()->getAudioDeviceManager(), m_settings.m_audioInputDeviceName, true); // true for input
+    audioSelect.move(p);
+    new DialogPositioner(&audioSelect, false);
+    audioSelect.exec();
+
+    if (audioSelect.m_selected)
+    {
+        m_settings.m_audioInputDeviceName = audioSelect.m_audioDeviceName;
+        applySettings(QStringList("audioInputDeviceName"));
+    }
+}
+
+void RadioPagingModGUI::on_micInput_clicked()
+{
+    micAudioSelect(QCursor::pos());
+}
+
+void RadioPagingModGUI::on_voiceSource_currentIndexChanged(int index)
+{
+    (void) index;
+    displayMessageType();
+}
+
+// The microphone is taken when the alert time of the live voice page is over (tick), and
+// released when the page ends: End, or the voice length
+void RadioPagingModGUI::startMic()
+{
+    AudioDeviceManager *audioDeviceManager = DSPEngine::instance()->getAudioDeviceManager();
+    int index = audioDeviceManager->getInputDeviceIndex(m_settings.m_audioInputDeviceName);
+    m_micRate = audioDeviceManager->getInputSampleRate(index);
+
+    if (!m_micResampler.setup(m_micRate))
+    {
+        log(QString("Microphone: the audio input rate %1 Hz is not supported (1 to 76.8 kHz)").arg(m_micRate));
+        endLive();
+        return;
+    }
+
+    m_micSent = 0;
+    m_micFifo.setSize(m_micRate);
+    audioDeviceManager->addAudioSource(&m_micFifo, m_radioPagingMod->getInputMessageQueue(), index);
+    m_micRecording = true;
+    log("Microphone: on the air");
+}
+
+void RadioPagingModGUI::stopMic()
+{
+    if (!m_micRecording) {
+        return;
+    }
+
+    DSPEngine::instance()->getAudioDeviceManager()->removeAudioSource(&m_micFifo);
+    readMic();              // What the fifo still holds
+    m_micRecording = false;
+}
+
+// The voice from the audio input, the channels averaged, resampled to the rate of the modulator
+// as it comes and passed to the transmitter. It stops at the voice length
+void RadioPagingModGUI::readMic()
+{
+    AudioVector buffer(4096);
+    std::vector<float> mono;
+    std::vector<float> out;
+    const quint64 limit = (quint64) m_settings.m_gscVoiceSeconds * RadioPagingWav::m_sampleRate;
+    uint32_t n;
+
+    while ((n = m_micFifo.read((quint8*) &buffer[0], buffer.size())) > 0)
+    {
+        mono.clear();
+
+        for (uint32_t i = 0; i < n; i++) {
+            mono.push_back((buffer[i].l + buffer[i].r) / (2.0f * 32768.0f));
+        }
+
+        out.clear();
+        m_micResampler.process(mono.data(), mono.size(), out);
+
+        if (m_micSent + out.size() > limit) {
+            out.resize((size_t) (limit - std::min(limit, m_micSent)));
+        }
+
+        m_micSent += out.size();
+
+        if (!out.empty()) {
+            m_radioPagingMod->getInputMessageQueue()->push(RadioPagingMod::MsgLiveVoice::create(m_liveId, out));
+        }
+    }
+}
+
+void RadioPagingModGUI::micDataReady()
+{
+    if (m_micRecording) {
+        readMic();
+    }
+}
+
+// End of the live voice page: End, or the page ended by itself
+void RadioPagingModGUI::endLive()
+{
+    stopMic();
+
+    if (m_liveId != 0)
+    {
+        if (m_liveSeen) {
+            m_radioPagingMod->getInputMessageQueue()->push(RadioPagingMod::MsgLiveEnd::create(m_liveId));
+        } else {
+            m_radioPagingMod->getInputMessageQueue()->push(RadioPagingMod::MsgClear::create(true));     // Not started: dropped
+        }
+    }
+
+    m_liveId = 0;
+    m_liveSeen = false;
+    m_liveWaiting = false;
+    ui->send->setEnabled(true);
+    displayMessageType();
+}
+
+// The live voice page: the request, the End button and the counter while it goes on
+void RadioPagingModGUI::updateLive(const RadioPagingModSource::Status& status)
+{
+    if (m_liveId == 0) {
+        return;
+    }
+
+    bool mine = status.m_liveActive && (status.m_liveId == m_liveId);
+
+    if (mine) {
+        m_liveSeen = true;
+    }
+
+    if (mine && status.m_liveOpen && !m_micRecording) {
+        startMic();
+    }
+
+    if (m_liveSeen && !mine)
+    {
+        // Ended by the voice length (or the page was cut)
+        log("Voice page ended");
+        endLive();
+        return;
+    }
+
+    if (m_micRecording)
+    {
+        ui->send->setText(QString("End %1 / %2 s").arg((double) m_micSent / RadioPagingWav::m_sampleRate, 0, 'f', 1)
+            .arg(m_settings.m_gscVoiceSeconds));
+    }
+    else
+    {
+        ui->send->setText("End (alert time)");
+    }
+}
+
+void RadioPagingModGUI::on_channelAlias_editingFinished()
+{
+    m_settings.m_channelAlias = ui->channelAlias->text().trimmed();
+    applySettings(QStringList("channelAlias"));
+}
+
+// The last messages transmitted, the newest first: a row per message, its state updated as it is
+// sent or dropped
+void RadioPagingModGUI::showTx(const MessageRecord& record, const QString& status)
+{
+    const int maxRows = 100;
+    QString id = record.m_protocolData.value("tx_id").toString();
+    int row = -1;
+
+    for (int i = 0; i < ui->txLog->rowCount(); i++)
+    {
+        if (ui->txLog->item(i, 0) && (ui->txLog->item(i, 0)->data(Qt::UserRole).toString() == id)) {
+            row = i;
+            break;
+        }
+    }
+
+    if (row < 0)
+    {
+        ui->txLog->insertRow(0);
+        row = 0;
+
+        while (ui->txLog->rowCount() > maxRows) {
+            ui->txLog->removeRow(ui->txLog->rowCount() - 1);
+        }
+
+        for (int column = 0; column < 6; column++) {
+            ui->txLog->setItem(row, column, new QTableWidgetItem());
+        }
+    }
+
+    QString text = (record.m_msgType == "voice") ? QString("(voice)") : record.m_text;
+    QString file = record.m_protocolData.value("voice_file").toString();
+
+    if (!file.isEmpty()) {
+        text = QString("(voice %1 s) %2").arg(record.m_protocolData.value("voice_seconds").toDouble(), 0, 'f', 1).arg(QFileInfo(file).fileName());
+    }
+
+    ui->txLog->item(row, 0)->setText(QDateTime::fromMSecsSinceEpoch(record.m_timestamp).toString("HH:mm:ss"));
+    ui->txLog->item(row, 0)->setData(Qt::UserRole, id);
+    ui->txLog->item(row, 0)->setData(Qt::UserRole + 1, file);
+    ui->txLog->item(row, 1)->setText(QString("%1 %2").arg(record.m_protocol).arg(record.m_mode));
+    ui->txLog->item(row, 2)->setText(record.m_address);
+    ui->txLog->item(row, 3)->setText(record.m_msgType);
+    ui->txLog->item(row, 4)->setText(text);
+    ui->txLog->item(row, 5)->setText(status);
+    ui->txLog->resizeColumnsToContents();
+}
+
+// A voice message is played from its file
+void RadioPagingModGUI::on_txLog_cellDoubleClicked(int row, int column)
+{
+    (void) column;
+    QString file = ui->txLog->item(row, 0) ? ui->txLog->item(row, 0)->data(Qt::UserRole + 1).toString() : QString();
+
+    if (!file.isEmpty()) {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(file));
+    }
+}
+
+// The files of the voice sent: the statistics of the directory, the files kept, the deletion of the old ones
+void RadioPagingModGUI::on_voiceFiles_clicked()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle("Files of the voice sent");
+    QVBoxLayout *layout = new QVBoxLayout(&dialog);
+    QFormLayout *form = new QFormLayout();
+    QSpinBox *days = new QSpinBox(&dialog);
+    QSpinBox *minimum = new QSpinBox(&dialog);
+    QLabel *stats = new QLabel(&dialog);
+    QPushButton *clean = new QPushButton("Delete the old files...", &dialog);
+    QPushButton *close = new QPushButton("Close", &dialog);
+
+    days->setRange(0, 3650);
+    days->setValue(m_settings.m_gscVoiceKeepDays);
+    days->setSpecialValueText("Keep all");
+    days->setSuffix(" days");
+    days->setToolTip("Files older than this are deleted, a few at a time, when a new file of the voice sent is written. "
+        "Keep all: no file is deleted for its age");
+    minimum->setRange(0, 100000);
+    minimum->setValue(m_settings.m_gscVoiceKeepMin);
+    minimum->setToolTip("The newest files kept whatever their age");
+    form->addRow("Delete after", days);
+    form->addRow("Always keep the newest", minimum);
+    layout->addLayout(form);
+    layout->addWidget(stats);
+    layout->addWidget(clean);
+    layout->addWidget(close);
+
+    auto refresh = [this, days, minimum, stats, clean]()
+    {
+        RadioPagingVoiceStore::Stats s = RadioPagingVoiceStore::stats(m_settings.voiceDirectory(), days->value(), minimum->value());
+        stats->setText(QString("Directory: %1\nFiles: %2, %3\nOldest: %4\nNewest: %5\nTo delete now: %6 files, %7\nFree space on the disk: %8")
+            .arg(m_settings.voiceDirectory())
+            .arg(s.m_files).arg(RadioPagingVoiceStore::sizeText(s.m_bytes))
+            .arg(s.m_oldest.isValid() ? s.m_oldest.toString("yyyy-MM-dd HH:mm") : QString("-"))
+            .arg(s.m_newest.isValid() ? s.m_newest.toString("yyyy-MM-dd HH:mm") : QString("-"))
+            .arg(s.m_expired).arg(RadioPagingVoiceStore::sizeText(s.m_expiredBytes))
+            .arg(RadioPagingVoiceStore::sizeText(s.m_freeBytes)));
+        clean->setEnabled(s.m_expired > 0);
+    };
+
+    QObject::connect(days, QOverload<int>::of(&QSpinBox::valueChanged), &dialog, [this, refresh](int value) {
+        m_settings.m_gscVoiceKeepDays = value;
+        applySettings(QStringList("gscVoiceKeepDays"));
+        refresh();
+    });
+    QObject::connect(minimum, QOverload<int>::of(&QSpinBox::valueChanged), &dialog, [this, refresh](int value) {
+        m_settings.m_gscVoiceKeepMin = value;
+        applySettings(QStringList("gscVoiceKeepMin"));
+        refresh();
+    });
+    QObject::connect(clean, &QPushButton::clicked, &dialog, [this, &dialog, refresh]()
+    {
+        RadioPagingVoiceStore::Stats s = RadioPagingVoiceStore::stats(m_settings.voiceDirectory(),
+            m_settings.m_gscVoiceKeepDays, m_settings.m_gscVoiceKeepMin);
+
+        if (QMessageBox::question(&dialog, "Delete the old files",
+            QString("Delete %1 files of the voice sent (%2) from\n%3 ?\nThis cannot be undone.").arg(s.m_expired)
+            .arg(RadioPagingVoiceStore::sizeText(s.m_expiredBytes)).arg(m_settings.voiceDirectory())) == QMessageBox::Yes)
+        {
+            RadioPagingVoiceStore::cleanup(m_settings.voiceDirectory(), m_settings.m_gscVoiceKeepDays, m_settings.m_gscVoiceKeepMin, -1);
+        }
+
+        refresh();
+    });
+    QObject::connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
+
+    refresh();
+    dialog.exec();
+}
+
+void RadioPagingModGUI::on_browse_triggered()
+{
+    QString file = QFileDialog::getOpenFileName(this, "Sound file", ui->text->text().trimmed(), "WAV files (*.wav);;All files (*)");
+
+    if (!file.isEmpty()) {
+        ui->text->setText(file);
+    }
 }
 
 void RadioPagingModGUI::on_clear_clicked()
@@ -497,13 +962,17 @@ RadioPagingModGUI::RadioPagingModGUI(PluginAPI* pluginAPI, DeviceUISet *deviceUI
 
 RadioPagingModGUI::~RadioPagingModGUI()
 {
+    if (m_micRecording) {
+        DSPEngine::instance()->getAudioDeviceManager()->removeAudioSource(&m_micFifo);
+    }
+
     delete ui;
 }
 
-// GSC transmission is not implemented: shown, not selectable
+// GSC has no network mode (it is sent one-shot): the network item is not selectable for it
 void RadioPagingModGUI::displayProtocolAvailability()
 {
-    setItemEnabled(ui->protocol, (int) RadioPagingModSettings::Gsc, false);
+    setItemEnabled(ui->mode, (int) RadioPagingModSettings::Network, m_settings.m_protocol != RadioPagingModSettings::Gsc);
 }
 
 // Marker bandwidth: twice the deviation plus the symbol rate
@@ -512,6 +981,10 @@ int RadioPagingModGUI::channelBandwidth() const
     int rate = m_settings.m_pocsagSpeed;
 
     int bandwidth;
+
+    if (m_settings.m_protocol == RadioPagingModSettings::Gsc) {
+        rate = RadioPagingGscTxStream::m_baud;
+    }
 
     if (m_settings.m_protocol == RadioPagingModSettings::Flex)
     {
@@ -538,6 +1011,7 @@ void RadioPagingModGUI::displayProtocol()
     QSignalBlocker messageSpeedBlocker(ui->messageSpeed);
     QSignalBlocker polarityBlocker(ui->polarity);
     QSignalBlocker collapseBlocker(ui->collapse);
+    QSignalBlocker voiceSecondsBlocker(ui->voiceSeconds);
     QSignalBlocker mixPocsagBlocker(ui->mixPocsag);
     QSignalBlocker mixSharedBlocker(ui->mixShared);
     QSignalBlocker mixSpeedBlocker(ui->mixSpeed);
@@ -562,7 +1036,36 @@ void RadioPagingModGUI::displayProtocol()
     ui->messageSpeed->setCurrentIndex(std::max(0, messageSpeedIndex));
     ui->messageSpeed->setToolTip("POCSAG speed of this message; Default is the speed set for the channel");
 
-    if (flex)
+    bool gsc = (m_settings.m_protocol == RadioPagingModSettings::Gsc);
+
+    // The function of a message: the function A to D of POCSAG, the address number 1 to 4 of GSC
+    {
+        QSignalBlocker functionBlocker(ui->function);
+        int functionIndex = std::max(0, ui->function->currentIndex());
+        ui->function->clear();
+
+        if (gsc) {
+            ui->function->addItems(QStringList({"1", "2", "3", "4"}));
+        } else {
+            ui->function->addItems(QStringList({"A (0)", "B (1)", "C (2)", "D (3)"}));
+        }
+
+        ui->function->setCurrentIndex(functionIndex);
+        ui->function->setToolTip(gsc ? "GSC address number 1 to 4" : "POCSAG function (sub address)");
+    }
+
+    if (gsc)
+    {
+        ui->speed->addItems(QStringList({"Auto", "Single", "Batch", "Non battery saver"}));
+        ui->speedLabel->setText("Mode");
+        ui->speed->setToolTip("GSC transmissions. Auto: a batch of the messages of the same preamble value, a message "
+            "alone after its own preamble. Single: one message per transmission. Batch: a batch even for one message. "
+            "Non battery saver: all queued messages of a polarity after one 1100 pattern");
+        ui->speed->setCurrentIndex(m_settings.m_gscMode);
+        ui->polarity->setCurrentIndex(m_settings.m_gscInverted ? 1 : 0);
+        ui->polarity->setToolTip("Default polarity of the messages sent. Normal: binary 1 is a positive deviation");
+    }
+    else if (flex)
     {
         for (int mode = (int) RadioPagingFlex::Mode1600_2; mode <= (int) RadioPagingFlex::Mode6400_4; mode++) {
             ui->speed->addItem(RadioPagingFlex::modeName((RadioPagingFlex::Mode) mode));
@@ -586,6 +1089,27 @@ void RadioPagingModGUI::displayProtocol()
         ui->speed->setCurrentIndex(pocsagSpeedIndex(m_settings.m_pocsagSpeed));
         ui->polarity->setCurrentIndex(m_settings.m_pocsagInverted ? 1 : 0);
         ui->polarity->setToolTip("Default polarity of the messages sent. Normal: binary 1 is a negative deviation");
+    }
+
+    ui->voiceSeconds->setValue(m_settings.m_gscVoiceSeconds);
+    ui->channelAlias->setText(m_settings.m_channelAlias);
+    ui->voiceSecondsLabel->setVisible(gsc);
+    ui->voiceSeconds->setVisible(gsc);
+
+    // The Voice message type is GSC's: its text is the path of a sound file
+    {
+        QSignalBlocker typeBlocker(ui->messageType);
+
+        if (gsc && (ui->messageType->count() == 3)) {
+            ui->messageType->addItem("Voice");
+        } else if (!gsc && (ui->messageType->count() == 4))
+        {
+            if (ui->messageType->currentIndex() == 3) {
+                ui->messageType->setCurrentIndex(0);
+            }
+
+            ui->messageType->removeItem(3);
+        }
     }
 
     ui->collapse->setValue(m_settings.m_flexCollapse);
@@ -638,13 +1162,26 @@ void RadioPagingModGUI::displayProtocol()
         ui->messageProtocol->setCurrentIndex(0);
     }
 
+    // POCSAG: address, function and speed; FLEX: capcode and priority (the mode is the network's);
+    // GSC: the address of 6 digits (as the capcode) and the address number
     bool flexMessage = messageIsFlex();
-    ui->messageSpeed->setVisible(!flexMessage);   // POCSAG speed of the message; FLEX: the mode of the network
-    ui->address->setVisible(!flexMessage);
+    ui->messageSpeed->setVisible(!flexMessage && !gsc);
+    ui->address->setVisible(!flexMessage && !gsc);
+
+    // GSC has no network mode: the combo shows one-shot, the setting is kept for the other protocols
+    {
+        QSignalBlocker modeBlocker(ui->mode);
+        ui->mode->setCurrentIndex(gsc ? (int) RadioPagingModSettings::OneShot : (int) m_settings.m_mode);
+    }
+
     ui->function->setVisible(!flexMessage);
-    ui->capcode->setVisible(flexMessage);
+    ui->capcode->setVisible(flexMessage || gsc);
     ui->priority->setVisible(flexMessage);
-    ui->addressLabel->setText(flexMessage ? "Capcode" : "Address");
+    ui->addressLabel->setText(gsc ? "Address" : flexMessage ? "Capcode" : "Address");
+    ui->capcode->setToolTip(gsc ? "GSC address: 6 digits (index, group, 3 address digits)"
+        : "FLEX capcode: short 1 to 1933312, long 2101249 to 4297068542");
+    displayProtocolAvailability();
+    displayMessageType();
 }
 
 // The message composed is FLEX: a FLEX channel, unless it mixes POCSAG and the message is POCSAG
@@ -809,12 +1346,8 @@ void RadioPagingModGUI::tick()
     }
 
     text += QString(", %1 waiting, %2 sent").arg(status.m_queued).arg(status.m_sent);
-
-    if (m_settings.m_protocol == RadioPagingModSettings::Gsc) {
-        text = QString("%1 not implemented. ").arg(RadioPagingModSettings::protocolName(m_settings.m_protocol)) + text;
-    }
-
     ui->status->setText(text);
+    updateLive(status);
 
     // Several transmissions may end between two ticks
     if (status.m_sent > m_lastLoggedSent)
@@ -845,6 +1378,7 @@ void RadioPagingModGUI::makeUIConnections()
     QObject::connect(ui->rampDown, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &RadioPagingModGUI::on_rampDown_valueChanged);
     QObject::connect(ui->rampRange, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_rampRange_valueChanged);
     QObject::connect(ui->collapse, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_collapse_valueChanged);
+    QObject::connect(ui->voiceSeconds, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_voiceSeconds_valueChanged);
     QObject::connect(ui->mixPocsag, &QCheckBox::toggled, this, &RadioPagingModGUI::on_mixPocsag_toggled);
     QObject::connect(ui->mixShared, &QCheckBox::toggled, this, &RadioPagingModGUI::on_mixShared_toggled);
     QObject::connect(ui->mixSpeed, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_mixSpeed_currentIndexChanged);
@@ -857,6 +1391,17 @@ void RadioPagingModGUI::makeUIConnections()
     QObject::connect(ui->messageProtocol, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_messageProtocol_currentIndexChanged);
     QObject::connect(ui->send, &QPushButton::clicked, this, &RadioPagingModGUI::on_send_clicked);
     QObject::connect(ui->text, &QLineEdit::returnPressed, this, &RadioPagingModGUI::on_text_returnPressed);
+    QObject::connect(ui->micInput, &QToolButton::clicked, this, &RadioPagingModGUI::on_micInput_clicked);
+    QObject::connect(ui->voiceSource, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_voiceSource_currentIndexChanged);
+    QObject::connect(&m_micFifo, &AudioFifo::dataReady, this, &RadioPagingModGUI::micDataReady);
+    QObject::connect(ui->channelAlias, &QLineEdit::editingFinished, this, &RadioPagingModGUI::on_channelAlias_editingFinished);
+    QObject::connect(ui->voiceFiles, &QToolButton::clicked, this, &RadioPagingModGUI::on_voiceFiles_clicked);
+    QObject::connect(ui->txLog, &QTableWidget::cellDoubleClicked, this, &RadioPagingModGUI::on_txLog_cellDoubleClicked);
+    m_browseAction = ui->text->addAction(style()->standardIcon(QStyle::SP_DirOpenIcon), QLineEdit::TrailingPosition);
+    m_browseAction->setToolTip("Choose the sound file");
+    m_browseAction->setVisible(false);
+    QObject::connect(m_browseAction, &QAction::triggered, this, &RadioPagingModGUI::on_browse_triggered);
+    QObject::connect(ui->messageType, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_messageType_currentIndexChanged);
     QObject::connect(ui->clear, &QPushButton::clicked, this, &RadioPagingModGUI::on_clear_clicked);
     QObject::connect(ui->abort, &QPushButton::clicked, this, &RadioPagingModGUI::on_abort_clicked);
 }

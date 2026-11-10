@@ -7,11 +7,11 @@ RadioPagingModSettings:
       type: integer
       format: int64
     protocol:
-      description: "Protocol transmitted: 0 POCSAG, 1 FLEX, 2 GSC. GSC is not implemented: tx is refused"
+      description: "Protocol transmitted: 0 POCSAG, 1 FLEX, 2 GSC"
       type: integer
       format: int32
     mode:
-      description: "0 one-shot (carrier on for each transmission, off after it), 1 network (carrier on all the time, idle signal between messages)"
+      description: "0 one-shot (carrier on for each transmission, off after it), 1 network (carrier on all the time, idle signal between messages). GSC has no network mode: it is one-shot whatever the setting"
       type: integer
       format: int32
     deviation:
@@ -56,6 +56,32 @@ RadioPagingModSettings:
       format: int32
     flexCollapse:
       description: "FLEX collapse 0 to 7: the emergency re-synchronization lasts at least 2^collapse frames. Network: pagers listen to one frame in 2^collapse. One-shot: the frames are sent with collapse 0"
+      type: integer
+      format: int32
+    gscMode:
+      description: "GSC transmissions (one-shot only, GSC has no network mode): 0 auto (a batch of messages of the same preamble value, a message alone after its own preamble), 1 single (one message per transmission), 2 batch (a batch even for one message), 3 non battery saver (all queued messages of a polarity after one 1100 pattern)"
+      type: integer
+      format: int32
+    gscInverted:
+      description: "GSC polarity: 0 normal (binary 1 is a positive deviation), 1 inverted"
+      type: integer
+      format: int32
+    gscVoiceSeconds:
+      description: "GSC voice pages: the length of the voice in seconds (1 to 50). A longer sound file is cut at this length, a voice from the microphone ends at this length"
+      type: integer
+      format: int32
+    channelAlias:
+      description: "Name of the transmitter, set in the channel alias of the records of the messages sent and in the names of the files of the voice sent. Empty: the frequency of the channel in Hz"
+      type: string
+    gscVoiceDirectory:
+      description: "Directory of the files of the voice sent. Empty: radiopaging/voice/tx in the application data directory"
+      type: string
+    gscVoiceKeepDays:
+      description: "Files of the voice sent older than this many days are deleted when a new one is written (0 to keep them all). The newest gscVoiceKeepMin files are kept whatever their age"
+      type: integer
+      format: int32
+    gscVoiceKeepMin:
+      description: "The number of the newest files of the voice sent that are not deleted"
       type: integer
       format: int32
     mixPocsag:
@@ -195,11 +221,11 @@ RadioPagingModTx:
       type: integer
       format: int32
     function:
-      description: "POCSAG: function 0 to 3 (A to D)"
+      description: "POCSAG: function 0 to 3 (A to D). GSC: address number 0 to 3, for 1 to 4"
       type: integer
       format: int32
     capcode:
-      description: "FLEX: capcode, short 1 to 1933312 or long 2101249 to 4297068542"
+      description: "FLEX: capcode, short 1 to 1933312 or long 2101249 to 4297068542. GSC: address 0 to 999999, sent as 6 digits (index, group, 3 address digits), zero padded"
       type: integer
       format: int64
     priority:
@@ -207,18 +233,18 @@ RadioPagingModTx:
       type: integer
       format: int32
     protocol:
-      description: "pocsag or flex: the protocol of the message. Omitted: the protocol of the channel. A FLEX channel in network mode with mixing also takes pocsag messages"
+      description: "pocsag, flex or gsc: the protocol of the message. Omitted: the protocol of the channel. A FLEX channel in network mode with mixing also takes pocsag messages"
       type: string
     type:
-      description: "tone, numeric or alphanumeric"
+      description: "tone, numeric or alphanumeric. GSC also voice: text is the path of a WAV file, sent after a 2 s alert, cut at gscVoiceSeconds"
       type: string
     text:
-      description: "Numeric: 0-9, space, U, -, ], [. Alphanumeric: 7-bit characters"
+      description: "Numeric: 0-9, space, U, -, ], [ (GSC: 0-9 A-H J L N P R U space -). Alphanumeric: 7-bit characters (GSC: ASCII 0x20-0x5d)"
       type: string
     speed:
       description: "POCSAG speed in baud: 512, 1200 or 2400. 0 or omitted: the channel setting"
       type: integer
       format: int32
     polarity:
-      description: "normal or inverted. Empty or omitted: the channel setting. FLEX: the other polarity than the network's is sent in the frames the network has nothing mandatory in"
+      description: "normal or inverted. Empty or omitted: the channel setting. FLEX: the other polarity than the network's is sent in the frames the network has nothing mandatory in. GSC: a transmission has one polarity"
       type: string

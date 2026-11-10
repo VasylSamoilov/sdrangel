@@ -16,6 +16,8 @@ set(modemradiopaging_SOURCES
     radiopagingflexdecodermsg.cpp
     radiopagingflexreceiver.cpp
     radiopagingtxstream.cpp
+    radiopagingwav.cpp
+    radiopagingvoicestore.cpp
 )
 
 set(modemradiopaging_HEADERS
@@ -35,6 +37,8 @@ set(modemradiopaging_HEADERS
     radiopagingflexdecoder.h
     radiopagingflexreceiver.h
     radiopagingtxstream.h
+    radiopagingwav.h
+    radiopagingvoicestore.h
 )
 
 include_directories(

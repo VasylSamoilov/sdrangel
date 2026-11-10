@@ -58,6 +58,14 @@ struct RadioPagingModSettings
     int m_flexMode;                             //!< RadioPagingFlex::Mode: 1600/2, 3200/2, 3200/4, 6400/4
     bool m_flexInverted;                        //!< Set: symbol levels reversed (normal: symbol 3 is the highest frequency)
     int m_flexCollapse;                         //!< 0-7: re-synchronization of 2^collapse frames at least; network: frames scheduled with it
+    int m_gscMode;                              //!< RadioPagingGsc::Mode: auto, single, batch, non battery saver. One-shot only
+    bool m_gscInverted;                         //!< Set: binary 1 is a negative deviation (normal: positive)
+    int m_gscVoiceSeconds;                      //!< Length of the voice of a GSC voice page in seconds, a longer sound file is cut
+    QString m_audioInputDeviceName;             //!< Audio input of the voice recorded from the microphone
+    QString m_channelAlias;                     //!< Name of the transmitter in the message records and voice file names, empty for its frequency
+    QString m_gscVoiceDirectory;                //!< Directory of the files of the voice sent, empty for the default (see voiceDirectory)
+    int m_gscVoiceKeepDays;                     //!< Files of the voice sent older than this many days may be deleted, 0 to keep them all
+    int m_gscVoiceKeepMin;                      //!< The newest files of the voice sent this many are not deleted
     // FLEX network option: mixing with POCSAG (STD-43A Chapter 7). POCSAG messages are sent in
     // the time between FLEX frames, with the POCSAG settings above (speed, polarity, deviation
     // here)
@@ -89,6 +97,10 @@ struct RadioPagingModSettings
     bool deserialize(const QByteArray& data);
     void applySettings(const QStringList& settingsKeys, const RadioPagingModSettings& settings);
     QString getDebugString(const QStringList& settingsKeys, bool force = false) const;
+    //!< The directory of the files of the voice sent: the one set, or radiopaging/voice/tx in the application data
+    QString voiceDirectory() const;
+    //!< The name of the transmitter: the alias set, or the frequency of the channel in Hz
+    QString effectiveChannelAlias(qint64 frequency) const;
 
     //! Bring the numeric settings into their ranges (ramps, ramp range, deviation, gain)
     void validate();

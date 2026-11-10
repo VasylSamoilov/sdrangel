@@ -28,6 +28,10 @@
 #include <string>
 #include <vector>
 
+#include <QFile>
+#include <QStandardPaths>
+#include <QTemporaryDir>
+
 #include "dsp/dsptypes.h"
 #include "util/messagequeue.h"
 #include "maincore.h"
@@ -36,8 +40,10 @@
 #include "radiopagingflex.h"
 #include "radiopagingflexscheduler.h"
 #include "radiopaginggsc.h"
+#include "radiopagingwav.h"
 #include "radiopagingfskmod.h"
 
+#include "radiopagingvoicestore.h"
 #include "radiopagingdemodsink.h"
 
 namespace {
@@ -611,7 +617,8 @@ struct Audio
 };
 
 // Only GSC on, audio at 48 kHz; the audio FIFO is read as the audio device would
-Audio receiveAudio(const std::vector<Sample>& samples, bool audio, int voiceTimeout)
+Audio receiveAudio(const std::vector<Sample>& samples, bool audio, int voiceTimeout, const QString& recordDirectory = QString(),
+    std::vector<QString> *files = nullptr)
 {
     RadioPagingDemodSink sink;
     RadioPagingDemodSettings settings;
@@ -619,6 +626,8 @@ Audio receiveAudio(const std::vector<Sample>& samples, bool audio, int voiceTime
     settings.m_pocsagEnabled = false;
     settings.m_flexEnabled = false;
     settings.m_gscAudio = audio;
+    settings.m_gscVoiceRecord = !recordDirectory.isEmpty();
+    settings.m_gscVoiceDirectory = recordDirectory;
     settings.m_gscVoiceTimeout = voiceTimeout;
     sink.setMessageQueueToChannel(&queue);
     sink.applyChannelSettings((int) sampleRate, 0, true);
@@ -652,11 +661,73 @@ Audio receiveAudio(const std::vector<Sample>& samples, bool audio, int voiceTime
         out.m_samples += n;
     }
 
-    while (queue.size() > 0) {
-        delete queue.pop();
+    while (queue.size() > 0)
+    {
+        Message *message = queue.pop();
+
+        if (files && MainCore::MsgMessageRecord::match(*message))
+        {
+            const MessageRecord& r = ((MainCore::MsgMessageRecord *) message)->getRecord();
+
+            if (r.m_protocolData.contains("voice_file")) {
+                files->push_back(r.m_protocolData["voice_file"].toString());
+            }
+        }
+
+        delete message;
     }
 
     return out;
+}
+
+// The voice recorded to a WAV file in a directory: its path is in the record of the end of the voice
+void testVoiceRecording()
+{
+    QTemporaryDir directory;
+    check(directory.isValid(), "Voice recording: temporary directory");
+
+    std::vector<Sample> page = voicePage(5.0, true);
+    std::vector<QString> files;
+
+    // Audio off: the recording does not depend on it
+    receiveAudio(page, false, 50, directory.path(), &files);
+    check(files.size() == 1, "Voice recording: the record of the end of the voice has the file");
+
+    RadioPagingWav::Audio wav;
+    std::string error;
+    bool loaded = !files.empty() && RadioPagingWav::load(files[0].toStdString(), wav, error, 50.0, false);
+    std::printf("      voice file %s: %s, %zu samples\n", files.empty() ? "" : files[0].toStdString().c_str(),
+        loaded ? "read" : error.c_str(), wav.m_samples.size());
+    check(loaded && files[0].startsWith(directory.path()), "Voice recording: a WAV file in the directory");
+
+    // 2.8 s of voice at 38400 Hz after the resampling; 1 kHz at 3 kHz of the 4.5 kHz deviation
+    double seconds = wav.m_samples.size() / (double) RadioPagingWav::m_sampleRate;
+    int crossings = 0;
+    float peak = 0.0f;
+
+    for (size_t i = 1; i < wav.m_samples.size(); i++)
+    {
+        if ((i > 19200) && (i <= 96000)) {
+            crossings += ((wav.m_samples[i] >= 0.0f) != (wav.m_samples[i - 1] >= 0.0f)) ? 1 : 0;
+        }
+
+        // Away from the start and from the turn-off word at the end
+        if ((i > 19200) && (i <= 96000)) {
+            peak = std::max(peak, std::fabs(wav.m_samples[i]));
+        }
+    }
+
+    std::printf("      voice file peak %.3f\n", peak);
+
+    double frequency = crossings / (2.0 * 2.0);
+    check((seconds > 2.8) && (seconds < 3.2), "Voice recording: the length of the voice message");
+    check((frequency > 950.0) && (frequency < 1050.0), "Voice recording: the voice tone at its frequency");
+    check((peak > 0.85 * 3000.0 / 4500.0) && (peak < 1.15 * 3000.0 / 4500.0), "Voice recording: full scale is the deviation, whatever the volume");
+
+    // Recording off: no file, no path
+    files.clear();
+    receiveAudio(page, true, 50, QString(), &files);
+    check(files.empty(), "Voice recording off: no file in the record");
 }
 
 void testVoiceAudio()
@@ -681,6 +752,47 @@ void testVoiceAudio()
     check((timeout.m_samples > 1.7 * 48000) && (timeout.m_samples < 1.9 * 48000), "Voice audio: closes at the longest voice message");
 }
 
+// Voice files: the ones that may be deleted are older than the days kept and not the newest ones
+void testVoiceStore()
+{
+    QTemporaryDir directory;
+    QDateTime now = QDateTime::currentDateTime();
+    QStringList names;
+
+    for (int i = 0; i < 8; i++)
+    {
+        QString name = QString("%1/146.5_rx_%2.wav").arg(directory.path()).arg(i);
+        QFile file(name);
+        file.open(QIODevice::WriteOnly);
+        file.write(QByteArray(100, 'x'));
+        file.close();
+        file.open(QIODevice::ReadWrite);        // The time is set on a file that is not written to afterwards
+        file.setFileTime(now.addSecs(-(qint64) i * 86400), QFileDevice::FileModificationTime);
+        file.close();
+        names.append(name);
+    }
+
+    QFile other(directory.path() + "/notes.wav");
+    other.open(QIODevice::WriteOnly);
+    other.close();
+
+    RadioPagingVoiceStore::Stats stats = RadioPagingVoiceStore::stats(directory.path(), 3, 2, now);
+    check((stats.m_files == 8) && (stats.m_bytes == 800) && (stats.m_expired == 4) && (stats.m_expiredBytes == 400)
+        && (stats.m_oldest < stats.m_newest) && (stats.m_freeBytes > 0), "Voice store: statistics, 4 of 8 files older than 3 days");
+    check(RadioPagingVoiceStore::stats(directory.path(), 3, 6, now).m_expired == 2, "Voice store: the newest 6 files are kept whatever their age");
+    check(RadioPagingVoiceStore::stats(directory.path(), 0, 0, now).m_expired == 0, "Voice store: 0 days, no file is deleted for its age");
+
+    int deleted = RadioPagingVoiceStore::cleanup(directory.path(), 3, 2, 3, QString(), now);
+    check((deleted == 3) && !QFile::exists(names[7]) && !QFile::exists(names[6]) && !QFile::exists(names[5]) && QFile::exists(names[4]),
+        "Voice store: a cleanup of at most 3 files deletes the oldest ones");
+    check((RadioPagingVoiceStore::cleanup(directory.path(), 3, 2, 5, names[4], now) == 0) && QFile::exists(names[4]),
+        "Voice store: the file just written is not deleted");
+    check((RadioPagingVoiceStore::cleanup(directory.path(), 3, 2, -1, QString(), now) == 1) && !QFile::exists(names[4])
+        && QFile::exists(names[3]) && QFile::exists(directory.path() + "/notes.wav"), "Voice store: all at once, other files are left");
+    check((RadioPagingVoiceStore::fileAlias("146.5/MHz x") == "146.5_MHz_x") && (RadioPagingVoiceStore::fileAlias("") == "rx"),
+        "Voice store: the alias in a file name");
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -695,6 +807,9 @@ int main(int argc, char **argv)
         sensitivity(argc > 2 ? std::string(argv[2]) : std::string(), (argc > 3) && (std::string(argv[3]) == "deep"));
         return 0;
     }
+
+    // Nothing of the tests goes to the data directory of the user
+    QStandardPaths::setTestModeEnabled(true);
 
     Modulator mod;
     std::set<std::string> sent;
@@ -767,6 +882,8 @@ int main(int argc, char **argv)
     check((status.m_messages[0] == 4) && (status.m_messages[1] == 3) && (status.m_messages[2] == 4), "Status counts the records per protocol");
 
     testVoiceAudio();
+    testVoiceRecording();
+    testVoiceStore();
     testFrequencyOffset();
 
     std::printf("%d passed, %d failed\n", passes, failures);

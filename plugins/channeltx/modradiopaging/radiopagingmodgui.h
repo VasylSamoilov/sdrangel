@@ -18,7 +18,13 @@
 #ifndef INCLUDE_RADIOPAGINGMODGUI_H
 #define INCLUDE_RADIOPAGINGMODGUI_H
 
+#include <memory>
+#include <vector>
+
+#include "audio/audiofifo.h"
 #include "channel/channelgui.h"
+#include "util/messagerecord.h"
+#include "radiopagingwav.h"
 #include "dsp/channelmarker.h"
 #include "util/movingaverage.h"
 #include "util/messagequeue.h"
@@ -30,6 +36,7 @@
 class PluginAPI;
 class DeviceUISet;
 class BasebandSampleSource;
+class QAction;
 
 namespace Ui {
     class RadioPagingModGUI;
@@ -89,6 +96,27 @@ private:
     void displayProtocolAvailability();
     void displayProtocol();
     bool messageIsFlex() const;
+    //! The text field of the message: the path of a sound file (with the browse button) for a voice page
+    void displayMessageType();
+
+    QAction *m_browseAction = nullptr;
+
+    // Live voice page: the page goes out, the microphone is taken once the alert time is over and
+    // its voice is passed to the transmitter as it comes, until End or the voice length
+    AudioFifo m_micFifo;
+    RadioPagingResampler m_micResampler;        //!< Audio input rate to the rate of the modulator
+    int m_micRate = 0;
+    bool m_micRecording = false;                //!< The microphone is taken
+    quint64 m_micSent = 0;                      //!< Samples of the voice passed, at the rate of the modulator
+    quint64 m_liveId = 0;                       //!< The live voice page being sent, 0 if none
+    bool m_liveSeen = false;                    //!< The transmitter has started it
+    bool m_liveWaiting = false;                 //!< Its request was posted, the id is not known yet
+    void startMic();
+    void stopMic();
+    void readMic();
+    void endLive();
+    void updateLive(const RadioPagingModSource::Status& status);
+    void showTx(const MessageRecord& record, const QString& status);
     int channelBandwidth() const;
     bool handleMessage(const Message& message);
     void makeUIConnections();
@@ -114,6 +142,7 @@ private slots:
     void on_rampDown_valueChanged(double value);
     void on_rampRange_valueChanged(int value);
     void on_collapse_valueChanged(int value);
+    void on_voiceSeconds_valueChanged(int value);
     void on_mixPocsag_toggled(bool checked);
     void on_mixShared_toggled(bool checked);
     void on_mixSpeed_currentIndexChanged(int index);
@@ -126,6 +155,15 @@ private slots:
     void on_messageProtocol_currentIndexChanged(int index);
     void on_send_clicked();
     void on_text_returnPressed();
+    void on_messageType_currentIndexChanged(int index);
+    void on_browse_triggered();
+    void on_micInput_clicked();
+    void on_voiceSource_currentIndexChanged(int index);
+    void on_channelAlias_editingFinished();
+    void on_voiceFiles_clicked();
+    void on_txLog_cellDoubleClicked(int row, int column);
+    void micAudioSelect(const QPoint& p);
+    void micDataReady();
     void on_clear_clicked();
     void on_abort_clicked();
 
