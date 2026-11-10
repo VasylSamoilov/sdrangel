@@ -28,7 +28,8 @@ namespace
 {
 
 const size_t kMaxChars = 160;
-const size_t kMaxAddressDigits = 20;                // 10 octets of digits are ample (the standard allows 12)
+// an address field is at most 12 octets with its length and type octets (Annex 24 2.1.2.5)
+const size_t kMaxAddressDigits = 20;
 
 // The GSM default alphabet (GSM 03.38) as Unicode code points, 0x1b is the escape.
 const uint32_t kGsm[128] = {
@@ -184,11 +185,59 @@ int twoDigitsValue(uint8_t byte)
     return tens * 10 + units;
 }
 
-// The text as it is sent: septets of the GSM alphabet. False if it does not fit.
-bool textSeptets(const std::string& text, std::vector<uint8_t>& septets)
+// The escape <0xNN> (two hex digits) at text[pos]: its value, or -1.
+int escapeAt(const std::string& text, size_t pos)
 {
-    septets = smsGsmEncode(text);
-    return septets.size() <= kMaxChars;
+    auto hex = [](char c) {
+        if (c >= '0' && c <= '9') {
+            return c - '0';
+        }
+        if (c >= 'a' && c <= 'f') {
+            return c - 'a' + 10;
+        }
+        if (c >= 'A' && c <= 'F') {
+            return c - 'A' + 10;
+        }
+        return -1;
+    };
+
+    if (pos + 6 > text.size() || text.compare(pos, 3, "<0x") != 0 || text[pos + 5] != '>') {
+        return -1;
+    }
+    const int high = hex(text[pos + 3]);
+    const int low = hex(text[pos + 4]);
+
+    return (high < 0 || low < 0) ? -1 : high * 16 + low;
+}
+
+// The character codes of a text to send: characters of the GSM alphabet (the escape 1Bh before
+// one of its extension table), '?' for others, and the code NN for an escape <0xNN>. eightBit
+// is set if a code is 80h or above: the text needs an NMT 8-bit set.
+std::vector<uint8_t> textCodes(const std::string& text, bool& eightBit)
+{
+    std::vector<uint8_t> codes;
+    size_t start = 0;
+
+    eightBit = false;
+    for (size_t pos = 0; pos <= text.size(); pos++)
+    {
+        const int value = (pos < text.size()) ? escapeAt(text, pos) : -1;
+
+        if (value < 0 && pos < text.size()) {
+            continue;
+        }
+        const std::vector<uint8_t> run = smsGsmEncode(text.substr(start, pos - start));
+        codes.insert(codes.end(), run.begin(), run.end());
+        if (value >= 0)
+        {
+            codes.push_back(static_cast<uint8_t>(value));
+            eightBit = eightBit || value >= 0x80;
+            pos += 5;
+        }
+        start = pos + 1;
+    }
+
+    return codes;
 }
 
 } // namespace
@@ -303,26 +352,35 @@ std::vector<uint8_t> smsUnpackSeptets(const uint8_t* data, size_t length, size_t
     return out;
 }
 
-bool smsEncodeAddress(const std::string& number, std::vector<uint8_t>& out)
+bool smsEncodeAddress(const std::string& number, std::vector<uint8_t>& out, int type, int plan)
 {
-    if (number.empty() || number.size() > kMaxAddressDigits || number == "+") {
-        return false;
-    }
-    for (size_t i = 0; i < number.size(); i++)
+    // characters that are no digit of an address are left out
+    std::vector<int> digits;
+
+    for (char c : number)
     {
-        // a plus sign only at the start
-        if (semiOctet(number[i]) < 0 || (number[i] == '+' && i != 0)) {
-            return false;
+        if (semiOctet(c) >= 0) {
+            digits.push_back(semiOctet(c));
         }
     }
+    if (digits.empty() || digits.size() > kMaxAddressDigits) {
+        return false;
+    }
 
-    // international with the numbering plan of the telephone network, else unknown
-    out.push_back(static_cast<uint8_t>(number.size()));
-    out.push_back(number[0] == '+' ? 0x91 : 0x81);
-    for (size_t i = 0; i < number.size(); i += 2)
+    // without a type: international if the number starts with a plus sign, else unknown; the
+    // numbering plan is that of the telephone network
+    if (type < 0) {
+        type = (number[0] == '+') ? 1 : 0;
+    }
+    if (plan < 0) {
+        plan = 1;
+    }
+    out.push_back(static_cast<uint8_t>(digits.size()));
+    out.push_back(static_cast<uint8_t>(0x80 | ((type & 7) << 4) | (plan & 0xf)));
+    for (size_t i = 0; i < digits.size(); i += 2)
     {
-        const int low = semiOctet(number[i]);
-        const int high = (i + 1 < number.size()) ? semiOctet(number[i + 1]) : 0xf;
+        const int low = digits[i];
+        const int high = (i + 1 < digits.size()) ? digits[i + 1] : 0xf;
 
         out.push_back(static_cast<uint8_t>((high << 4) | low));
     }
@@ -425,9 +483,14 @@ std::vector<uint8_t> smsHeader(const std::string& destination)
 bool smsBuildDeliver(const SmsDeliver& message, uint8_t rpRef, std::vector<uint8_t>& out)
 {
     std::vector<uint8_t> tpdu;
-    std::vector<uint8_t> septets;
+    // The GSM alphabet goes out in septets (DCS 0). A code of 80h or above, which only an escape
+    // <0xNN> can give, needs the NMT 8-bit set 0 (DCS 0x30): one octet per character, the first
+    // 128 those of the GSM alphabet.
+    bool eightBit = false;
+    const std::vector<uint8_t> codes = textCodes(message.text, eightBit);
+    const std::vector<uint8_t> userData = eightBit ? codes : smsPackSeptets(codes);
 
-    if (!textSeptets(message.text, septets)) {
+    if (codes.size() > kMaxChars) {
         return false;
     }
     const SmsTime& t = message.time;
@@ -438,16 +501,15 @@ bool smsBuildDeliver(const SmsDeliver& message, uint8_t rpRef, std::vector<uint8
     }
     // first octet: SMS-DELIVER, bit 2 is 0 when more messages wait (the other way round than GSM)
     tpdu.push_back(message.moreWaiting ? 0x00 : 0x04);
-    if (!smsEncodeAddress(message.originator, tpdu)) {
+    if (!smsEncodeAddress(message.originator, tpdu, message.originatorType, message.originatorPlan)) {
         return false;
     }
     tpdu.push_back(0x00);                           // protocol identifier
-    tpdu.push_back(0x00);                           // data coding scheme: the GSM alphabet
+    tpdu.push_back(eightBit ? 0x30 : 0x00);         // data coding scheme
     const std::vector<uint8_t> time = smsEncodeTime(message.time);
     tpdu.insert(tpdu.end(), time.begin(), time.end());
-    tpdu.push_back(static_cast<uint8_t>(septets.size()));
-    const std::vector<uint8_t> packed = smsPackSeptets(septets);
-    tpdu.insert(tpdu.end(), packed.begin(), packed.end());
+    tpdu.push_back(static_cast<uint8_t>(codes.size()));
+    tpdu.insert(tpdu.end(), userData.begin(), userData.end());
 
     if (tpdu.size() > 255) {
         return false;
@@ -549,7 +611,7 @@ SmsParse parseSubmitTpdu(const uint8_t* data, size_t length, SmsSubmit& out, siz
     else
     {
         // 8-bit set: the first 128 characters are those of the GSM alphabet (with the escape), the
-        // national ones are not known here
+        // national ones are passed on as escapes <0xNN>
         std::string text;
         std::vector<uint8_t> run;
 
@@ -557,9 +619,14 @@ SmsParse parseSubmitTpdu(const uint8_t* data, size_t length, SmsSubmit& out, siz
         {
             if (data[pos + i] & 0x80)
             {
+                static const char kHex[] = "0123456789abcdef";
+
                 text += smsGsmDecode(run);
                 run.clear();
-                text.push_back('?');
+                text += "<0x";
+                text.push_back(kHex[data[pos + i] >> 4]);
+                text.push_back(kHex[data[pos + i] & 0xf]);
+                text.push_back('>');
             }
             else {
                 run.push_back(data[pos + i]);

@@ -131,16 +131,37 @@ static void testAddresses()
     CHECK(smsDecodeAddress(odd.data(), odd.size(), number, used) == SmsParse::Ok && number == "123" && used == 4);
     const Bytes alpha = {0x04, 0xd0, 0x00, 0x00};
     CHECK(smsDecodeAddress(alpha.data(), alpha.size(), number, used) == SmsParse::Error);
+    // up to 20 digits: 12 octets with the length and the type
     out.clear();
-    CHECK(!smsEncodeAddress("+", out));
     CHECK(smsEncodeAddress(std::string(20, '7'), out) && out[0] == 20 && out.size() == 12);
+    out.clear();
+    CHECK(smsEncodeAddress(std::string(20, '7') + "--", out) && out[0] == 20);
 
-    // what cannot be coded
+    // characters that are no digit are left out; a plus sign is a digit wherever it is
+    out.clear();
+    CHECK(smsEncodeAddress("12a4", out));
+    CHECK(out == Bytes({0x03, 0x81, 0x21, 0xf4}));
+    out.clear();
+    CHECK(smsEncodeAddress("1 2-3", out));
+    CHECK(out == Bytes({0x03, 0x81, 0x21, 0xf3}));
+    out.clear();
+    CHECK(smsEncodeAddress("12+4", out));
+    CHECK(out == Bytes({0x04, 0x81, 0x21, 0x4d}));
+
+    // type and numbering plan from the caller
+    out.clear();
+    CHECK(smsEncodeAddress("12", out, 2, 8));
+    CHECK(out == Bytes({0x02, 0xa8, 0x21}));
+    out.clear();
+    CHECK(smsEncodeAddress("12", out, 0, 9));
+    CHECK(out == Bytes({0x02, 0x89, 0x21}));
+
+    // what cannot be coded: nothing, no digit, over 20 digits
     out.clear();
     CHECK(!smsEncodeAddress("", out));
-    CHECK(!smsEncodeAddress("12a4", out));
-    CHECK(!smsEncodeAddress("12+4", out));
+    CHECK(!smsEncodeAddress("abc", out));
     CHECK(!smsEncodeAddress(std::string(21, '1'), out));
+    CHECK(out.empty());
 }
 
 static void testTime()
@@ -228,6 +249,42 @@ static void testDeliverExample()
     CHECK(smsRpErrorToPhone(7, SmsCauseMemoryFull) == Bytes({0x05, 0x07, 0x42, 0x01, 0x16}));
     CHECK(smsRpNoMessages(9) == Bytes({0x07, 0x09}));
 
+    // text goes out in the GSM alphabet (DCS 0), other characters as '?'; an escape <0xNN> of 80h
+    // or above sends the message in the 8-bit set 0 (DCS 0x30), one octet per character
+    m.text = "\xc3\xa4 A";                              // a umlaut is in the GSM alphabet
+    CHECK(smsBuildDeliver(m, 1, out) && out[4 + 1 + 8 + 1] == 0x00);
+    m.text = "A\xc4\x8d";                               // c with caron is not
+    CHECK(smsBuildDeliver(m, 1, out) && out[4 + 1 + 8 + 1] == 0x00);
+    CHECK(Bytes(out.end() - 3, out.end()) == Bytes({0x02, 0xc1, 0x1f}));    // "A?" in septets
+    m.text = "<0x41>B";                                 // an escape below 80h is a GSM character
+    CHECK(smsBuildDeliver(m, 1, out) && out[4 + 1 + 8 + 1] == 0x00);
+    CHECK(Bytes(out.end() - 3, out.end()) == Bytes({0x02, 0x41, 0x21}));
+    m.text = "caf<0xE9>@";
+    CHECK(smsBuildDeliver(m, 1, out));
+    CHECK(out[4 + 1 + 8 + 1] == 0x30);
+    CHECK(Bytes(out.end() - 6, out.end()) == Bytes({0x05, 'c', 'a', 'f', 0xe9, 0x00}));
+    CHECK(out[3] == out.size() - 4);
+    m.text = "<0x4>x<0xzz><0x41";                      // no escapes: text
+    CHECK(smsBuildDeliver(m, 1, out) && out[4 + 1 + 8 + 1] == 0x00 && out[4 + 1 + 8 + 2 + 7] == 17);
+    m.text = "";
+    for (int i = 0; i < 160; i++) {
+        m.text += "<0xc4>";
+    }
+    CHECK(smsBuildDeliver(m, 1, out) && out.size() == 4 + 1 + 8 + 2 + 7 + 1 + 160);
+    m.text += "<0xc4>";
+    CHECK(!smsBuildDeliver(m, 1, out));
+
+    // the address type and numbering plan come from the caller
+    m.text = "x";
+    m.originator = "358";
+    m.originatorType = 1;
+    m.originatorPlan = 1;
+    CHECK(smsBuildDeliver(m, 1, out) && out[4 + 1 + 1] == 0x91);
+    m.originatorType = -1;
+    m.originatorPlan = -1;
+    CHECK(smsBuildDeliver(m, 1, out) && out[4 + 1 + 1] == 0x81);
+    m.originator = "+35849654321";
+
     // what does not fit
     m.text = std::string(161, 'a');
     CHECK(!smsBuildDeliver(m, 1, out));
@@ -297,8 +354,8 @@ static void testSubmitExample()
         eight.push_back(c);
     }
     CHECK(smsParseFromPhone(eight.data(), eight.size(), m, used) == SmsParse::Ok && m.submit.text == "HELLO");
-    eight[27] = 0xe4;                                   // beyond the first 128: a question mark
-    CHECK(smsParseFromPhone(eight.data(), eight.size(), m, used) == SmsParse::Ok && m.submit.text == "?ELLO");
+    eight[27] = 0xe4;                                   // beyond the first 128: an escape
+    CHECK(smsParseFromPhone(eight.data(), eight.size(), m, used) == SmsParse::Ok && m.submit.text == "<0xe4>ELLO");
     eight[24] = 0x04;                                   // 8-bit data of another kind
     CHECK(smsParseFromPhone(eight.data(), eight.size(), m, used) == SmsParse::Error);
 
