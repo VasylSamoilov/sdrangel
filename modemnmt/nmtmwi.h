@@ -46,7 +46,8 @@ enum class NmtServiceEnd
     NoAck,          // the indicators were sent, the phone did not acknowledge
     Undelivered,    // they were not sent: the call ended before, or the phone did not answer
     Unreachable,    // the phone did not answer the page
-    NoChannel       // no traffic channel became free
+    NoChannel,      // no traffic channel became free
+    Rejected        // a short message: the phone refused it (RP-ERROR, with a cause)
 };
 
 // The 12 bits F1F2F3 of frame 5c: i1..i6 (SMS, voice mail, fax, e-mail, data, spare) followed by

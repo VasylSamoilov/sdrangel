@@ -156,9 +156,22 @@ void NmtSystem::destroyTransaction(NmtTransaction* transaction)
         }
 
         const MwiReport report = mwiReport(*it);
+        SmsReport sms;
+
+        if (it->smsToPhone && !it->smsReported)
+        {
+            it->smsReported = true;
+            sms.valid = true;
+            sms.subscriber = it->subscriber;
+            sms.result = it->smsResult;
+            sms.cause = it->smsCause;
+        }
 
         m_transactions.erase(it);
         sendMwiReport(report);
+        if (sms.valid && m_smsResultHandler) {
+            m_smsResultHandler(sms.subscriber, sms.result, sms.cause);
+        }
         return;
     }
 }
@@ -225,6 +238,54 @@ bool NmtSystem::sendMwi(char country, const std::string& number, uint8_t flags)
     return true;
 }
 
+bool NmtSystem::sendSms(char country, const std::string& number, const SmsDeliver& message)
+{
+    std::vector<uint8_t> coded;
+
+    if (!smsBuildDeliver(message, 0, coded)) {
+        return false;
+    }
+    // a phone that has a transaction is busy (a message call too)
+    for (const NmtTransaction& transaction : m_transactions)
+    {
+        if (transaction.subscriber.country == country && transaction.subscriber.number == number) {
+            return false;
+        }
+    }
+    if (!admits(nullptr)) {
+        return false;
+    }
+
+    NmtTransaction& transaction = newPagedTransaction(country, number);
+
+    transaction.messageCall = true;
+    transaction.smsCall = true;
+    transaction.smsToPhone = true;
+    transaction.smsDeliver = message;
+    transaction.smsRef = m_smsRef++;
+    page(transaction, 1);
+
+    return true;
+}
+
+bool NmtSystem::isSmsCenter(const std::string& dialled)
+{
+    return !m_smscNumber.empty() && dialled == m_smscNumber;
+}
+
+uint8_t NmtSystem::smsSubmitted(NmtTransaction& transaction, const SmsSubmit& message)
+{
+    // nobody to take it: temporary failure (GSM 04.11 Table 8.4)
+    if (!m_smsSubmitHandler) {
+        return 41;
+    }
+
+    // a copy: the handler may end the transaction
+    const NmtSubscriber subscriber = transaction.subscriber;
+
+    return m_smsSubmitHandler(subscriber, message);
+}
+
 void NmtSystem::detachChannel(NmtChannel& channel, NmtTransaction* transaction)
 {
     for (auto it = m_transactions.begin(); it != m_transactions.end(); ++it)
@@ -253,11 +314,17 @@ void NmtSystem::detachChannel(NmtChannel& channel, NmtTransaction* transaction)
             const bool failed = it->mobileTerminated && !it->answered;
             NmtTransaction report;
             const MwiReport mwi = mwiReport(*it);
+            const bool smsReport = it->smsToPhone && !it->smsReported;
+            const NmtServiceEnd smsResult = it->smsResult;
+            const uint8_t smsCause = it->smsCause;
 
             report.subscriber = it->subscriber;
             // the transaction is gone before the handler runs: it may do anything
             m_transactions.erase(it);
             sendMwiReport(mwi);
+            if (smsReport && m_smsResultHandler) {
+                m_smsResultHandler(report.subscriber, smsResult, smsCause);
+            }
             if (up)
             {
                 if (failed) {
@@ -695,6 +762,7 @@ void NmtSystem::queueTimeout(NmtTransaction& transaction)
 {
     if (transaction.messageCall) {
         transaction.mwiResult = NmtServiceEnd::NoChannel;
+        transaction.smsResult = NmtServiceEnd::NoChannel;
     }
     if (transaction.callUp)
     {
@@ -969,6 +1037,9 @@ void NmtSystem::callFailed(NmtTransaction& transaction, modemcellular::Cause cau
     if (transaction.messageCall)
     {
         transaction.mwiResult = (cause == modemcellular::Cause::NoChannel) ? NmtServiceEnd::NoChannel : NmtServiceEnd::Unreachable;
+        if (transaction.smsResult == NmtServiceEnd::Undelivered) {
+            transaction.smsResult = transaction.mwiResult;
+        }
         return;
     }
 

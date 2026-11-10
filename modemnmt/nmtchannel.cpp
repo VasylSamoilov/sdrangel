@@ -130,6 +130,14 @@ const double kMftSilence = 10.0;
 const double kRecallFirstDigit = 30.0;
 const double kRecallNextDigit = 8.0;
 const size_t kMaxRecallDigits = 32;
+// Short message calls (Annex 24 1.1): the call is released when no frame of the data link came
+// for 10 s, or no answer to our message for 20 s; after the last message the release follows
+// after 5 s.
+const double kSmsDmsTimeout = 10.0;
+const double kSmsPacketTimeout = 20.0;
+const double kSmsReleaseWait = 5.0;
+// RP cause for a short message from the phone that cannot be read (GSM 04.11 Table 8.4)
+const uint8_t kSmsCauseInvalidMessage = 95;
 // Frames of L(3), the roaming updating confirmation (NMT Doc 450-1 scheme D, T''' = 2 frames).
 const int kConfirmFrames = 2;
 // The phone dials digit by digit; a pause longer than this ends the call.
@@ -191,8 +199,25 @@ NmtChannel::NmtChannel(const ChannelConfig& config, double sampleRate, double de
     m_mwiLead(0),
     m_mwiAcked(false),
     m_compandor(8000.0),
-    m_compandorOn(false)
+    m_compandorOn(false),
+    m_dms(true),
+    m_smsSent(false),
+    m_smsReleasing(false),
+    m_smsAnswered(false)
 {
+    // short message calls: the bits of the data link go both ways on the speech path, in 8-bit
+    // format (Annex 24 1.2)
+    m_modem.setBitTap([this](int bit, double quality, double level) {
+        if (m_state == State::Sms) {
+            m_dms.pushBit(bit, quality, level);
+        }
+    });
+    m_modem.setDataSource([this]() {
+        int bit = 0;
+        return (m_state == State::Sms && m_dms.pullBit(bit)) ? bit : -1;
+    });
+    m_dms.setDataHandler([this](const std::vector<uint8_t>& data) { smsData(data); });
+    m_dms.setAllSentHandler([this]() { smsAllSent(); });
     m_modem.setFrameSource([this](FrameBits& bits) { return nextFrame(bits); });
     m_modem.setFrameSink([this](const RxFrame& rx) { receiveFrame(rx); });
     // the audio is muted while a frame is received, a little longer than two frames
@@ -244,6 +269,10 @@ void NmtChannel::receive(const float* samples, int length)
         m_superDetector.process(samples, length);
     }
     m_modem.receive(samples, length);
+    // the time of the data link runs with the audio that comes in
+    if (m_state == State::Sms) {
+        m_dms.advance(length / m_sampleRate);
+    }
 
     // The frame sync is found while the block is processed; the audio of the frame is muted
     // from the start of the block.
@@ -512,6 +541,24 @@ int NmtChannel::render(float* samples, int length, bool add)
         }
         case DspMode::Audio:
         default:
+            // a short message call: the frames of the data link, silence and the supervisory
+            // tone in between
+            if (m_state == State::Sms)
+            {
+                const int count = m_valid ? m_modem.renderData(samples + pos, length - pos, add) : 0;
+
+                framed += count;
+                pos += count;
+                if (pos < length)
+                {
+                    if (!add) {
+                        std::fill(samples + pos, samples + length, 0.0f);
+                    }
+                    m_superTone.add(samples + pos, length - pos);
+                    pos = length;
+                }
+                break;
+            }
             if (callAudioUp()) {
                 m_txAudio.generate(samples + pos, length - pos, add, m_deviationFactor);
             } else if (!add) {
@@ -832,8 +879,9 @@ Frame NmtChannel::txMtComplete()
     }
     if (m_txFrameCount == 4)
     {
-        // a phone that answered a ringing message call hears nothing: the indicators and the release
-        if (m_transaction->messageCall) {
+        // a phone that answered a ringing message call hears nothing: the indicators and the
+        // release (a short message call goes on with the data link)
+        if (m_transaction->messageCall && !m_transaction->smsCall) {
             beginMwiClear(0, false);
         } else {
             enterActive();
@@ -883,13 +931,16 @@ Frame NmtChannel::txMoComplete()
     }
     else
     {
-        if (m_config.compandor) {
+        // a short message call has no speech: no compandor order
+        const bool compandor = m_config.compandor && !m_transaction->smsCall;
+
+        if (compandor) {
             frame = lineSignalFrame(5);
         } else {
             frame.mt = MessageType::Frame6;
         }
         if (m_txFrameCount == kAddressCompleteFrames + 1) {
-            startCompandor(m_config.compandor);
+            startCompandor(compandor);
         }
         if (m_txFrameCount == kActiveFrame) {
             enterActive();
@@ -911,6 +962,11 @@ void NmtChannel::startCompandor(bool on)
 // seconds.
 void NmtChannel::enterActive()
 {
+    if (m_transaction && m_transaction->smsCall)
+    {
+        enterSms();
+        return;
+    }
     m_state = State::Active;
     setDspMode(DspMode::Audio);
     m_txAudio.reset();
@@ -1785,6 +1841,17 @@ void NmtChannel::completeDialling()
     const std::string dialled = m_dialled;
     NmtTransaction* const transaction = m_transaction;
 
+    // the number of the service centre: a short message call, the exchange is not called
+    if (m_host->isSmsCenter(dialled))
+    {
+        transaction->smsCall = true;
+        m_timer->start(kStateWatchdog);
+        m_state = State::MoComplete;
+        setDspMode(DspMode::Frame);
+        m_txFrameCount = 0;
+        return;
+    }
+
     transaction->callUp = true;
     const bool accepted = m_host->callDialled(*transaction, dialled);
 
@@ -1880,6 +1947,13 @@ Frame NmtChannel::txMtAutoanswer()
     // the phone answered while the order was going out: the order is complete, then 3 idle frames
     if (n == kAckFrames + 1 && m_autoanswerAcked)
     {
+        // a short message: the 3 idle frames, then the data link
+        if (m_transaction->smsCall)
+        {
+            m_state = State::MtComplete;
+            m_txFrameCount = 4 - kAckIdleFrames;
+            return txMtComplete();
+        }
         beginMwiClear(kAckIdleFrames, false);
         return txMwiClear();
     }
@@ -1912,8 +1986,16 @@ void NmtChannel::rxMtAutoanswer(const Frame& frame)
         return;
     }
     const int sent = std::max(0, m_txFrameCount - kAckFrames);
+    const int idle = std::max(0, kAckIdleFrames - sent);
 
-    beginMwiClear(std::max(0, kAckIdleFrames - sent), false);
+    // a short message: the idle frames still due (one at least), then the data link
+    if (m_transaction->smsCall)
+    {
+        m_state = State::MtComplete;
+        m_txFrameCount = 4 - std::max(idle, 1);
+        return;
+    }
+    beginMwiClear(idle, false);
 }
 
 // Frame 5c with all message indicators of the call.
@@ -1952,6 +2034,153 @@ Frame NmtChannel::txMwiInCall()
         return Frame();
     }
     return mwiFrame();
+}
+
+// ---- short message calls (NMT Doc 450-3 / 900-3 Annex 24) ----
+
+// The call is through: the data link runs on the speech path, without supervision. To the phone
+// the exchange starts the link (identity and random number) and sends the message; from the
+// phone it waits for the phone's frames.
+void NmtChannel::enterSms()
+{
+    m_state = State::Sms;
+    m_alarmRunning = false;
+    setDspMode(DspMode::Audio);
+    m_dms.reset();
+    m_modem.resetData();
+    m_smsRx.clear();
+    m_smsSent = false;
+    m_smsReleasing = false;
+    m_smsAnswered = false;
+
+    if (!m_transaction->smsToPhone)
+    {
+        m_timer->start(kSmsDmsTimeout);
+        return;
+    }
+
+    std::vector<uint8_t> rp;
+
+    if (!smsBuildDeliver(m_transaction->smsDeliver, m_transaction->smsRef, rp))
+    {
+        release();
+        return;
+    }
+    m_dms.startAsCaller();
+    smsSend(rp);
+    m_timer->start(kSmsPacketTimeout);
+}
+
+// Every message to the phone has the SMS header before it.
+void NmtChannel::smsSend(const std::vector<uint8_t>& rp)
+{
+    std::vector<uint8_t> data = smsHeader();
+
+    data.insert(data.end(), rp.begin(), rp.end());
+    m_smsSent = false;
+    m_dms.queueData(data.data(), data.size());
+}
+
+// The exchange is over: the release follows after a while.
+void NmtChannel::smsRelease()
+{
+    m_smsReleasing = true;
+    m_timer->start(kSmsReleaseWait);
+}
+
+// What we sent is acknowledged by the data link of the phone.
+void NmtChannel::smsAllSent()
+{
+    if (m_state != State::Sms) {
+        return;
+    }
+    m_smsSent = true;
+    // the message to the phone arrived; its answer is still to come
+    if (m_transaction->smsToPhone && m_transaction->smsResult == NmtServiceEnd::Undelivered) {
+        m_transaction->smsResult = NmtServiceEnd::NoAck;
+    }
+    if (m_smsAnswered) {
+        smsRelease();
+    }
+}
+
+// Data from the phone: the relay layer messages, one after the other.
+void NmtChannel::smsData(const std::vector<uint8_t>& data)
+{
+    if (m_state != State::Sms) {
+        return;
+    }
+    if (!m_smsReleasing) {
+        m_timer->start(kSmsDmsTimeout);
+    }
+    // what the phone sends while our message goes out is not looked at
+    if (m_transaction->smsToPhone && !m_smsSent) {
+        return;
+    }
+    m_smsRx.insert(m_smsRx.end(), data.begin(), data.end());
+
+    while (!m_smsRx.empty() && m_state == State::Sms)
+    {
+        SmsFromPhone message;
+        size_t used = 0;
+        const bool moData = m_smsRx.size() >= 2 && (m_smsRx[0] & 7) == 0;
+        const uint8_t ref = (m_smsRx.size() >= 2) ? m_smsRx[1] : 0;
+        const SmsParse result = smsParseFromPhone(m_smsRx.data(), m_smsRx.size(), message, used);
+
+        if (result == SmsParse::NeedMore) {
+            return;
+        }
+        m_smsRx.erase(m_smsRx.begin(), m_smsRx.begin() + static_cast<std::ptrdiff_t>(std::min(used, m_smsRx.size())));
+        if (result == SmsParse::Error)
+        {
+            // a short message that cannot be read is refused, anything else ends the call
+            if (moData && !m_transaction->smsToPhone)
+            {
+                m_smsAnswered = true;
+                smsSend(smsRpErrorToPhone(ref, kSmsCauseInvalidMessage));
+            }
+            else {
+                smsRelease();
+            }
+            return;
+        }
+
+        switch (message.kind)
+        {
+        case SmsRpKind::Submit:
+            if (m_transaction->smsToPhone) {
+                break;
+            }
+            {
+                const uint8_t cause = m_host->smsSubmitted(*m_transaction, message.submit);
+
+                if (m_state != State::Sms) {
+                    return;                 // the handler ended the call
+                }
+                m_smsAnswered = true;
+                smsSend(cause ? smsRpErrorToPhone(message.rpRef, cause) : smsRpAckToPhone(message.rpRef));
+            }
+            break;
+        case SmsRpKind::Ack:
+        case SmsRpKind::Error:
+            if (!m_transaction->smsToPhone) {
+                break;
+            }
+            m_transaction->smsResult = (message.kind == SmsRpKind::Ack) ? NmtServiceEnd::Ok : NmtServiceEnd::Rejected;
+            m_transaction->smsCause = message.cause;
+            smsRelease();
+            break;
+        case SmsRpKind::ReadyToReceive:
+            // the phone asks for waiting messages: there are none here
+            m_smsAnswered = true;
+            smsSend(smsRpNoMessages(message.rpRef));
+            break;
+        case SmsRpKind::MemoryAvailable:
+            m_smsAnswered = true;
+            smsSend(smsRpAckToPhone(message.rpRef));
+            break;
+        }
+    }
 }
 
 // The indicators go out right before the clearing signal (4.4.1.16): 5c twice, L(15) four times.
@@ -2135,6 +2364,12 @@ void NmtChannel::goIdle()
     m_alarmRunning = false;
     m_rxMute = 0;
     m_superDetector.reset();
+    m_dms.reset();
+    m_modem.resetData();
+    m_smsRx.clear();
+    m_smsSent = false;
+    m_smsReleasing = false;
+    m_smsAnswered = false;
     setDspMode(DspMode::Frame);
 }
 
@@ -2217,6 +2452,10 @@ void NmtChannel::onTimer()
         // this channel stopped sending: the order is off, the call goes on
         m_host->scipEnded(*m_transaction, true);
         enterActive();
+        return;
+    case State::Sms:
+        // nothing from the phone in time, or the exchange is over: the phone is released
+        release();
         return;
     default:
         break;

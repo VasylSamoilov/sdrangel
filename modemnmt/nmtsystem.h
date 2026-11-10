@@ -87,6 +87,24 @@ public:
     using MwiHandler = std::function<void(const NmtSubscriber& subscriber, uint8_t flags, NmtServiceEnd result)>;
     void setMwiHandler(MwiHandler handler) { m_mwiHandler = std::move(handler); }
 
+    // Short messages (NMT Doc 450-3 / 900-3 Annex 24) over the data link of the DMS.
+    // To the phone: it is paged and called without ringing like a message call, then the
+    // message goes out; the result handler tells how it ended (Ok: the phone took it, Rejected:
+    // it refused it with the RP cause, NoAck: no answer, Undelivered, Unreachable, NoChannel).
+    // False if the phone is busy, the carousel has no room, or the message cannot be coded.
+    bool sendSms(char country, const std::string& number, const SmsDeliver& message);
+    // From the phone: the phone dials the number of the service centre (empty: none, the
+    // default); the submit handler gets the message and returns the RP cause to answer with, 0
+    // to accept. Without a handler messages are refused (temporary failure).
+    void setSmscNumber(const std::string& number) { m_smscNumber = number; }
+    using SmsSubmitHandler = std::function<uint8_t(const NmtSubscriber& subscriber, const SmsSubmit& message)>;
+    using SmsResultHandler = std::function<void(const NmtSubscriber& subscriber, NmtServiceEnd result, uint8_t cause)>;
+    void setSmsHandlers(SmsSubmitHandler submit, SmsResultHandler result)
+    {
+        m_smsSubmitHandler = std::move(submit);
+        m_smsResultHandler = std::move(result);
+    }
+
     // Orders the phone of a connected call to another power level 0..3 (NMT Doc 450-1 4.4.1.8).
     // False if the phone has no connected call, or it has that level already. The result is
     // told to the power handler: the level, and whether the phone took it. The new level is
@@ -173,6 +191,8 @@ public:
     void roamingConfirmed(const NmtSubscriber& subscriber) override;
     bool callDialled(NmtTransaction& transaction, const std::string& dialled) override;
     void callCleared(NmtTransaction& transaction) override;
+    bool isSmsCenter(const std::string& dialled) override;
+    uint8_t smsSubmitted(NmtTransaction& transaction, const SmsSubmit& message) override;
     void audioFromMobile(NmtTransaction& transaction, const float* samples, int count) override;
     void audioToMobile(NmtTransaction& transaction, float* samples, int count) override;
     NmtChannel* findTrafficChannel(NmtChannel& from) override;
@@ -204,6 +224,13 @@ private:
     bool cancelMessageCall(char country, const std::string& number, uint8_t* carried);
     MwiReport mwiReport(NmtTransaction& transaction);
     void sendMwiReport(const MwiReport& report);
+    struct SmsReport
+    {
+        bool valid = false;
+        NmtSubscriber subscriber;
+        NmtServiceEnd result = NmtServiceEnd::Undelivered;
+        uint8_t cause = 0;
+    };
     NmtTransaction& newPagedTransaction(char country, const std::string& number);
     void page(NmtTransaction& transaction, int tryNo);
     void pagingTimeout(NmtTransaction& transaction);
@@ -228,6 +255,10 @@ private:
     AudioFromMobile m_audioFromMobile;
     AudioToMobile m_audioToMobile;
     MwiHandler m_mwiHandler;
+    std::string m_smscNumber;
+    SmsSubmitHandler m_smsSubmitHandler;
+    SmsResultHandler m_smsResultHandler;
+    uint8_t m_smsRef = 0;
     PowerHandler m_powerHandler;
     DigitHandler m_mftHandler;
     RecallDigitHandler m_recallDigitHandler;

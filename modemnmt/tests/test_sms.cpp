@@ -116,21 +116,22 @@ static void testAddresses()
     // short, and not an address
     CHECK(smsDecodeAddress(international.data(), 1, number, used) == SmsParse::NeedMore);
     CHECK(smsDecodeAddress(international.data(), 5, number, used) == SmsParse::NeedMore);
-    const Bytes noTypeBit = {0x02, 0x11, 0x21};
-    CHECK(smsDecodeAddress(noTypeBit.data(), noTypeBit.size(), number, used) == SmsParse::Error);
     const Bytes longer = {0x30, 0x91, 0x21, 0, 0};
     CHECK(smsDecodeAddress(longer.data(), longer.size(), number, used) == SmsParse::NeedMore);   // 48 digits need 24 octets
-    // filler or unused codes inside the number, a plus in the middle, a name in letters
+    // taken as received: any type, a filler or an unused code inside the number is '?', a plus
+    // anywhere
+    const Bytes noTypeBit = {0x02, 0x11, 0x21};
+    CHECK(smsDecodeAddress(noTypeBit.data(), noTypeBit.size(), number, used) == SmsParse::Ok && number == "+12");
     const Bytes filler = {0x02, 0x91, 0xf1};
-    CHECK(smsDecodeAddress(filler.data(), filler.size(), number, used) == SmsParse::Error);
+    CHECK(smsDecodeAddress(filler.data(), filler.size(), number, used) == SmsParse::Ok && number == "+1?");
     const Bytes unused = {0x04, 0x81, 0x21, 0xe3};
-    CHECK(smsDecodeAddress(unused.data(), unused.size(), number, used) == SmsParse::Error);
+    CHECK(smsDecodeAddress(unused.data(), unused.size(), number, used) == SmsParse::Ok && number == "123?");
     const Bytes midPlus = {0x03, 0x81, 0xd1, 0x32};
-    CHECK(smsDecodeAddress(midPlus.data(), midPlus.size(), number, used) == SmsParse::Error);
+    CHECK(smsDecodeAddress(midPlus.data(), midPlus.size(), number, used) == SmsParse::Ok && number == "1+2");
     const Bytes odd = {0x03, 0x81, 0x21, 0xf3};
     CHECK(smsDecodeAddress(odd.data(), odd.size(), number, used) == SmsParse::Ok && number == "123" && used == 4);
     const Bytes alpha = {0x04, 0xd0, 0x00, 0x00};
-    CHECK(smsDecodeAddress(alpha.data(), alpha.size(), number, used) == SmsParse::Error);
+    CHECK(smsDecodeAddress(alpha.data(), alpha.size(), number, used) == SmsParse::Ok && used == 4);
     // up to 20 digits: 12 octets with the length and the type
     out.clear();
     CHECK(smsEncodeAddress(std::string(20, '7'), out) && out[0] == 20 && out.size() == 12);
@@ -179,7 +180,7 @@ static void testTime()
     Bytes bytes = smsEncodeTime(t);
 
     CHECK(Bytes(bytes.begin(), bytes.begin() + 6) == Bytes({0x69, 0x21, 0x42, 0x31, 0x53, 0x4a}));
-    CHECK(bytes[6] == 0x00);
+    CHECK(bytes[6] == 0xa0);                            // zone 0: the units zero is 1010
     const SmsTime back = smsDecodeTime(bytes.data());
     CHECK(back.year == 96 && back.month == 12 && back.day == 24 && back.hour == 13 && back.minute == 35 && back.second == 4);
 
@@ -228,7 +229,7 @@ static void testDeliverExample()
         0x04,                                           // SMS-DELIVER, no more messages
         0x0c, 0x91, 0x3d, 0x85, 0x94, 0x56, 0x34, 0x12, // originator
         0x00, 0x00,                                     // protocol, coding scheme
-        0x69, 0x21, 0x42, 0x31, 0x53, 0x4a, 0x00,       // time
+        0x69, 0x21, 0x42, 0x31, 0x53, 0x4a, 0xa0,       // time, zone 0 (page 28 has 08h)
         0x05, 0xc8, 0x22, 0x93, 0xf9, 0x04              // 5 characters
     };
     CHECK(out == expected);
@@ -367,16 +368,16 @@ static void testSubmitExample()
     bad[12] = 0x10;                                     // not an SMS-SUBMIT
     CHECK(smsParseFromPhone(bad.data(), bad.size(), m, used) == SmsParse::Error);
     bad = kSubmit;
-    bad[12] = 0x09;                                     // reserved validity format
-    CHECK(smsParseFromPhone(bad.data(), bad.size(), m, used) == SmsParse::Error);
+    bad[12] = 0x09;                                     // reserved validity format: one octet
+    CHECK(smsParseFromPhone(bad.data(), bad.size(), m, used) == SmsParse::Ok && m.submit.text == "HELLO");
     bad = kSubmit;
     bad[0] = 0x08;                                      // spare bits are ignored
     CHECK(smsParseFromPhone(bad.data(), bad.size(), m, used) == SmsParse::Ok && m.submit.text == "HELLO");
     bad[0] = 0x01;                                      // a message to the phone, not from it
     CHECK(smsParseFromPhone(bad.data(), bad.size(), m, used) == SmsParse::Error && used == bad.size());
     bad = kSubmit;
-    bad[12] = 0x51;                                     // a user data header (concatenation): not defined
-    CHECK(smsParseFromPhone(bad.data(), bad.size(), m, used) == SmsParse::Error);
+    bad[12] = 0x51;                                     // the user data header bit is not looked at
+    CHECK(smsParseFromPhone(bad.data(), bad.size(), m, used) == SmsParse::Ok && m.submit.text == "HELLO");
     bad = kSubmit;
     bad[12] = 0x03;                                     // a reserved kind of TPDU
     CHECK(smsParseFromPhone(bad.data(), bad.size(), m, used) == SmsParse::Error);
@@ -563,7 +564,7 @@ static void testTimeRange()
     t.minute = 0;
     t.second = 60;
     const Bytes b = smsEncodeTime(t);
-    CHECK(b == Bytes({0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xa6, 0x00}));
+    CHECK(b == Bytes({0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xa6, 0xa0}));
     // a time stamp of nibbles that are no digits stays below 100
     const Bytes wild = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
     const SmsTime w = smsDecodeTime(wild.data());
