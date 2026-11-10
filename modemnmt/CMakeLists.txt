@@ -4,6 +4,7 @@ set(modemnmt_SOURCES
     biquad.cpp
     ffsk.cpp
     hagelbarger.cpp
+    nmtdms.cpp
     nmtcellularbridge.cpp
     nmtchannel.cpp
     nmtframe.cpp
@@ -18,6 +19,7 @@ set(modemnmt_HEADERS
     biquad.h
     ffsk.h
     hagelbarger.h
+    nmtdms.h
     nmtcellularbridge.h
     nmtchannel.h
     nmtframe.h

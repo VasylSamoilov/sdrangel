@@ -10,6 +10,7 @@ set(MODEMNMT_LIB_SOURCES
     ../biquad.cpp
     ../ffsk.cpp
     ../hagelbarger.cpp
+    ../nmtdms.cpp
     ../nmtcellularbridge.cpp
     ../nmtchannel.cpp
     ../nmtframe.cpp
@@ -66,3 +67,4 @@ modemnmt_add_test(modemnmt_mtcall_test test_mtcall.cpp)
 modemnmt_add_test(modemnmt_scip_test test_scip.cpp)
 modemnmt_add_test(modemnmt_incall_test test_incall.cpp)
 modemnmt_add_test(modemnmt_mwi_test test_mwi.cpp)
+modemnmt_add_test(modemnmt_dms_test test_dms.cpp)
