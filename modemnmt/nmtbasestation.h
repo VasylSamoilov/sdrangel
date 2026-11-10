@@ -23,7 +23,9 @@
 #include <vector>
 
 #include "carrierbatch.h"
+#include "carrierradio.h"
 #include "clock.h"
+#include "emphasis.h"
 #include "nmtplan.h"
 #include "nmtsystem.h"
 #include "export.h"
@@ -35,7 +37,9 @@ namespace modemnmt
 // runs it. The carriers get their frequencies from the plan of the country and are bound to one
 // receive and one transmit stream (radio plugin) whose span covers them. The network runs on the
 // clock of its receive stream: every received batch is fed to the carriers, the clock moves on by
-// its length, the timers run, and the same length is rendered for the transmitter.
+// its length, the timers run, and the same length is rendered for the transmitter. The batches
+// carry the frequency deviation in Hz; the base station applies the emphasis and the speech
+// deviation of the plan (3 kHz at 1 kHz times the deviation factor).
 struct NmtCarrierConfig
 {
     int channel = 0;
@@ -45,6 +49,7 @@ struct NmtCarrierConfig
 
 struct NmtNetworkConfig
 {
+    int id = 0;                     // the carrier ids are id * kIdStride + channel number
     System system = System::Nmt450;
     std::string country = "DK";     // short name of the plan
     int area = 1;                   // traffic area Y2 within the country
@@ -91,6 +96,8 @@ public:
     // 2 * (4700 Hz deviation + 4055 Hz modulation) times the deviation factor of the plan
     static constexpr double kUsableBandwidth = 0.75;
     static constexpr double kCarrierBandwidth = 2.0 * (4700.0 + 4055.0);
+    static constexpr double kSpeechDeviation = 3000.0;
+    static constexpr int kIdStride = 10000;
 
     explicit NmtBaseStation(const NmtNetworkConfig& config);
     ~NmtBaseStation();
@@ -113,9 +120,14 @@ public:
     int rxStream() const { return m_rxStream; }
     int txStream() const { return m_txStream; }
 
-    // One received batch of the receive stream (carrier ids are channel numbers; other carriers
-    // of the stream are left alone) to the batch for the transmitter: the carriers on air, the
-    // same length, the same first sample.
+    // the id of a carrier in the batches
+    int carrierId(size_t index) const;
+    // the carriers on air as the radio of the receive and the transmit stream tunes them
+    std::vector<modemcellular::CarrierTuning> rxTuning() const;
+    std::vector<modemcellular::CarrierTuning> txTuning() const;
+
+    // One received batch of the receive stream (other carriers of the stream are left alone) to
+    // the batch for the transmitter: the carriers on air, the same length, the same first sample.
     void process(const modemcellular::CarrierBatch& rx, modemcellular::CarrierBatch& tx);
     uint64_t samples() const { return m_samples; }
 
@@ -123,6 +135,8 @@ public:
     NmtSystem* system() { return m_system.get(); }
 
 private:
+    double speechDeviation(size_t onAirIndex) const;
+
     NmtNetworkConfig m_config;
     std::vector<NmtPlanIssue> m_issues;
     std::vector<NmtPlanIssue> m_streamIssues;
@@ -133,8 +147,13 @@ private:
     uint64_t m_samples;
     modemcellular::SampleClock m_clock;
     std::unique_ptr<NmtSystem> m_system;
+    NmtStreamSpan m_rxSpan;
+    NmtStreamSpan m_txSpan;
     std::vector<int> m_onAir;                   // indices into m_carriers
     std::vector<NmtChannel*> m_channels;        // parallel to m_onAir
+    std::vector<std::unique_ptr<Emphasis>> m_rxEmphasis;
+    std::vector<std::unique_ptr<Emphasis>> m_txEmphasis;
+    std::vector<float> m_audio;
 };
 
 } // namespace modemnmt

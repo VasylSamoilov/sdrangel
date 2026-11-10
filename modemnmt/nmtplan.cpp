@@ -19,6 +19,7 @@
 #include "nmtplan.h"
 
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 
 namespace modemnmt
@@ -157,6 +158,7 @@ bool nmtChannelFrequency(const NmtCountry& country, int channel, NmtChannelFrequ
         out.downlink = downlink * 1e6;
         out.uplink = (downlink - block.duplex) * 1e6;
         out.deviationFactor = block.deviationFactor;
+        out.spacing = std::fabs(block.spacing) * 1e6;
         out.scandinavia = block.scandinavia;
         return true;
     }
