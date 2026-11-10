@@ -862,9 +862,13 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
         record.m_protocolData.insert("registration_ack", message.m_registrationAck);
     }
 
-    // The text is hex: digit size, order of the bits in a digit and the number of data bits
+    // The text is hex: digit size, order of the bits in a digit and the number of data bits. fill_state: how the
+    // end of the data was found (consistent, inconsistent with the termination rules, unknown)
     if (message.m_hexNibbleBits > 0)
     {
+        static const char *const fill[3] = {"consistent", "inconsistent", "unknown"};
+
+        record.m_protocolData.insert("fill_state", fill[std::max(0, std::min(2, message.m_fillState))]);
         record.m_protocolData.insert("hex_nibble_bits", message.m_hexNibbleBits);
         record.m_protocolData.insert("hex_bit_order", message.m_hexLsbFirst ? "lsb_first" : "msb_first");
         record.m_protocolData.insert("hex_bits", message.m_dataBits);

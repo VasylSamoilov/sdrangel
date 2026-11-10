@@ -1717,8 +1717,173 @@ void testShortMessage()
     check(tooLong && notNumeric, "short message: 4 digits on a short address and letters refused");
 }
 
+// ---------------------------------------------------------------------------
+// HEX/binary data bits, termination, K and signature (STD-43A 3.10.1.2)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+uint32_t testGroupSum(uint32_t w)
+{
+    return (w & 0xff) + ((w >> 8) & 0xff) + ((w >> 16) & 0x1f);
+}
+
+// Words of a HEX/binary fragment: header 1 (K, C, F, N), header 2 of a first fragment (B, S), data words
+std::vector<uint32_t> hexFragmentWords(int c, int f, int n, int b, uint32_t signature, bool first, const std::vector<int>& dataBits)
+{
+    std::vector<uint32_t> words;
+    uint32_t hdr1 = ((uint32_t) c << 12) | ((uint32_t) f << 13) | ((uint32_t) n << 15);
+
+    words.push_back(hdr1);
+    if (first) {
+        words.push_back(((uint32_t) (b & 0xf) << 4) | (1u << 12) | (signature << 13));  // I = 1 as in the capture
+    }
+    for (size_t i = 0; i < dataBits.size(); i += 21)
+    {
+        uint32_t w = 0;
+        for (size_t k = 0; (k < 21) && (i + k < dataBits.size()); k++) {
+            w |= (uint32_t) dataBits[i + k] << k;
+        }
+        words.push_back(w);
+    }
+
+    uint32_t sum = 0;
+    for (uint32_t w : words) {
+        sum += testGroupSum(w);
+    }
+    words[0] |= (~sum) & 0xfff;
+    return words;
+}
+
+Flex::FrameBytes hexFrameBytes(unsigned cycle, unsigned frame, const std::vector<uint32_t>& body)
+{
+    uint32_t words[Flex::m_wordsPerFrame];
+    Flex::fillIdle(words, 0, Flex::Mode1600_2);
+    words[0] = Flex::blockInfoWord(0, 0, 2, 0, 0);
+    words[1] = Flex::encodeWord(1234567u + 32768u);
+    words[2] = Flex::encodeWord(Flex::addChecksum((6u << 4) | (3u << 7) | ((uint32_t) body.size() << 14)));
+    for (size_t i = 0; i < body.size(); i++) {
+        words[3 + i] = Flex::encodeWord(body[i]);
+    }
+    for (int b = 0; b < Flex::m_blocksPerFrame; b++) {
+        Flex::interleaveBlock(words + b * Flex::m_wordsPerBlock);
+    }
+    Flex::FrameParams fp;
+    fp.m_cycle = cycle;
+    fp.m_frame = frame;
+    return Flex::assemble(fp, {std::vector<uint32_t>(words, words + Flex::m_wordsPerFrame)});
+}
+
+// Bits of bytes, first bit the least significant of a byte
+std::vector<int> byteBits(const std::vector<uint8_t>& bytes)
+{
+    std::vector<int> bits;
+    for (uint8_t v : bytes) {
+        for (int k = 0; k < 8; k++) {
+            bits.push_back((v >> k) & 1);
+        }
+    }
+    return bits;
+}
+
+uint32_t testSignature(const std::vector<uint8_t>& bytes)
+{
+    uint32_t sum = 0;
+    for (uint8_t v : bytes) {
+        sum += v;
+    }
+    return (~sum) & 0xff;
+}
+
+// Data bits followed by the termination of 3.10.1.2: the inverse of the last bit to the end of the word, and a
+// word of the inverse if the data end exactly at a word end and the last character is uniform (last fragment)
+std::vector<int> terminated(std::vector<int> bits, int b, bool last)
+{
+    int inv = 1 - bits.back();
+    bool charUniform = true;
+    for (int k = 1; k <= b; k++) {
+        charUniform = charUniform && (bits[bits.size() - k] == bits.back());
+    }
+    if ((bits.size() % 21) != 0)
+    {
+        while ((bits.size() % 21) != 0) {
+            bits.push_back(inv);
+        }
+    }
+    else if (last && charUniform)
+    {
+        bits.insert(bits.end(), 21, inv);
+    }
+    return bits;
+}
+
+} // namespace
+
+void testHexBits()
+{
+    // One fragment, 8 bit characters; data that end mid-word, exactly at the end of a word with a
+    // non-uniform last character (nothing added) and with a uniform one (an extra word)
+    struct Case { const char *m_name; std::vector<uint8_t> m_data; };
+    std::vector<uint8_t> exact(21, 0x5a);       // 168 bits: 8 words exactly
+    std::vector<uint8_t> exactUniform(21, 0x5a);
+    exactUniform.back() = 0xff;
+    const Case cases[] = {
+        { "mid-word end", {0x11, 0xc2, 0x10, 0x2c, 0x23} },
+        { "exact word end, last character mixed", exact },
+        { "exact word end, last character 0xff", exactUniform },
+        { "exact word end, last character 0x00", std::vector<uint8_t>(20, 0x5a) },
+    };
+
+    for (const Case& c : cases)
+    {
+        std::vector<uint8_t> data = c.m_data;
+        if (std::string(c.m_name).find("0x00") != std::string::npos) {
+            data.insert(data.end(), 1, 0x00);
+        }
+        std::vector<int> bits = terminated(byteBits(data), 8, true);
+        std::vector<uint32_t> body = hexFragmentWords(0, 3, 0, 8, testSignature(data), true, bits);
+        Flex::FrameBytes bytes = hexFrameBytes(2, 10, body);
+        Dec dec;
+        std::vector<Dec::Message> out = dec.decodeFrame(toRxFrame(Flex::Mode1600_2, false, bytes.m_sync, bytes.m_data));
+        bool ok = (out.size() == 1) && (out[0].m_type == Dec::TypeBinary) && (out[0].m_dataBits == (int) data.size() * 8)
+            && (out[0].m_checksum == Dec::CheckOk) && (out[0].m_signature == Dec::CheckOk) && (out[0].m_fillState == 0)
+            && (out[0].m_blocking == 8) && out[0].m_statusInfo;
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "hex bits: %s: data end, K and signature", c.m_name);
+        check(ok, buf);
+    }
+
+    // Two fragments: the signature covers the data of both, the fragment ends need not be on a digit
+    for (int lost = 0; lost < 2; lost++)
+    {
+        std::vector<uint8_t> data;
+        for (int i = 0; i < 30; i++) {
+            data.push_back((uint8_t) (0x13 * i + 7));
+        }
+        std::vector<int> all = byteBits(data);
+        // The first fragment ends on a character boundary: 15 characters
+        std::vector<int> frag1(all.begin(), all.begin() + 15 * 8);
+        std::vector<int> frag2(all.begin() + 15 * 8, all.end());
+        frag1 = terminated(frag1, 8, false);
+        frag2 = terminated(frag2, 8, true);
+        Dec dec;
+        std::vector<Dec::Message> first = dec.decodeFrame(toRxFrame(Flex::Mode1600_2, false,
+            hexFrameBytes(2, 20, hexFragmentWords(1, 3, 9, 8, testSignature(data), true, frag1)).m_sync,
+            hexFrameBytes(2, 20, hexFragmentWords(1, 3, 9, 8, testSignature(data), true, frag1)).m_data));
+        // F = 0 follows 3; with a fragment lost the next one is F = 1
+        Flex::FrameBytes b2 = hexFrameBytes(2, 21, hexFragmentWords(0, lost ? 1 : 0, 9, 8, 0, false, frag2));
+        std::vector<Dec::Message> last = dec.decodeFrame(toRxFrame(Flex::Mode1600_2, false, b2.m_sync, b2.m_data));
+        bool ok = first.empty() && (last.size() == 1) && (last[0].m_fragmentCount == 2) && (last[0].m_dataBits == 240)
+            && (last[0].m_signature == (lost ? Dec::CheckIncomplete : Dec::CheckOk)) && (last[0].m_checksum == Dec::CheckOk)
+            && (last[0].m_fragmentGap == (lost != 0));
+        check(ok, lost ? "hex bits: fragments with a lost one: signature not checked"
+                       : "hex bits: two fragments, signature over both");
+    }
+}
+
 int main()
 {
+    testHexBits();
     testReferenceFrames();
     testRoaming();
     testShortMessage();

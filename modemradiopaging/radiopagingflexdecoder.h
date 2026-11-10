@@ -267,6 +267,9 @@ public:
         int m_reservedBits = 0;             //!< s3-s0, reserved, 0 by default
         int m_fragmentControl = -1;         //!< U0 V0 of an alphanumeric fragment after the first (as 2 bits, U0 high), else -1
         bool m_nulError = false;            //!< Enhanced fragmentation: a NUL character that is not a reminder at the end of the fragment
+        //! HEX/binary and secure binary: how the end of the data was found. 0 by the termination rules, 1 the
+        //! bits at the end do not follow them, 2 can not be told (lost bits at the end, blocking length unknown)
+        int m_fillState = 0;
         int m_dataBits = 0;                 //!< Data bits in m_text without the termination bits (binary, secure hex)
 
         // Short message (vector type 2)

@@ -221,6 +221,144 @@ int dataBitCount(const std::vector<int8_t>& bits)
     return (int) std::count_if(bits.begin(), bits.end(), [](int8_t b) { return b != 2; });
 }
 
+// Length in bits of the data of a HEX/binary or secure binary fragment of bits.size() bits (21 a word, a bit
+// of a lost word is -1). The data end on a character boundary of blocking bits (STD-43A 3.10.1.2 p.61-62):
+//   - data end in the middle of the last word: the rest of the word is the inverse of the last data bit;
+//   - data end exactly at the end of the last word: nothing is added, except in the last fragment when the
+//     last character is all 0s or all 1s: then a word of the inverse of the last data bit is added.
+// The length is a multiple of blocking. A non-last fragment that ends exactly at a word end, with a
+// run of equal bits of blocking bits or more at its end, can not be told from fill: taken as fill.
+// state: 0 follows the rules, 1 does not, 2 can not be told (lost bits at the end, blocking unknown = 0)
+int terminateBits(const std::vector<int8_t>& bits, int blocking, bool lastFragment, int& state)
+{
+    const int wordBits = 21;
+    int n = (int) bits.size();
+
+    state = 0;
+
+    if (n <= 0) {
+        return 0;
+    }
+    if (blocking <= 0)
+    {
+        state = 2;
+        return n;
+    }
+
+    const int8_t *lw = &bits[n - wordBits];
+
+    for (int i = 0; i < wordBits; i++)
+    {
+        if (lw[i] < 0)
+        {
+            state = 2;
+            return n;
+        }
+    }
+
+    // Rule (3): an extra word of the inverse of the last data bit
+    if (lastFragment && (n >= 2 * wordBits) && (((n - wordBits) % blocking) == 0) && (n - wordBits >= blocking))
+    {
+        bool uniform = true;
+
+        for (int i = 1; i < wordBits; i++)
+        {
+            if (lw[i] != lw[0])
+            {
+                uniform = false;
+                break;
+            }
+        }
+
+        if (uniform)
+        {
+            bool inverse = true;
+
+            for (int i = 1; i <= blocking; i++)
+            {
+                int8_t b = bits[n - wordBits - i];
+
+                if (b < 0)
+                {
+                    state = 2;
+                    return n;
+                }
+                if (b == lw[0]) {
+                    inverse = false;
+                }
+            }
+
+            if (inverse) {
+                return n - wordBits;
+            }
+        }
+    }
+
+    // Rule (2): fill in the last word, the run of equal bits at its end
+    int run = 0;
+
+    while ((run < wordBits) && (lw[wordBits - 1 - run] == lw[wordBits - 1])) {
+        run++;
+    }
+
+    if (run == wordBits)
+    {
+        // A whole word of one value is not fill (fill is shorter)
+        if ((n % blocking) != 0) {
+            state = 1;
+        }
+        return n;
+    }
+    if (run >= blocking)
+    {
+        if (((n - run) % blocking) == 0) {
+            return n - run;
+        }
+        state = (lastFragment || ((n % blocking) != 0)) ? 1 : 0;
+        return n;
+    }
+    if ((n % blocking) == 0) {
+        return n;
+    }
+    if (((n - run) % blocking) == 0) {
+        return n - run;
+    }
+
+    state = 1;
+    return n;
+}
+
+// Signature sum of HEX/binary data (3.10.1.2 p.61): groups of 8 bits, the first bit of a group the least
+// significant, a last group with fewer bits padded with 0. lost: a bit is lost or a fragment is missing
+uint32_t hexSignatureSum(const std::vector<int8_t>& bits, bool& lost)
+{
+    uint32_t sum = 0;
+    uint32_t acc = 0;
+
+    lost = false;
+
+    for (size_t i = 0; i < bits.size(); i++)
+    {
+        if ((bits[i] < 0) || (bits[i] == 2)) {
+            lost = true;
+        } else {
+            acc |= (uint32_t) bits[i] << (i % 8);
+        }
+
+        if ((i % 8) == 7)
+        {
+            sum += acc;
+            acc = 0;
+        }
+    }
+
+    if ((bits.size() % 8) != 0) {
+        sum += acc;
+    }
+
+    return sum;
+}
+
 } // namespace
 
 RadioPagingFlexDecoder::Check RadioPagingFlexDecoder::combineChecks(Check a, Check b)
@@ -631,7 +769,8 @@ void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& 
 {
     // Only an alphanumeric message has a signature field (3.10.1.3); a secure message has none (3.10.1.4)
     const bool signatureUsed = (vector == 5);
-    const bool secureHex = (vector == 0) && (msg.m_hexNibbleBits != 0);
+    // HEX/binary and secure binary data are joined as one bit string over the fragments
+    const bool secureHex = (msg.m_hexNibbleBits != 0);
 
     setRaw(msg, info.m_raw);
 
@@ -775,9 +914,26 @@ void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& 
                 out.m_signature = CheckIncomplete;
             }
         }
+        else if ((vector == 6) && secureHex)
+        {
+            // HEX/binary: the signature (8 bit sums) covers the data bits of all fragments
+            bool lost = false;
+            uint32_t sum = hexSignatureSum(slot.m_bits, lost);
+
+            if (!slot.m_signatureValid || slot.m_gap || lost) {
+                out.m_signature = CheckIncomplete;
+            } else {
+                out.m_signature = (slot.m_signature == ((~sum) & 0xff)) ? CheckOk : CheckFailed;
+            }
+            out.m_fillState = std::max(out.m_fillState, msg.m_fillState);
+        }
         else
         {
             out.m_signature = CheckNone;
+        }
+
+        if (secureHex) {
+            out.m_dataBits = dataBitCount(slot.m_bits);
         }
 
         setRaw(out, slot.m_raw);
@@ -1091,14 +1247,15 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
             }
         }
 
-        if ((secureType == 2) && (hdrC == 0) && !secureBits.empty() && (secureBits.back() >= 0))
-        {
-            int8_t fill = secureBits.back();
+        // Binary data (t1t0 = 10): the termination of 3.10.1.4 p.70, characters of 1 bit. The termination of
+        // t1t0 = 01 is not defined
+        int secureFill = 0;
 
-            while (!secureBits.empty() && (secureBits.back() == fill)) {
-                secureBits.pop_back();
-            }
+        if (secureType == 2) {
+            secureBits.resize(terminateBits(secureBits, 1, hdrC == 0, secureFill));
         }
+
+        msg.m_fillState = secureFill;
 
         msg.m_text = hexFromBits(secureBits);
         msg.m_hexNibbleBits = 4;
@@ -1328,7 +1485,6 @@ void RadioPagingFlexDecoder::decodeBinary(Message& proto, const AddressContext& 
         return;
     }
 
-    static const char hexDigits[17] = "0123456789ABCDEF";
     int hexC = 0;
     int hexF = 0;
     int hexN = 0;
@@ -1422,145 +1578,49 @@ void RadioPagingFlexDecoder::decodeBinary(Message& proto, const AddressContext& 
         }
     }
 
-    // Data bits as digits; lost words are left out of the stream
-    std::string hex;
-    int bitCount = 0;
-    uint8_t nibble = 0;
-    int lastDataWord = -1;
+    // Data bits of the fragment, d0 of each word first, 21 a word; a lost word keeps its place (-1).
+    // A fragment after the first has no header word 2: its blocking length is the one of the first fragment
+    int blockingValue = blocking;
+    bool blockingKnown = initial && hasSignature;
+
+    if (!initial && hdrOk)
+    {
+        int slot = reassemblyFind(a.m_capcode, hexN);
+
+        if (slot >= 0)
+        {
+            blockingValue = pol().m_reassembly[slot].m_message.m_blocking;
+            blockingKnown = true;
+        }
+    }
+
+    std::vector<int8_t> bits;
 
     for (int w = dataStart; (w <= mw2) && (w < wordsPerFrame); w++)
     {
-        if ((m_w[w].m_status == WordUncorrectable) || (m_w[w].m_status == WordNotReceived)) {
-            continue;
-        }
+        bool lost = (m_w[w].m_status == WordUncorrectable) || (m_w[w].m_status == WordNotReceived);
 
-        uint32_t dw = m_w[w].m_data;
-
-        lastDataWord = w;
-
-        for (int b = 0; b < 21; b++)
-        {
-            int pos = bitCount % 4;
-
-            if (pos == 0) {
-                nibble = 0;
-            }
-
-            nibble |= ((dw >> b) & 1) << pos;
-
-            if (pos == 3) {
-                hex += hexDigits[nibble & 0xf];
-            }
-
-            bitCount++;
+        for (int b = 0; b < 21; b++) {
+            bits.push_back(lost ? -1 : (int8_t) ((m_w[w].m_data >> b) & 1));
         }
     }
 
-    size_t digitCount = hex.size();
+    int fillState = 0;
 
-    auto bitsBefore = [&](int word) {
-        int bits = 0;
+    bits.resize(terminateBits(bits, blockingKnown ? (blockingValue ? blockingValue : 16) : 0, hexC == 0, fillState));
 
-        for (int w = dataStart; w < word; w++)
-        {
-            if ((m_w[w].m_status == WordUncorrectable) || (m_w[w].m_status == WordNotReceived)) {
-                continue;
-            }
-            bits += 21;
-        }
+    std::string hex = hexFromBits(bits);
 
-        return bits;
-    };
-
-    // Termination: an extra fill word, or fill bits at the end of the last word
-    if ((lastDataWord >= 0) && (hexC == 0))
-    {
-        int stripWord = lastDataWord;
-
-        if (stripWord > dataStart)
-        {
-            uint32_t lw = m_w[stripWord].m_data & 0x1fffff;
-
-            if ((lw == 0) || (lw == 0x1fffff))
-            {
-                size_t digitsBefore = (size_t) (bitsBefore(stripWord) / 4);
-
-                if ((digitsBefore > 0) && (digitsBefore <= digitCount))
-                {
-                    digitCount = digitsBefore;
-                    stripWord = -1;
-                }
-            }
-        }
-
-        if ((stripWord >= dataStart) && (m_w[stripWord].m_status != WordUncorrectable)
-            && (m_w[stripWord].m_status != WordNotReceived))
-        {
-            uint32_t lw = m_w[stripWord].m_data;
-            uint32_t topBit = (lw >> 20) & 1;
-            int fillStart = 21;
-
-            for (int b = 20; b >= 0; b--)
-            {
-                if (((lw >> b) & 1) != topBit) {
-                    break;
-                }
-                fillStart = b;
-            }
-
-            if ((fillStart < 21) && (fillStart > 0))
-            {
-                size_t realDigits = (size_t) ((bitsBefore(stripWord) + fillStart + 3) / 4);
-
-                if (realDigits < digitCount) {
-                    digitCount = realDigits;
-                }
-            }
-        }
-    }
-
-    hex.resize(digitCount);
-
-    // Signature of the data (8 bit sums, 1's complement), checked for a message in one piece
+    // Signature of the data (8 bit sums, 1's complement), checked for a message in one piece. The sum of a
+    // message in fragments covers all fragments: it is checked when the last one arrives
     Check signatureCheck = CheckNone;
 
     if (initial && hasSignature && (hexC == 0))
     {
-        uint32_t sum = 0;
-        int totalBits = (int) digitCount * 4;
-        int bitPos = 0;
-        uint8_t accum = 0;
-        int accumBits = 0;
         bool lost = false;
+        uint32_t sum = hexSignatureSum(bits, lost);
 
-        for (int w = dataStart; (w <= mw2) && (w < wordsPerFrame) && (bitPos < totalBits); w++)
-        {
-            if ((m_w[w].m_status == WordUncorrectable) || (m_w[w].m_status == WordNotReceived))
-            {
-                lost = true;
-                continue;
-            }
-
-            for (int b = 0; (b < 21) && (bitPos < totalBits); b++)
-            {
-                accum |= (uint8_t) (((m_w[w].m_data >> b) & 1) << accumBits);
-                accumBits++;
-                bitPos++;
-
-                if (accumBits == 8)
-                {
-                    sum += accum;
-                    accum = 0;
-                    accumBits = 0;
-                }
-            }
-        }
-
-        if (accumBits > 0) {
-            sum += accum;
-        }
-
-        signatureCheck = lost ? CheckIncomplete : (signature == ((~sum) & 0xff)) ? CheckOk : CheckFailed;
+        signatureCheck = (lost || (fillState == 2)) ? CheckIncomplete : (signature == ((~sum) & 0xff)) ? CheckOk : CheckFailed;
     }
 
     // K: 12-bit fragment checksum (STD-43A 3.10.1.2): 1's complement of the sum of all words of the fragment
@@ -1598,7 +1658,8 @@ void RadioPagingFlexDecoder::decodeBinary(Message& proto, const AddressContext& 
     msg.m_text = hex;
     msg.m_hexNibbleBits = 4;
     msg.m_hexLsbFirst = true;
-    msg.m_dataBits = (int) digitCount * 4;
+    msg.m_dataBits = (int) bits.size();
+    msg.m_fillState = fillState;
     msg.m_fragment = kind;
     msg.m_fragmentNumber = hexF;
     msg.m_messageNumber = hdrOk ? hexN : -1;
@@ -1615,16 +1676,15 @@ void RadioPagingFlexDecoder::decodeBinary(Message& proto, const AddressContext& 
     msg.m_fragmented = (kind == FragmentFirst) || (kind == FragmentMiddle) || (kind == FragmentLast);
 
     // Continuation fragments take the blocking of the first fragment
-    if (!initial && (blocking == 0) && hdrOk)
-    {
-        int slot = reassemblyFind(a.m_capcode, hexN);
-
-        if (slot >= 0) {
-            msg.m_blocking = pol().m_reassembly[slot].m_message.m_blocking;
-        }
+    if (!initial) {
+        msg.m_blocking = blockingValue;
     }
 
     FragmentInfo info;
+
+    info.m_bits = bits;
+    info.m_signature = signature;
+    info.m_wordsOk = initial ? hasSignature : true;
 
     if (a.m_long)
     {
