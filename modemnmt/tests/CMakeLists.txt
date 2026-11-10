@@ -17,6 +17,7 @@ set(MODEMNMT_LIB_SOURCES
     ../nmtmwi.cpp
     ../nmtmodem.cpp
     ../nmtnumbers.cpp
+    ../nmtsms.cpp
     ../nmtsystem.cpp
     ../nmtvoice.cpp
     ../../modemcellular/callrouter.cpp
@@ -68,3 +69,4 @@ modemnmt_add_test(modemnmt_scip_test test_scip.cpp)
 modemnmt_add_test(modemnmt_incall_test test_incall.cpp)
 modemnmt_add_test(modemnmt_mwi_test test_mwi.cpp)
 modemnmt_add_test(modemnmt_dms_test test_dms.cpp)
+modemnmt_add_test(modemnmt_sms_test test_sms.cpp)
