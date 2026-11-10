@@ -423,20 +423,10 @@ void RadioPagingFlexDecoder::processVector(const AddressContext& a, int j)
         return;
     }
 
-    // Network address: area, zones and traffic flags in the first message word
-    if ((a.m_type == AddressNetwork) && (vecType == 0) && (mw1 <= 87) && wordOk(mw1))
-    {
-        uint32_t mw = m_w[mw1].m_data;
-
-        proto.m_type = TypeNetwork;
-        proto.m_areaId = mw & 0xfff;
-        proto.m_coverageZones = (mw >> 12) & 0xf;
-        proto.m_trafficFlags = (mw >> 16) & 0x1f;
-        proto.m_overload = ((mw >> 16) & 1) != 0;
-        countWords(proto, mw1, mw1);
-        setRaw(proto, std::vector<uint32_t>(1, mw));
-        emitMessage(proto);
-        return;
+    // Network address with a message vector: a system message of the NID, decoded as any other message
+    // (FLEX-93001 3.9.2 p.44)
+    if (a.m_type == AddressNetwork) {
+        proto.m_nidSystemMessage = true;
     }
 
     // Operator messaging address: the message is decoded as any other message
@@ -590,7 +580,7 @@ void RadioPagingFlexDecoder::decodeShortMessage(Message& proto, const AddressCon
 // Reassembly of fragments of alphanumeric, secure and binary messages
 void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& a, int vector, const FragmentInfo& info)
 {
-    const bool signatureUsed = (vector == 5) || (vector == 0);
+    const bool signatureUsed = ((vector == 5) || (vector == 0)) && !msg.m_payloadUnknown;
 
     setRaw(msg, info.m_raw);
 
@@ -976,6 +966,37 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
     // Registration acknowledgment: secure message with operation code "="
     if (secure && (secureType == 0) && !text.empty() && (text[0] == '=')) {
         msg.m_registrationAck = true;
+    }
+
+    // Secure type 01 is data defined separately, 11 is reserved (STD-43A 3.10.1.4 p.70): not characters, no
+    // published layout, the words after the header are output as hex. Type 01 on a network address is the
+    // System NID Change Instruction (FLEX-93001 3.9.7 p.48)
+    if (secure && ((secureType == 1) || (secureType == 3)))
+    {
+        static const char hexDigits[] = "0123456789ABCDEF";
+        std::string hex;
+
+        for (int w = startWord; (w <= mw2) && (w < wordsPerFrame); w++)
+        {
+            if (!hex.empty()) {
+                hex += ' ';
+            }
+
+            if ((m_w[w].m_status == WordUncorrectable) || (m_w[w].m_status == WordNotReceived))
+            {
+                hex += "??????";
+                continue;
+            }
+
+            for (int shift = 20; shift >= 0; shift -= 4) {
+                hex += hexDigits[(m_w[w].m_data >> shift) & 0xf];
+            }
+        }
+
+        msg.m_text = hex;
+        msg.m_nidChange = (secureType == 1) && (a.m_type == AddressNetwork);
+        msg.m_payloadUnknown = true;
+        msg.m_signature = CheckNone;
     }
 
     // Message words: for a long address the first one is the second vector word

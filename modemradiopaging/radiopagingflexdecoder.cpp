@@ -120,7 +120,6 @@ const char *RadioPagingFlexDecoder::messageTypeName(MessageType type)
     case TypeBinary: return "binary";
     case TypeShortMessage: return "short_message";
     case TypeShortInstruction: return "short_instruction";
-    case TypeNetwork: return "network";
     }
 
     return "unknown";

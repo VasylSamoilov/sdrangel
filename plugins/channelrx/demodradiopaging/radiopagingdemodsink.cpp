@@ -832,6 +832,13 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
     record.m_protocolData.insert("signature", checkName(message.m_signature));
     record.m_protocolData.insert("is_fragment", message.m_isFragment);
     record.m_protocolData.insert("fragment_gap", message.m_fragmentGap);
+    record.m_protocolData.insert("payload_unknown", message.m_payloadUnknown);
+
+    if (message.m_nidSystemMessage)
+    {
+        record.m_protocolData.insert("nid_system_message", true);
+        record.m_protocolData.insert("nid_change", message.m_nidChange);
+    }
 
     if (message.m_tempSlot >= 0)
     {

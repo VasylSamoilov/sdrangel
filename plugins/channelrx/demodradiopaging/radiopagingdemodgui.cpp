@@ -167,8 +167,7 @@ QString typeChip(const QString& type)
         {"numbered_special_numeric", {"NSPEC", "#90caf9|#1a237e"}},
         {"binary", {"BIN", "#cfd8dc|#37474f"}},
         {"short_message", {"SMSG", "#cfd8dc|#37474f"}},
-        {"short_instruction", {"SI", "#cfd8dc|#37474f"}},
-        {"network", {"NET", "#cfd8dc|#37474f"}}
+        {"short_instruction", {"SI", "#cfd8dc|#37474f"}}
     };
     auto it = labels.find(type);
     QString label = (it != labels.end()) ? it->first : type.toUpper();
@@ -254,6 +253,21 @@ void RadioPagingDemodGUI::recordInfo(const MessageRecord& record, QString& plain
             add("LONG");
         } else if ((addrType != "short") && (addrType != "temporary") && !addrType.isEmpty()) {
             add(addrType.toUpper(), chip(addrType.toUpper(), "#ce93d8", "#2e2e2e"));
+        }
+
+        // Network ID, or a system message of the NID (the NID change instruction has an unpublished layout)
+        if (d.contains("nid_service_area"))
+        {
+            add(QString("NID A%1 M%2 T%3").arg(d.value("nid_service_area").toInt()).arg(d.value("nid_multiplier").toInt())
+                .arg(d.value("nid_traffic_flags").toInt(), 4, 2, QChar('0')));
+        }
+        if (d.value("nid_change").toBool()) {
+            add("NID CHG");
+        } else if (d.value("nid_system_message").toBool()) {
+            add("NID MSG");
+        }
+        if (d.value("payload_unknown").toBool()) {
+            add("HEX");
         }
 
         if (d.contains("group_slot"))

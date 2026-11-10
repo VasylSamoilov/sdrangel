@@ -1305,7 +1305,9 @@ void testMisc()
 
     f = findFrame("special", "network alpha");
     out = d.decodeFrame(toRxFrame((Flex::Mode) f->m_mode, false, fromHex(f->m_sync), fromHex(f->m_data)));
-    check(out.size() == 1 && (out[0].m_addressType == Dec::AddressNetwork), "network address");
+    check(out.size() == 1 && (out[0].m_addressType == Dec::AddressNetwork) && (out[0].m_type == Dec::TypeAlphanumeric)
+        && out[0].m_nidSystemMessage && !out[0].m_nidChange && !out[0].m_payloadUnknown,
+        "network address: alphanumeric system message of the NID");
 
     f = findFrame("special", "reserved short");
     out = d.decodeFrame(toRxFrame((Flex::Mode) f->m_mode, false, fromHex(f->m_sync), fromHex(f->m_data)));
@@ -1607,6 +1609,42 @@ void testShortMessage()
             && (out[0].m_nidServiceArea == (int) sa) && (out[0].m_nidMultiplier == (int) mult)
             && (out[0].m_nidTrafficFlags == (int) tmf) && out[0].m_text.empty() && !out[0].m_toneOnly;
         check(ok, "short message on a network address: network ID, service area, multiplier, traffic flags");
+    }
+
+    // The network address twice (FLEX-93001 3.9.2 p.44): the first with the NID, the second with a secure message
+    // t = 01, the System NID Change Instruction (3.9.7 p.48). Its layout is not published: the data words as hex
+    // On a short address the secure type 01 (data defined separately, STD-43A 3.10.1.4) is hex as well, not an NID change
+    for (bool network : {true, false})
+    {
+        uint32_t words[Flex::m_wordsPerFrame];
+        Flex::fillIdle(words, 0, Flex::Mode1600_2);
+        const uint32_t net = 0x1F6800u + 7;
+        const uint32_t data1 = 0x123456, data2 = 0x0abcde;
+        uint32_t hdr = (3u << 11) | (1u << 19);     // C = 0, F = 3, N = 0, t = 01
+        auto sums = [](uint32_t w) { return (w & 0xff) + ((w >> 8) & 0xff) + ((w >> 16) & 0x1f); };
+        hdr |= (~(sums(hdr) + sums(data1) + sums(data2))) & 0x3ff;
+        words[0] = Flex::blockInfoWord(0, 0, 3, 0, 0);
+        words[1] = Flex::encodeWord(net);
+        words[2] = Flex::encodeWord(network ? net : (1234567u + 32768u));
+        words[3] = Flex::encodeWord(Flex::addChecksum((Flex::m_vectorTone << 4) | ((21u | (5u << 5) | (0xau << 8)) << 9)));
+        words[4] = Flex::encodeWord(Flex::addChecksum((0u << 4) | (5u << 7) | (3u << 14)));
+        words[5] = Flex::encodeWord(hdr);
+        words[6] = Flex::encodeWord(data1);
+        words[7] = Flex::encodeWord(data2);
+        for (int b = 0; b < Flex::m_blocksPerFrame; b++) {
+            Flex::interleaveBlock(words + b * Flex::m_wordsPerBlock);
+        }
+        Flex::FrameParams fp;
+        Flex::FrameBytes bytes = Flex::assemble(fp, {std::vector<uint32_t>(words, words + Flex::m_wordsPerFrame)});
+        Dec dec;
+        std::vector<Dec::Message> out = dec.decodeFrame(toRxFrame(Flex::Mode1600_2, false, bytes.m_sync, bytes.m_data));
+        bool ok = (out.size() == 2) && out[0].m_networkId && !out[0].m_nidSystemMessage
+            && (out[1].m_type == Dec::TypeSecure) && (out[1].m_nidSystemMessage == network) && (out[1].m_nidChange == network)
+            && (out[1].m_addressType == (network ? Dec::AddressNetwork : Dec::AddressShort))
+            && out[1].m_payloadUnknown && (out[1].m_secureType == 1) && (out[1].m_text == "123456 0ABCDE")
+            && (out[1].m_checksum == Dec::CheckOk) && (out[1].m_signature == Dec::CheckNone);
+        check(ok, network ? "network address: NID, then the NID change instruction with its payload as hex"
+                          : "secure type 01 on a short address: payload as hex, no NID change");
     }
 
     // Too many digits, characters that are not numeric, digits in the source type, source out of range

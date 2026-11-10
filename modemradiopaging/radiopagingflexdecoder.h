@@ -73,8 +73,7 @@ public:
         TypeNumberedSpecialNumeric,
         TypeBinary,             //!< Hex / binary vector
         TypeShortMessage,       //!< Message in the vector word (vector type 2)
-        TypeShortInstruction,
-        TypeNetwork             //!< Network address with a secure vector
+        TypeShortInstruction
     };
 
     enum Check {
@@ -198,7 +197,7 @@ public:
         MessageType m_type = TypeUnknown;
         std::string m_typeName;             //!< alphanumeric, secure, numeric, special_numeric, numbered_numeric,
                                             //!< numbered_special_numeric, tone, binary, short_message,
-                                            //!< short_instruction, network, unknown
+                                            //!< short_instruction, unknown
 
         // Content. Raw payload: the message words (header words included, vector words excluded; the first
         // word of a long address message is the second vector word) in message order, 21 data bits d0-d20
@@ -209,8 +208,10 @@ public:
         int m_rawBits = 0;
         //! Alphanumeric: 7-bit characters (the default charset), lost characters are '?', unprintable characters
         //! stay (or two bytes per character if the kanji mode is set). Numeric: digits 0-9 . U space - ] [,
-        //! lost digits '?'. Binary: hex digits of the data bits. Short message: digits. Else empty
+        //! lost digits '?'. Binary: hex digits of the data bits. Short message: digits. A payload of unknown
+        //! layout (m_payloadUnknown): the data words as hex, 6 digits d20-d0 each, lost words '??????'. Else empty
         std::string m_text;
+        bool m_payloadUnknown = false;      //!< The layout of the payload is not published: m_text is its hex
         std::string m_wordMap;              //!< One character for each message word: . clean, c corrected, X lost; fragments split by |
 
         // Errors in the address, vector and message words
@@ -283,11 +284,11 @@ public:
         bool m_groupTracked = false;        //!< The group assignment was received
         std::vector<uint64_t> m_groupMembers;
 
-        // Network address
-        unsigned m_areaId = 0;
-        unsigned m_coverageZones = 0;
-        unsigned m_trafficFlags = 0;
-        bool m_overload = false;
+        // Network address with a vector other than the short message vector: a system message of the NID
+        // (FLEX-93001 3.9.2 p.44). A secure message of type t = 01 is the System NID Change Instruction
+        // (FLEX-93001 3.9.7 p.48), its data layout is not published (m_payloadUnknown, as any secure t = 01)
+        bool m_nidSystemMessage = false;
+        bool m_nidChange = false;
 
         // Operator messaging address
         std::string m_operatorSubtype;
