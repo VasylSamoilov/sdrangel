@@ -67,6 +67,21 @@ static Frame pull(NmtChannel& channel)
     return decodeFrame(encoded, Direction::MtxToMs, false);
 }
 
+[[maybe_unused]] static bool isIdleCallingFrame(const Frame& f)
+{
+    return f.mt == MessageType::Frame1a || f.mt == MessageType::Frame1aA || f.mt == MessageType::Frame1aB
+        || f.mt == MessageType::Frame1b;
+}
+
+// The next carousel frame of an idle calling channel: its idle frame comes in every other slot, so
+// that one is skipped (at most one; the idle frame comes back if nothing is pending).
+[[maybe_unused]] static Frame pullCalling(NmtChannel& channel)
+{
+    const Frame f = pull(channel);
+
+    return isIdleCallingFrame(f) ? pull(channel) : f;
+}
+
 // A frame from the phone, as the modem would deliver it.
 static void phoneSends(NmtChannel& channel, const Frame& frame, uint64_t framesElapsed)
 {

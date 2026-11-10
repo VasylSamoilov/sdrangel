@@ -19,6 +19,7 @@
 #ifndef MODEMNMT_NMTSYSTEM_H_
 #define MODEMNMT_NMTSYSTEM_H_
 
+#include <algorithm>
 #include <functional>
 #include <list>
 #include <map>
@@ -80,8 +81,8 @@ public:
     // Tells the phone that messages wait (frame 5c, flags of MwiFlag; NMT Doc 450-1 4.4.1.16). A
     // phone in a call hears it when the call is cleared. A phone that is on a calling channel
     // is paged and called without ringing (4.4.1.12). False if the phone is busy with something
-    // else, there is no idle calling channel or traffic channel, or the flags are invalid. The handler tells how it ended:
-    // Undelivered flags can be sent again.
+    // else, the calling channel carousel has no room for it (see capacity()), or the flags are
+    // invalid. The handler tells how it ended: Undelivered flags can be sent again.
     bool sendMwi(char country, const std::string& number, uint8_t flags);
     using MwiHandler = std::function<void(const NmtSubscriber& subscriber, uint8_t flags, NmtServiceEnd result)>;
     void setMwiHandler(MwiHandler handler) { m_mwiHandler = std::move(handler); }
@@ -110,13 +111,30 @@ public:
 
     // A call to a phone: it is paged on the calling channels and moved to a traffic channel
     // when it answers. False, and at once, if the phone has a call or a roaming update going on
-    // (cause Busy), or there is no idle calling channel (cause NoChannel); `cause` may be null.
-    // With no idle traffic channel when the phone answers, the call is queued. The caller is told
-    // through the call handlers set below. The call can be ended with releaseCall().
+    // (cause Busy), or the carousel has no room for it (cause NoChannel, see capacity()); `cause`
+    // may be null. With no idle traffic channel when the phone answers, the call is queued. The
+    // caller is told through the call handlers set below. The call can be ended with releaseCall().
     bool startCall(char country, const std::string& number, const std::string& callerId,
                    modemcellular::NumberType callerType, modemcellular::Cause* cause = nullptr);
-    // There is an idle calling channel to page with (a combined channel is one too).
+    // A new call to a phone can be taken now (the same test as startCall, without the phone).
     bool canCall() const;
+
+    // Capacity of the calling channel carousel. A calling channel pages at most maxPagesPerCc
+    // phones at a time, and at most maxQueued answered calls wait for a free traffic channel
+    // (our choices: half the slots of a calling channel carry the carousel, about 3.6 frames a
+    // second, one page frame per phone and try of 1 s). A call, message call or short message for
+    // a phone that would go beyond is refused at once (cause NoChannel).
+    void setMaxPagesPerCc(int pages) { m_maxPagesPerCc = std::max(pages, 1); }
+    void setMaxQueued(int queued) { m_maxQueued = std::max(queued, 0); }
+    struct Capacity
+    {
+        int freePageSlots = 0;          // pages that can still start, over all idle calling channels
+        int freeQueueSlots = 0;         // answered calls that can still wait for a traffic channel
+        int idleTrafficChannels = 0;    // traffic channels (and combined ones) that are idle
+    };
+    Capacity capacity() const;
+    // Where the call to the phone is on the calling channels; None if it is not there (or no call).
+    NmtTransaction::CcPhase callPhase(char country, const std::string& number) const;
     using CallEventHandler = std::function<void(const NmtSubscriber& subscriber)>;
     using CallFailedHandler = std::function<void(const NmtSubscriber& subscriber, modemcellular::Cause cause)>;
     // The phone rings; the phone answered; the call to the phone failed before it was answered.
@@ -159,10 +177,12 @@ public:
     void audioToMobile(NmtTransaction& transaction, float* samples, int count) override;
     NmtChannel* findTrafficChannel(NmtChannel& from) override;
     NmtTransaction* startPriorityCall(const NmtSubscriber& subscriber, NmtChannel& channel) override;
-    void pageAgain(NmtTransaction& transaction) override;
     NmtTransaction* calledPhoneSeized(const NmtSubscriber& subscriber, NmtChannel& channel) override;
-    void pagingAnswered(NmtTransaction& transaction, NmtChannel& channel) override;
-    void moveToTrafficChannel(NmtTransaction& transaction, NmtChannel& from, NmtChannel& to) override;
+    CarouselItem carouselItem(NmtChannel& callingChannel) override;
+    bool awaitsAnswer(const NmtChannel& callingChannel) const override;
+    bool callingChannelAnswer(const NmtSubscriber& subscriber, NmtChannel& callingChannel, bool priority) override;
+    void orderSent(NmtTransaction& transaction, NmtChannel& trafficChannel) override;
+    NmtTransaction* callingChannelCleared(const NmtSubscriber& subscriber, NmtChannel& callingChannel) override;
     void callAlerting(NmtTransaction& transaction) override;
     void callAnswered(NmtTransaction& transaction) override;
     void callFailed(NmtTransaction& transaction, modemcellular::Cause cause) override;
@@ -187,6 +207,17 @@ private:
     NmtTransaction& newPagedTransaction(char country, const std::string& number);
     void page(NmtTransaction& transaction, int tryNo);
     void pagingTimeout(NmtTransaction& transaction);
+    void queueTimeout(NmtTransaction& transaction);
+    void leaveCallingChannels(NmtTransaction& transaction);
+    bool admits(modemcellular::Cause* cause) const;
+    int pagesOn(const NmtChannel& callingChannel) const;
+    int queuedCalls() const;
+    int idleTrafficChannels() const;
+    bool idleCallingChannel(const NmtChannel& channel) const;
+    void repageQueued();
+
+    int m_maxPagesPerCc = 3;
+    int m_maxQueued = 8;
 
     modemcellular::TimerService m_timers;       // before the channels, their timers use it
     std::list<NmtTransaction> m_transactions;

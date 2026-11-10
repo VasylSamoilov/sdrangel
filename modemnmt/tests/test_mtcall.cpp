@@ -65,6 +65,7 @@ static Frame acknowledgement(const NmtChannel& channel, const Phone& phone, Mess
 }
 
 static const modemcellular::NumberType kNational = modemcellular::NumberType::National;
+using Phase = NmtTransaction::CcPhase;
 
 static void wait(modemcellular::SampleClock& clock, NmtSystem& system, double seconds)
 {
@@ -76,9 +77,9 @@ static void wait(modemcellular::SampleClock& clock, NmtSystem& system, double se
 static void toRinging(NmtSystem& system, NmtChannel& cc, NmtChannel& tc, const Phone& phone)
 {
     CHECK(system.startCall(phone.country, phone.number, "5551234", kNational));
-    pull(cc);
+    CHECK(pullCalling(cc).mt == MessageType::Frame2a);
     phoneSends(cc, acknowledgement(cc, phone), 1);
-    pull(cc);
+    CHECK(pullCalling(cc).mt == MessageType::Frame2b);
     pull(tc);
     phoneSends(tc, seizureFrame(tc, phone, MessageType::Frame10b), 3);
 }
@@ -97,20 +98,22 @@ static void testCallFlow()
 
     CHECK(system.startCall('1', "123456", "5551234", kNational));
     CHECK(system.transactionCount() == 1);
-    CHECK(cc.state() == NmtChannel::State::MtPaging);
+    CHECK(system.callPhase('1', "123456") == Phase::Page);
+    CHECK(cc.state() == NmtChannel::State::Idle);
     CHECK(tc.state() == NmtChannel::State::Idle);
 
     // the page: frame 2a with the phone and the area, then the idle frames of the channel
-    Frame f = pull(cc);
+    Frame f = pullCalling(cc);
     CHECK(f.mt == MessageType::Frame2a);
     CHECK(f.msCountry == digitsToValue("1") && f.msNumber == digitsToValue("123456"));
     CHECK(f.channelNo == encodeChannel(System::Nmt450, 50, 1));
     CHECK(pull(cc).mt == MessageType::Frame1a);
+    CHECK(pull(cc).mt == MessageType::Frame1a);                 // one 2a per try
 
     // the phone answers: the calling channel assigns the traffic channel with one frame 2b
     phoneSends(cc, acknowledgement(cc, phone), 1);
-    CHECK(cc.state() == NmtChannel::State::MtChannel);
-    f = pull(cc);
+    CHECK(system.callPhase('1', "123456") == Phase::Order);
+    f = pullCalling(cc);
     CHECK(f.mt == MessageType::Frame2b);
     CHECK(f.msNumber == digitsToValue("123456"));
     CHECK(f.channelNo == encodeChannel(System::Nmt450, 50, 1));
@@ -224,15 +227,15 @@ static void testPagingFails()
 
     CHECK(system.startCall('1', "123456", "5551234", kNational));
     CHECK(!system.startCall('1', "123456", "5551234", kNational));      // the phone has a call
-    CHECK(pull(cc).mt == MessageType::Frame2a);
+    CHECK(pullCalling(cc).mt == MessageType::Frame2a);
     pull(cc);
 
     // three tries of one second, each starts the page again
     wait(clock, system, 1.05);
-    CHECK(cc.state() == NmtChannel::State::MtPaging);
-    CHECK(pull(cc).mt == MessageType::Frame2a);
+    CHECK(system.callPhase('1', "123456") == Phase::Page);
+    CHECK(pullCalling(cc).mt == MessageType::Frame2a);
     wait(clock, system, 1.0);
-    CHECK(pull(cc).mt == MessageType::Frame2a);
+    CHECK(pullCalling(cc).mt == MessageType::Frame2a);
     CHECK(events.failed.empty());
     wait(clock, system, 0.9);
     CHECK(events.failed.empty());
@@ -257,14 +260,14 @@ static void testTwoCallingChannels()
     const Phone phone;
 
     CHECK(system.startCall('1', "123456", "5551234", kNational));
-    CHECK(first.state() == NmtChannel::State::MtPaging);
-    CHECK(second.state() == NmtChannel::State::MtPaging);
+    CHECK(pullCalling(first).mt == MessageType::Frame2a);
+    CHECK(pullCalling(second).mt == MessageType::Frame2a);
 
     // the phone answers on the second one; the first one stops paging
     phoneSends(second, acknowledgement(second, phone), 1);
-    CHECK(first.state() == NmtChannel::State::Idle);
-    CHECK(second.state() == NmtChannel::State::MtChannel);
-    const Frame f = pull(second);
+    CHECK(system.callPhase('1', "123456") == Phase::Order);
+    CHECK(isIdleCallingFrame(pull(first)) && isIdleCallingFrame(pull(first)));
+    const Frame f = pullCalling(second);
     CHECK(f.mt == MessageType::Frame2b);
     CHECK(f.channelNo == encodeChannel(System::Nmt450, 51, 1));
     CHECK(tc.state() == NmtChannel::State::MtIdent);
@@ -272,15 +275,16 @@ static void testTwoCallingChannels()
     // an answer on the first channel now is not heard
     phoneSends(first, acknowledgement(first, phone), 1);
     CHECK(first.state() == NmtChannel::State::Idle);
+    CHECK(tc.state() == NmtChannel::State::MtIdent);
 
     // the answer on the wrong channel number or from another phone does nothing
     Phone other = phone;
     other.number = "999999";
     CHECK(system.startCall('1', "999999", "5551234", kNational));
     phoneSends(first, acknowledgement(first, phone), 1);
-    CHECK(first.state() == NmtChannel::State::MtPaging);                // paging the other phone
+    CHECK(system.callPhase('1', "999999") == Phase::Page);             // paging the other phone
     phoneSends(first, acknowledgement(second, other), 1);               // channel number of the other channel
-    CHECK(first.state() == NmtChannel::State::MtPaging);
+    CHECK(system.callPhase('1', "999999") == Phase::Page);
 }
 
 static void testQueue()
@@ -296,30 +300,36 @@ static void testQueue()
     busy.number = "777777";
 
     CHECK(system.startCall('1', "123456", "5551234", kNational));
-    pull(cc);
+    pullCalling(cc);
 
     // the only traffic channel is taken by a roaming update while the phone is paged
     phoneSends(tc, roamingFrame(tc, busy), 40);
     CHECK(tc.state() == NmtChannel::State::RoamingIdent);
     phoneSends(cc, acknowledgement(cc, phone), 1);
 
-    // no traffic channel: queueing information 2f, the codes of the ordinary phone
-    Frame f = pull(cc);
+    // no traffic channel: queueing information 2f twice, the codes of the ordinary phone, with the
+    // idle frames of the calling channel (1a) in between; then the phone is standby
+    CHECK(system.callPhase('1', "123456") == Phase::Queue);
+    Frame f = pullCalling(cc);
     CHECK(f.mt == MessageType::Frame2f);
     CHECK(f.additionalInfo == 0x3f0);
-    CHECK(cc.state() == NmtChannel::State::MtQueue);
-    // the idle frames of the calling channel (1a) go in between
     CHECK(pull(cc).mt == MessageType::Frame1a);
     CHECK(pull(cc).mt == MessageType::Frame2f);
-    CHECK(pull(cc).mt == MessageType::Frame1a);
+    for (int i = 0; i < 6; i++) {
+        CHECK(pull(cc).mt == MessageType::Frame1a);
+    }
 
-    // the traffic channel is free again: the next frame is the allocation
+    // the traffic channel is free again: the phone is paged again (it is standby, NMT Doc 450-3
+    // 5.4.3), and its new answer gets the allocation
     phoneSends(tc, lineSignalFrame(tc, busy, 0x11111), 1);
     for (int i = 0; i < 4; i++) {
         pull(tc);
     }
     CHECK(tc.state() == NmtChannel::State::Idle);
-    f = pull(cc);
+    CHECK(pullCalling(cc).mt == MessageType::Frame2a);
+    CHECK(system.callPhase('1', "123456") == Phase::Page);
+    phoneSends(cc, acknowledgement(cc, phone), 1);
+    f = pullCalling(cc);
     CHECK(f.mt == MessageType::Frame2b);
     CHECK(f.tcNo == encodeTc(System::Nmt450, 100, 1));
     CHECK(tc.state() == NmtChannel::State::MtIdent);
@@ -339,23 +349,24 @@ static void testQueueTimeoutAndPriority()
     busy.number = "777777";
 
     CHECK(system.startCall('1', "123456", "5551234", kNational));
-    pull(cc);
+    pullCalling(cc);
     phoneSends(tc, roamingFrame(tc, busy), 40);
     // a priority phone (11b) is queued with 2c
     phoneSends(cc, acknowledgement(cc, phone, MessageType::Frame11b), 1);
-    const Frame f = pull(cc);
+    const Frame f = pullCalling(cc);
     CHECK(f.mt == MessageType::Frame2c);
     CHECK(f.additionalInfo == 0x3f1);
 
+    // no traffic channel for a minute: the call fails as congestion; the phone is standby on the
+    // calling channel, nothing is sent to it
     wait(clock, system, 59.0);
-    CHECK(cc.state() == NmtChannel::State::MtQueue);
+    CHECK(system.callPhase('1', "123456") == Phase::Queue);
     CHECK(events.failed.empty());
     wait(clock, system, 1.5);
     CHECK(events.failed.size() == 1 && events.failed[0] == modemcellular::Cause::NoChannel);
-    CHECK(cc.state() == NmtChannel::State::MtRelease);
-    CHECK(isLineSignal(pull(cc), 15));
-    phoneSends(cc, lineSignalFrame(cc, phone, 0x11111), 1);
+    CHECK(system.callPhase('1', "123456") == Phase::None);
     CHECK(cc.state() == NmtChannel::State::Idle);
+    CHECK(isIdleCallingFrame(pull(cc)) && isIdleCallingFrame(pull(cc)));
 }
 
 static void testIdentityAndRingTimeouts()
@@ -371,9 +382,9 @@ static void testIdentityAndRingTimeouts()
         const Phone phone;
 
         CHECK(system.startCall('1', "123456", "5551234", kNational));
-        pull(cc);
+        pullCalling(cc);
         phoneSends(cc, acknowledgement(cc, phone), 1);
-        pull(cc);
+        CHECK(pullCalling(cc).mt == MessageType::Frame2b);
         for (int i = 0; i < 8; i++) {
             CHECK(pull(tc).mt == MessageType::Frame3b);
         }
@@ -457,9 +468,9 @@ static void testFarEndReleases()
             toRinging(system, cc, tc, phone);
         } else {
             CHECK(system.startCall('1', "123456", "5551234", kNational));
-            pull(cc);
+            pullCalling(cc);
             phoneSends(cc, acknowledgement(cc, phone), 1);
-            pull(cc);
+            pullCalling(cc);
             CHECK(tc.state() == NmtChannel::State::MtIdent);
         }
         CHECK(system.releaseCall('1', "123456"));
@@ -482,9 +493,9 @@ static void testCombinedChannel()
     const Phone phone;
 
     CHECK(system.startCall('1', "123456", "5551234", kNational));
-    CHECK(pull(both).mt == MessageType::Frame2a);
+    CHECK(pullCalling(both).mt == MessageType::Frame2a);
     phoneSends(both, acknowledgement(both, phone), 1);
-    const Frame f = pull(both);
+    const Frame f = pullCalling(both);
     CHECK(f.mt == MessageType::Frame2b);
     CHECK(f.tcNo == encodeTc(System::Nmt450, 60, 1));
     CHECK(both.state() == NmtChannel::State::MtIdent);
@@ -508,18 +519,19 @@ static void testBatterySavingPage()
 
     // a phone of the group waits for its wake-up window (4 s)
     CHECK(system.startCall('1', "123450", "5551234", kNational));
-    CHECK(cc.state() == NmtChannel::State::Idle);
+    CHECK(system.callPhase('1', "123450") == Phase::Deferred);
+    CHECK(isIdleCallingFrame(pull(cc)) && isIdleCallingFrame(pull(cc)));
     wait(clock, system, 3.9);
-    CHECK(cc.state() == NmtChannel::State::Idle);
+    CHECK(system.callPhase('1', "123450") == Phase::Deferred);
     wait(clock, system, 0.2);
-    CHECK(cc.state() == NmtChannel::State::MtPaging);
-    CHECK(pull(cc).mt == MessageType::Frame2a);
+    CHECK(system.callPhase('1', "123450") == Phase::Page);
+    CHECK(pullCalling(cc).mt == MessageType::Frame2a);
     CHECK(events.failed.empty());
 
     // another group is paged at once
     CHECK(system.releaseCall('1', "123450"));
     CHECK(system.startCall('1', "123451", "5551234", kNational));
-    CHECK(cc.state() == NmtChannel::State::MtPaging);
+    CHECK(system.callPhase('1', "123451") == Phase::Page);
 }
 
 // The queue codes of NMT-900 are the fictitious channels 1008 and 1009 coded as channel numbers.
@@ -542,18 +554,16 @@ static void testQueueCodes900()
         caller.number = priority ? "222222" : "111111";
 
         CHECK(system.startCall('1', caller.number, "5551234", kNational));
-        pull(cc);
+        pullCalling(cc);
         phoneSends(tc, roamingFrame(tc, busy), 40);
         phoneSends(cc, acknowledgement(cc, caller, priority ? MessageType::Frame11b : MessageType::Frame10a), 1);
-        const Frame f = pull(cc);
+        const Frame f = pullCalling(cc);
         CHECK(f.mt == (priority ? MessageType::Frame2c : MessageType::Frame2f));
         CHECK(f.additionalInfo == (priority ? 0x9f1u : 0x9f0u));
-        CHECK(cc.state() == NmtChannel::State::MtQueue);
+        CHECK(system.callPhase('1', caller.number) == Phase::Queue);
+        // the far end gives up: the queued call just ends (the phone is standby)
         CHECK(system.releaseCall('1', caller.number));
-        for (int i = 0; i < 4; i++) {
-            pull(cc);
-        }
-        phoneSends(cc, lineSignalFrame(cc, caller, 0x11111), 1);
+        CHECK(system.callPhase('1', caller.number) == Phase::None);
         CHECK(cc.state() == NmtChannel::State::Idle);
 
         // the roaming update ends: the traffic channel is free for the next call
@@ -584,9 +594,9 @@ static void testCallerIdLengths()
         const Phone phone;
 
         CHECK(system.startCall('1', "123456", c.number, kNational));
-        pull(cc);
+        pullCalling(cc);
         phoneSends(cc, acknowledgement(cc, phone), 1);
-        pull(cc);
+        pullCalling(cc);
         pull(tc);
         phoneSends(tc, seizureFrame(tc, phone, MessageType::Frame10b), 3);
 
@@ -625,9 +635,9 @@ static void testCallerIdLengths()
         const Phone phone;
 
         CHECK(system.startCall('1', "123456", "4915", modemcellular::NumberType::International));
-        pull(cc);
+        pullCalling(cc);
         phoneSends(cc, acknowledgement(cc, phone), 1);
-        pull(cc);
+        pullCalling(cc);
         pull(tc);
         phoneSends(tc, seizureFrame(tc, phone, MessageType::Frame10b), 3);
         const Frame f = pull(tc);                                       // index 1 of 1 frame: 0
@@ -658,20 +668,20 @@ static void testTrafficChannelChoice()
     // the first AC/TC or TC in the order of the channels, not the combined one
     CHECK(system.startCall('1', "123456", "5551234", kNational));
     phoneSends(cc, acknowledgement(cc, phone), 1);
-    CHECK(pull(cc).tcNo == encodeTc(System::Nmt900, 70, 1));
+    CHECK(pullCalling(cc).tcNo == encodeTc(System::Nmt900, 70, 1));
     CHECK(access.state() == NmtChannel::State::MtIdent);
-    CHECK(both.state() == NmtChannel::State::MtPaging || both.state() == NmtChannel::State::Idle);
+    CHECK(both.state() == NmtChannel::State::Idle);
 
     // the next one gets the traffic channel
     CHECK(system.startCall('1', "222222", "5551234", kNational));
     phoneSends(cc, acknowledgement(cc, other), 1);
-    CHECK(pull(cc).tcNo == encodeTc(System::Nmt900, 80, 1));
+    CHECK(pullCalling(cc).tcNo == encodeTc(System::Nmt900, 80, 1));
     CHECK(traffic.state() == NmtChannel::State::MtIdent);
 
     // and only then the combined channel, on which the call stays
     CHECK(system.startCall('1', "333333", "5551234", kNational));
     phoneSends(cc, acknowledgement(cc, third), 1);
-    CHECK(pull(cc).tcNo == encodeTc(System::Nmt900, 60, 1));
+    CHECK(pullCalling(cc).tcNo == encodeTc(System::Nmt900, 60, 1));
     CHECK(both.state() == NmtChannel::State::MtIdent);
 }
 
@@ -694,7 +704,7 @@ static void testBusyCallingChannel()
 
     CHECK(system.startCall('1', "123456", "5551234", kNational));
     CHECK(busy.state() == NmtChannel::State::RoamingIdent);             // untouched
-    CHECK(idle.state() == NmtChannel::State::MtPaging);
+    CHECK(pullCalling(idle).mt == MessageType::Frame2a);
 
     // the roaming ends, the next try pages on both
     phoneSends(busy, lineSignalFrame(busy, caller, 0x11111), 1);
@@ -702,9 +712,10 @@ static void testBusyCallingChannel()
         pull(busy);
     }
     CHECK(busy.state() == NmtChannel::State::Idle);
+    CHECK(isIdleCallingFrame(pull(busy)) && isIdleCallingFrame(pull(busy)));     // not in this try
     wait(clock, system, 1.05);
-    CHECK(busy.state() == NmtChannel::State::MtPaging);
-    CHECK(idle.state() == NmtChannel::State::MtPaging);
+    CHECK(pullCalling(busy).mt == MessageType::Frame2a);
+    CHECK(pullCalling(idle).mt == MessageType::Frame2a);
 }
 
 // A phone that has a call or a roaming update is busy, and its seizure is not taken while it is called.
@@ -767,13 +778,13 @@ static void testPriorityPhoneCall()
         connect(system, calls);
 
         phoneSends(cc, seizureFrame(cc, phone, MessageType::Frame11b), 40);
-        CHECK(cc.state() == NmtChannel::State::MtPaging);
+        CHECK(system.callPhase(phone.country, phone.number) == Phase::Page);
         CHECK(system.transactionCount() == 1);
-        CHECK(pull(cc).mt == MessageType::Frame2a);
+        CHECK(pullCalling(cc).mt == MessageType::Frame2a);
 
         phoneSends(cc, seizureFrame(cc, phone, MessageType::Frame11b), 1);
-        CHECK(cc.state() == NmtChannel::State::MtChannel);
-        CHECK(pull(cc).mt == MessageType::Frame2b);
+        CHECK(system.callPhase(phone.country, phone.number) == Phase::Order);
+        CHECK(pullCalling(cc).mt == MessageType::Frame2b);
         CHECK(tc.state() == NmtChannel::State::MtIdent);
         CHECK(pull(tc).mt == MessageType::Frame3b);
         phoneSends(tc, seizureFrame(tc, phone, MessageType::Frame10b), 3);
@@ -827,20 +838,22 @@ static void testPriorityPhoneCall()
 
         phoneSends(tc, roamingFrame(tc, busy), 40);
         phoneSends(cc, seizureFrame(cc, phone, MessageType::Frame11b), 40);
-        CHECK(cc.state() == NmtChannel::State::MtPaging);
-        pull(cc);
+        CHECK(system.callPhase(phone.country, phone.number) == Phase::Page);
+        pullCalling(cc);
         phoneSends(cc, seizureFrame(cc, phone, MessageType::Frame11b), 1);
-        CHECK(pull(cc).mt == MessageType::Frame2c);
-        CHECK(cc.state() == NmtChannel::State::MtQueue);
+        CHECK(pullCalling(cc).mt == MessageType::Frame2c);
+        CHECK(system.callPhase(phone.country, phone.number) == Phase::Queue);
 
         phoneSends(tc, lineSignalFrame(tc, busy, 0x11111), 1);
         for (int i = 0; i < 4; i++) {
             pull(tc);
         }
-        CHECK(pull(cc).mt == MessageType::Frame2a);
-        CHECK(cc.state() == NmtChannel::State::MtPaging);
+        // the second 2c is still due before the page
+        CHECK(pullCalling(cc).mt == MessageType::Frame2c);
+        CHECK(pullCalling(cc).mt == MessageType::Frame2a);
+        CHECK(system.callPhase(phone.country, phone.number) == Phase::Page);
         phoneSends(cc, seizureFrame(cc, phone, MessageType::Frame11b), 1);
-        CHECK(pull(cc).mt == MessageType::Frame2b);
+        CHECK(pullCalling(cc).mt == MessageType::Frame2b);
         CHECK(tc.state() == NmtChannel::State::MtIdent);
     }
 
@@ -873,10 +886,10 @@ static void testCalledPhoneSeizesTrafficChannel()
     CHECK(tc.state() == NmtChannel::State::Idle);
 
     CHECK(system.startCall(phone.country, phone.number, "5551234", kNational));
-    CHECK(cc.state() == NmtChannel::State::MtPaging);
+    CHECK(system.callPhase(phone.country, phone.number) == Phase::Page);
     phoneSends(tc, seizureFrame(tc, phone, MessageType::Frame10c), 40);
     CHECK(tc.state() == NmtChannel::State::MtIdent);
-    CHECK(cc.state() == NmtChannel::State::Idle);
+    CHECK(system.callPhase(phone.country, phone.number) == Phase::None);
     CHECK(pull(tc).mt == MessageType::Frame3b);
 
     phoneSends(tc, seizureFrame(tc, phone, MessageType::Frame10c), 3);
@@ -889,7 +902,8 @@ static void testCalledPhoneSeizesTrafficChannel()
     CHECK(events.failed.empty());
 }
 
-// A call is rejected at once if no calling channel is idle or no traffic channel is free.
+// A call is rejected at once when the carousel has no room: every calling channel pages as many
+// phones as it may, or no traffic channel is free and the queue is full.
 static void testRejectedAtOnce()
 {
     const Phone phone;
@@ -897,25 +911,51 @@ static void testRejectedAtOnce()
     other.number = "222222";
     modemcellular::Cause cause = modemcellular::Cause::Normal;
 
-    // the only calling channel pages another phone
+    // the only calling channel pages three phones already
     {
         modemcellular::SampleClock clock(kRate);
         NmtSystem system(clock);
-        NmtChannel& cc = system.addChannel(callingConfig(50), kRate, 1.0);
+        system.addChannel(callingConfig(50), kRate, 1.0);
         system.addChannel(config(System::Nmt450, ChannelType::Tc, 100), kRate, 1.0);
         Events events;
         listen(system, events);
 
-        CHECK(system.startCall(other.country, other.number, "5551234", kNational));
-        CHECK(cc.state() == NmtChannel::State::MtPaging);
+        for (const char* number : {"111111", "222222", "333333"}) {
+            CHECK(system.startCall('1', number, "5551234", kNational));
+        }
+        CHECK(system.capacity().freePageSlots == 0);
         CHECK(!system.canCall());
         CHECK(!system.startCall(phone.country, phone.number, "5551234", kNational, &cause));
         CHECK(cause == modemcellular::Cause::NoChannel);
-        CHECK(system.transactionCount() == 1);
+        CHECK(system.transactionCount() == 3);
         for (int i = 0; i < 5; i++) {
             wait(clock, system, 1.05);
         }
-        CHECK(events.failed.size() == 1);               // only the call that was paged
+        CHECK(events.failed.size() == 3);               // only the calls that were paged
+        CHECK(system.canCall());
+    }
+
+    // no traffic channel and the queue is full: answered and paged calls count
+    {
+        modemcellular::SampleClock clock(kRate);
+        NmtSystem system(clock);
+        NmtChannel& cc = system.addChannel(callingConfig(50), kRate, 1.0);
+        NmtChannel& tc = system.addChannel(config(System::Nmt450, ChannelType::Tc, 100), kRate, 1.0);
+        Events events;
+        listen(system, events);
+
+        system.setMaxQueued(2);
+        phoneSends(tc, roamingFrame(tc, other), 40);
+        Phone first = phone;
+        first.number = "111111";
+        CHECK(system.startCall(first.country, first.number, "5551234", kNational));
+        phoneSends(cc, acknowledgement(cc, first), 1);
+        CHECK(system.callPhase(first.country, first.number) == Phase::Queue);
+        CHECK(system.capacity().freeQueueSlots == 1);
+        CHECK(system.startCall('1', "333333", "5551234", kNational));       // paged towards the queue
+        CHECK(!system.startCall(phone.country, phone.number, "5551234", kNational, &cause));
+        CHECK(cause == modemcellular::Cause::NoChannel);
+        CHECK(system.capacity().idleTrafficChannels == 0);
     }
 
     // the only traffic channel is busy: the phone is paged all the same, and queued when it answers
@@ -930,11 +970,10 @@ static void testRejectedAtOnce()
         phoneSends(tc, roamingFrame(tc, other), 40);
         CHECK(system.canCall());
         CHECK(system.startCall(phone.country, phone.number, "5551234", kNational, &cause));
-        CHECK(cc.state() == NmtChannel::State::MtPaging);
-        CHECK(pull(cc).mt == MessageType::Frame2a);
+        CHECK(pullCalling(cc).mt == MessageType::Frame2a);
         phoneSends(cc, acknowledgement(cc, phone), 1);
-        CHECK(pull(cc).mt == MessageType::Frame2f);
-        CHECK(cc.state() == NmtChannel::State::MtQueue);
+        CHECK(pullCalling(cc).mt == MessageType::Frame2f);
+        CHECK(system.callPhase(phone.country, phone.number) == Phase::Queue);
         CHECK(system.transactionCount() == 2);
     }
 
@@ -956,7 +995,9 @@ static void testRejectedAtOnce()
 // A call that loses its channel or its channel's frames: the exchange hears it once.
 static void testCallIsNotLost()
 {
-    // the calling channel is not rendered after the phone answered: the watchdog fails the call
+    // the calling channel is not rendered after the phone answered: after 2T the phone is standby
+    // again (NMT Doc 450-3 5.4.3) and is paged with the next try; with no frame going out the
+    // tries run out
     {
         modemcellular::SampleClock clock(kRate);
         NmtSystem system(clock);
@@ -968,11 +1009,15 @@ static void testCallIsNotLost()
 
         CHECK(system.startCall('1', "123456", "5551234", kNational));
         phoneSends(cc, acknowledgement(cc, phone), 1);
-        CHECK(cc.state() == NmtChannel::State::MtChannel);
-        wait(clock, system, 4.9);
-        CHECK(events.failed.empty());
+        CHECK(system.callPhase('1', "123456") == Phase::Order);
+        wait(clock, system, 2.1);
+        CHECK(system.callPhase('1', "123456") == Phase::Order);
         wait(clock, system, 0.2);
-        CHECK(events.failed.size() == 1 && events.failed[0] == modemcellular::Cause::TempFail);
+        CHECK(system.callPhase('1', "123456") == Phase::Page);
+        CHECK(events.failed.empty());
+        wait(clock, system, 1.0);
+        wait(clock, system, 1.0);
+        CHECK(events.failed.size() == 1 && events.failed[0] == modemcellular::Cause::OutOfOrder);
         CHECK(events.cleared == 0);
         CHECK(cc.state() == NmtChannel::State::Idle);
         CHECK(system.transactionCount() == 0);
@@ -990,7 +1035,7 @@ static void testCallIsNotLost()
 
         CHECK(system.startCall('1', "123456", "5551234", kNational));
         phoneSends(cc, acknowledgement(cc, phone), 1);
-        pull(cc);
+        pullCalling(cc);
         CHECK(tc.state() == NmtChannel::State::MtIdent);
         wait(clock, system, 5.2);
         CHECK(events.failed.size() == 1 && events.failed[0] == modemcellular::Cause::TempFail);
@@ -1023,7 +1068,7 @@ static void testCallIsNotLost()
 
         CHECK(system.startCall('1', "123456", "5551234", kNational));
         phoneSends(both, acknowledgement(both, phone), 1);
-        pull(both);
+        pullCalling(both);
         CHECK(both.state() == NmtChannel::State::MtIdent);
         phoneSends(both, seizureFrame(both, phone, MessageType::Frame10b), 1);        // the repeat
         CHECK(both.state() == NmtChannel::State::MtIdent);
@@ -1067,17 +1112,24 @@ static void testBusyCallingChannel2()
         Phone second;
         second.number = "123457";
 
+        // two phones are paged on one calling channel at the same time; the answers are told apart
+        // by the number
         CHECK(system.startCall(first.country, first.number, "5551234", kNational));
-        CHECK(!system.startCall(second.country, second.number, "5551234", kNational));
-        phoneSends(cc, acknowledgement(cc, first), 1);
-        CHECK(pull(cc).mt == MessageType::Frame2b);
-        CHECK(cc.state() == NmtChannel::State::Idle);
-
         CHECK(system.startCall(second.country, second.number, "5551234", kNational));
-        CHECK(cc.state() == NmtChannel::State::MtPaging);
-        CHECK(pull(cc).mt == MessageType::Frame2a);
+        CHECK(pullCalling(cc).msNumber == digitsToValue(first.number));
+        CHECK(isIdleCallingFrame(pull(cc)));
+        CHECK(pull(cc).msNumber == digitsToValue(second.number));
+        CHECK(isIdleCallingFrame(pull(cc)));
+
         phoneSends(cc, acknowledgement(cc, second), 1);
-        CHECK(pull(cc).mt == MessageType::Frame2b);
+        Frame f = pullCalling(cc);
+        CHECK(f.mt == MessageType::Frame2b && f.msNumber == digitsToValue(second.number));
+        CHECK(system.callPhase(first.country, first.number) == Phase::Page);
+        phoneSends(cc, acknowledgement(cc, first), 1);
+        f = pullCalling(cc);
+        CHECK(f.mt == MessageType::Frame2b && f.msNumber == digitsToValue(first.number));
+        CHECK(f.tcNo != 0);
+        CHECK(cc.state() == NmtChannel::State::Idle);
         CHECK(events.failed.empty());
     }
 
@@ -1116,7 +1168,7 @@ static void testBusyCallingChannel2()
 
         CHECK(system.startCall(phone.country, phone.number, "5551234", kNational));
         phoneSends(cc, acknowledgement(cc, phone), 1);
-        pull(cc);
+        pullCalling(cc);
         phoneSends(tc, seizureFrame(tc, phone, MessageType::Frame10b), 0);
         CHECK(tc.state() == NmtChannel::State::MtRinging);
     }
@@ -1137,7 +1189,7 @@ static void testChoicesAndCleanup()
 
         CHECK(system.startCall(phone.country, phone.number, "5551234", kNational));
         phoneSends(a, acknowledgement(a, phone), 1);
-        CHECK(pull(a).mt == MessageType::Frame2b);
+        CHECK(pullCalling(a).mt == MessageType::Frame2b);
         CHECK(a.state() == NmtChannel::State::MtIdent);
         CHECK(b.state() == NmtChannel::State::Idle);
     }
@@ -1155,9 +1207,9 @@ static void testChoicesAndCleanup()
         const Phone phone;
 
         CHECK(system.startCall(phone.country, phone.number, "", kNational));
-        pull(cc);
+        pullCalling(cc);
         phoneSends(cc, acknowledgement(cc, phone), 1);
-        pull(cc);
+        pullCalling(cc);
         pull(tc);
         phoneSends(tc, seizureFrame(tc, phone, MessageType::Frame10b), 3);
         const Frame f = pull(tc);
@@ -1186,8 +1238,44 @@ static void testChoicesAndCleanup()
     }
 }
 
+// A combined channel that is taken as a traffic channel lets go of the calls it carried as a
+// calling channel: they go on with another calling channel.
+static void testCombinedChannelTaken()
+{
+    modemcellular::SampleClock clock(kRate);
+    NmtSystem system(clock);
+    NmtChannel& cc = system.addChannel(callingConfig(50), kRate, 1.0);
+    NmtChannel& both = system.addChannel(config(System::Nmt450, ChannelType::CcTc, 60), kRate, 1.0);
+    Events events;
+    listen(system, events);
+    Calls calls;
+    connect(system, calls);
+    const Phone phone;
+    Phone caller = phone;
+    caller.number = "777777";
+
+    CHECK(system.startCall(phone.country, phone.number, "5551234", kNational));
+    CHECK(system.capacity().freePageSlots == 2 * 3 - 2);
+    CHECK(system.capacity().idleTrafficChannels == 1);
+
+    // the phone answers on the combined channel; before the order goes out another phone seizes it
+    phoneSends(both, acknowledgement(both, phone), 1);
+    CHECK(system.callPhase(phone.country, phone.number) == Phase::Order);
+    phoneSends(both, seizureFrame(both, caller, MessageType::Frame10b), 40);
+    CHECK(both.state() == NmtChannel::State::MoIdent);
+
+    // the call goes on with the other calling channel; no traffic channel is left: queued
+    const Frame f = pullCalling(cc);
+    CHECK(f.mt == MessageType::Frame2f);
+    CHECK(f.msNumber == digitsToValue(phone.number));
+    CHECK(system.callPhase(phone.country, phone.number) == Phase::Queue);
+    CHECK(system.capacity().idleTrafficChannels == 0);
+    CHECK(events.failed.empty());
+}
+
 int main()
 {
+    testCombinedChannelTaken();
     testBusyCallingChannel2();
     testChoicesAndCleanup();
     testQueueCodes900();

@@ -144,12 +144,9 @@ const int kConfirmFrames = 2;
 const double kDiallingTimeout = 1.0;
 // Dial tone frequency
 const double kDialToneHz = 425.0;
-// How long a call waits for a free traffic channel, and how long the phone may ring.
-const double kQueueTimeout = 60.0;
+// How long the phone may ring; a message call that rings a phone nobody answers.
 const double kRingingTimeout = 60.0;
-// A message call that rings a phone nobody answers, and one that waits for a traffic channel.
 const double kMessageRingTimeout = 15.0;
-const double kMessageQueueTimeout = 10.0;
 // The received audio is muted this long after a frame sync (a little more than two frames).
 const double kMuteSeconds = 0.280;
 // Seconds to detect the supervisory tone after the call is connected, and to lose it before the
@@ -180,6 +177,7 @@ NmtChannel::NmtChannel(const ChannelConfig& config, double sampleRate, double de
     m_transaction(nullptr),
     m_rxFrameCount(0),
     m_txFrameCount(0),
+    m_callingSlot(0),
     m_sampleRate(sampleRate),
     m_deviationFactor(deviationFactor),
     m_dspMode(DspMode::Frame),
@@ -386,15 +384,6 @@ bool NmtChannel::nextFrame(FrameBits& bits)
     case State::MtIdent:
         frame = txIdentRequest();
         break;
-    case State::MtPaging:
-        frame = txMtPaging();
-        break;
-    case State::MtQueue:
-        frame = txMtQueue();
-        break;
-    case State::MtChannel:
-        frame = txMtChannel();
-        break;
     case State::MtRinging:
         frame = txMtRinging();
         break;
@@ -459,6 +448,8 @@ bool NmtChannel::nextFrame(FrameBits& bits)
         // nothing but audio in these states
         return false;
     case State::Idle:
+        frame = (m_host && isCallingChannel()) ? txCalling() : idleFrame();
+        break;
     default:
         frame = idleFrame();
         break;
@@ -585,9 +576,12 @@ void NmtChannel::receiveFrame(const RxFrame& rx)
     }
 
     ReceivedFrame received;
-    // a call acknowledgement is only told from a seizure by the state of the channel
-    received.frame = decodeFrame(rx.bits, m_config.loopback ? Direction::MtxToXx : Direction::XxToMtx,
-                                 m_state == State::MtPaging);
+    // A call acknowledgement (10a) is only told from a seizure (10b) by what the channel waits for:
+    // a calling channel that pages a phone. A plain calling channel gets no seizure, a combined
+    // one only when no page waits for its answer.
+    const bool callAck = m_host && m_state == State::Idle && isCallingChannel()
+        && (m_config.type != ChannelType::CcTc || m_host->awaitsAnswer(*this));
+    received.frame = decodeFrame(rx.bits, m_config.loopback ? Direction::MtxToXx : Direction::XxToMtx, callAck);
     received.quality = rx.quality;
     received.level = rx.level;
     received.framesElapsed = rx.framesElapsed;
@@ -704,19 +698,6 @@ bool NmtChannel::isCallingChannel() const
         || m_config.type == ChannelType::Ccb || m_config.type == ChannelType::CcTc;
 }
 
-void NmtChannel::startPaging(NmtTransaction& transaction)
-{
-    if (!m_host) {
-        return;
-    }
-
-    m_transaction = &transaction;
-    m_state = State::MtPaging;
-    m_txFrameCount = 0;
-    setDspMode(DspMode::Frame);
-    m_timer->stop();
-}
-
 void NmtChannel::beginMtIdent(NmtTransaction& transaction)
 {
     m_transaction = &transaction;
@@ -728,87 +709,67 @@ void NmtChannel::beginMtIdent(NmtTransaction& transaction)
     m_timer->start(kStateWatchdog);
 }
 
-// Page: frame 2a once, then the idle frames of the calling channel.
-Frame NmtChannel::txMtPaging()
+// An idle calling channel: its own idle frame in every even slot, so that the phones keep the
+// channel (our choice; NMT Doc 450-1 4.4.1.7 shows X = 1a, 2a/b/c/d/f), and in the odd slots the
+// next frame of the carousel, or the idle frame again.
+Frame NmtChannel::txCalling()
 {
-    if (++m_txFrameCount > 1) {
+    if ((m_callingSlot++ & 1) == 0) {
         return idleFrame();
     }
 
+    const NmtHost::CarouselItem item = m_host->carouselItem(*this);
+
+    switch (item.kind)
+    {
+    case NmtHost::CarouselItem::Kind::Page:
+        return txPage(*item.transaction);
+    case NmtHost::CarouselItem::Kind::Queue:
+        return txQueueInfo(*item.transaction);
+    case NmtHost::CarouselItem::Kind::Order:
+        return txOrder(*item.transaction, *item.trafficChannel);
+    case NmtHost::CarouselItem::Kind::None:
+    default:
+        return idleFrame();
+    }
+}
+
+// Page: frame 2a.
+Frame NmtChannel::txPage(const NmtTransaction& transaction) const
+{
     Frame frame = baseFrame(MessageType::Frame2a);
 
-    frame.msCountry = static_cast<uint8_t>(digitsToValue(std::string(1, m_transaction->subscriber.country)));
-    frame.msNumber = static_cast<uint32_t>(digitsToValue(m_transaction->subscriber.number));
+    frame.msCountry = static_cast<uint8_t>(digitsToValue(std::string(1, transaction.subscriber.country)));
+    frame.msNumber = static_cast<uint32_t>(digitsToValue(transaction.subscriber.number));
     frame.additionalInfo = encodeAreaNo(m_config.system, static_cast<uint8_t>(m_config.areaNo));
     return frame;
 }
 
-// The phone waits on the calling channel for a traffic channel: queueing information, 2c for a
-// priority phone, 2f for an ordinary one.
-Frame NmtChannel::txMtQueue()
+// No free traffic channel for the phone that answered: queueing information, 2c for a priority
+// phone, 2f for an ordinary one. The phone then stays standby on the channel (NMT Doc 450-3 5.4.3).
+Frame NmtChannel::txQueueInfo(const NmtTransaction& transaction) const
 {
-    // a traffic channel became free
-    if (m_host->findTrafficChannel(*this))
-    {
-        m_timer->stop();
+    Frame frame = baseFrame(transaction.priority ? MessageType::Frame2c : MessageType::Frame2f);
 
-        // A priority phone that places a call is paged again first and has to confirm before the
-        // traffic channel is assigned.
-        if (m_transaction->priorityMo)
-        {
-            m_host->pageAgain(*m_transaction);
-            return txMtPaging();
-        }
-
-        m_state = State::MtChannel;
-        m_txFrameCount = 0;
-        return txMtChannel();
-    }
-
-    // The queueing frame goes between the idle frames of the channel (scheme 4.4.1.7: X = 1a,
-    // 2a/b/c/d/f), so the other phones keep their calling channel.
-    if (m_txFrameCount++ & 1) {
-        return idleFrame();
-    }
-
-    Frame frame = baseFrame(m_transaction->priority ? MessageType::Frame2c : MessageType::Frame2f);
-
-    frame.msCountry = static_cast<uint8_t>(digitsToValue(std::string(1, m_transaction->subscriber.country)));
-    frame.msNumber = static_cast<uint32_t>(digitsToValue(m_transaction->subscriber.number));
+    frame.msCountry = static_cast<uint8_t>(digitsToValue(std::string(1, transaction.subscriber.country)));
+    frame.msNumber = static_cast<uint32_t>(digitsToValue(transaction.subscriber.number));
     // the fictitious channels 1008 (ordinary), 1009 (priority); NMT-450 codes them as 3F0, 3F1
-    const uint16_t code = m_transaction->priority ? 1 : 0;
+    const uint16_t code = transaction.priority ? 1 : 0;
     frame.additionalInfo = (m_config.system == System::Nmt450 ? 0x3f0 : 0x9f0) + code;
     return frame;
 }
 
-// Traffic channel allocation: frame 2b with the channel on the calling channel, then the call
-// continues on the traffic channel (or here, on a combined channel).
-Frame NmtChannel::txMtChannel()
+// Traffic channel allocation: frame 2b with the channel, then the call continues on the traffic
+// channel (or here, on a combined channel).
+Frame NmtChannel::txOrder(NmtTransaction& transaction, NmtChannel& trafficChannel)
 {
-    NmtChannel* const tc = m_host->findTrafficChannel(*this);
-
-    if (!tc)
-    {
-        // no free traffic channel: the call is queued
-        m_state = State::MtQueue;
-        m_txFrameCount = 0;
-        // a message call does not hold the calling channel for long
-        m_timer->start(m_transaction->messageCall ? kMessageQueueTimeout : kQueueTimeout);
-        return txMtQueue();
-    }
-
-    NmtTransaction* const transaction = m_transaction;
     Frame frame = baseFrame(MessageType::Frame2b);
 
-    frame.msCountry = static_cast<uint8_t>(digitsToValue(std::string(1, transaction->subscriber.country)));
-    frame.msNumber = static_cast<uint32_t>(digitsToValue(transaction->subscriber.number));
-    frame.tcNo = static_cast<uint16_t>(encodeTc(tc->m_config.system, tc->m_config.channel, tc->m_config.msPower));
-
-    if (tc != this) {
-        m_host->moveToTrafficChannel(*transaction, *this, *tc);       // this channel is idle after it
-    } else {
-        beginMtIdent(*transaction);
-    }
+    frame.msCountry = static_cast<uint8_t>(digitsToValue(std::string(1, transaction.subscriber.country)));
+    frame.msNumber = static_cast<uint32_t>(digitsToValue(transaction.subscriber.number));
+    frame.tcNo = static_cast<uint16_t>(encodeTc(trafficChannel.m_config.system, trafficChannel.m_config.channel,
+                                                trafficChannel.m_config.msPower));
+    m_host->orderSent(transaction, trafficChannel);
 
     return frame;
 }
@@ -1502,6 +1463,21 @@ void NmtChannel::process(const Frame& frame)
         m_timer->start(kSupervisoryLost);
     }
 
+    // A phone whose call is still on the calling channels clears on this idle calling channel: the
+    // call is bound here as if it had come in on the channel, and the clearing is acknowledged
+    // like any other below.
+    if (frame.mt == MessageType::Frame13a && m_state == State::Idle && isCallingChannel()
+     && matchChannel(frame) && lineSignalMajority(frame.lineSignal, 5, 3) == 1)
+    {
+        NmtTransaction* const transaction = m_host->callingChannelCleared(subscriberOf(frame), *this);
+
+        if (transaction)
+        {
+            m_transaction = transaction;
+            m_state = State::MtIdent;
+        }
+    }
+
     // The phone clears: acknowledge with the release signal, unless that is already going on
     // (a clearing from the phone that answers our release is handled in MtRelease).
     if (frame.mt == MessageType::Frame13a && m_state != State::Idle
@@ -1517,10 +1493,6 @@ void NmtChannel::process(const Frame& frame)
             NmtTransaction* const transaction = m_transaction;
 
             transaction->callUp = false;
-            // the page stops: no more tries, and the other calling channels let go
-            if (transaction->paging) {
-                m_host->pagingAnswered(*transaction, *this);
-            }
             // a switch to another channel is off, the phone is here
             if (transaction->scipTarget) {
                 m_host->scipEnded(*transaction, false);
@@ -1555,9 +1527,6 @@ void NmtChannel::process(const Frame& frame)
     case State::MoConfirm:
     case State::MoDialling:
         rxMoDialling(frame);
-        break;
-    case State::MtPaging:
-        rxMtPaging(frame);
         break;
     case State::MtIdent:
         rxMtIdent(frame);
@@ -1597,8 +1566,6 @@ void NmtChannel::process(const Frame& frame)
     case State::ScipOrder:
     case State::ScipRelease:
         break;
-    case State::MtQueue:
-    case State::MtChannel:
     case State::MtComplete:
     case State::RoamingConfirm:
     case State::MoComplete:
@@ -1612,9 +1579,10 @@ void NmtChannel::rxIdle(const Frame& frame)
 {
     // roaming update (11a), call from an ordinary phone (10b) or from a coin-box phone (12), a
     // priority phone that places a call (11b, calling channel), the called phone that found this
-    // traffic channel by itself (10c)
+    // traffic channel by itself (10c); on a calling channel the answer to a page (10a, 10d, 11b)
     if (frame.mt != MessageType::Frame11a && frame.mt != MessageType::Frame10b && frame.mt != MessageType::Frame12
-     && frame.mt != MessageType::Frame11b && frame.mt != MessageType::Frame10c) {
+     && frame.mt != MessageType::Frame11b && frame.mt != MessageType::Frame10c
+     && frame.mt != MessageType::Frame10a && frame.mt != MessageType::Frame10d) {
         return;
     }
     if (!matchChannel(frame)) {
@@ -1626,9 +1594,19 @@ void NmtChannel::rxIdle(const Frame& frame)
         return;
     }
 
+    if (isCallingChannel() && (frame.mt == MessageType::Frame10a || frame.mt == MessageType::Frame10d
+                             || frame.mt == MessageType::Frame11b))
+    {
+        if (m_host->callingChannelAnswer(subscriber, *this, frame.mt == MessageType::Frame11b)) {
+            return;
+        }
+    }
+    if (frame.mt == MessageType::Frame10a || frame.mt == MessageType::Frame10d) {
+        return;
+    }
     if (frame.mt == MessageType::Frame11b)
     {
-        // the phone is paged to check who it is; the transaction is bound to the calling channels
+        // the phone is paged to check who it is
         if (isCallingChannel() && matchArea(frame)) {
             m_host->startPriorityCall(subscriber, *this);
         }
@@ -1826,27 +1804,6 @@ void NmtChannel::completeDialling()
     m_state = State::MoComplete;
     setDspMode(DspMode::Frame);
     m_txFrameCount = 0;
-}
-
-// The phone answers the page: call acknowledgement (10a), on a combined channel (10d), or from
-// a priority phone (11b).
-void NmtChannel::rxMtPaging(const Frame& frame)
-{
-    if (frame.mt != MessageType::Frame10a && frame.mt != MessageType::Frame10d && frame.mt != MessageType::Frame11b) {
-        return;
-    }
-    if (!matchChannel(frame) || !matchSubscriber(frame)) {
-        return;
-    }
-
-    if (frame.mt == MessageType::Frame11b) {
-        m_transaction->priority = true;
-    }
-
-    m_state = State::MtChannel;
-    m_txFrameCount = 0;
-    m_timer->start(kStateWatchdog);
-    m_host->pagingAnswered(*m_transaction, *this);
 }
 
 // The phone is on the traffic channel and has identified itself: it rings.
@@ -2236,19 +2193,11 @@ void NmtChannel::onTimer()
         return;
     }
 
-    // the phone does not answer, or no traffic channel became free: the call fails, the phone
-    // is released
-    if (m_state == State::MtRinging || m_state == State::MtQueue)
+    // the phone does not answer: the call fails (a plain release for the caller), the phone is
+    // released
+    if (m_state == State::MtRinging)
     {
-        if (m_state == State::MtQueue && m_transaction->messageCall)
-        {
-            // the phone never left the calling channel: nothing to release
-            m_transaction->mwiResult = NmtServiceEnd::NoChannel;
-            m_host->destroyTransaction(m_transaction);
-            return;
-        }
-        // no answer is a plain release for the caller, no free channel is congestion
-        failCall(m_state == State::MtRinging ? modemcellular::Cause::Normal : modemcellular::Cause::NoChannel);
+        failCall(modemcellular::Cause::Normal);
         if (m_transaction) {
             release();
         }
@@ -2280,7 +2229,7 @@ void NmtChannel::onTimer()
     if (m_transaction->callUp)
     {
         NmtTransaction* const transaction = m_transaction;
-        const bool notAnswered = (m_state == State::MtIdent || m_state == State::MtChannel);
+        const bool notAnswered = (m_state == State::MtIdent);
 
         if (notAnswered)
         {

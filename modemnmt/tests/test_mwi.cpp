@@ -85,10 +85,10 @@ struct Station
     void toAutoanswer()
     {
         CHECK(system.sendMwi(phone.country, phone.number, MwiSms));
-        CHECK(cc->state() == State::MtPaging);
-        pull(*cc);
+        CHECK(system.callPhase(phone.country, phone.number) == NmtTransaction::CcPhase::Page);
+        CHECK(pullCalling(*cc).mt == MessageType::Frame2a);
         phoneSends(*cc, acknowledgement(), 1);
-        CHECK(pull(*cc).mt == MessageType::Frame2b);
+        CHECK(pullCalling(*cc).mt == MessageType::Frame2b);
         CHECK(tc->state() == State::MtIdent);
         pull(*tc);
         phoneSends(*tc, seizureFrame(*tc, phone, MessageType::Frame10b), 3);
@@ -399,10 +399,10 @@ static void testNotDelivered()
         Station s(false);
 
         CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiSms));
-        pull(*s.cc);
+        pullCalling(*s.cc);
         phoneSends(*s.cc, s.acknowledgement(), 1);
-        pull(*s.cc);
-        CHECK(s.cc->state() == State::MtQueue);
+        pullCalling(*s.cc);
+        CHECK(s.system.callPhase(s.phone.country, s.phone.number) == NmtTransaction::CcPhase::Queue);
         s.wait(60.5);
         s.wait(2.5);
         CHECK(s.system.transactionCount() == 0);
@@ -530,7 +530,7 @@ static void testPreemption()
         CHECK(s.system.startCall(s.phone.country, s.phone.number, "5551234", modemcellular::NumberType::National));
         CHECK(s.reports.empty());                       // the indicators go with the call
         CHECK(s.system.transactionCount() == 1);
-        CHECK(s.cc->state() == State::MtPaging);
+        CHECK(s.system.callPhase(s.phone.country, s.phone.number) == NmtTransaction::CcPhase::Page);
         CHECK(s.system.releaseCall(s.phone.country, s.phone.number));
         CHECK(s.reports.size() == 1 && s.reports[0].flags == MwiSms && s.reports[0].result == NmtServiceEnd::Undelivered);
     }
@@ -575,9 +575,9 @@ static void testIndicatorsCarried()
         CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiSms | MwiFax));
         CHECK(s.system.startCall(s.phone.country, s.phone.number, "5551234", modemcellular::NumberType::National));
         CHECK(s.reports.empty());
-        pull(*s.cc);
+        pullCalling(*s.cc);
         phoneSends(*s.cc, s.acknowledgement(), 1);
-        pull(*s.cc);
+        pullCalling(*s.cc);
         pull(*s.tc);
         phoneSends(*s.tc, seizureFrame(*s.tc, s.phone, MessageType::Frame10b), 3);
         phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0xeeeee), 1);
@@ -628,7 +628,8 @@ static void testIndicatorsCarried()
             system.sendMwi(sub.country, sub.number, flags);
         });
         CHECK(system.sendMwi(phone.country, phone.number, MwiSms));
-        CHECK(cctc.state() == State::MtPaging);
+        CHECK(cctc.state() == State::Idle);
+        CHECK(system.callPhase(phone.country, phone.number) == NmtTransaction::CcPhase::Page);
         // the phone's call comes in on another channel: here a second combined channel
         NmtChannel& other = system.addChannel(config(System::Nmt450, ChannelType::CcTc, 62), kRate, 1.0);
         phoneSends(other, seizureFrame(other, phone, MessageType::Frame10b), 40);
@@ -671,9 +672,9 @@ static void testNotThere()
         Station s;
 
         CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiSms));
-        pull(*s.cc);
+        pullCalling(*s.cc);
         phoneSends(*s.cc, s.acknowledgement(), 1);
-        pull(*s.cc);
+        pullCalling(*s.cc);
         for (int i = 0; i < 8; i++) {
             moreFrames(*s.tc);
         }
@@ -687,13 +688,13 @@ static void testNotThere()
 
         other.number = "654321";
         CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiSms));
-        pull(*s.cc);
+        pullCalling(*s.cc);
         phoneSends(*s.tc, roamingFrame(*s.tc, other), 40);
         phoneSends(*s.cc, s.acknowledgement(), 1);
-        pull(*s.cc);
-        CHECK(s.cc->state() == State::MtQueue);
+        pullCalling(*s.cc);
+        CHECK(s.system.callPhase(s.phone.country, s.phone.number) == NmtTransaction::CcPhase::Queue);
         s.wait(9.5);
-        CHECK(s.cc->state() == State::MtQueue);
+        CHECK(s.system.callPhase(s.phone.country, s.phone.number) == NmtTransaction::CcPhase::Queue);
         s.wait(1.0);
         CHECK(s.cc->state() == State::Idle);                    // nothing to release
         CHECK(s.system.transactionCount() == 0);
@@ -817,11 +818,11 @@ static void testTeardown()
                 reports.push_back({flags, result});
             });
             CHECK(system.sendMwi(phone.country, phone.number, MwiSms));
-            pull(cc);
+            pullCalling(cc);
             Frame ack = seizureFrame(cc, phone, MessageType::Frame10a);
             ack.msPassword = 0;
             phoneSends(cc, ack, 1);
-            pull(cc);
+            pullCalling(cc);
             pull(tc);
             phoneSends(tc, seizureFrame(tc, phone, MessageType::Frame10b), 3);
             CHECK(tc.state() == State::MtAutoanswer);

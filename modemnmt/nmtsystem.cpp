@@ -74,7 +74,14 @@ NmtSystem::~NmtSystem()
     // handler may do anything, so the list is left alone while it runs)
     std::vector<MwiReport> reports;
 
-    for (NmtTransaction& transaction : m_transactions) {
+    for (NmtTransaction& transaction : m_transactions)
+    {
+        // a call to a phone that is still on the calling channels has no channel to report it
+        if (transaction.ccPhase != NmtTransaction::CcPhase::None && transaction.callUp)
+        {
+            transaction.callUp = false;
+            callFailed(transaction, modemcellular::Cause::TempFail);
+        }
         reports.push_back(mwiReport(transaction));
     }
     for (const MwiReport& report : reports) {
@@ -92,17 +99,9 @@ bool NmtSystem::cancelMessageCall(char country, const std::string& number, uint8
         if (transaction.subscriber.country != country || transaction.subscriber.number != number) {
             continue;
         }
-        if (!transaction.messageCall) {
+        // only while it is on the calling channels
+        if (!transaction.messageCall || transaction.ccPhase == NmtTransaction::CcPhase::None) {
             return false;
-        }
-        for (const NmtChannel* channel : transaction.channels)
-        {
-            const NmtChannel::State state = channel->state();
-
-            if (state != NmtChannel::State::MtPaging && state != NmtChannel::State::MtQueue
-             && state != NmtChannel::State::MtChannel) {
-                return false;
-            }
         }
         // For a call or a seizure of the phone the indicators go on with that call, no word to the
         // handler (it would send them again while the new call is being made).
@@ -209,7 +208,7 @@ bool NmtSystem::sendMwi(char country, const std::string& number, uint8_t flags)
         return true;
     }
 
-    if (!canCall()) {
+    if (!admits(nullptr)) {
         return false;
     }
 
@@ -334,24 +333,372 @@ int batteryPeriodFrames(int h3)
 
 } // namespace
 
-// An idle calling channel to page on. A call that finds no idle traffic channel when the phone
-// answers is queued (frame 2f/2c, NMT Doc 450-1 para 4.1.1.2 and scheme B step 5).
 bool NmtSystem::canCall() const
 {
+    return admits(nullptr);
+}
+
+// ---- calling channel carousel ----
+//
+// A call to a phone lives on the calling channels until it gets its traffic channel: paged (2a)
+// on the idle calling channels with room, answered (10a, 10d, 11b) on one of them, then the
+// channel order (2b) there, or, with no free traffic channel, the queueing information (2f / 2c)
+// after which the phone is standby on the channel. The phone reacts to 2b, 2d, 2f and 2a only
+// for 2T after its answer (NMT Doc 450-3 5.4.3): a queued phone is paged again when a traffic
+// channel becomes free, and gets the channel order after its new answer (as the priority phone
+// of NMT Doc 450-1 4.4.1.7, state 4).
+
+namespace
+{
+
+// queueing information frames after the answer (our choice; one is what the phone needs)
+const int kQueueInfoFrames = 2;
+// how long an answered call waits for a traffic channel; a message call holds less
+const double kQueueTimeout = 60.0;
+const double kMessageQueueTimeout = 10.0;
+// 2T after the answer the phone no longer waits for the channel order (NMT Doc 450-3 5.4.3)
+const double kOrderDeadline = 2.0 * 1.107;
+
+bool contains(const std::vector<NmtChannel*>& channels, const NmtChannel* channel)
+{
+    return std::find(channels.begin(), channels.end(), channel) != channels.end();
+}
+
+bool onCallingChannels(NmtTransaction::CcPhase phase)
+{
+    return phase != NmtTransaction::CcPhase::None;
+}
+
+} // namespace
+
+bool NmtSystem::idleCallingChannel(const NmtChannel& channel) const
+{
+    return channel.valid() && channel.isCallingChannel() && channel.state() == NmtChannel::State::Idle;
+}
+
+// Pages placed on the calling channel (also those that wait for the wake-up window of battery
+// saving: they go out on it later).
+int NmtSystem::pagesOn(const NmtChannel& callingChannel) const
+{
+    int pages = 0;
+
+    for (const NmtTransaction& transaction : m_transactions)
+    {
+        if ((transaction.ccPhase == NmtTransaction::CcPhase::Page || transaction.ccPhase == NmtTransaction::CcPhase::Deferred)
+         && contains(transaction.pageChannels, &callingChannel)) {
+            pages++;
+        }
+    }
+
+    return pages;
+}
+
+int NmtSystem::queuedCalls() const
+{
+    int queued = 0;
+
+    for (const NmtTransaction& transaction : m_transactions)
+    {
+        if (transaction.ccPhase == NmtTransaction::CcPhase::Queue) {
+            queued++;
+        }
+    }
+
+    return queued;
+}
+
+int NmtSystem::idleTrafficChannels() const
+{
+    int idle = 0;
+
     for (const auto& channel : m_channels)
     {
-        if (!channel->valid() || channel->state() != NmtChannel::State::Idle) {
+        const ChannelType type = channel->config().type;
+
+        if (channel->valid() && channel->state() == NmtChannel::State::Idle
+         && (type == ChannelType::Tc || type == ChannelType::AcTc || type == ChannelType::CcTc)) {
+            idle++;
+        }
+    }
+
+    return idle;
+}
+
+// Room for one more call to a phone: a page on an idle calling channel, and, with no idle traffic
+// channel, a place in the queue for it (counting the calls that are paged already).
+bool NmtSystem::admits(modemcellular::Cause* cause) const
+{
+    bool room = false;
+
+    for (const auto& channel : m_channels)
+    {
+        if (idleCallingChannel(*channel) && pagesOn(*channel) < m_maxPagesPerCc)
+        {
+            room = true;
+            break;
+        }
+    }
+
+    if (room && idleTrafficChannels() == 0)
+    {
+        int paged = 0;
+
+        for (const NmtTransaction& transaction : m_transactions)
+        {
+            if (transaction.ccPhase == NmtTransaction::CcPhase::Page || transaction.ccPhase == NmtTransaction::CcPhase::Deferred) {
+                paged++;
+            }
+        }
+        room = queuedCalls() + paged < m_maxQueued;
+    }
+
+    if (!room && cause) {
+        *cause = modemcellular::Cause::NoChannel;
+    }
+    return room;
+}
+
+NmtSystem::Capacity NmtSystem::capacity() const
+{
+    Capacity capacity;
+
+    for (const auto& channel : m_channels)
+    {
+        if (idleCallingChannel(*channel)) {
+            capacity.freePageSlots += std::max(0, m_maxPagesPerCc - pagesOn(*channel));
+        }
+    }
+    capacity.freeQueueSlots = std::max(0, m_maxQueued - queuedCalls());
+    capacity.idleTrafficChannels = idleTrafficChannels();
+
+    return capacity;
+}
+
+NmtTransaction::CcPhase NmtSystem::callPhase(char country, const std::string& number) const
+{
+    for (const NmtTransaction& transaction : m_transactions)
+    {
+        if (transaction.subscriber.country == country && transaction.subscriber.number == number) {
+            return transaction.ccPhase;
+        }
+    }
+
+    return NmtTransaction::CcPhase::None;
+}
+
+// The call is off the calling channels (its traffic channel has it, or it ends).
+void NmtSystem::leaveCallingChannels(NmtTransaction& transaction)
+{
+    transaction.ccPhase = NmtTransaction::CcPhase::None;
+    transaction.pageChannels.clear();
+    transaction.pageDue.clear();
+    transaction.ccChannel = nullptr;
+    transaction.queueInfoLeft = 0;
+    transaction.repaged = false;
+    transaction.timer->stop();
+}
+
+// Queued calls whose phone is paged again because a traffic channel became free: as many as there
+// are idle traffic channels not already promised to a call (an order to send, or such a page).
+// Priority phones first, then the oldest.
+void NmtSystem::repageQueued()
+{
+    int promised = 0;
+
+    for (const NmtTransaction& transaction : m_transactions)
+    {
+        if (transaction.ccPhase == NmtTransaction::CcPhase::Order
+         || (transaction.repaged && (transaction.ccPhase == NmtTransaction::CcPhase::Page
+                                  || transaction.ccPhase == NmtTransaction::CcPhase::Deferred))) {
+            promised++;
+        }
+    }
+
+    const int idle = idleTrafficChannels();
+
+    for (int pass = 0; pass < 2 && promised < idle; pass++)
+    {
+        for (NmtTransaction& transaction : m_transactions)
+        {
+            if (promised >= idle) {
+                break;
+            }
+            // the queueing information has to be out first
+            if (transaction.ccPhase != NmtTransaction::CcPhase::Queue || transaction.queueInfoLeft > 0
+             || transaction.priority != (pass == 0)) {
+                continue;
+            }
+
+            transaction.repaged = true;
+            transaction.pageWaited = false;
+            page(transaction, 1);
+            promised++;
+        }
+    }
+}
+
+NmtHost::CarouselItem NmtSystem::carouselItem(NmtChannel& callingChannel)
+{
+    CarouselItem item;
+
+    // the calling channel of an answered call is gone (a combined channel that carries a call
+    // now): the call goes on with this one
+    for (NmtTransaction& transaction : m_transactions)
+    {
+        if ((transaction.ccPhase == NmtTransaction::CcPhase::Order || transaction.ccPhase == NmtTransaction::CcPhase::Queue)
+         && transaction.ccChannel && !idleCallingChannel(*transaction.ccChannel)) {
+            transaction.ccChannel = &callingChannel;
+        }
+    }
+
+    repageQueued();
+
+    // the channel order first: the phone waits for it for 2T only
+    for (NmtTransaction& transaction : m_transactions)
+    {
+        if (transaction.ccPhase != NmtTransaction::CcPhase::Order || transaction.ccChannel != &callingChannel) {
             continue;
         }
 
-        const ChannelType type = channel->config().type;
+        NmtChannel* const trafficChannel = findTrafficChannel(callingChannel);
 
-        if (type == ChannelType::Cc || type == ChannelType::Cca || type == ChannelType::Ccb || type == ChannelType::CcTc) {
+        if (trafficChannel)
+        {
+            item.kind = CarouselItem::Kind::Order;
+            item.transaction = &transaction;
+            item.trafficChannel = trafficChannel;
+            return item;
+        }
+        // the traffic channel was taken meanwhile: the call is queued
+        transaction.ccPhase = NmtTransaction::CcPhase::Queue;
+        transaction.queueInfoLeft = kQueueInfoFrames;
+        transaction.timer->start(transaction.messageCall ? kMessageQueueTimeout : kQueueTimeout);
+    }
+
+    // then the queueing information, also within 2T
+    for (NmtTransaction& transaction : m_transactions)
+    {
+        if (transaction.ccPhase == NmtTransaction::CcPhase::Queue && transaction.ccChannel == &callingChannel
+         && transaction.queueInfoLeft > 0)
+        {
+            transaction.queueInfoLeft--;
+            item.kind = CarouselItem::Kind::Queue;
+            item.transaction = &transaction;
+            return item;
+        }
+    }
+
+    // then the pages of this try that did not go out on this channel yet
+    for (NmtTransaction& transaction : m_transactions)
+    {
+        if (transaction.ccPhase != NmtTransaction::CcPhase::Page) {
+            continue;
+        }
+
+        const auto due = std::find(transaction.pageDue.begin(), transaction.pageDue.end(), &callingChannel);
+
+        if (due != transaction.pageDue.end())
+        {
+            transaction.pageDue.erase(due);
+            item.kind = CarouselItem::Kind::Page;
+            item.transaction = &transaction;
+            return item;
+        }
+    }
+
+    return item;
+}
+
+bool NmtSystem::awaitsAnswer(const NmtChannel& callingChannel) const
+{
+    for (const NmtTransaction& transaction : m_transactions)
+    {
+        if (transaction.ccPhase == NmtTransaction::CcPhase::Page && contains(transaction.pageChannels, &callingChannel)) {
             return true;
         }
     }
 
     return false;
+}
+
+bool NmtSystem::callingChannelAnswer(const NmtSubscriber& subscriber, NmtChannel& callingChannel, bool priority)
+{
+    for (NmtTransaction& transaction : m_transactions)
+    {
+        if (transaction.subscriber.country != subscriber.country || transaction.subscriber.number != subscriber.number) {
+            continue;
+        }
+        if (transaction.ccPhase != NmtTransaction::CcPhase::Page || !contains(transaction.pageChannels, &callingChannel)) {
+            return false;
+        }
+
+        if (priority) {
+            transaction.priority = true;
+        }
+        // the other calling channels stop paging; the answer goes on here
+        transaction.timer->stop();
+        transaction.pageChannels.clear();
+        transaction.pageDue.clear();
+        transaction.ccChannel = &callingChannel;
+        transaction.repaged = false;
+
+        if (findTrafficChannel(callingChannel))
+        {
+            transaction.ccPhase = NmtTransaction::CcPhase::Order;
+            // the phone waits for the order for 2T, then it is standby again
+            transaction.timer->start(kOrderDeadline);
+        }
+        else
+        {
+            transaction.ccPhase = NmtTransaction::CcPhase::Queue;
+            transaction.queueInfoLeft = kQueueInfoFrames;
+            transaction.timer->start(transaction.messageCall ? kMessageQueueTimeout : kQueueTimeout);
+        }
+        return true;
+    }
+
+    return false;
+}
+
+void NmtSystem::orderSent(NmtTransaction& transaction, NmtChannel& trafficChannel)
+{
+    leaveCallingChannels(transaction);
+    transaction.channels.assign(1, &trafficChannel);
+    trafficChannel.beginMtIdent(transaction);
+}
+
+NmtTransaction* NmtSystem::callingChannelCleared(const NmtSubscriber& subscriber, NmtChannel& callingChannel)
+{
+    for (NmtTransaction& transaction : m_transactions)
+    {
+        if (transaction.subscriber.country != subscriber.country || transaction.subscriber.number != subscriber.number) {
+            continue;
+        }
+        if (!onCallingChannels(transaction.ccPhase)) {
+            return nullptr;
+        }
+
+        leaveCallingChannels(transaction);
+        transaction.channels.assign(1, &callingChannel);
+        return &transaction;
+    }
+
+    return nullptr;
+}
+
+// No traffic channel became free in time: the call fails as congestion. The phone is standby on
+// the calling channel, there is nothing to release.
+void NmtSystem::queueTimeout(NmtTransaction& transaction)
+{
+    if (transaction.messageCall) {
+        transaction.mwiResult = NmtServiceEnd::NoChannel;
+    }
+    if (transaction.callUp)
+    {
+        transaction.callUp = false;
+        callFailed(transaction, modemcellular::Cause::NoChannel);
+    }
+    destroyTransaction(&transaction);
 }
 
 bool NmtSystem::startCall(char country, const std::string& number, const std::string& callerId,
@@ -374,8 +721,8 @@ bool NmtSystem::startCall(char country, const std::string& number, const std::st
         }
     }
 
-    // no calling channel to page on: rejected at once
-    if (!canCall())
+    // no room on the calling channels: rejected at once
+    if (!admits(cause))
     {
         if (carried && m_mwiHandler)
         {
@@ -384,9 +731,6 @@ bool NmtSystem::startCall(char country, const std::string& number, const std::st
             subscriber.country = country;
             subscriber.number = number;
             m_mwiHandler(subscriber, carried, NmtServiceEnd::Undelivered);
-        }
-        if (cause) {
-            *cause = modemcellular::Cause::NoChannel;
         }
         return false;
     }
@@ -415,14 +759,15 @@ NmtTransaction& NmtSystem::newPagedTransaction(char country, const std::string& 
     transaction.subscriber.country = country;
     transaction.subscriber.number = number;
     transaction.mobileTerminated = true;
-    transaction.paging = true;
     transaction.timer = std::make_unique<modemcellular::Timer>(m_timers, [this, pointer]() { pagingTimeout(*pointer); });
 
     return transaction;
 }
 
-// Pages the phone on the calling channels that are idle. With battery saving on a calling channel
-// the phone may be asleep: the first page waits one period of the group the phone is in.
+// Pages the phone: one 2a per try on each of its calling channels (the carousel sends it). The
+// first try places the page on the idle calling channels that have room; a phone that is queued
+// is paged on the calling channel it is standby on. With battery saving on a calling channel the
+// phone may be asleep: the first page there waits one period of the group the phone is in.
 void NmtSystem::page(NmtTransaction& transaction, int tryNo)
 {
     const char last = transaction.subscriber.number.empty() ? '\0' : transaction.subscriber.number.back();
@@ -432,32 +777,47 @@ void NmtSystem::page(NmtTransaction& transaction, int tryNo)
         const ChannelConfig& c = channel.config();
         return channel.isCallingChannel() && c.batteryPeriod > 0 && x6 >= 0 && groupContains(c.batteryGroup, x6);
     };
-    // pages on the idle calling channels (and those that paged the phone before) that pass `wanted`
-    const auto pageChannels = [this, &transaction](const std::function<bool(const NmtChannel&)>& wanted) {
-        bool any = false;
 
+    // the channels of the page, unless they are chosen already (the wake-up window of battery
+    // saving came for a page that waited)
+    if (tryNo == 1 && transaction.pageChannels.empty())
+    {
+        NmtChannel* const standby = transaction.ccChannel;
+
+        transaction.ccChannel = nullptr;
+        transaction.queueInfoLeft = 0;
+        if (standby && idleCallingChannel(*standby)) {
+            transaction.pageChannels.push_back(standby);
+        }
+        else
+        {
+            for (const auto& channel : m_channels)
+            {
+                if (idleCallingChannel(*channel) && pagesOn(*channel) < m_maxPagesPerCc) {
+                    transaction.pageChannels.push_back(channel.get());
+                }
+            }
+        }
+    }
+
+    else if (tryNo > 1 && !transaction.repaged)
+    {
+        // a calling channel that became idle since takes part in the next try
         for (const auto& channel : m_channels)
         {
-            if (!channel->valid() || !channel->isCallingChannel() || !wanted(*channel)) {
-                continue;
+            if (idleCallingChannel(*channel) && !contains(transaction.pageChannels, channel.get())
+             && pagesOn(*channel) < m_maxPagesPerCc) {
+                transaction.pageChannels.push_back(channel.get());
             }
-            const bool paged = std::find(transaction.channels.begin(), transaction.channels.end(), channel.get()) != transaction.channels.end();
-            if (channel->state() != NmtChannel::State::Idle && !paged) {
-                continue;
-            }
-            if (!paged) {
-                transaction.channels.push_back(channel.get());
-            }
-            channel->startPaging(transaction);
-            any = true;
         }
+    }
 
-        return any;
-    };
+    transaction.pageTry = tryNo;
+    transaction.pageDue.clear();
 
     if (tryNo == 1 && !transaction.pageWaited)
     {
-        for (const auto& channel : m_channels)
+        for (const NmtChannel* channel : transaction.pageChannels)
         {
             if (!sleeps(*channel)) {
                 continue;
@@ -469,16 +829,26 @@ void NmtSystem::page(NmtTransaction& transaction, int tryNo)
 
             transaction.pageDeferred = true;
             transaction.pageWaited = true;
-            transaction.pageTry = tryNo;
             transaction.timer->start(seconds);
             // the calling channels whose phones are awake page at once
-            pageChannels([&sleeps](const NmtChannel& c) { return !sleeps(c); });
+            for (NmtChannel* c : transaction.pageChannels)
+            {
+                if (!sleeps(*c)) {
+                    transaction.pageDue.push_back(c);
+                }
+            }
+            transaction.ccPhase = transaction.pageDue.empty() ? NmtTransaction::CcPhase::Deferred : NmtTransaction::CcPhase::Page;
             return;
         }
     }
 
-    pageChannels([](const NmtChannel&) { return true; });
-    transaction.pageTry = tryNo;
+    for (NmtChannel* channel : transaction.pageChannels)
+    {
+        if (idleCallingChannel(*channel)) {
+            transaction.pageDue.push_back(channel);
+        }
+    }
+    transaction.ccPhase = NmtTransaction::CcPhase::Page;
     transaction.timer->start(kPagingTimeout);
 }
 
@@ -505,12 +875,6 @@ NmtTransaction* NmtSystem::startPriorityCall(const NmtSubscriber& subscriber, Nm
     return &transaction;
 }
 
-void NmtSystem::pageAgain(NmtTransaction& transaction)
-{
-    transaction.paging = true;
-    page(transaction, 1);
-}
-
 NmtTransaction* NmtSystem::calledPhoneSeized(const NmtSubscriber& subscriber, NmtChannel& channel)
 {
     for (NmtTransaction& transaction : m_transactions)
@@ -519,11 +883,13 @@ NmtTransaction* NmtSystem::calledPhoneSeized(const NmtSubscriber& subscriber, Nm
             continue;
         }
         // only a call to the phone that is not answered yet can be taken over
-        if (!transaction.mobileTerminated || transaction.answered || transaction.scipTarget) {
+        if (!transaction.mobileTerminated || transaction.answered || transaction.scipTarget
+         || !onCallingChannels(transaction.ccPhase)) {
             return nullptr;
         }
 
-        pagingAnswered(transaction, channel);
+        leaveCallingChannels(transaction);
+        transaction.channels.assign(1, &channel);
         return &transaction;
     }
 
@@ -532,6 +898,20 @@ NmtTransaction* NmtSystem::calledPhoneSeized(const NmtSubscriber& subscriber, Nm
 
 void NmtSystem::pagingTimeout(NmtTransaction& transaction)
 {
+    if (transaction.ccPhase == NmtTransaction::CcPhase::Queue)
+    {
+        queueTimeout(transaction);
+        return;
+    }
+    // the order did not go out within 2T: the phone is standby again, it is paged with the next
+    // try on the channel it answered on
+    if (transaction.ccPhase == NmtTransaction::CcPhase::Order)
+    {
+        transaction.pageChannels.assign(1, transaction.ccChannel);
+        transaction.ccChannel = nullptr;
+        transaction.ccPhase = NmtTransaction::CcPhase::Page;
+    }
+
     // the wake-up window of battery saving has come: now the page, this was no failed attempt
     if (transaction.pageDeferred)
     {
@@ -575,30 +955,6 @@ NmtChannel* NmtSystem::findTrafficChannel(NmtChannel& from)
     }
 
     return combined;
-}
-
-void NmtSystem::pagingAnswered(NmtTransaction& transaction, NmtChannel& channel)
-{
-    transaction.paging = false;
-    transaction.timer->stop();
-
-    // the other calling channels stop paging
-    const std::vector<NmtChannel*> channels = transaction.channels;
-
-    transaction.channels.assign(1, &channel);
-    for (NmtChannel* other : channels)
-    {
-        if (other != &channel) {
-            other->transactionEnded();
-        }
-    }
-}
-
-void NmtSystem::moveToTrafficChannel(NmtTransaction& transaction, NmtChannel& from, NmtChannel& to)
-{
-    transaction.channels.assign(1, &to);
-    from.transactionEnded();
-    to.beginMtIdent(transaction);
 }
 
 void NmtSystem::callAlerting(NmtTransaction& transaction)
@@ -665,8 +1021,8 @@ bool NmtSystem::releaseCall(char country, const std::string& number)
         if (transaction.messageCall) {
             return cancelMessageCall(country, number, nullptr);
         }
-        // a call that is still paging has no phone on a channel: it just stops
-        if (transaction.paging && transaction.callUp)
+        // a call that is still on the calling channels has no phone on a channel: it just stops
+        if (onCallingChannels(transaction.ccPhase) && transaction.callUp)
         {
             transaction.callUp = false;
             destroyTransaction(&transaction);
