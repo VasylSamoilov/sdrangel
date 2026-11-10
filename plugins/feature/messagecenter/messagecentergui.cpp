@@ -124,7 +124,7 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     m_polarity = new QComboBox(this);
     m_polarity->addItems({"Any polarity", "Normal", "Inverted"});
     m_type = new QComboBox(this);
-    m_type->addItems({"Any type", "alphanumeric", "numeric", "tone", "voice", "short_message"});
+    m_type->addItems({"Any type", "alphanumeric", "numeric", "tone", "voice", "short_message", "binary", "secure"});
     m_alias = new QLineEdit(this);
     m_alias->setPlaceholderText("channel alias");
     m_address = new QLineEdit(this);
@@ -351,8 +351,29 @@ void MessageCenterGUI::buildCompose(QWidget *container)
     m_function->addItems({"1 (A)", "2 (B)", "3 (C)", "4 (D)"});
     m_function->setToolTip("POCSAG function A to D, GSC address number 1 to 4");
     m_type = new QComboBox(container);
-    m_type->addItems({"alphanumeric", "numeric", "tone", "voice", "short_message"});
+    m_type->addItems({"alphanumeric", "numeric", "tone", "voice", "short_message", "binary", "secure"});
     m_text = new QLineEdit(container);
+    m_blocking = new QSpinBox(container);
+    m_blocking->setRange(1, 16);
+    m_blocking->setPrefix("B ");
+    m_blocking->setToolTip("FLEX binary: blocking length, bits of a character (1 is the default of the standard)");
+    m_mailDrop = new QCheckBox("M", container);
+    m_mailDrop->setToolTip("FLEX binary: mail drop flag");
+    m_rightToLeft = new QCheckBox("D", container);
+    m_rightToLeft->setToolTip("FLEX binary: display right to left (not with a blocking length of 1)");
+    m_headerMessage = new QCheckBox("H", container);
+    m_headerMessage->setToolTip("FLEX binary: header message, a transparent message of the same number follows");
+    m_statusInfo = new QCheckBox("I", container);
+    m_statusInfo->setToolTip("FLEX binary: the first 8 data bits name the encoding method (reserved)");
+    QHBoxLayout *binaryRow = new QHBoxLayout();
+    binaryRow->addWidget(m_blocking);
+    binaryRow->addWidget(m_mailDrop);
+    binaryRow->addWidget(m_rightToLeft);
+    binaryRow->addWidget(m_headerMessage);
+    binaryRow->addWidget(m_statusInfo);
+    m_secureType = new QComboBox(container);
+    m_secureType->addItems({"alphanumeric", "data defined separately", "binary"});
+    m_secureType->setToolTip("FLEX secure type t1 t0: 00 7-bit characters, 01 and 10 hex digits");
     m_voiceFile = new QLineEdit(container);
     m_voiceFile->setPlaceholderText("WAV file");
     QPushButton *browse = new QPushButton("...", container);
@@ -371,6 +392,8 @@ void MessageCenterGUI::buildCompose(QWidget *container)
     layout->addRow("Function", m_function);
     layout->addRow("Type", m_type);
     layout->addRow("Text", m_text);
+    layout->addRow("Binary header", binaryRow);
+    layout->addRow("Secure type", m_secureType);
     layout->addRow("Voice file", voiceRow);
     layout->addRow("Speed", m_speed);
     layout->addRow("Polarity", m_polarity);
@@ -733,8 +756,15 @@ void MessageCenterGUI::typeChanged()
 {
     bool voice = (m_type->currentText() == "voice");
     bool tone = (m_type->currentText() == "tone");
+    bool binary = (m_type->currentText() == "binary");
     m_text->setEnabled(!voice && !tone);
     m_voiceFile->setEnabled(voice);
+
+    for (QWidget *w : QList<QWidget*>({m_blocking, m_mailDrop, m_rightToLeft, m_headerMessage, m_statusInfo})) {
+        w->setEnabled(binary);
+    }
+
+    m_secureType->setEnabled(m_type->currentText() == "secure");
 }
 
 void MessageCenterGUI::browseVoice()
@@ -748,10 +778,26 @@ void MessageCenterGUI::browseVoice()
 
 MessageRecord MessageCenterGUI::composedPage() const
 {
-    return MessageCenter::pageRecord(m_transmitter->currentData().toString(), m_protocol->currentText(), m_address->text().trimmed(),
+    MessageRecord r = MessageCenter::pageRecord(m_transmitter->currentData().toString(), m_protocol->currentText(), m_address->text().trimmed(),
         m_function->currentIndex(), 0, m_type->currentText(), m_text->isEnabled() ? m_text->text() : QString(),
         m_voiceFile->text().trimmed(), (m_speed->currentIndex() > 0) ? m_speed->currentText().toInt() : 0,
         (m_polarity->currentIndex() == 1) ? "normal" : (m_polarity->currentIndex() == 2) ? "inverted" : "");
+
+    // The keys of the received records
+    if (r.m_msgType == "binary")
+    {
+        r.m_protocolData.insert("blocking", m_blocking->value());
+        r.m_protocolData.insert("maildrop", m_mailDrop->isChecked());
+        r.m_protocolData.insert("display_direction", m_rightToLeft->isChecked() ? "rtl" : "ltr");
+        r.m_protocolData.insert("header_message", m_headerMessage->isChecked());
+        r.m_protocolData.insert("status_info", m_statusInfo->isChecked());
+    }
+    else if (r.m_msgType == "secure")
+    {
+        r.m_protocolData.insert("secure_type", m_secureType->currentIndex());
+    }
+
+    return r;
 }
 
 void MessageCenterGUI::post()

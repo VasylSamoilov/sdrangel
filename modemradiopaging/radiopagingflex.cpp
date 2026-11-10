@@ -39,6 +39,8 @@ const uint64_t RadioPagingFlex::m_longMax;
 const unsigned RadioPagingFlex::m_vectorTone;
 const unsigned RadioPagingFlex::m_vectorNumeric;
 const unsigned RadioPagingFlex::m_vectorAlpha;
+const unsigned RadioPagingFlex::m_vectorBinary;
+const unsigned RadioPagingFlex::m_vectorSecure;
 const int RadioPagingFlex::m_frameMs;
 const int RadioPagingFlex::m_bitsPerFrame;
 
@@ -232,6 +234,107 @@ std::vector<uint32_t> numericBody(const std::string& text, uint32_t& kBits)
     return msg;
 }
 
+int hexValue(char c)
+{
+    if ((c >= '0') && (c <= '9')) {
+        return c - '0';
+    }
+    if ((c >= 'a') && (c <= 'f')) {
+        return c - 'a' + 10;
+    }
+    if ((c >= 'A') && (c <= 'F')) {
+        return c - 'A' + 10;
+    }
+    return -1;
+}
+
+// Data bits of hex digits: digit i holds bits 4i to 4i+3, its least significant bit first. Empty if a
+// character is not a hex digit
+std::vector<uint8_t> hexBits(const std::string& hex)
+{
+    std::vector<uint8_t> bits;
+
+    bits.reserve(hex.size() * 4);
+
+    for (char c : hex)
+    {
+        int v = hexValue(c);
+
+        if (v < 0) {
+            return std::vector<uint8_t>();
+        }
+        for (int b = 0; b < 4; b++) {
+            bits.push_back((uint8_t) ((v >> b) & 1));
+        }
+    }
+
+    return bits;
+}
+
+// True if the last blocking bits (the last character) are all 0s or all 1s
+bool lastCharacterUniform(const std::vector<uint8_t>& bits, int blocking)
+{
+    if ((blocking <= 0) || ((int) bits.size() < blocking)) {
+        return false;
+    }
+    for (size_t i = bits.size() - blocking; i < bits.size(); i++)
+    {
+        if (bits[i] != bits.back()) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Data words of binary data in the last (here the only) fragment, terminated (STD-43A 3.10.1.2 p.61-62 rule
+// (3), 3.10.1.4 p.70): data ending in the middle of a word, the rest of the word is the inverse of the last
+// data bit; data ending exactly at a word end, a word of the inverse of the last data bit is added when the
+// last character (blocking bits) is all 0s or all 1s. Not terminated (blocking 0): the unused bits are 0
+std::vector<uint32_t> binaryDataWords(const std::vector<uint8_t>& bits, int blocking)
+{
+    const int wordBits = 21;
+    std::vector<uint32_t> words((bits.size() + wordBits - 1) / wordBits, 0);
+
+    for (size_t i = 0; i < bits.size(); i++)
+    {
+        if (bits[i]) {
+            words[i / wordBits] |= 1u << (i % wordBits);
+        }
+    }
+
+    if ((blocking > 0) && !bits.empty())
+    {
+        uint32_t inverse = bits.back() ? 0u : 1u;
+        size_t rest = bits.size() % wordBits;
+
+        if (rest != 0)
+        {
+            for (size_t b = rest; b < (size_t) wordBits; b++) {
+                words.back() |= inverse << b;
+            }
+        }
+        else if (lastCharacterUniform(bits, blocking))
+        {
+            words.push_back(inverse ? 0x1fffffu : 0u);
+        }
+    }
+
+    return words;
+}
+
+// 1's complement of the sum of 8-bit groups of the data bits, the first bit of a group the least significant,
+// a last group of fewer bits completed with 0 (STD-43A 3.10.1.2 p.61); termination bits are not included
+uint32_t binarySignature(const std::vector<uint8_t>& bits)
+{
+    uint32_t sum = 0;
+
+    for (size_t i = 0; i < bits.size(); i++) {
+        sum += (uint32_t) bits[i] << (i % 8);
+    }
+
+    return (~sum) & 0xff;
+}
+
 int estimateBody(const RadioPagingFlex::PhaseMessage& message)
 {
     size_t len = message.m_text.size();
@@ -255,6 +358,22 @@ int estimateBody(const RadioPagingFlex::PhaseMessage& message)
     }
     case RadioPagingFlex::ShortMessage:
         return 0;
+    case RadioPagingFlex::Binary:
+        return RadioPagingFlex::binaryWords(message.m_text, message.m_binary.m_blocking, 2);
+    case RadioPagingFlex::Secure:
+        if (len == 0) {
+            return -1;
+        }
+        switch (message.m_binary.m_secureType)
+        {
+        case RadioPagingFlex::SecureAlphanumeric:
+            return 1 + (int) ((len + 2) / 3);
+        case RadioPagingFlex::SecureBinary:
+            return RadioPagingFlex::binaryWords(message.m_text, 1, 1);
+        case RadioPagingFlex::SecureSeparate:
+            return hexBits(message.m_text).empty() ? -1 : 1 + (int) ((len * 4 + 20) / 21);
+        }
+        return -1;
     }
 
     return -1;
@@ -463,8 +582,117 @@ bool RadioPagingFlex::longAddressCapcode(uint32_t data1, uint32_t data2, uint64_
 
 uint32_t RadioPagingFlex::alphaVector(unsigned start, unsigned words)
 {
-    uint32_t data = (m_vectorAlpha << 4) | ((start & 0x7f) << 7) | ((words & 0x7f) << 14);
+    return messageVector(m_vectorAlpha, start, words);
+}
+
+uint32_t RadioPagingFlex::messageVector(unsigned type, unsigned start, unsigned words)
+{
+    uint32_t data = ((type & 7) << 4) | ((start & 0x7f) << 7) | ((words & 0x7f) << 14);
     return encodeWord(addChecksum(data));
+}
+
+int RadioPagingFlex::binaryWords(const std::string& hex, int blocking, int headerWords)
+{
+    std::vector<uint8_t> bits = hexBits(hex);
+
+    if (bits.empty() || (blocking < 1) || (blocking > 16)) {
+        return -1;
+    }
+
+    return headerWords + (int) binaryDataWords(bits, blocking).size();
+}
+
+std::vector<uint32_t> RadioPagingFlex::binaryBody(const std::string& hex, const BinaryParams& binary, int number, bool retrieval)
+{
+    std::vector<uint8_t> bits = hexBits(hex);
+
+    if (bits.empty() || (binary.m_blocking < 1) || (binary.m_blocking > 16)) {
+        return std::vector<uint32_t>();
+    }
+
+    std::vector<uint32_t> data = binaryDataWords(bits, binary.m_blocking);
+    std::vector<uint32_t> msg(2, 0);
+
+    // Header word 1 (Fig. 3.10.1.2-1): K in bits 0-11 (set last), C = 0 (bit 12), F = 11 (only fragment,
+    // bits 13-14), N in bits 15-20
+    msg[0] = (3u << 13) | (((uint32_t) number & 0x3f) << 15);
+    // Header word 2: R, M, D, H, B (16 sent as 0000), s = 0000 (reserved), I, S
+    msg[1] = (retrieval ? 1u : 0u)
+        | ((binary.m_mailDrop ? 1u : 0u) << 1)
+        | ((binary.m_rightToLeft ? 1u : 0u) << 2)
+        | ((binary.m_header ? 1u : 0u) << 3)
+        | (((uint32_t) binary.m_blocking & 0xf) << 4)
+        | ((binary.m_statusInfo ? 1u : 0u) << 12)
+        | (binarySignature(bits) << 13);
+    msg.insert(msg.end(), data.begin(), data.end());
+
+    // K: 1's complement of the sum of 3 groups per word of all words, K counted as 0, 12 bits kept (p.59)
+    uint32_t sum = 0;
+    for (uint32_t w : msg) {
+        sum += groupSum(w);
+    }
+    msg[0] |= (~sum) & 0xfff;
+
+    return msg;
+}
+
+std::vector<uint32_t> RadioPagingFlex::secureBody(const std::string& text, SecureType type, int number)
+{
+    std::vector<uint32_t> msg(1, 0);
+
+    // Header word (Fig. 3.10.1.4-1): K in bits 0-9 (set last), C = 0 (bit 10), F = 11 (only fragment, bits
+    // 11-12), N in bits 13-18, t1 t0 in bits 19-20. The data start at word 2, there is no signature
+    msg[0] = (3u << 11) | (((uint32_t) number & 0x3f) << 13) | (((uint32_t) type & 3) << 19);
+
+    if (type == SecureAlphanumeric)
+    {
+        if (text.empty()) {
+            return std::vector<uint32_t>();
+        }
+
+        // 7-bit characters, 3 a word from the first slot of word 2; unused slots of the last word ETX
+        int shift = 0;
+
+        for (char c : text)
+        {
+            if (shift == 0) {
+                msg.push_back(0);
+            }
+            msg.back() |= (((uint32_t) (unsigned char) c) & 0x7f) << shift;
+            shift = (shift + 7) % 21;
+        }
+        while (shift != 0)
+        {
+            msg.back() |= alphaEtx << shift;
+            shift = (shift + 7) % 21;
+        }
+    }
+    else if ((type == SecureBinary) || (type == SecureSeparate))
+    {
+        std::vector<uint8_t> bits = hexBits(text);
+
+        if (bits.empty()) {
+            return std::vector<uint32_t>();
+        }
+
+        // Binary data are terminated as 1-bit characters (p.70); the termination of data defined separately
+        // is not defined: the unused bits are 0
+        std::vector<uint32_t> data = binaryDataWords(bits, (type == SecureBinary) ? 1 : 0);
+        msg.insert(msg.end(), data.begin(), data.end());
+    }
+    else
+    {
+        return std::vector<uint32_t>();
+    }
+
+    // K: 1's complement of the sum of 3 groups per word of all words, K counted as 0, 10 bits kept (p.69)
+    uint32_t sum = 0;
+    for (uint32_t w : msg) {
+        sum += groupSum(w);
+    }
+    msg[0] |= (~sum) & 0x3ff;
+
+    return msg;
 }
 
 uint32_t RadioPagingFlex::numericVector(unsigned start, unsigned words, unsigned kBits)
@@ -564,6 +792,12 @@ void RadioPagingFlex::deinterleaveBlock(uint32_t *words)
 
 bool RadioPagingFlex::validateMessage(uint64_t capcode, MessageType type, const std::string& text, std::string& error)
 {
+    return validateMessage(capcode, type, text, error, BinaryParams());
+}
+
+bool RadioPagingFlex::validateMessage(uint64_t capcode, MessageType type, const std::string& text, std::string& error,
+    const BinaryParams& binary)
+{
     if (!isValidAddress(capcode))
     {
         error = "Capcode out of range";
@@ -630,6 +864,86 @@ bool RadioPagingFlex::validateMessage(uint64_t capcode, MessageType type, const 
             }
         }
     }
+    else if (type == Binary)
+    {
+        if (text.empty())
+        {
+            error = "Empty HEX/binary message";
+            return false;
+        }
+        if (hexBits(text).empty())
+        {
+            error = "HEX/binary message: hex digits only";
+            return false;
+        }
+        if ((binary.m_blocking < 1) || (binary.m_blocking > 16))
+        {
+            error = "HEX/binary message: blocking length 1 to 16 bits";
+            return false;
+        }
+        // Display direction: only for characters of a blocking length other than 0001 (3.10.1.2 p.60)
+        if (binary.m_rightToLeft && (binary.m_blocking == 1))
+        {
+            error = "HEX/binary message: right to left display not allowed with a blocking length of 1";
+            return false;
+        }
+        // A message ends on a character boundary (3.10.1.2 p.61)
+        if (((text.size() * 4) % (size_t) binary.m_blocking) != 0)
+        {
+            error = "HEX/binary message: " + std::to_string(text.size() * 4) + " bits, not a multiple of the blocking length "
+                + std::to_string(binary.m_blocking);
+            return false;
+        }
+        if (binaryWords(text, binary.m_blocking, 2) > maxAlphaWords)
+        {
+            error = "HEX/binary message too long";
+            return false;
+        }
+    }
+    else if (type == Secure)
+    {
+        if (text.empty())
+        {
+            error = "Empty secure message";
+            return false;
+        }
+        if (binary.m_secureType == SecureAlphanumeric)
+        {
+            if (1 + (int) ((text.size() + 2) / 3) > maxAlphaWords)
+            {
+                error = "Secure message too long";
+                return false;
+            }
+            for (char c : text)
+            {
+                if (((unsigned char) c) > 0x7f)
+                {
+                    error = "Character above 0x7f in secure message";
+                    return false;
+                }
+            }
+        }
+        else if ((binary.m_secureType == SecureBinary) || (binary.m_secureType == SecureSeparate))
+        {
+            if (hexBits(text).empty())
+            {
+                error = "Secure binary message: hex digits only";
+                return false;
+            }
+            int words = (binary.m_secureType == SecureBinary) ? binaryWords(text, 1, 1)
+                : 1 + (int) ((text.size() * 4 + 20) / 21);
+            if (words > maxAlphaWords)
+            {
+                error = "Secure message too long";
+                return false;
+            }
+        }
+        else
+        {
+            error = "Secure message type: alphanumeric, separate or binary (11 is reserved)";
+            return false;
+        }
+    }
 
     return true;
 }
@@ -638,7 +952,7 @@ int RadioPagingFlex::messageCost(const PhaseMessage& message, std::string *error
 {
     std::string reason;
 
-    if (!validateMessage(message.m_capcode, message.m_type, message.m_text, reason))
+    if (!validateMessage(message.m_capcode, message.m_type, message.m_text, reason, message.m_binary))
     {
         if (error) {
             *error = reason;
@@ -862,6 +1176,18 @@ RadioPagingFlex::PhaseResult RadioPagingFlex::buildPhase(const PhaseParams& para
         {
             body = alphaBody(m.m_text, m.m_number);
             vector = alphaVector(msgCursor, (unsigned) body.size());
+        }
+        else if (m.m_type == Binary)
+        {
+            // Retrieval flag set, as in alphanumeric messages (the pager checks the numbers)
+            body = binaryBody(m.m_text, m.m_binary, m.m_number, true);
+            vector = messageVector(m_vectorBinary, msgCursor, (unsigned) body.size());
+        }
+        else if (m.m_type == Secure)
+        {
+            // No message numbering for secure messages (3.10.1.4 p.70): N tells the messages of an address apart
+            body = secureBody(m.m_text, m.m_binary.m_secureType, m.m_number);
+            vector = messageVector(m_vectorSecure, msgCursor, (unsigned) body.size());
         }
         else
         {

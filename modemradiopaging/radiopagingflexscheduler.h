@@ -105,6 +105,7 @@ public:
         bool m_priority = false;
         RadioPagingFlex::ShortType m_shortType = RadioPagingFlex::ShortNumeric;    //!< Short message only
         int m_source = 0;           //!< Short message source and numbered types: source code 0-7
+        RadioPagingFlex::BinaryParams m_binary;     //!< HEX/binary and secure messages only
     };
 
     struct EnqueueResult

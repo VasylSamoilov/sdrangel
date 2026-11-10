@@ -792,7 +792,7 @@
      <x>2</x>
      <y>160</y>
      <width>376</width>
-     <height>110</height>
+     <height>136</height>
     </rect>
    </property>
    <property name="windowTitle">
@@ -1031,13 +1031,108 @@
       </item>
      </widget>
     </item>
+    <item row="4" column="0">
+     <widget class="QLabel" name="binaryLabel">
+      <property name="text">
+       <string>Header</string>
+      </property>
+     </widget>
+    </item>
+    <item row="4" column="1" colspan="3">
+     <layout class="QHBoxLayout" name="binaryLayout">
+      <property name="spacing">
+       <number>3</number>
+      </property>
+      <item>
+       <widget class="QSpinBox" name="blocking">
+        <property name="toolTip">
+         <string>FLEX binary: blocking length B, bits of a character (1 is the default of the standard); the bits of the text (4 a hex digit) are a multiple of it</string>
+        </property>
+        <property name="prefix">
+         <string>B </string>
+        </property>
+        <property name="minimum">
+         <number>1</number>
+        </property>
+        <property name="maximum">
+         <number>16</number>
+        </property>
+        <property name="value">
+         <number>1</number>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="mailDrop">
+        <property name="toolTip">
+         <string>FLEX binary: mail drop flag M, the message can be handled separately from ordinary messages</string>
+        </property>
+        <property name="text">
+         <string>M</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="rightToLeft">
+        <property name="toolTip">
+         <string>FLEX binary: display direction D, right to left; not allowed with a blocking length of 1</string>
+        </property>
+        <property name="text">
+         <string>D</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="headerMessage">
+        <property name="toolTip">
+         <string>FLEX binary: header message flag H, a transparent message of the same number follows</string>
+        </property>
+        <property name="text">
+         <string>H</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="statusInfo">
+        <property name="toolTip">
+         <string>FLEX binary: status information field enabler I, the first 8 data bits name the encoding method (reserved)</string>
+        </property>
+        <property name="text">
+         <string>I</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="secureType">
+        <property name="toolTip">
+         <string>FLEX secure message type t1 t0: 00 alphanumeric (7-bit characters), 01 data defined separately (hex digits, not terminated), 10 binary (hex digits)</string>
+        </property>
+        <item>
+         <property name="text">
+          <string>Alphanumeric</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Separate</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Binary</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+     </layout>
+    </item>
    </layout>
   </widget>
   <widget class="QWidget" name="queueContainer" native="true">
    <property name="geometry">
     <rect>
      <x>2</x>
-     <y>274</y>
+     <y>300</y>
      <width>376</width>
      <height>200</height>
     </rect>

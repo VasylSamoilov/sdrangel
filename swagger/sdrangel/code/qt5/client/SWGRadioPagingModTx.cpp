@@ -29,6 +29,12 @@ void SWGRadioPagingModTx::init()
     m_id = new QString(); m_idIsSet = false;
     m_shortType = 0; m_shortTypeIsSet = false;
     m_source = 0; m_sourceIsSet = false;
+    m_blocking = 0; m_blockingIsSet = false;
+    m_mailDrop = 0; m_mailDropIsSet = false;
+    m_rightToLeft = 0; m_rightToLeftIsSet = false;
+    m_headerMessage = 0; m_headerMessageIsSet = false;
+    m_statusInfo = 0; m_statusInfoIsSet = false;
+    m_secureType = 0; m_secureTypeIsSet = false;
 }
 SWGRadioPagingModTx* SWGRadioPagingModTx::fromJson(QString& json)
 {
@@ -48,6 +54,12 @@ void SWGRadioPagingModTx::fromJsonObject(QJsonObject& json)
     if (json.contains("polarity")) { ::SWGSDRangel::setValue(&m_polarity,json["polarity"],"QString","QString"); m_polarityIsSet = true; }
     if (json.contains("shortType")) { ::SWGSDRangel::setValue(&m_shortType,json["shortType"],"qint32",""); m_shortTypeIsSet = true; }
     if (json.contains("source")) { ::SWGSDRangel::setValue(&m_source,json["source"],"qint32",""); m_sourceIsSet = true; }
+    if (json.contains("blocking")) { ::SWGSDRangel::setValue(&m_blocking,json["blocking"],"qint32",""); m_blockingIsSet = true; }
+    if (json.contains("mailDrop")) { ::SWGSDRangel::setValue(&m_mailDrop,json["mailDrop"],"qint32",""); m_mailDropIsSet = true; }
+    if (json.contains("rightToLeft")) { ::SWGSDRangel::setValue(&m_rightToLeft,json["rightToLeft"],"qint32",""); m_rightToLeftIsSet = true; }
+    if (json.contains("headerMessage")) { ::SWGSDRangel::setValue(&m_headerMessage,json["headerMessage"],"qint32",""); m_headerMessageIsSet = true; }
+    if (json.contains("statusInfo")) { ::SWGSDRangel::setValue(&m_statusInfo,json["statusInfo"],"qint32",""); m_statusInfoIsSet = true; }
+    if (json.contains("secureType")) { ::SWGSDRangel::setValue(&m_secureType,json["secureType"],"qint32",""); m_secureTypeIsSet = true; }
 }
 QString SWGRadioPagingModTx::asJson()
 {
@@ -68,12 +80,19 @@ QJsonObject* SWGRadioPagingModTx::asJsonObject()
     if (m_polarity && (m_polarityIsSet || !m_polarity->isEmpty())) { toJsonValue(QString("polarity"),m_polarity,object,QString("QString")); }
     if (m_shortTypeIsSet) { object->insert("shortType",QJsonValue(m_shortType)); }
     if (m_sourceIsSet) { object->insert("source",QJsonValue(m_source)); }
+    if (m_blockingIsSet) { object->insert("blocking",QJsonValue(m_blocking)); }
+    if (m_mailDropIsSet) { object->insert("mailDrop",QJsonValue(m_mailDrop)); }
+    if (m_rightToLeftIsSet) { object->insert("rightToLeft",QJsonValue(m_rightToLeft)); }
+    if (m_headerMessageIsSet) { object->insert("headerMessage",QJsonValue(m_headerMessage)); }
+    if (m_statusInfoIsSet) { object->insert("statusInfo",QJsonValue(m_statusInfo)); }
+    if (m_secureTypeIsSet) { object->insert("secureType",QJsonValue(m_secureType)); }
     return object;
 }
 bool SWGRadioPagingModTx::isSet()
 {
     return m_addressIsSet || m_functionIsSet || m_capcodeIsSet || m_priorityIsSet || m_protocolIsSet || m_typeIsSet || m_textIsSet
-        || m_speedIsSet || m_polarityIsSet || m_idIsSet || m_shortTypeIsSet || m_sourceIsSet;
+        || m_speedIsSet || m_polarityIsSet || m_idIsSet || m_shortTypeIsSet || m_sourceIsSet || m_blockingIsSet || m_mailDropIsSet
+        || m_rightToLeftIsSet || m_headerMessageIsSet || m_statusInfoIsSet || m_secureTypeIsSet;
 }
 qint32 SWGRadioPagingModTx::getAddress() { return m_address; }
 void SWGRadioPagingModTx::setAddress(qint32 value) { m_address = value; m_addressIsSet = true; }
@@ -99,4 +118,16 @@ qint32 SWGRadioPagingModTx::getShortType() { return m_shortType; }
 void SWGRadioPagingModTx::setShortType(qint32 value) { m_shortType = value; m_shortTypeIsSet = true; }
 qint32 SWGRadioPagingModTx::getSource() { return m_source; }
 void SWGRadioPagingModTx::setSource(qint32 value) { m_source = value; m_sourceIsSet = true; }
+qint32 SWGRadioPagingModTx::getBlocking() { return m_blocking; }
+void SWGRadioPagingModTx::setBlocking(qint32 value) { m_blocking = value; m_blockingIsSet = true; }
+qint32 SWGRadioPagingModTx::getMailDrop() { return m_mailDrop; }
+void SWGRadioPagingModTx::setMailDrop(qint32 value) { m_mailDrop = value; m_mailDropIsSet = true; }
+qint32 SWGRadioPagingModTx::getRightToLeft() { return m_rightToLeft; }
+void SWGRadioPagingModTx::setRightToLeft(qint32 value) { m_rightToLeft = value; m_rightToLeftIsSet = true; }
+qint32 SWGRadioPagingModTx::getHeaderMessage() { return m_headerMessage; }
+void SWGRadioPagingModTx::setHeaderMessage(qint32 value) { m_headerMessage = value; m_headerMessageIsSet = true; }
+qint32 SWGRadioPagingModTx::getStatusInfo() { return m_statusInfo; }
+void SWGRadioPagingModTx::setStatusInfo(qint32 value) { m_statusInfo = value; m_statusInfoIsSet = true; }
+qint32 SWGRadioPagingModTx::getSecureType() { return m_secureType; }
+void SWGRadioPagingModTx::setSecureType(qint32 value) { m_secureType = value; m_secureTypeIsSet = true; }
 }

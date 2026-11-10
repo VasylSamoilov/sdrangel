@@ -396,6 +396,7 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
         record.m_address = QString::number((qulonglong) m.m_capcode);
         // FLEX names as the decoder: tone is the address alone; a short message without digits has the tone only payload
         record.m_msgType = (m.m_type == RadioPagingFlex::Tone) ? "tone" : (m.m_type == RadioPagingFlex::ShortMessage) ? "short_message"
+            : (m.m_type == RadioPagingFlex::Binary) ? "binary" : (m.m_type == RadioPagingFlex::Secure) ? "secure"
             : (m.m_type == RadioPagingFlex::Numeric) ? "numeric" : "alphanumeric";
         record.m_text = (m.m_type == RadioPagingFlex::Tone) ? QString() : QString::fromStdString(m.m_text);
 
@@ -406,6 +407,28 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
                 && (m.m_text.find_first_not_of(' ') == std::string::npos));
             if (m.m_shortType != RadioPagingFlex::ShortNumeric) {
                 record.m_protocolData.insert("short_source", m.m_source);
+            }
+        }
+        else if ((m.m_type == RadioPagingFlex::Binary) || (m.m_type == RadioPagingFlex::Secure))
+        {
+            // Same names as the fields of the decoder record; the bits are 4 a hex digit, least significant first
+            if (m.m_type == RadioPagingFlex::Binary)
+            {
+                record.m_protocolData.insert("blocking", m.m_binary.m_blocking);
+                record.m_protocolData.insert("maildrop", m.m_binary.m_mailDrop);
+                record.m_protocolData.insert("display_direction", m.m_binary.m_rightToLeft ? "rtl" : "ltr");
+                record.m_protocolData.insert("header_message", m.m_binary.m_header);
+                record.m_protocolData.insert("status_info", m.m_binary.m_statusInfo);
+            }
+            else
+            {
+                record.m_protocolData.insert("secure_type", (int) m.m_binary.m_secureType);
+            }
+            if ((m.m_type == RadioPagingFlex::Binary) || (m.m_binary.m_secureType != RadioPagingFlex::SecureAlphanumeric))
+            {
+                record.m_protocolData.insert("hex_nibble_bits", 4);
+                record.m_protocolData.insert("hex_bit_order", "lsb_first");
+                record.m_protocolData.insert("hex_bits", (int) m.m_text.size() * 4);
             }
         }
         inverted = sourceRequest.m_flexInverted;
@@ -1181,9 +1204,9 @@ int RadioPagingMod::webapiActionsPost(
 
         if (!type.isEmpty() && (type != "tone") && (type != "numeric") && (type != "alphanumeric")
          && !((type == "voice") && (protocol == RadioPagingModSettings::Gsc))
-         && !((type == "short_message") && (protocol == RadioPagingModSettings::Flex)))
+         && !(((type == "short_message") || (type == "binary") || (type == "secure")) && (protocol == RadioPagingModSettings::Flex)))
         {
-            errorMessage = "Message type must be tone, numeric or alphanumeric (GSC: or voice; FLEX: or short_message)";
+            errorMessage = "Message type must be tone, numeric or alphanumeric (GSC: or voice; FLEX: or short_message, binary, secure)";
             return 400;
         }
 
@@ -1235,6 +1258,7 @@ int RadioPagingMod::webapiActionsPost(
 
             request.m_flex.m_capcode = (uint64_t) swgTx->getCapcode();
             request.m_flex.m_type = tone ? RadioPagingFlex::Tone : (type == "short_message") ? RadioPagingFlex::ShortMessage
+                : (type == "binary") ? RadioPagingFlex::Binary : (type == "secure") ? RadioPagingFlex::Secure
                 : (type == "numeric") ? RadioPagingFlex::Numeric : RadioPagingFlex::Alphanumeric;
             request.m_flex.m_text = text;
             request.m_flex.m_priority = swgTx->getPriority() != 0;
@@ -1250,6 +1274,26 @@ int RadioPagingMod::webapiActionsPost(
 
                 request.m_flex.m_shortType = (RadioPagingFlex::ShortType) swgTx->getShortType();
                 request.m_flex.m_source = swgTx->getSource();
+            }
+            else if (type == "binary")
+            {
+                // Header word 2 of STD-43A Fig. 3.10.1.2-1; the digits and B are checked by the encoder
+                request.m_flex.m_binary.m_blocking = (swgTx->getBlocking() == 0) ? 1 : swgTx->getBlocking();
+                request.m_flex.m_binary.m_mailDrop = swgTx->getMailDrop() != 0;
+                request.m_flex.m_binary.m_rightToLeft = swgTx->getRightToLeft() != 0;
+                request.m_flex.m_binary.m_header = swgTx->getHeaderMessage() != 0;
+                request.m_flex.m_binary.m_statusInfo = swgTx->getStatusInfo() != 0;
+            }
+            else if (type == "secure")
+            {
+                // t1 t0 of STD-43A 3.10.1.4; 11 is reserved
+                if ((swgTx->getSecureType() < 0) || (swgTx->getSecureType() > 2))
+                {
+                    errorMessage = "FLEX secure message: secureType 0 (alphanumeric), 1 (data defined separately) or 2 (binary)";
+                    return 400;
+                }
+
+                request.m_flex.m_binary.m_secureType = (RadioPagingFlex::SecureType) swgTx->getSecureType();
             }
         }
         else if (protocol == RadioPagingModSettings::Gsc)

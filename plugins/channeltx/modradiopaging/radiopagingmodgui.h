@@ -96,6 +96,7 @@ private:
     void displayProtocolAvailability();
     void displayProtocol();
     bool messageIsFlex() const;
+    void updateMessageTypes();
     //! The text field of the message: the path of a sound file (with the browse button) for a voice page
     void displayMessageType();
 

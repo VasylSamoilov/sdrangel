@@ -103,6 +103,13 @@ private:
     QLineEdit *m_voiceFile;
     QComboBox *m_speed;
     QComboBox *m_polarity;
+    // FLEX binary: B and the flags M, D, H, I of header word 2; FLEX secure: the type t1 t0
+    QSpinBox *m_blocking;
+    QCheckBox *m_mailDrop;
+    QCheckBox *m_rightToLeft;
+    QCheckBox *m_headerMessage;
+    QCheckBox *m_statusInfo;
+    QComboBox *m_secureType;
     // The routes and the files
     QTableWidget *m_routesTable;
     QTableWidget *m_sinksTable;

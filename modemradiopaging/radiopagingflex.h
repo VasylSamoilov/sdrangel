@@ -60,7 +60,29 @@ public:
         Tone,           //!< Address only
         Numeric,        //!< 0-9 U space - ] [ . (and _ as - and u as U)
         Alphanumeric,   //!< 7-bit characters
-        ShortMessage    //!< Short message vector (STD-43A 3.9.2), all the data in the vector, see ShortType
+        ShortMessage,   //!< Short message vector (STD-43A 3.9.2), all the data in the vector, see ShortType
+        Binary,         //!< HEX/binary message (vector 110, STD-43A 3.10.1.2): hex digits, see BinaryParams
+        Secure          //!< Secure message (vector 000, STD-43A 3.10.1.4), see BinaryParams::m_secureType
+    };
+
+    //! Secure message type field t1 t0 (STD-43A 3.10.1.4)
+    enum SecureType {
+        SecureAlphanumeric = 0, //!< 00: 7-bit characters (JIS X 0201), unused characters ETX
+        SecureSeparate = 1,     //!< 01: data defined separately, hex digits, termination not defined (unused bits 0)
+        SecureBinary = 2        //!< 10: binary data, hex digits, terminated as binary data
+    };
+
+    //! Fields of the second header word of a HEX/binary message (STD-43A Fig. 3.10.1.2-1) and the type of a
+    //! secure message. The data of both are hex digits: digit i holds data bits 4i to 4i+3, the least
+    //! significant bit of the digit first (transmission starts from the LSB)
+    struct BinaryParams
+    {
+        int m_blocking = 1;             //!< B: bits of a character 1-16 (16 is sent as 0000); default 0001
+        bool m_mailDrop = false;        //!< M
+        bool m_rightToLeft = false;     //!< D: display from right to left, not allowed with B = 1
+        bool m_header = false;          //!< H: header message, a transparent message of the same number follows
+        bool m_statusInfo = false;      //!< I: the first 8 data bits name the encoding method (reserved)
+        SecureType m_secureType = SecureAlphanumeric;   //!< Secure message only
     };
 
     //! Types of short messages (STD-43A Table 3.9.2-1, t1 t0)
@@ -95,6 +117,7 @@ public:
         int m_number = 0;           //!< Message number 0-63, sent in alphanumeric and numbered short messages
         ShortType m_shortType = ShortNumeric;   //!< Short message only
         int m_source = 0;           //!< Short message source and numbered types: source code S2-S0, 0-7
+        BinaryParams m_binary;      //!< HEX/binary and secure messages only
     };
 
     struct PhaseParams
@@ -185,6 +208,10 @@ public:
     static const unsigned m_vectorTone = 2;
     static const unsigned m_vectorNumeric = 3;
     static const unsigned m_vectorAlpha = 5;
+    static const unsigned m_vectorBinary = 6;
+    static const unsigned m_vectorSecure = 0;
+    //!< Vector of a message with a 7-bit length (alphanumeric, HEX/binary, secure)
+    static uint32_t messageVector(unsigned type, unsigned start, unsigned words);
 
     //!< Fill a phase with idle words: alternating all ones and all zeros, all zeros in the
     //!< phases carrying the least significant bit of 4-level symbols
@@ -198,6 +225,17 @@ public:
     static int messageCost(const PhaseMessage& message, std::string *error = nullptr);
     //!< Check the capcode and text of a message
     static bool validateMessage(uint64_t capcode, MessageType type, const std::string& text, std::string& error);
+    static bool validateMessage(uint64_t capcode, MessageType type, const std::string& text, std::string& error,
+        const BinaryParams& binary);
+
+    //!< Message words (headers, data and termination) of a HEX/binary message in one fragment, data bits d0
+    //!< in bit 0. number: message number N, retrieval: R. Empty if the parameters or the digits are not valid
+    static std::vector<uint32_t> binaryBody(const std::string& hex, const BinaryParams& binary, int number, bool retrieval);
+    //!< Message words of a secure message in one fragment, data bits d0 in bit 0
+    static std::vector<uint32_t> secureBody(const std::string& text, SecureType type, int number);
+    //!< Message words of a HEX/binary (2 header words) or secure binary (1 header word) message in one
+    //!< fragment: the data words and the termination word, -1 if the digits are not valid
+    static int binaryWords(const std::string& hex, int blocking, int headerWords);
 
     //!< Place messages (priority addresses first, then others, tone only addresses last) in
     //!< a phase and interleave. Messages that do not fit are left out

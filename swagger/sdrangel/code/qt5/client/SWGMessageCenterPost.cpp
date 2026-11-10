@@ -33,6 +33,12 @@ void SWGMessageCenterPost::init()
     m_polarity = new QString(); m_polarityIsSet = false;
     m_shortType = 0; m_shortTypeIsSet = false;
     m_source = 0; m_sourceIsSet = false;
+    m_blocking = 0; m_blockingIsSet = false;
+    m_mailDrop = 0; m_mailDropIsSet = false;
+    m_rightToLeft = 0; m_rightToLeftIsSet = false;
+    m_headerMessage = 0; m_headerMessageIsSet = false;
+    m_statusInfo = 0; m_statusInfoIsSet = false;
+    m_secureType = 0; m_secureTypeIsSet = false;
 }
 SWGMessageCenterPost* SWGMessageCenterPost::fromJson(QString& json)
 {
@@ -53,6 +59,12 @@ void SWGMessageCenterPost::fromJsonObject(QJsonObject& json)
     if (json.contains("polarity")) { ::SWGSDRangel::setValue(&m_polarity,json["polarity"],"QString","QString"); m_polarityIsSet = true; }
     if (json.contains("shortType")) { ::SWGSDRangel::setValue(&m_shortType,json["shortType"],"qint32",""); m_shortTypeIsSet = true; }
     if (json.contains("source")) { ::SWGSDRangel::setValue(&m_source,json["source"],"qint32",""); m_sourceIsSet = true; }
+    if (json.contains("blocking")) { ::SWGSDRangel::setValue(&m_blocking,json["blocking"],"qint32",""); m_blockingIsSet = true; }
+    if (json.contains("mailDrop")) { ::SWGSDRangel::setValue(&m_mailDrop,json["mailDrop"],"qint32",""); m_mailDropIsSet = true; }
+    if (json.contains("rightToLeft")) { ::SWGSDRangel::setValue(&m_rightToLeft,json["rightToLeft"],"qint32",""); m_rightToLeftIsSet = true; }
+    if (json.contains("headerMessage")) { ::SWGSDRangel::setValue(&m_headerMessage,json["headerMessage"],"qint32",""); m_headerMessageIsSet = true; }
+    if (json.contains("statusInfo")) { ::SWGSDRangel::setValue(&m_statusInfo,json["statusInfo"],"qint32",""); m_statusInfoIsSet = true; }
+    if (json.contains("secureType")) { ::SWGSDRangel::setValue(&m_secureType,json["secureType"],"qint32",""); m_secureTypeIsSet = true; }
 }
 QString SWGMessageCenterPost::asJson()
 {
@@ -74,12 +86,19 @@ QJsonObject* SWGMessageCenterPost::asJsonObject()
     if (m_polarity && (m_polarityIsSet || !m_polarity->isEmpty())) { toJsonValue(QString("polarity"),m_polarity,object,QString("QString")); }
     if (m_shortTypeIsSet) { object->insert("shortType",QJsonValue(m_shortType)); }
     if (m_sourceIsSet) { object->insert("source",QJsonValue(m_source)); }
+    if (m_blockingIsSet) { object->insert("blocking",QJsonValue(m_blocking)); }
+    if (m_mailDropIsSet) { object->insert("mailDrop",QJsonValue(m_mailDrop)); }
+    if (m_rightToLeftIsSet) { object->insert("rightToLeft",QJsonValue(m_rightToLeft)); }
+    if (m_headerMessageIsSet) { object->insert("headerMessage",QJsonValue(m_headerMessage)); }
+    if (m_statusInfoIsSet) { object->insert("statusInfo",QJsonValue(m_statusInfo)); }
+    if (m_secureTypeIsSet) { object->insert("secureType",QJsonValue(m_secureType)); }
     return object;
 }
 bool SWGMessageCenterPost::isSet()
 {
     return m_idIsSet || m_transmitterIsSet || m_protocolIsSet || m_addressIsSet || m_functionIsSet || m_priorityIsSet || m_typeIsSet
-        || m_textIsSet || m_voiceFileIsSet || m_speedIsSet || m_polarityIsSet || m_shortTypeIsSet || m_sourceIsSet;
+        || m_textIsSet || m_voiceFileIsSet || m_speedIsSet || m_polarityIsSet || m_shortTypeIsSet || m_sourceIsSet
+        || m_blockingIsSet || m_mailDropIsSet || m_rightToLeftIsSet || m_headerMessageIsSet || m_statusInfoIsSet || m_secureTypeIsSet;
 }
 QString* SWGMessageCenterPost::getId() { return m_id; }
 void SWGMessageCenterPost::setId(QString* value) { if (m_id != value) { delete m_id; m_id = value; } m_idIsSet = true; }
@@ -107,4 +126,16 @@ qint32 SWGMessageCenterPost::getShortType() { return m_shortType; }
 void SWGMessageCenterPost::setShortType(qint32 value) { m_shortType = value; m_shortTypeIsSet = true; }
 qint32 SWGMessageCenterPost::getSource() { return m_source; }
 void SWGMessageCenterPost::setSource(qint32 value) { m_source = value; m_sourceIsSet = true; }
+qint32 SWGMessageCenterPost::getBlocking() { return m_blocking; }
+void SWGMessageCenterPost::setBlocking(qint32 value) { m_blocking = value; m_blockingIsSet = true; }
+qint32 SWGMessageCenterPost::getMailDrop() { return m_mailDrop; }
+void SWGMessageCenterPost::setMailDrop(qint32 value) { m_mailDrop = value; m_mailDropIsSet = true; }
+qint32 SWGMessageCenterPost::getRightToLeft() { return m_rightToLeft; }
+void SWGMessageCenterPost::setRightToLeft(qint32 value) { m_rightToLeft = value; m_rightToLeftIsSet = true; }
+qint32 SWGMessageCenterPost::getHeaderMessage() { return m_headerMessage; }
+void SWGMessageCenterPost::setHeaderMessage(qint32 value) { m_headerMessage = value; m_headerMessageIsSet = true; }
+qint32 SWGMessageCenterPost::getStatusInfo() { return m_statusInfo; }
+void SWGMessageCenterPost::setStatusInfo(qint32 value) { m_statusInfo = value; m_statusInfoIsSet = true; }
+qint32 SWGMessageCenterPost::getSecureType() { return m_secureType; }
+void SWGMessageCenterPost::setSecureType(qint32 value) { m_secureType = value; m_secureTypeIsSet = true; }
 }

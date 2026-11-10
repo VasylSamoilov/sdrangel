@@ -241,6 +241,19 @@ int MessageCenter::postToTransmitter(const MessageCenterPage& page, QString& err
             tx->setShortType(d.value("short_type").toInt());
             tx->setSource(d.value("short_source").toInt());
         }
+        else if (type == "binary")
+        {
+            // The keys of the received records: blocking 1 to 16, display direction ltr or rtl
+            tx->setBlocking(d.value("blocking", 1).toInt());
+            tx->setMailDrop(d.value("maildrop").toBool() ? 1 : 0);
+            tx->setRightToLeft((d.value("display_direction").toString() == "rtl") ? 1 : 0);
+            tx->setHeaderMessage(d.value("header_message").toBool() ? 1 : 0);
+            tx->setStatusInfo(d.value("status_info").toBool() ? 1 : 0);
+        }
+        else if (type == "secure")
+        {
+            tx->setSecureType(d.value("secure_type").toInt());
+        }
     }
     else {
         tx->setCapcode(d.value("address").toLongLong());       // GSC: the address as an integer of up to 6 digits
@@ -568,9 +581,9 @@ int MessageCenter::webapiActionsPost(const QStringList& featureActionsKeys, SWGS
             return 400;
         }
         if (!type.isEmpty() && (type != "alphanumeric") && (type != "numeric") && (type != "tone") && (type != "voice")
-         && !((type == "short_message") && (protocol == "flex")))
+         && !(((type == "short_message") || (type == "binary") || (type == "secure")) && (protocol == "flex")))
         {
-            errorMessage = "Type must be alphanumeric, numeric, tone or voice (FLEX: or short_message)";
+            errorMessage = "Type must be alphanumeric, numeric, tone or voice (FLEX: or short_message, binary, secure)";
             return 400;
         }
         if ((type == "voice") && ((protocol != "gsc") || text(post->getVoiceFile()).isEmpty()))
@@ -603,6 +616,16 @@ int MessageCenter::webapiActionsPost(const QStringList& featureActionsKeys, SWGS
             errorMessage = "FLEX short message: shortType 0 (numeric), 1 (source) or 2 (numbered), source 0 to 7";
             return 400;
         }
+        if ((type == "binary") && ((post->getBlocking() < 0) || (post->getBlocking() > 16)))
+        {
+            errorMessage = "FLEX binary message: blocking 1 to 16 (0: 1)";
+            return 400;
+        }
+        if ((type == "secure") && ((post->getSecureType() < 0) || (post->getSecureType() > 2)))
+        {
+            errorMessage = "FLEX secure message: secureType 0 (alphanumeric), 1 (data defined separately) or 2 (binary)";
+            return 400;
+        }
 
         MessageRecord record = pageRecord(transmitter, protocol, address, post->getFunction(), post->getPriority(), type,
             text(post->getText()), text(post->getVoiceFile()), post->getSpeed(), polarity);
@@ -612,6 +635,19 @@ int MessageCenter::webapiActionsPost(const QStringList& featureActionsKeys, SWGS
         {
             record.m_protocolData.insert("short_type", post->getShortType());
             record.m_protocolData.insert("short_source", post->getSource());
+        }
+        else if (type == "binary")
+        {
+            // The keys of the received records
+            record.m_protocolData.insert("blocking", (post->getBlocking() == 0) ? 1 : post->getBlocking());
+            record.m_protocolData.insert("maildrop", post->getMailDrop() != 0);
+            record.m_protocolData.insert("display_direction", (post->getRightToLeft() != 0) ? "rtl" : "ltr");
+            record.m_protocolData.insert("header_message", post->getHeaderMessage() != 0);
+            record.m_protocolData.insert("status_info", post->getStatusInfo() != 0);
+        }
+        else if (type == "secure")
+        {
+            record.m_protocolData.insert("secure_type", post->getSecureType());
         }
         m_inputMessageQueue.push(MsgPostPage::create(record));
         return 202;

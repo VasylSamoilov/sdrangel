@@ -69,13 +69,31 @@ MessageCenterPost:
       description: "FLEX: priority address (1 for yes)"
       type: integer
     type:
-      description: "alphanumeric, numeric, tone, voice (GSC) or short_message (FLEX, see shortType)"
+      description: "alphanumeric, numeric, tone, voice (GSC), short_message (FLEX, see shortType), binary (FLEX HEX/binary, text of hex digits) or secure (FLEX, see secureType)"
       type: string
     shortType:
       description: "FLEX short_message type (STD-43A Table 3.9.2-1): 0 numeric, text up to 3 digits (8 for a long address), no text is the tone only payload; 1 source code; 2 source code and message number"
       type: integer
     source:
       description: "FLEX short_message types 1 and 2: source code 0 to 7"
+      type: integer
+    blocking:
+      description: "FLEX binary: blocking length B, bits of a character 1 to 16; 0 or omitted: 1"
+      type: integer
+    mailDrop:
+      description: "FLEX binary: mail drop flag M (1 for yes)"
+      type: integer
+    rightToLeft:
+      description: "FLEX binary: display direction D, 1 right to left (not with a blocking length of 1)"
+      type: integer
+    headerMessage:
+      description: "FLEX binary: header message flag H (1 for yes)"
+      type: integer
+    statusInfo:
+      description: "FLEX binary: status information field enabler I (1 for yes)"
+      type: integer
+    secureType:
+      description: "FLEX secure type t1 t0 (STD-43A 3.10.1.4): 0 alphanumeric, 1 data defined separately (hex digits), 2 binary (hex digits)"
       type: integer
     text:
       description: "The text of the message"

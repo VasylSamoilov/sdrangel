@@ -209,6 +209,7 @@ RadioPagingFlexEncoder::EnqueueResult RadioPagingFlexEncoder::enqueue(const TxMe
     pm.m_priority = message.m_priority;
     pm.m_shortType = message.m_shortType;
     pm.m_source = message.m_source;
+    pm.m_binary = message.m_binary;
 
     int cost = RadioPagingFlex::messageCost(pm, &result.m_error);
 
@@ -359,6 +360,7 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
             pm.m_priority = m.m_priority;
             pm.m_shortType = m.m_shortType;
             pm.m_source = m.m_source;
+            pm.m_binary = m.m_binary;
 
             int cost = RadioPagingFlex::messageCost(pm);
             if (cost < 0) {
@@ -519,6 +521,7 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
                 pm.m_number = item.m_number;
                 pm.m_shortType = item.m_message.m_shortType;
                 pm.m_source = item.m_message.m_source;
+                pm.m_binary = item.m_message.m_binary;
                 messages.push_back(pm);
             }
 

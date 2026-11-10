@@ -416,8 +416,8 @@ void RadioPagingModGUI::send()
     static const RadioPagingPocsag::MessageType pocsagTypes[3] = {
         RadioPagingPocsag::Alphanumeric, RadioPagingPocsag::Numeric, RadioPagingPocsag::Tone
     };
-    static const RadioPagingFlex::MessageType flexTypes[3] = {
-        RadioPagingFlex::Alphanumeric, RadioPagingFlex::Numeric, RadioPagingFlex::Tone
+    static const RadioPagingFlex::MessageType flexTypes[5] = {
+        RadioPagingFlex::Alphanumeric, RadioPagingFlex::Numeric, RadioPagingFlex::Tone, RadioPagingFlex::Binary, RadioPagingFlex::Secure
     };
     // The button is End while a live voice page is going on
     if (m_liveId != 0)
@@ -432,13 +432,12 @@ void RadioPagingModGUI::send()
 
     RadioPagingMod::TxRequest request;
     bool gscMessage = (m_settings.m_protocol == RadioPagingModSettings::Gsc);
-    int typeIndex = std::max(0, std::min(gscMessage ? 3 : 2, ui->messageType->currentIndex()));
+    bool flexMessage = messageIsFlex();
+    int typeIndex = std::max(0, std::min(gscMessage ? 3 : flexMessage ? 4 : 2, ui->messageType->currentIndex()));
     bool tone = (typeIndex == 2);
-    bool voice = (typeIndex == 3);
+    bool voice = gscMessage && (typeIndex == 3);
     std::string text = (tone || voice) ? std::string() : ui->text->text().toStdString();
     int overrideIndex = ui->messageSpeed->currentIndex();     // POCSAG speed
-
-    bool flexMessage = messageIsFlex();
 
     // A mixed FLEX channel also sends POCSAG messages
     request.m_protocol = (m_settings.m_protocol == RadioPagingModSettings::Flex)
@@ -486,10 +485,30 @@ void RadioPagingModGUI::send()
         request.m_flex.m_text = text;
         request.m_flex.m_priority = ui->priority->isChecked();
 
-        log(QString("%1%2 %3: %4")
+        QString header;
+
+        if (request.m_flex.m_type == RadioPagingFlex::Binary)
+        {
+            RadioPagingFlex::BinaryParams& b = request.m_flex.m_binary;
+            b.m_blocking = ui->blocking->value();
+            b.m_mailDrop = ui->mailDrop->isChecked();
+            b.m_rightToLeft = ui->rightToLeft->isChecked();
+            b.m_header = ui->headerMessage->isChecked();
+            b.m_statusInfo = ui->statusInfo->isChecked();
+            header = QString(" B=%1%2%3%4%5").arg(b.m_blocking).arg(b.m_mailDrop ? " M" : "").arg(b.m_rightToLeft ? " D" : "")
+                .arg(b.m_header ? " H" : "").arg(b.m_statusInfo ? " I" : "");
+        }
+        else if (request.m_flex.m_type == RadioPagingFlex::Secure)
+        {
+            request.m_flex.m_binary.m_secureType = (RadioPagingFlex::SecureType) ui->secureType->currentIndex();
+            header = " " + ui->secureType->currentText();
+        }
+
+        log(QString("%1%2 %3%4: %5")
             .arg(ui->capcode->text().trimmed())
             .arg(request.m_flex.m_priority ? " priority" : "")
             .arg(ui->messageType->currentText())
+            .arg(header)
             .arg(QString::fromStdString(text)));
     }
     else
@@ -551,11 +570,26 @@ void RadioPagingModGUI::displayMessageType()
         ui->send->setText("Send voice");
     }
 
+    // FLEX HEX/binary: B and the flags of header word 2; secure: the type t1 t0
+    bool flexMessage = messageIsFlex();
+    bool binary = flexMessage && (ui->messageType->currentIndex() == 3);
+    bool secure = flexMessage && (ui->messageType->currentIndex() == 4);
+    bool hexText = binary || (secure && (ui->secureType->currentIndex() != (int) RadioPagingFlex::SecureAlphanumeric));
+    ui->binaryLabel->setVisible(binary || secure);
+    ui->binaryLabel->setText(binary ? "Header" : "Type");
+    for (QWidget *w : QList<QWidget*>({ui->blocking, ui->mailDrop, ui->rightToLeft, ui->headerMessage, ui->statusInfo})) {
+        w->setVisible(binary);
+    }
+    ui->secureType->setVisible(secure);
+
     ui->textLabel->setText(voice ? "File" : "Text");
-    ui->text->setPlaceholderText(voice ? "WAV file" : QString());
+    ui->text->setPlaceholderText(voice ? "WAV file" : hexText ? "Hex digits" : QString());
     ui->text->setToolTip(voice
         ? "Path of a WAV file (8 to 32 bit PCM or float, up to 76.8 kHz). Sent after an alert of 2 s, "
           "cut at the voice length. Enter to send"
+        : hexText
+        ? "Hex digits: digit i holds the data bits 4i to 4i+3, its least significant bit sent first. Binary: the bits are "
+          "a multiple of B. Enter to send"
         : "Message text. Numeric: 0-9, space, U, -, ], [. Alphanumeric: 7-bit characters. Enter to send");
 }
 
@@ -1132,21 +1166,7 @@ void RadioPagingModGUI::displayProtocol()
     ui->voiceSecondsLabel->setVisible(gsc);
     ui->voiceSeconds->setVisible(gsc);
 
-    // The Voice message type is GSC's: its text is the path of a sound file
-    {
-        QSignalBlocker typeBlocker(ui->messageType);
-
-        if (gsc && (ui->messageType->count() == 3)) {
-            ui->messageType->addItem("Voice");
-        } else if (!gsc && (ui->messageType->count() == 4))
-        {
-            if (ui->messageType->currentIndex() == 3) {
-                ui->messageType->setCurrentIndex(0);
-            }
-
-            ui->messageType->removeItem(3);
-        }
-    }
+    updateMessageTypes();
 
     ui->roaming->setVisible(flex);
     ui->ssidZone->setVisible(flex);
@@ -1233,6 +1253,38 @@ void RadioPagingModGUI::displayProtocol()
         : "FLEX capcode: short 1 to 1933312, long 2101249 to 4297068542");
     displayProtocolAvailability();
     displayMessageType();
+}
+
+// Message types after Alphanumeric, Numeric and Tone (indexes 0 to 2): Voice (3) for GSC, its text is the
+// path of a sound file; Binary (3) and Secure (4) for a FLEX message. The type selected is kept if it is there
+void RadioPagingModGUI::updateMessageTypes()
+{
+    QStringList extra;
+
+    if (m_settings.m_protocol == RadioPagingModSettings::Gsc) {
+        extra << "Voice";
+    } else if (messageIsFlex()) {
+        extra << "Binary" << "Secure";
+    }
+
+    QStringList current;
+    for (int i = 3; i < ui->messageType->count(); i++) {
+        current << ui->messageType->itemText(i);
+    }
+    if (current == extra) {
+        return;
+    }
+
+    QSignalBlocker typeBlocker(ui->messageType);
+    QString selected = ui->messageType->currentText();
+
+    while (ui->messageType->count() > 3) {
+        ui->messageType->removeItem(3);
+    }
+
+    ui->messageType->addItems(extra);
+    int index = ui->messageType->findText(selected);
+    ui->messageType->setCurrentIndex((index >= 0) ? index : 0);
 }
 
 // The message composed is FLEX: a FLEX channel, unless it mixes POCSAG and the message is POCSAG
@@ -1458,6 +1510,7 @@ void RadioPagingModGUI::makeUIConnections()
     m_browseAction->setVisible(false);
     QObject::connect(m_browseAction, &QAction::triggered, this, &RadioPagingModGUI::on_browse_triggered);
     QObject::connect(ui->messageType, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_messageType_currentIndexChanged);
+    QObject::connect(ui->secureType, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_messageType_currentIndexChanged);
     QObject::connect(ui->clear, &QPushButton::clicked, this, &RadioPagingModGUI::on_clear_clicked);
     QObject::connect(ui->abort, &QPushButton::clicked, this, &RadioPagingModGUI::on_abort_clicked);
 }

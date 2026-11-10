@@ -256,7 +256,7 @@ RadioPagingModTx:
       description: "pocsag, flex or gsc: the protocol of the message. Omitted: the protocol of the channel. A FLEX channel in network mode with mixing also takes pocsag messages"
       type: string
     type:
-      description: "tone, numeric or alphanumeric. GSC also voice: text is the path of a WAV file, sent after a 2 s alert, cut at gscVoiceSeconds. FLEX also short_message (STD-43A 3.9.2, see shortType); FLEX tone is the address alone (3.8.1)"
+      description: "tone, numeric or alphanumeric. GSC also voice: text is the path of a WAV file, sent after a 2 s alert, cut at gscVoiceSeconds. FLEX also short_message (STD-43A 3.9.2, see shortType), binary (HEX/binary message, 3.10.1.2) and secure (3.10.1.4, see secureType); FLEX tone is the address alone (3.8.1)"
       type: string
     shortType:
       description: "FLEX short_message type (STD-43A Table 3.9.2-1): 0 numeric, text up to 3 numeric characters (8 for a long address), an empty text is the tone only payload; 1 source code; 2 source code and the message number of the address, with the retrieval flag"
@@ -266,8 +266,32 @@ RadioPagingModTx:
       description: "FLEX short_message types 1 and 2: source code 0 to 7"
       type: integer
       format: int32
+    blocking:
+      description: "FLEX binary: blocking length B, bits of a character 1 to 16 (16 is sent as 0000). 0 or omitted: 1, the default of the standard. The bits of the text (4 a hex digit) are a multiple of it"
+      type: integer
+      format: int32
+    mailDrop:
+      description: "FLEX binary: mail drop flag M (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    rightToLeft:
+      description: "FLEX binary: display direction D, 1 right to left, 0 left to right; not allowed with a blocking length of 1"
+      type: integer
+      format: int32
+    headerMessage:
+      description: "FLEX binary: header message flag H, 1 if a transparent message of the same number follows"
+      type: integer
+      format: int32
+    statusInfo:
+      description: "FLEX binary: status information field enabler I, 1 if the first 8 data bits name the encoding method (reserved in the standard)"
+      type: integer
+      format: int32
+    secureType:
+      description: "FLEX secure type t1 t0 (STD-43A 3.10.1.4): 0 alphanumeric (7-bit characters), 1 data defined separately (hex digits, not terminated), 2 binary (hex digits)"
+      type: integer
+      format: int32
     text:
-      description: "Numeric: 0-9, space, U, -, ], [ (GSC: 0-9 A-H J L N P R U space -). Alphanumeric: 7-bit characters (GSC: ASCII 0x20-0x5d)"
+      description: "Numeric: 0-9, space, U, -, ], [ (GSC: 0-9 A-H J L N P R U space -). Alphanumeric: 7-bit characters (GSC: ASCII 0x20-0x5d). FLEX binary and secure types 1 and 2: hex digits, digit i the data bits 4i to 4i+3, the least significant bit sent first"
       type: string
     speed:
       description: "POCSAG speed in baud: 512, 1200 or 2400. 0 or omitted: the channel setting"

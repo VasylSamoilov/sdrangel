@@ -1881,8 +1881,189 @@ void testHexBits()
     }
 }
 
+// HEX/binary and secure messages of the encoder, decoded: text, data bits, header fields, K and signature
+void testBinaryTx()
+{
+    struct Case
+    {
+        const char *m_label;
+        uint64_t m_capcode;
+        Flex::MessageType m_type;
+        const char *m_text;
+        Flex::BinaryParams m_binary;
+        int m_words;            // Message words, headers and termination included
+        int m_dataBits;
+    };
+
+    auto hexParams = [](int blocking, bool m, bool d, bool h, bool i) {
+        Flex::BinaryParams p;
+        p.m_blocking = blocking;
+        p.m_mailDrop = m;
+        p.m_rightToLeft = d;
+        p.m_header = h;
+        p.m_statusInfo = i;
+        return p;
+    };
+    auto secParams = [](Flex::SecureType t) {
+        Flex::BinaryParams p;
+        p.m_secureType = t;
+        return p;
+    };
+
+    const Case cases[] = {
+        // 64 bits end in word 4: fill of 20 bits
+        {"hex B=8 fill", 1234567, Flex::Binary, "0123456789ABCDEF", hexParams(8, false, false, false, false), 2 + 4, 64},
+        // 84 bits end exactly at a word end, last character 1111: padding word
+        {"hex B=4 exact end, uniform last character: padding word", 1234567, Flex::Binary, "123456789ABCDEF12345F",
+            hexParams(4, false, false, false, false), 2 + 4 + 1, 84},
+        // 84 bits end exactly at a word end, last character 1010: nothing added
+        {"hex B=4 exact end, last character not uniform", 1234567, Flex::Binary, "123456789ABCDEF123455",
+            hexParams(4, false, false, false, false), 2 + 4, 84},
+        // Last character all 0s, ended in the middle of a word: fill of 1s longer than a character
+        {"hex B=16 last character all 0s, fill", 1234567, Flex::Binary, "ABCD1234FFFF0000", hexParams(16, false, false, false, false),
+            2 + 4, 64},
+        {"hex B=1 M H I", 1234567, Flex::Binary, "A5", hexParams(1, true, false, true, true), 2 + 1, 8},
+        {"hex B=7 right to left", 1234567, Flex::Binary, "1234567", hexParams(7, false, true, false, false), 2 + 2, 28},
+        {"hex long address", 2101300, Flex::Binary, "DEADBEEF", hexParams(8, false, false, false, false), 2 + 2, 32},
+        {"secure alphanumeric", 1234567, Flex::Secure, "Hello", secParams(Flex::SecureAlphanumeric), 1 + 2, 0},
+        {"secure alphanumeric, last word full", 1234567, Flex::Secure, "ABC", secParams(Flex::SecureAlphanumeric), 1 + 1, 0},
+        {"secure alphanumeric long address", 2101300, Flex::Secure, "secure text", secParams(Flex::SecureAlphanumeric), 1 + 4, 0},
+        {"secure binary fill", 1234567, Flex::Secure, "DEADBEEF", secParams(Flex::SecureBinary), 1 + 2, 32},
+        {"secure binary exact end: termination word", 1234567, Flex::Secure, "123456789ABCDEF123455",
+            secParams(Flex::SecureBinary), 1 + 4 + 1, 84},
+        {"secure data defined separately", 1234567, Flex::Secure, "0123", secParams(Flex::SecureSeparate), 1 + 1, 21},
+    };
+
+    for (const Case& c : cases)
+    {
+        Enc enc;
+        Dec dec;
+        Enc::TxMessage m;
+        m.m_capcode = c.m_capcode;
+        m.m_type = c.m_type;
+        m.m_text = c.m_text;
+        m.m_binary = c.m_binary;
+
+        Flex::PhaseMessage pm;
+        pm.m_capcode = m.m_capcode;
+        pm.m_type = m.m_type;
+        pm.m_text = m.m_text;
+        pm.m_binary = m.m_binary;
+        bool isLong = Flex::isLongAddress(c.m_capcode);
+        int cost = Flex::messageCost(pm);
+        // Address and vector words; the first message word of a long address is in the second vector word
+        int expectedCost = (isLong ? 4 : 2) + c.m_words - (isLong ? 1 : 0);
+
+        Enc::EnqueueResult er = enc.enqueue(m);
+        std::vector<Dec::Message> out = runEncoder(enc, dec);
+        bool ok = er.m_ok && (cost == expectedCost) && (out.size() == 1);
+        std::string why = er.m_ok ? "" : er.m_error;
+
+        if (ok)
+        {
+            const Dec::Message& r = out[0];
+            ok = (r.m_capcode == c.m_capcode) && (r.m_checksum == Dec::CheckOk) && (r.m_messageNumber == 1)
+                && (r.m_fragment == Dec::FragmentComplete);
+
+            if (c.m_type == Flex::Binary)
+            {
+                int b = c.m_binary.m_blocking & 0xf;
+                ok = ok && (r.m_type == Dec::TypeBinary) && (r.m_text == c.m_text) && (r.m_dataBits == c.m_dataBits)
+                    && (r.m_signature == Dec::CheckOk) && (r.m_fillState == 0) && (r.m_blocking == b)
+                    && r.m_retrieval && (r.m_mailDrop == c.m_binary.m_mailDrop) && (r.m_displayRtl == c.m_binary.m_rightToLeft)
+                    && (r.m_headerMessage == c.m_binary.m_header) && (r.m_statusInfo == c.m_binary.m_statusInfo)
+                    && (r.m_reservedBits == 0);
+            }
+            else
+            {
+                ok = ok && (r.m_type == Dec::TypeSecure) && (r.m_secureType == (int) c.m_binary.m_secureType);
+
+                if (c.m_binary.m_secureType == Flex::SecureAlphanumeric) {
+                    ok = ok && (r.m_text == c.m_text);
+                } else if (c.m_binary.m_secureType == Flex::SecureBinary) {
+                    ok = ok && (r.m_text == c.m_text) && (r.m_dataBits == c.m_dataBits) && (r.m_fillState == 0);
+                } else {
+                    // Not terminated: all the bits of the word, the unused ones 0
+                    ok = ok && (r.m_text.compare(0, 4, c.m_text) == 0) && (r.m_dataBits == c.m_dataBits) && r.m_payloadUnknown;
+                }
+            }
+
+            if (!ok)
+            {
+                char buf[256];
+                std::snprintf(buf, sizeof(buf), "type %d text %s bits %d K %d sig %d fill %d B %d N %d R %d M %d D %d H %d I %d t %d",
+                    (int) r.m_type, r.m_text.c_str(), r.m_dataBits, (int) r.m_checksum, (int) r.m_signature, r.m_fillState,
+                    r.m_blocking, r.m_messageNumber, r.m_retrieval, r.m_mailDrop, r.m_displayRtl, r.m_headerMessage,
+                    r.m_statusInfo, r.m_secureType);
+                why = buf;
+            }
+        }
+        else if (er.m_ok)
+        {
+            why = "cost " + std::to_string(cost) + " expected " + std::to_string(expectedCost) + ", messages "
+                + std::to_string(out.size());
+        }
+
+        std::string label = std::string("tx binary: ") + c.m_label + (why.empty() ? "" : " (" + why + ")");
+        check(ok, label.c_str());
+    }
+
+    // Rejected messages
+    struct Bad { const char *m_label; Flex::MessageType m_type; std::string m_text; Flex::BinaryParams m_binary; };
+    Flex::BinaryParams reserved = secParams(Flex::SecureAlphanumeric);
+    reserved.m_secureType = (Flex::SecureType) 3;
+    const Bad bad[] = {
+        {"bits not a multiple of the blocking length", Flex::Binary, "123", hexParams(8, false, false, false, false)},
+        {"right to left with a blocking length of 1", Flex::Binary, "12", hexParams(1, false, true, false, false)},
+        {"blocking length 0", Flex::Binary, "12", hexParams(0, false, false, false, false)},
+        {"not a hex digit", Flex::Binary, "12G4", hexParams(4, false, false, false, false)},
+        {"empty", Flex::Binary, "", hexParams(4, false, false, false, false)},
+        {"too long", Flex::Binary, std::string(431, 'A'), hexParams(4, false, false, false, false)},
+        {"secure type 11 reserved", Flex::Secure, "1234", reserved},
+        {"secure binary not hex", Flex::Secure, "xyz", secParams(Flex::SecureBinary)},
+        {"secure alphanumeric too long", Flex::Secure, std::string(250, 'a'), secParams(Flex::SecureAlphanumeric)},
+    };
+
+    for (const Bad& b : bad)
+    {
+        Enc enc;
+        Enc::TxMessage m;
+        m.m_capcode = 1234567;
+        m.m_type = b.m_type;
+        m.m_text = b.m_text;
+        m.m_binary = b.m_binary;
+        Enc::EnqueueResult er = enc.enqueue(m);
+        std::string label = std::string("tx binary rejected: ") + b.m_label + (er.m_ok ? "" : " (" + er.m_error + ")");
+        check(!er.m_ok, label.c_str());
+    }
+
+    // Longest messages that fit: 84 message words
+    {
+        Enc enc;
+        Enc::TxMessage m;
+        m.m_capcode = 1234567;
+        m.m_type = Flex::Binary;
+        m.m_text = std::string(430, '5');
+        m.m_binary = hexParams(8, false, false, false, false);
+        Enc::EnqueueResult er = enc.enqueue(m);
+        Dec dec;
+        std::vector<Dec::Message> out = runEncoder(enc, dec);
+        check(er.m_ok && (out.size() == 1) && (out[0].m_text == m.m_text) && (out[0].m_signature == Dec::CheckOk)
+            && (out[0].m_checksum == Dec::CheckOk), "tx binary: 430 digits (82 data words) in one frame");
+
+        m.m_type = Flex::Secure;
+        m.m_text = std::string(249, 'z');
+        m.m_binary = secParams(Flex::SecureAlphanumeric);
+        er = enc.enqueue(m);
+        out = runEncoder(enc, dec);
+        check(er.m_ok && (out.size() == 1) && (out[0].m_text == m.m_text) && (out[0].m_checksum == Dec::CheckOk),
+            "tx secure: 249 characters (83 data words) in one frame");
+    }
+}
+
 int main()
 {
+    testBinaryTx();
     testHexBits();
     testReferenceFrames();
     testRoaming();
