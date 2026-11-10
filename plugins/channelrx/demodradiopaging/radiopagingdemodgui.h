@@ -131,6 +131,7 @@ private slots:
     void on_gscAudio_toggled(bool checked);
     void on_gscVoiceRecord_toggled(bool checked);
     void on_gscVoiceFiles_clicked();
+    void on_messages_cellDoubleClicked(int row, int column);
     void on_channelAlias_editingFinished();
     void voiceDirectorySelect(const QPoint& p);
     void displayVoiceRecordToolTip();

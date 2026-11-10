@@ -17,8 +17,11 @@
 
 #include <QDateTime>
 #include <QDebug>
+#include <QDesktopServices>
 #include <QDialog>
 #include <QFileDialog>
+#include <QFileInfo>
+#include <QUrl>
 #include <QFormLayout>
 #include <QLabel>
 #include <QMessageBox>
@@ -96,6 +99,7 @@ namespace {
 // Cells with chips and colours keep their HTML in this role; the display text stays plain
 // (copy, sort, width)
 const int htmlRole = Qt::UserRole + 1;
+const int voiceFileRole = Qt::UserRole + 2;     // On the time item of a voice message: the file recorded
 
 class HtmlDelegate : public QStyledItemDelegate
 {
@@ -354,8 +358,17 @@ void RadioPagingDemodGUI::recordReceived(const MessageRecord& record)
             if (item && (item->data(Qt::UserRole).toString() == record.m_id))
             {
                 QTableWidgetItem *messageItem = ui->messages->item(row, COL_MESSAGE);
+                QString file = record.m_protocolData.value("voice_file").toString();
+
+                // The voice recorded: double-click plays it
+                if (!file.isEmpty())
+                {
+                    item->setData(voiceFileRole, file);
+                    text += " (double-click to play)";
+                }
+
                 messageItem->setText(text);
-                messageItem->setToolTip(text);
+                messageItem->setToolTip(file.isEmpty() ? text : QString("%1\n%2").arg(text).arg(file));
                 if (!messageItem->data(htmlRole).toString().isEmpty()) {
                     messageItem->setData(htmlRole, text.toHtmlEscaped());
                 }
@@ -562,6 +575,26 @@ void RadioPagingDemodGUI::on_gscVoiceRecord_toggled(bool checked)
 {
     m_settings.m_gscVoiceRecord = checked;
     applySettings(QStringList("gscVoiceRecord"));
+}
+
+// A voice message with a file is played with the player of the system
+void RadioPagingDemodGUI::on_messages_cellDoubleClicked(int row, int column)
+{
+    (void) column;
+    QTableWidgetItem *item = ui->messages->item(row, COL_TIME);
+    QString file = item ? item->data(voiceFileRole).toString() : QString();
+
+    if (file.isEmpty()) {
+        return;
+    }
+
+    if (!QFileInfo::exists(file))
+    {
+        QMessageBox::information(this, "Voice message", QString("%1\nis not there any more (deleted with the old voice files).").arg(file));
+        return;
+    }
+
+    QDesktopServices::openUrl(QUrl::fromLocalFile(file));
 }
 
 void RadioPagingDemodGUI::on_channelAlias_editingFinished()
@@ -1117,6 +1150,7 @@ void RadioPagingDemodGUI::makeUIConnections()
     QObject::connect(ui->gscAudio, &QToolButton::toggled, this, &RadioPagingDemodGUI::on_gscAudio_toggled);
     QObject::connect(ui->gscVoiceRecord, &QToolButton::toggled, this, &RadioPagingDemodGUI::on_gscVoiceRecord_toggled);
     QObject::connect(ui->gscVoiceFiles, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_gscVoiceFiles_clicked);
+    QObject::connect(ui->messages, &QTableWidget::cellDoubleClicked, this, &RadioPagingDemodGUI::on_messages_cellDoubleClicked);
     QObject::connect(ui->channelAlias, &QLineEdit::editingFinished, this, &RadioPagingDemodGUI::on_channelAlias_editingFinished);
     QObject::connect(ui->volume, &QDial::valueChanged, this, &RadioPagingDemodGUI::on_volume_valueChanged);
     QObject::connect(ui->clearTable, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_clearTable_clicked);
