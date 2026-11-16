@@ -47,6 +47,11 @@ struct MessageCenterSettings
     std::vector<MessageCenterEngine::Route> m_routes;
     QList<MessageCenterFileSetting> m_sinks;
     QList<MessageCenterFileSetting> m_sources;
+    bool m_useReverseAPI;
+    QString m_reverseAPIAddress;
+    uint16_t m_reverseAPIPort;
+    uint16_t m_reverseAPIFeatureSetIndex;
+    uint16_t m_reverseAPIFeatureIndex;
     Serializable *m_rollupState;
     int m_workspaceIndex;
     QByteArray m_geometryBytes;

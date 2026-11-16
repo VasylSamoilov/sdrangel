@@ -22,6 +22,10 @@
 #include <QPointer>
 #include <QRecursiveMutex>
 #include <QTimer>
+#include <QNetworkRequest>
+
+class QNetworkAccessManager;
+class QNetworkReply;
 
 #include "availablechannelorfeaturehandler.h"
 #include "feature/feature.h"
@@ -163,11 +167,6 @@ public:
         const QStringList& featureSettingsKeys,
         SWGSDRangel::SWGFeatureSettings& response);
 
-    //! A page: the transmitter it is for, the message and how to send it. The address is as the protocol has it
-    //! (POCSAG: the address, FLEX: the capcode, GSC: up to 6 digits); the function 0 to 3
-    static MessageRecord pageRecord(const QString& transmitter, const QString& protocol, const QString& address, int function,
-        int priority, const QString& type, const QString& text, const QString& voiceFile, int speed, const QString& polarity);
-
     //! The engine, for the GUI to read (same thread)
     const MessageCenterEngine& engine() const { return m_engine; }
     const MessageCenterSettings& settings() const { return m_settings; }
@@ -185,9 +184,12 @@ private:
     QMap<QString, QPointer<ChannelAPI>> m_transmitters;     //!< By alias, the channels that announced themselves as transmitters
     QStringList m_errors;
     bool m_dirty = false;
+    QNetworkAccessManager *m_networkManager;
+    QNetworkRequest m_networkRequest;
     mutable QRecursiveMutex m_mutex;        //!< The engine: the feature thread writes it, the WebAPI reads it
 
     void applySettings(const MessageCenterSettings& settings, const QStringList& settingsKeys, bool force = false);
+    void webapiReverseSendSettings(const QList<QString>& featureSettingsKeys, const MessageCenterSettings& settings, bool force);
     void applyEngineSettings();
     void ingest(const MessageRecord& record, const QObject *source);
     void tick();
@@ -196,6 +198,7 @@ private:
 
 private slots:
     void handleChannelMessageQueue(MessageQueue *messageQueue);
+    void networkManagerFinished(QNetworkReply *reply);
 };
 
 #endif // INCLUDE_FEATURE_MESSAGECENTER_H_

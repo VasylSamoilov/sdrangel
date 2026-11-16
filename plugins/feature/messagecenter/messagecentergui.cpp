@@ -33,6 +33,7 @@
 #include "gui/basicfeaturesettingsdialog.h"
 #include "gui/dialogpositioner.h"
 
+#include "radiopagingpage.h"
 #include "messagecentergui.h"
 
 namespace {
@@ -480,15 +481,26 @@ void MessageCenterGUI::onMenuDialogCalled(const QPoint &p)
     {
         BasicFeatureSettingsDialog dialog(this);
         dialog.setTitle(m_settings.m_title);
+        dialog.setUseReverseAPI(m_settings.m_useReverseAPI);
+        dialog.setReverseAPIAddress(m_settings.m_reverseAPIAddress);
+        dialog.setReverseAPIPort(m_settings.m_reverseAPIPort);
+        dialog.setReverseAPIFeatureSetIndex(m_settings.m_reverseAPIFeatureSetIndex);
+        dialog.setReverseAPIFeatureIndex(m_settings.m_reverseAPIFeatureIndex);
         dialog.setDefaultTitle(m_displayedName);
         dialog.move(p);
         new DialogPositioner(&dialog, false);
         dialog.exec();
 
         m_settings.m_title = dialog.getTitle();
+        m_settings.m_useReverseAPI = dialog.useReverseAPI();
+        m_settings.m_reverseAPIAddress = dialog.getReverseAPIAddress();
+        m_settings.m_reverseAPIPort = dialog.getReverseAPIPort();
+        m_settings.m_reverseAPIFeatureSetIndex = dialog.getReverseAPIFeatureSetIndex();
+        m_settings.m_reverseAPIFeatureIndex = dialog.getReverseAPIFeatureIndex();
         setTitle(m_settings.m_title);
         setTitleColor(m_settings.m_rgbColor);
-        applySettings({"title", "rgbColor"});
+        applySettings({"title", "rgbColor", "useReverseAPI", "reverseAPIAddress", "reverseAPIPort",
+            "reverseAPIFeatureSetIndex", "reverseAPIFeatureIndex"});
     }
 
     resetContextMenuType();
@@ -778,26 +790,23 @@ void MessageCenterGUI::browseVoice()
 
 MessageRecord MessageCenterGUI::composedPage() const
 {
-    MessageRecord r = MessageCenter::pageRecord(m_transmitter->currentData().toString(), m_protocol->currentText(), m_address->text().trimmed(),
-        m_function->currentIndex(), 0, m_type->currentText(), m_text->isEnabled() ? m_text->text() : QString(),
-        m_voiceFile->text().trimmed(), (m_speed->currentIndex() > 0) ? m_speed->currentText().toInt() : 0,
-        (m_polarity->currentIndex() == 1) ? "normal" : (m_polarity->currentIndex() == 2) ? "inverted" : "");
-
-    // The keys of the received records
-    if (r.m_msgType == "binary")
-    {
-        r.m_protocolData.insert("blocking", m_blocking->value());
-        r.m_protocolData.insert("maildrop", m_mailDrop->isChecked());
-        r.m_protocolData.insert("display_direction", m_rightToLeft->isChecked() ? "rtl" : "ltr");
-        r.m_protocolData.insert("header_message", m_headerMessage->isChecked());
-        r.m_protocolData.insert("status_info", m_statusInfo->isChecked());
-    }
-    else if (r.m_msgType == "secure")
-    {
-        r.m_protocolData.insert("secure_type", m_secureType->currentIndex());
-    }
-
-    return r;
+    RadioPagingPage page;
+    page.m_transmitter = m_transmitter->currentData().toString();
+    page.m_protocol = m_protocol->currentText();
+    page.m_type = m_type->currentText();
+    page.m_address = m_address->text().trimmed();
+    page.m_function = m_function->currentIndex();
+    page.m_text = m_text->isEnabled() ? m_text->text() : QString();
+    page.m_voiceFile = m_voiceFile->text().trimmed();
+    page.m_speed = (m_speed->currentIndex() > 0) ? m_speed->currentText().toInt() : 0;
+    page.m_polarity = m_polarity->currentIndex() - 1;
+    page.m_blocking = m_blocking->value();
+    page.m_mailDrop = m_mailDrop->isChecked();
+    page.m_rightToLeft = m_rightToLeft->isChecked();
+    page.m_headerMessage = m_headerMessage->isChecked();
+    page.m_statusInfo = m_statusInfo->isChecked();
+    page.m_secureType = m_secureType->currentIndex();
+    return page.toRecord();
 }
 
 void MessageCenterGUI::post()

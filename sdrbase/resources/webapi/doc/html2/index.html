@@ -15630,6 +15630,30 @@ margin-bottom: 20px;
     "sources" : {
       "type" : "string",
       "description" : "JSON array of JSON lines files records are read from: name, path"
+    },
+    "useReverseAPI" : {
+      "type" : "integer",
+      "description" : "Synchronize with reverse API (1 for yes, 0 for no)",
+      "minimum" : 0,
+      "maximum" : 1
+    },
+    "reverseAPIAddress" : {
+      "type" : "string",
+      "description" : "IPv4 address or host name of the reverse API peer."
+    },
+    "reverseAPIPort" : {
+      "type" : "integer",
+      "description" : "TCP port of the reverse API peer.",
+      "minimum" : 1,
+      "maximum" : 65535
+    },
+    "reverseAPIFeatureSetIndex" : {
+      "type" : "integer",
+      "description" : "Feature-set index used by the reverse API peer."
+    },
+    "reverseAPIFeatureIndex" : {
+      "type" : "integer",
+      "description" : "Feature index used by the reverse API peer."
     }
   },
   "description" : "Message Center settings. The lists are JSON texts."

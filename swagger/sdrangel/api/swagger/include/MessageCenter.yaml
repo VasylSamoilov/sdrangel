@@ -24,6 +24,25 @@ MessageCenterSettings:
     sources:
       description: "JSON array of JSON lines files records are read from: name, path"
       type: string
+    useReverseAPI:
+      description: Synchronize with reverse API (1 for yes, 0 for no)
+      type: integer
+      minimum: 0
+      maximum: 1
+    reverseAPIAddress:
+      type: string
+      description: "IPv4 address or host name of the reverse API peer."
+    reverseAPIPort:
+      type: integer
+      description: "TCP port of the reverse API peer."
+      minimum: 1
+      maximum: 65535
+    reverseAPIFeatureSetIndex:
+      type: integer
+      description: "Feature-set index used by the reverse API peer."
+    reverseAPIFeatureIndex:
+      type: integer
+      description: "Feature index used by the reverse API peer."
 
 MessageCenterReport:
   description: "Message Center report. The lists are JSON texts."

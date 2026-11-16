@@ -172,6 +172,77 @@ int RadioPagingMod::outstanding() const
     return (accepted > done) ? (int) (accepted - done) : 0;
 }
 
+// A page checked with RadioPagingPage::check(): the messages of the encoders. FLEX short message: the digits of
+// the vector, no text for the tone only payload; GSC: the address zero padded to its 6 digits (index, group, 3
+// address digits), the function 0 to 3 as the address number 1 to 4
+RadioPagingMod::TxRequest RadioPagingMod::requestFromPage(const RadioPagingPage& page)
+{
+    TxRequest request;
+    const QString type = page.m_type.isEmpty() ? QString("alphanumeric") : page.m_type;
+    const bool tone = (type == "tone");
+    const std::string text = page.m_text.toStdString();
+
+    request.m_pageId = page.m_id;
+    request.m_polarity = page.m_polarity;
+    request.m_retransmit = page.m_retransmit;
+    request.m_retransmitInterval = page.m_retransmitInterval;
+    request.m_sendDelay = page.m_sendDelay;
+
+    if (page.m_protocol == "pocsag")
+    {
+        request.m_protocol = (int) RadioPagingModSettings::Pocsag;
+        request.m_pocsag.m_address = (uint32_t) page.m_address.toULongLong();
+        request.m_pocsag.m_function = page.m_function;
+        request.m_pocsag.m_type = tone ? RadioPagingPocsag::Tone
+            : (type == "numeric") ? RadioPagingPocsag::Numeric : RadioPagingPocsag::Alphanumeric;
+        request.m_pocsag.m_text = text;
+        request.m_speed = page.m_speed;
+    }
+    else if (page.m_protocol == "flex")
+    {
+        request.m_protocol = (int) RadioPagingModSettings::Flex;
+        request.m_flex.m_capcode = (uint64_t) page.m_address.toULongLong();
+        request.m_flex.m_type = tone ? RadioPagingFlex::Tone : (type == "short_message") ? RadioPagingFlex::ShortMessage
+            : (type == "binary") ? RadioPagingFlex::Binary : (type == "secure") ? RadioPagingFlex::Secure
+            : (type == "numeric") ? RadioPagingFlex::Numeric : RadioPagingFlex::Alphanumeric;
+        request.m_flex.m_text = text;
+        request.m_flex.m_priority = page.m_priority;
+        // STD-43A Table 3.9.2-1: 0 numeric, 1 source, 2 numbered
+        if (type == "short_message")
+        {
+            request.m_flex.m_shortType = (RadioPagingFlex::ShortType) page.m_shortType;
+            request.m_flex.m_source = page.m_source;
+        }
+        // Header word 2 of STD-43A Fig. 3.10.1.2-1; the digits and B are checked by the encoder
+        else if (type == "binary")
+        {
+            request.m_flex.m_binary.m_blocking = page.m_blocking;
+            request.m_flex.m_binary.m_mailDrop = page.m_mailDrop;
+            request.m_flex.m_binary.m_rightToLeft = page.m_rightToLeft;
+            request.m_flex.m_binary.m_header = page.m_headerMessage;
+            request.m_flex.m_binary.m_statusInfo = page.m_statusInfo;
+        }
+        // t1 t0 of STD-43A 3.10.1.4
+        else if (type == "secure")
+        {
+            request.m_flex.m_binary.m_secureType = (RadioPagingFlex::SecureType) page.m_secureType;
+        }
+    }
+    else
+    {
+        request.m_protocol = (int) RadioPagingModSettings::Gsc;
+        request.m_gsc.m_address = page.m_address.rightJustified(6, QChar('0')).toStdString();
+        request.m_gsc.m_addressNumber = page.m_function + 1;
+        request.m_gsc.m_type = tone ? RadioPagingGsc::Tone
+            : (type == "voice") ? RadioPagingGsc::Voice
+            : (type == "numeric") ? RadioPagingGsc::Numeric : RadioPagingGsc::Alphanumeric;
+        request.m_gsc.m_text = (tone || (type == "voice")) ? std::string() : text;
+        request.m_voiceFile = (type == "voice") ? page.m_voiceFile : QString();
+    }
+
+    return request;
+}
+
 // The request is resolved with the channel settings and tried on a stream of its own (the
 // message encodes; FLEX: some frame of the collapse carries its capcode)
 QString RadioPagingMod::checkRequest(const TxRequest& request, RadioPagingModSource::Request& sourceRequest, QString *warning)
@@ -1324,150 +1395,22 @@ int RadioPagingMod::webapiActionsPost(
 
     {
         SWGSDRangel::SWGRadioPagingModTx *swgTx = swgActions->getTx();
-        TxRequest request;
-        QString type = swgTx->getType() ? swgTx->getType()->toLower() : QString();
-        QString polarity = swgTx->getPolarity() ? swgTx->getPolarity()->toLower() : QString();
-        std::string text = swgTx->getText() ? swgTx->getText()->toStdString() : std::string();
-        request.m_pageId = swgTx->getId() ? *swgTx->getId() : QString();
-        QString messageProtocol = swgTx->getProtocol() ? swgTx->getProtocol()->toLower() : QString();
         QMutexLocker mutexLocker(&m_settingsMutex);
-        RadioPagingModSettings::Protocol protocol = m_settings.m_protocol;
+        const QString channelProtocol = RadioPagingModSettings::protocolName(m_settings.m_protocol).toLower();
         mutexLocker.unlock();
 
-        // A FLEX channel with the mixing option also takes POCSAG messages: checkRequest decides
-        if (messageProtocol == "pocsag") {
-            protocol = RadioPagingModSettings::Pocsag;
-        } else if (messageProtocol == "flex") {
-            protocol = RadioPagingModSettings::Flex;
-        } else if (messageProtocol == "gsc") {
-            protocol = RadioPagingModSettings::Gsc;
-        } else if (!messageProtocol.isEmpty())
+        // Without a protocol the message is of the channel's; a FLEX channel with the mixing option also takes
+        // POCSAG messages: checkRequest decides
+        RadioPagingPage page = RadioPagingPage::fromTx(*swgTx, channelProtocol);
+        QString pageError = page.check();
+
+        if (!pageError.isEmpty())
         {
-            errorMessage = "Message protocol must be pocsag, flex or gsc";
+            errorMessage = pageError;
             return 400;
         }
 
-        if (!type.isEmpty() && (type != "tone") && (type != "numeric") && (type != "alphanumeric")
-         && !((type == "voice") && (protocol == RadioPagingModSettings::Gsc))
-         && !(((type == "short_message") || (type == "binary") || (type == "secure")) && (protocol == RadioPagingModSettings::Flex)))
-        {
-            errorMessage = "Message type must be tone, numeric or alphanumeric (GSC: or voice; FLEX: or short_message, binary, secure)";
-            return 400;
-        }
-
-        // FLEX short_message: digits in the vector, an empty text is the tone only payload
-        const bool tone = (type == "tone");
-
-        if (polarity.isEmpty()) {
-            request.m_polarity = -1;
-        } else if (polarity == "normal") {
-            request.m_polarity = 0;
-        } else if (polarity == "inverted") {
-            request.m_polarity = 1;
-        }
-        else
-        {
-            errorMessage = "Polarity must be normal or inverted";
-            return 400;
-        }
-
-        request.m_protocol = (int) protocol;
-
-        if (protocol == RadioPagingModSettings::Pocsag)
-        {
-            if ((swgTx->getAddress() < 0) || ((uint32_t) swgTx->getAddress() > RadioPagingPocsag::m_maxAddress))
-            {
-                errorMessage = "POCSAG address must be 0 to 2097151";
-                return 400;
-            }
-            if ((swgTx->getFunction() < 0) || (swgTx->getFunction() > 3))
-            {
-                errorMessage = "POCSAG function must be 0 to 3";
-                return 400;
-            }
-
-            request.m_pocsag.m_address = (uint32_t) swgTx->getAddress();
-            request.m_pocsag.m_function = swgTx->getFunction();
-            request.m_pocsag.m_type = tone ? RadioPagingPocsag::Tone
-                : (type == "numeric") ? RadioPagingPocsag::Numeric : RadioPagingPocsag::Alphanumeric;
-            request.m_pocsag.m_text = text;
-            request.m_speed = swgTx->getSpeed();
-        }
-        else if (protocol == RadioPagingModSettings::Flex)
-        {
-            if (swgTx->getCapcode() <= 0)
-            {
-                errorMessage = "FLEX capcode must be 1 to 1933312 or 2101249 to 4297068542";
-                return 400;
-            }
-
-            request.m_flex.m_capcode = (uint64_t) swgTx->getCapcode();
-            request.m_flex.m_type = tone ? RadioPagingFlex::Tone : (type == "short_message") ? RadioPagingFlex::ShortMessage
-                : (type == "binary") ? RadioPagingFlex::Binary : (type == "secure") ? RadioPagingFlex::Secure
-                : (type == "numeric") ? RadioPagingFlex::Numeric : RadioPagingFlex::Alphanumeric;
-            request.m_flex.m_text = text;
-            request.m_flex.m_priority = swgTx->getPriority() != 0;
-
-            if (type == "short_message")
-            {
-                // STD-43A Table 3.9.2-1: 0 numeric (digits, none for the tone only payload), 1 source, 2 numbered
-                if ((swgTx->getShortType() < 0) || (swgTx->getShortType() > 2) || (swgTx->getSource() < 0) || (swgTx->getSource() > 7))
-                {
-                    errorMessage = "FLEX short message: shortType 0 (numeric), 1 (source) or 2 (numbered), source 0 to 7";
-                    return 400;
-                }
-
-                request.m_flex.m_shortType = (RadioPagingFlex::ShortType) swgTx->getShortType();
-                request.m_flex.m_source = swgTx->getSource();
-            }
-            else if (type == "binary")
-            {
-                // Header word 2 of STD-43A Fig. 3.10.1.2-1; the digits and B are checked by the encoder
-                request.m_flex.m_binary.m_blocking = (swgTx->getBlocking() == 0) ? 1 : swgTx->getBlocking();
-                request.m_flex.m_binary.m_mailDrop = swgTx->getMailDrop() != 0;
-                request.m_flex.m_binary.m_rightToLeft = swgTx->getRightToLeft() != 0;
-                request.m_flex.m_binary.m_header = swgTx->getHeaderMessage() != 0;
-                request.m_flex.m_binary.m_statusInfo = swgTx->getStatusInfo() != 0;
-            }
-            else if (type == "secure")
-            {
-                // t1 t0 of STD-43A 3.10.1.4; 11 is reserved
-                if ((swgTx->getSecureType() < 0) || (swgTx->getSecureType() > 2))
-                {
-                    errorMessage = "FLEX secure message: secureType 0 (alphanumeric), 1 (data defined separately) or 2 (binary)";
-                    return 400;
-                }
-
-                request.m_flex.m_binary.m_secureType = (RadioPagingFlex::SecureType) swgTx->getSecureType();
-            }
-        }
-        else if (protocol == RadioPagingModSettings::Gsc)
-        {
-            // The address as an integer of up to 6 digits (zero padded: index, group, 3 address
-            // digits), the function 0 to 3 as the address number 1 to 4
-            if ((swgTx->getCapcode() < 0) || (swgTx->getCapcode() > 999999))
-            {
-                errorMessage = "GSC address (capcode) must be 0 to 999999";
-                return 400;
-            }
-            if ((swgTx->getFunction() < 0) || (swgTx->getFunction() > 3))
-            {
-                errorMessage = "GSC function must be 0 to 3 (A to D), for the address number 1 to 4";
-                return 400;
-            }
-
-            request.m_gsc.m_address = QString("%1").arg((qlonglong) swgTx->getCapcode(), 6, 10, QChar('0')).toStdString();
-            request.m_gsc.m_addressNumber = swgTx->getFunction() + 1;
-            request.m_gsc.m_type = tone ? RadioPagingGsc::Tone
-                : (type == "voice") ? RadioPagingGsc::Voice
-                : (type == "numeric") ? RadioPagingGsc::Numeric : RadioPagingGsc::Alphanumeric;
-            request.m_gsc.m_text = (tone || (type == "voice")) ? std::string() : text;
-            request.m_voiceFile = (type == "voice") ? QString::fromStdString(text) : QString();
-        }
-
-        request.m_retransmit = swgTx->getRetransmit();
-        request.m_retransmitInterval = swgTx->getRetransmitInterval();
-        request.m_sendDelay = swgTx->getSendDelay();
+        TxRequest request = requestFromPage(page);
 
         // Checked here for the reply; it is checked again when queued, after the settings
         // posted before it

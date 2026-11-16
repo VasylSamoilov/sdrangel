@@ -32,6 +32,7 @@
 
 #include "radiopagingpocsag.h"
 #include "radiopagingflexscheduler.h"
+#include "radiopagingpage.h"
 #include "radiopagingmodsettings.h"
 #include "radiopagingmodsource.h"
 
@@ -67,6 +68,9 @@ public:
         double m_retransmitInterval = -1.0;
         double m_sendDelay = 0.0;
     };
+
+    //! The request of a page checked with RadioPagingPage::check() (the channel and the encoder check the rest)
+    static TxRequest requestFromPage(const RadioPagingPage& page);
 
     class MsgConfigureRadioPagingMod : public Message {
         MESSAGE_CLASS_DECLARATION

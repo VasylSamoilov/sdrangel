@@ -70,6 +70,11 @@ check "routes and the claim time are set" '[ "$(curl_code PATCH /featureset/feat
 sleep 1
 S=$(curl -s "$U/featureset/feature/0/settings" | tr -d "\n" | sed 's/\\"/"/g')
 check "the settings keep them" '[[ "$S" == *"\"claimTimeoutSec\": 20"* && "$S" == *"gsc to the file"* ]]'
+check "the reverse API is off, its defaults are there" '[[ "$S" == *"\"useReverseAPI\": 0"* && "$S" == *"\"reverseAPIAddress\": \"127.0.0.1\""* && "$S" == *"\"reverseAPIPort\": 8888"* ]]'
+check "the reverse API settings are set" '[ "$(curl_code PATCH /featureset/feature/0/settings "{\"featureType\":\"MessageCenter\",\"MessageCenterSettings\":{\"reverseAPIAddress\":\"127.0.0.2\",\"reverseAPIPort\":8899,\"reverseAPIFeatureSetIndex\":1,\"reverseAPIFeatureIndex\":2}}")" = 200 ]'
+sleep 1
+S=$(curl -s "$U/featureset/feature/0/settings" | tr -d "\n" | sed 's/\\"/"/g')
+check "the settings keep the reverse API" '[[ "$S" == *"\"reverseAPIAddress\": \"127.0.0.2\""* && "$S" == *"\"reverseAPIPort\": 8899"* && "$S" == *"\"reverseAPIFeatureSetIndex\": 1"* && "$S" == *"\"reverseAPIFeatureIndex\": 2"* ]]'
 
 curl_code DELETE /deviceset/0/device/run > /dev/null
 fuser -k "$PORT"/tcp > /dev/null 2>&1

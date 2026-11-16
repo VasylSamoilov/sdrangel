@@ -12,6 +12,7 @@ void SWGMessageCenterSettings::cleanup()
     delete m_routes; m_routes = nullptr;
     delete m_sinks; m_sinks = nullptr;
     delete m_sources; m_sources = nullptr;
+    delete m_reverseApiAddress; m_reverseApiAddress = nullptr;
 }
 void SWGMessageCenterSettings::init()
 {
@@ -24,6 +25,11 @@ void SWGMessageCenterSettings::init()
     m_routes = new QString(); m_routesIsSet = false;
     m_sinks = new QString(); m_sinksIsSet = false;
     m_sources = new QString(); m_sourcesIsSet = false;
+    m_useReverseApi = 0; m_useReverseApiIsSet = false;
+    m_reverseApiAddress = new QString(); m_reverseApiAddressIsSet = false;
+    m_reverseApiPort = 0; m_reverseApiPortIsSet = false;
+    m_reverseApiFeatureSetIndex = 0; m_reverseApiFeatureSetIndexIsSet = false;
+    m_reverseApiFeatureIndex = 0; m_reverseApiFeatureIndexIsSet = false;
 }
 SWGMessageCenterSettings* SWGMessageCenterSettings::fromJson(QString& json)
 {
@@ -39,6 +45,11 @@ void SWGMessageCenterSettings::fromJsonObject(QJsonObject& json)
     if (json.contains("routes")) { ::SWGSDRangel::setValue(&m_routes,json["routes"],"QString","QString"); m_routesIsSet = true; }
     if (json.contains("sinks")) { ::SWGSDRangel::setValue(&m_sinks,json["sinks"],"QString","QString"); m_sinksIsSet = true; }
     if (json.contains("sources")) { ::SWGSDRangel::setValue(&m_sources,json["sources"],"QString","QString"); m_sourcesIsSet = true; }
+    if (json.contains("useReverseAPI")) { ::SWGSDRangel::setValue(&m_useReverseApi,json["useReverseAPI"],"qint32",""); m_useReverseApiIsSet = true; }
+    if (json.contains("reverseAPIAddress")) { ::SWGSDRangel::setValue(&m_reverseApiAddress,json["reverseAPIAddress"],"QString","QString"); m_reverseApiAddressIsSet = true; }
+    if (json.contains("reverseAPIPort")) { ::SWGSDRangel::setValue(&m_reverseApiPort,json["reverseAPIPort"],"qint32",""); m_reverseApiPortIsSet = true; }
+    if (json.contains("reverseAPIFeatureSetIndex")) { ::SWGSDRangel::setValue(&m_reverseApiFeatureSetIndex,json["reverseAPIFeatureSetIndex"],"qint32",""); m_reverseApiFeatureSetIndexIsSet = true; }
+    if (json.contains("reverseAPIFeatureIndex")) { ::SWGSDRangel::setValue(&m_reverseApiFeatureIndex,json["reverseAPIFeatureIndex"],"qint32",""); m_reverseApiFeatureIndexIsSet = true; }
 }
 QString SWGMessageCenterSettings::asJson()
 {
@@ -55,12 +66,18 @@ QJsonObject* SWGMessageCenterSettings::asJsonObject()
     if (m_routes && (m_routesIsSet || !m_routes->isEmpty())) { toJsonValue(QString("routes"),m_routes,object,QString("QString")); }
     if (m_sinks && (m_sinksIsSet || !m_sinks->isEmpty())) { toJsonValue(QString("sinks"),m_sinks,object,QString("QString")); }
     if (m_sources && (m_sourcesIsSet || !m_sources->isEmpty())) { toJsonValue(QString("sources"),m_sources,object,QString("QString")); }
+    if (m_useReverseApiIsSet) { object->insert("useReverseAPI",QJsonValue(m_useReverseApi)); }
+    if (m_reverseApiAddress && (m_reverseApiAddressIsSet || !m_reverseApiAddress->isEmpty())) { toJsonValue(QString("reverseAPIAddress"),m_reverseApiAddress,object,QString("QString")); }
+    if (m_reverseApiPortIsSet) { object->insert("reverseAPIPort",QJsonValue(m_reverseApiPort)); }
+    if (m_reverseApiFeatureSetIndexIsSet) { object->insert("reverseAPIFeatureSetIndex",QJsonValue(m_reverseApiFeatureSetIndex)); }
+    if (m_reverseApiFeatureIndexIsSet) { object->insert("reverseAPIFeatureIndex",QJsonValue(m_reverseApiFeatureIndex)); }
     return object;
 }
 bool SWGMessageCenterSettings::isSet()
 {
     return m_titleIsSet || m_rgbColorIsSet || m_logSizeIsSet || m_claimTimeoutSecIsSet || m_silentSecIsSet || m_routesIsSet
-        || m_sinksIsSet || m_sourcesIsSet;
+        || m_sinksIsSet || m_sourcesIsSet || m_useReverseApiIsSet || m_reverseApiAddressIsSet || m_reverseApiPortIsSet
+        || m_reverseApiFeatureSetIndexIsSet || m_reverseApiFeatureIndexIsSet;
 }
 QString* SWGMessageCenterSettings::getTitle() { return m_title; }
 void SWGMessageCenterSettings::setTitle(QString* value) { if (m_title != value) { delete m_title; m_title = value; } m_titleIsSet = true; }
@@ -78,4 +95,14 @@ QString* SWGMessageCenterSettings::getSinks() { return m_sinks; }
 void SWGMessageCenterSettings::setSinks(QString* value) { if (m_sinks != value) { delete m_sinks; m_sinks = value; } m_sinksIsSet = true; }
 QString* SWGMessageCenterSettings::getSources() { return m_sources; }
 void SWGMessageCenterSettings::setSources(QString* value) { if (m_sources != value) { delete m_sources; m_sources = value; } m_sourcesIsSet = true; }
+qint32 SWGMessageCenterSettings::getUseReverseApi() { return m_useReverseApi; }
+void SWGMessageCenterSettings::setUseReverseApi(qint32 value) { m_useReverseApi = value; m_useReverseApiIsSet = true; }
+QString* SWGMessageCenterSettings::getReverseApiAddress() { return m_reverseApiAddress; }
+void SWGMessageCenterSettings::setReverseApiAddress(QString* value) { if (m_reverseApiAddress != value) { delete m_reverseApiAddress; m_reverseApiAddress = value; } m_reverseApiAddressIsSet = true; }
+qint32 SWGMessageCenterSettings::getReverseApiPort() { return m_reverseApiPort; }
+void SWGMessageCenterSettings::setReverseApiPort(qint32 value) { m_reverseApiPort = value; m_reverseApiPortIsSet = true; }
+qint32 SWGMessageCenterSettings::getReverseApiFeatureSetIndex() { return m_reverseApiFeatureSetIndex; }
+void SWGMessageCenterSettings::setReverseApiFeatureSetIndex(qint32 value) { m_reverseApiFeatureSetIndex = value; m_reverseApiFeatureSetIndexIsSet = true; }
+qint32 SWGMessageCenterSettings::getReverseApiFeatureIndex() { return m_reverseApiFeatureIndex; }
+void SWGMessageCenterSettings::setReverseApiFeatureIndex(qint32 value) { m_reverseApiFeatureIndex = value; m_reverseApiFeatureIndexIsSet = true; }
 }

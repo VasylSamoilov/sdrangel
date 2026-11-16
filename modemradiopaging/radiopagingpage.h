@@ -1,0 +1,80 @@
+///////////////////////////////////////////////////////////////////////////////////
+// Copyright (C) 2026 Vasyl Samoilov <vasyl.samoilov@gmail.com>                  //
+//                                                                               //
+// This program is free software; you can redistribute it and/or modify          //
+// it under the terms of the GNU General Public License as published by          //
+// the Free Software Foundation as version 3 of the License, or                  //
+// (at your option) any later version.                                           //
+//                                                                               //
+// This program is distributed in the hope that it will be useful,               //
+// but WITHOUT ANY WARRANTY; without even the implied warranty of                //
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the                  //
+// GNU General Public License V3 for more details.                               //
+//                                                                               //
+// You should have received a copy of the GNU General Public License             //
+// along with this program. If not, see <http://www.gnu.org/licenses/>.          //
+///////////////////////////////////////////////////////////////////////////////////
+
+#ifndef MODEMRADIOPAGING_RADIOPAGINGPAGE_H
+#define MODEMRADIOPAGING_RADIOPAGINGPAGE_H
+
+#include <QString>
+#include <QStringList>
+
+#include "export.h"
+#include "util/messagerecord.h"
+
+namespace SWGSDRangel {
+    class SWGRadioPagingModTx;
+}
+
+// A page to transmit: the fields of the tx action of the modulator and of the post of the message center.
+//
+// The message center keeps a page as a TX record (toRecord): the address and the fields in the keys of the
+// records of the receivers and transmitters (protocolData). A transmitter takes it back with fromRecord.
+// check() holds the limits that do not need the channel; the encoder checks the rest when it is queued.
+struct MODEMRADIOPAGING_API RadioPagingPage
+{
+    QString m_id;                       //!< Page of the message center, empty if none
+    QString m_transmitter;              //!< Alias of the transmitter (message center)
+    QString m_protocol;                 //!< pocsag, flex or gsc
+    QString m_type;                     //!< One of types(); empty: alphanumeric
+    QString m_address;                  //!< Digits: POCSAG address, FLEX capcode, GSC address (up to 6 digits)
+    int m_function = 0;                 //!< POCSAG function 0-3 (A-D); GSC function 0-3, the address number 1-4
+    bool m_priority = false;            //!< FLEX priority address
+    QString m_text;
+    QString m_voiceFile;                //!< GSC voice: the sound file
+    int m_speed = 0;                    //!< POCSAG baud, 0: the channel setting
+    int m_polarity = -1;                //!< -1 the channel setting, 0 normal, 1 inverted
+    int m_shortType = 0;                //!< FLEX short message (STD-43A Table 3.9.2-1): 0 numeric, 1 source, 2 numbered
+    int m_source = 0;                   //!< FLEX short message source code 0-7
+    int m_blocking = 1;                 //!< FLEX binary: B, 1-16
+    bool m_mailDrop = false;            //!< FLEX binary: M
+    bool m_rightToLeft = false;         //!< FLEX binary: D
+    bool m_headerMessage = false;       //!< FLEX binary: H
+    bool m_statusInfo = false;          //!< FLEX binary: I
+    int m_secureType = 0;               //!< FLEX secure t1 t0: 0 alphanumeric, 1 data defined separately, 2 binary
+    int m_retransmit = 0;               //!< Network mode: copies sent after the message
+    double m_retransmitInterval = -1.0; //!< Seconds between the copies, negative: the default of the protocol
+    double m_sendDelay = 0.0;           //!< Network mode: seconds before the first transmission
+
+    static const int m_maxScheduleSeconds = 3600;
+
+    //!< The protocols and the types of messages; the types a protocol sends
+    static const QStringList& protocols();
+    static const QStringList& types();
+    static QStringList types(const QString& protocol);
+
+    //!< Empty if the page can be queued, else why not
+    QString check() const;
+    //!< The page as a TX record of the message center
+    MessageRecord toRecord() const;
+    //!< The page of a TX record (toRecord, or a record of a source file in the same keys)
+    static RadioPagingPage fromRecord(const MessageRecord& record);
+    //!< The tx action of the modulator (WebAPI) of the page, and the page of a tx action (without a protocol: the
+    //!< protocol of the channel)
+    void toTx(SWGSDRangel::SWGRadioPagingModTx& tx) const;
+    static RadioPagingPage fromTx(SWGSDRangel::SWGRadioPagingModTx& tx, const QString& defaultProtocol);
+};
+
+#endif // MODEMRADIOPAGING_RADIOPAGINGPAGE_H

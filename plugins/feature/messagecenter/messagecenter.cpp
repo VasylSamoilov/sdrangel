@@ -20,6 +20,9 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QBuffer>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
 
 #include <algorithm>
 
@@ -36,9 +39,7 @@
 
 #include "channel/channelapi.h"
 #include "maincore.h"
-#include "radiopagingflex.h"
-#include "radiopaginggsc.h"
-#include "radiopagingpocsag.h"
+#include "radiopagingpage.h"
 
 #include "messagecenter.h"
 
@@ -74,6 +75,9 @@ MessageCenter::MessageCenter(WebAPIAdapterInterface *webAPIAdapterInterface) :
     QObject::connect(&m_timer, &QTimer::timeout, this, &MessageCenter::tick);
     applyEngineSettings();
     m_timer.start(tickMs);
+
+    m_networkManager = new QNetworkAccessManager();
+    QObject::connect(m_networkManager, &QNetworkAccessManager::finished, this, &MessageCenter::networkManagerFinished);
 }
 
 MessageCenter::~MessageCenter()
@@ -81,6 +85,8 @@ MessageCenter::~MessageCenter()
     m_timer.stop();
     QObject::disconnect(&m_availableChannelHandler, &AvailableChannelOrFeatureHandler::messageEnqueued,
         this, &MessageCenter::handleChannelMessageQueue);
+    QObject::disconnect(m_networkManager, &QNetworkAccessManager::finished, this, &MessageCenter::networkManagerFinished);
+    delete m_networkManager;
 }
 
 void MessageCenter::handleChannelMessageQueue(MessageQueue *messageQueue)
@@ -214,62 +220,11 @@ int MessageCenter::postToTransmitter(const MessageCenterPage& page, QString& err
         return 404;
     }
 
-    const MessageRecord& r = page.m_record;
-    const QVariantMap& d = r.m_protocolData;
     SWGSDRangel::SWGChannelActions query;
     SWGSDRangel::SWGRadioPagingModActions *actions = new SWGSDRangel::SWGRadioPagingModActions();
     SWGSDRangel::SWGRadioPagingModTx *tx = new SWGSDRangel::SWGRadioPagingModTx();
-    // The modulator takes the record types (FLEX tone: the address alone; short_message: digits, none for tone only)
-    QString type = r.m_msgType.isEmpty() ? QString("alphanumeric") : r.m_msgType;
 
-    tx->setId(new QString(r.m_id));
-    tx->setProtocol(new QString(r.m_protocol));
-    tx->setType(new QString(type));
-    tx->setText(new QString((type == "voice") ? d.value("voice_source").toString() : r.m_text));
-    tx->setPolarity(new QString((r.m_polarity == MessageRecord::PolarityInverted) ? "inverted" : (r.m_polarity == MessageRecord::PolarityNormal) ? "normal" : ""));
-
-    if (r.m_protocol == "pocsag")
-    {
-        tx->setAddress((qint32) d.value("ric").toULongLong());
-        tx->setFunction(d.value("function").toInt());
-        tx->setSpeed((r.m_speed > 0) ? r.m_speed : 0);
-    }
-    else if (r.m_protocol == "flex")
-    {
-        tx->setCapcode(d.value("capcode").toLongLong());
-        tx->setPriority(d.value("priority").toBool() ? 1 : 0);
-
-        if (type == "short_message")
-        {
-            tx->setShortType(d.value("short_type").toInt());
-            tx->setSource(d.value("short_source").toInt());
-        }
-        else if (type == "binary")
-        {
-            // The keys of the received records: blocking 1 to 16, display direction ltr or rtl
-            tx->setBlocking(d.value("blocking", 1).toInt());
-            tx->setMailDrop(d.value("maildrop").toBool() ? 1 : 0);
-            tx->setRightToLeft((d.value("display_direction").toString() == "rtl") ? 1 : 0);
-            tx->setHeaderMessage(d.value("header_message").toBool() ? 1 : 0);
-            tx->setStatusInfo(d.value("status_info").toBool() ? 1 : 0);
-        }
-        else if (type == "secure")
-        {
-            tx->setSecureType(d.value("secure_type").toInt());
-        }
-    }
-    else
-    {
-        // GSC: the 6 digits of the record address as an integer, the address number 1-4 as the function 0-3 (A-D)
-        tx->setCapcode(r.m_address.left(6).toLongLong());
-        tx->setFunction(d.contains("address_number") ? std::max(1, std::min(4, d.value("address_number").toInt())) - 1
-            : (d.value("function").toInt() & 3));
-    }
-
-    tx->setRetransmit(d.value("retransmit", 0).toInt());
-    tx->setRetransmitInterval((float) d.value("retransmit_interval", -1.0).toDouble());
-    tx->setSendDelay((float) d.value("send_delay", 0.0).toDouble());
-
+    RadioPagingPage::fromRecord(page.m_record).toTx(*tx);
     actions->setTx(tx);
     query.setRadioPagingModActions(actions);
     QStringList keys = {"tx"};
@@ -282,52 +237,6 @@ QStringList MessageCenter::takeErrors()
     QStringList errors = m_errors;
     m_errors.clear();
     return errors;
-}
-
-MessageRecord MessageCenter::pageRecord(const QString& transmitter, const QString& protocol, const QString& address, int function,
-    int priority, const QString& type, const QString& text, const QString& voiceFile, int speed, const QString& polarity)
-{
-    MessageRecord r;
-    r.m_direction = MessageRecord::DirectionTX;
-    r.m_kind = MessageRecord::KindMessage;
-    r.m_protocol = protocol;
-    r.m_msgType = type.isEmpty() ? QString("alphanumeric") : type;
-    r.m_text = ((r.m_msgType == "tone") || (r.m_msgType == "voice")) ? QString() : text;
-    r.m_polarity = (polarity == "normal") ? MessageRecord::PolarityNormal
-        : (polarity == "inverted") ? MessageRecord::PolarityInverted : MessageRecord::PolarityUnknown;
-    r.m_speed = (speed > 0) ? speed : -1;
-    r.m_protocolData.insert("transmitter", transmitter);
-
-    // The address and its keys as in the records of the receivers and transmitters: POCSAG ric and function
-    // 0-3, FLEX capcode, GSC address number 1-4 and function 0-3 (A-D, the address number less 1)
-    if (protocol == "pocsag")
-    {
-        r.m_address = QString::fromStdString(RadioPagingPocsag::addressText((uint32_t) address.toULongLong(), function));
-        r.m_protocolData.insert("ric", address.toULongLong());
-        r.m_protocolData.insert("function", function);
-    }
-    else if (protocol == "gsc")
-    {
-        r.m_address = QString::fromStdString(RadioPagingGsc::addressText(address.toStdString(), (function & 3) + 1));
-        r.m_protocolData.insert("address_number", (function & 3) + 1);
-        r.m_protocolData.insert("function", function & 3);
-    }
-    else
-    {
-        qulonglong capcode = address.toULongLong();
-        r.m_address = QString::fromStdString(RadioPagingFlex::addressText(capcode));
-        r.m_protocolData.insert("capcode", capcode);
-        r.m_protocolData.insert("long_address", RadioPagingFlex::isLongAddress(capcode));
-        r.m_protocolData.insert("addr_type", RadioPagingFlex::isLongAddress(capcode) ? "long" : "short");
-        r.m_protocolData.insert("priority", priority != 0);
-    }
-
-    // The sound file a voice page sends (voice_file is the record of the voice sent or received)
-    if (r.m_msgType == "voice") {
-        r.m_protocolData.insert("voice_source", voiceFile);
-    }
-
-    return r;
 }
 
 QByteArray MessageCenter::serialize() const
@@ -359,6 +268,91 @@ void MessageCenter::applySettings(const MessageCenterSettings& settings, const Q
         || settingsKeys.contains("sources")) {
         applyEngineSettings();
     }
+
+    if (m_settings.m_useReverseAPI)
+    {
+        bool fullUpdate = (settingsKeys.contains("useReverseAPI") && m_settings.m_useReverseAPI) ||
+                settingsKeys.contains("reverseAPIAddress") ||
+                settingsKeys.contains("reverseAPIPort") ||
+                settingsKeys.contains("reverseAPIFeatureSetIndex") ||
+                settingsKeys.contains("reverseAPIFeatureIndex");
+        webapiReverseSendSettings(settingsKeys, m_settings, fullUpdate || force);
+    }
+}
+
+// The settings that changed (all of them but the reverse API's when force is on) to the peer, as a PATCH of
+// the settings of its message center
+void MessageCenter::webapiReverseSendSettings(const QList<QString>& featureSettingsKeys, const MessageCenterSettings& settings, bool force)
+{
+    SWGSDRangel::SWGFeatureSettings *swgFeatureSettings = new SWGSDRangel::SWGFeatureSettings();
+    swgFeatureSettings->setFeatureType(new QString("MessageCenter"));
+    swgFeatureSettings->setMessageCenterSettings(new SWGSDRangel::SWGMessageCenterSettings());
+    SWGSDRangel::SWGMessageCenterSettings *swg = swgFeatureSettings->getMessageCenterSettings();
+
+    if (featureSettingsKeys.contains("title") || force) {
+        swg->setTitle(new QString(settings.m_title));
+    }
+    if (featureSettingsKeys.contains("rgbColor") || force) {
+        swg->setRgbColor(settings.m_rgbColor);
+    }
+    if (featureSettingsKeys.contains("logSize") || force) {
+        swg->setLogSize(settings.m_logSize);
+    }
+    if (featureSettingsKeys.contains("claimTimeoutSec") || force) {
+        swg->setClaimTimeoutSec(settings.m_claimTimeoutSec);
+    }
+    if (featureSettingsKeys.contains("silentSec") || force) {
+        swg->setSilentSec(settings.m_silentSec);
+    }
+    if (featureSettingsKeys.contains("routes") || force) {
+        swg->setRoutes(new QString(QString::fromUtf8(MessageCenterSettings::routesToJson(settings.m_routes))));
+    }
+    if (featureSettingsKeys.contains("sinks") || force) {
+        swg->setSinks(new QString(QString::fromUtf8(MessageCenterSettings::filesToJson(settings.m_sinks))));
+    }
+    if (featureSettingsKeys.contains("sources") || force) {
+        swg->setSources(new QString(QString::fromUtf8(MessageCenterSettings::filesToJson(settings.m_sources))));
+    }
+
+    QString featureSettingsURL = QString("http://%1:%2/sdrangel/featureset/%3/feature/%4/settings")
+            .arg(settings.m_reverseAPIAddress)
+            .arg(settings.m_reverseAPIPort)
+            .arg(settings.m_reverseAPIFeatureSetIndex)
+            .arg(settings.m_reverseAPIFeatureIndex);
+    m_networkRequest.setUrl(QUrl(featureSettingsURL));
+    m_networkRequest.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    QBuffer *buffer = new QBuffer();
+    buffer->open((QBuffer::ReadWrite));
+    buffer->write(swgFeatureSettings->asJson().toUtf8());
+    buffer->seek(0);
+
+    // Always use PATCH to avoid passing reverse API settings
+    QNetworkReply *reply = m_networkManager->sendCustomRequest(m_networkRequest, "PATCH", buffer);
+    buffer->setParent(reply);
+
+    delete swgFeatureSettings;
+}
+
+void MessageCenter::networkManagerFinished(QNetworkReply *reply)
+{
+    QNetworkReply::NetworkError replyError = reply->error();
+
+    if (replyError)
+    {
+        qWarning() << "MessageCenter::networkManagerFinished:"
+                << " error(" << (int) replyError
+                << "): " << replyError
+                << ": " << reply->errorString();
+    }
+    else
+    {
+        QString answer = reply->readAll();
+        answer.chop(1); // remove last \n
+        qDebug("MessageCenter::networkManagerFinished: reply:\n%s", answer.toStdString().c_str());
+    }
+
+    reply->deleteLater();
 }
 
 // The sinks, sources and routes of the settings in the engine
@@ -412,6 +406,17 @@ void MessageCenter::webapiFormatFeatureSettings(SWGSDRangel::SWGFeatureSettings&
     swg->setRoutes(new QString(QString::fromUtf8(MessageCenterSettings::routesToJson(settings.m_routes))));
     swg->setSinks(new QString(QString::fromUtf8(MessageCenterSettings::filesToJson(settings.m_sinks))));
     swg->setSources(new QString(QString::fromUtf8(MessageCenterSettings::filesToJson(settings.m_sources))));
+    swg->setUseReverseApi(settings.m_useReverseAPI ? 1 : 0);
+
+    if (swg->getReverseApiAddress()) {
+        *swg->getReverseApiAddress() = settings.m_reverseAPIAddress;
+    } else {
+        swg->setReverseApiAddress(new QString(settings.m_reverseAPIAddress));
+    }
+
+    swg->setReverseApiPort(settings.m_reverseAPIPort);
+    swg->setReverseApiFeatureSetIndex(settings.m_reverseAPIFeatureSetIndex);
+    swg->setReverseApiFeatureIndex(settings.m_reverseAPIFeatureIndex);
 }
 
 void MessageCenter::webapiUpdateFeatureSettings(MessageCenterSettings& settings, const QStringList& featureSettingsKeys,
@@ -442,6 +447,21 @@ void MessageCenter::webapiUpdateFeatureSettings(MessageCenterSettings& settings,
     }
     if (featureSettingsKeys.contains("sources") && swg->getSources()) {
         settings.m_sources = MessageCenterSettings::filesFromJson(swg->getSources()->toUtf8());
+    }
+    if (featureSettingsKeys.contains("useReverseAPI")) {
+        settings.m_useReverseAPI = swg->getUseReverseApi() != 0;
+    }
+    if (featureSettingsKeys.contains("reverseAPIAddress") && swg->getReverseApiAddress()) {
+        settings.m_reverseAPIAddress = *swg->getReverseApiAddress();
+    }
+    if (featureSettingsKeys.contains("reverseAPIPort")) {
+        settings.m_reverseAPIPort = swg->getReverseApiPort();
+    }
+    if (featureSettingsKeys.contains("reverseAPIFeatureSetIndex")) {
+        settings.m_reverseAPIFeatureSetIndex = swg->getReverseApiFeatureSetIndex();
+    }
+    if (featureSettingsKeys.contains("reverseAPIFeatureIndex")) {
+        settings.m_reverseAPIFeatureIndex = swg->getReverseApiFeatureIndex();
     }
 }
 
@@ -591,103 +611,45 @@ int MessageCenter::webapiActionsPost(const QStringList& featureActionsKeys, SWGS
         }
 
         auto text = [](QString *s) { return s ? *s : QString(); };
-        QString protocol = text(post->getProtocol()).toLower();
-        QString type = text(post->getType()).toLower();
         QString polarity = text(post->getPolarity()).toLower();
-        QString address = text(post->getAddress()).trimmed();
-        QString transmitter = text(post->getTransmitter());
+        RadioPagingPage page;
+        page.m_id = text(post->getId());
+        page.m_transmitter = text(post->getTransmitter());
+        page.m_protocol = text(post->getProtocol()).toLower();
+        page.m_type = text(post->getType()).toLower();
+        page.m_address = text(post->getAddress()).trimmed();
+        page.m_function = post->getFunction();
+        page.m_priority = post->getPriority() != 0;
+        page.m_text = text(post->getText());
+        page.m_voiceFile = text(post->getVoiceFile());
+        page.m_speed = post->getSpeed();
+        page.m_polarity = polarity.isEmpty() ? -1 : (polarity == "normal") ? 0 : (polarity == "inverted") ? 1 : -2;
+        page.m_shortType = post->getShortType();
+        page.m_source = post->getSource();
+        page.m_blocking = (post->getBlocking() == 0) ? 1 : post->getBlocking();
+        page.m_mailDrop = post->getMailDrop() != 0;
+        page.m_rightToLeft = post->getRightToLeft() != 0;
+        page.m_headerMessage = post->getHeaderMessage() != 0;
+        page.m_statusInfo = post->getStatusInfo() != 0;
+        page.m_secureType = post->getSecureType();
+        page.m_retransmit = post->getRetransmit();
+        page.m_retransmitInterval = post->getRetransmitInterval();
+        page.m_sendDelay = post->getSendDelay();
 
-        if (transmitter.isEmpty())
+        if (page.m_transmitter.isEmpty())
         {
             errorMessage = "A page needs a transmitter (its alias)";
             return 400;
         }
-        if ((protocol != "pocsag") && (protocol != "flex") && (protocol != "gsc"))
-        {
-            errorMessage = "Protocol must be pocsag, flex or gsc";
-            return 400;
-        }
-        if (!type.isEmpty() && (type != "alphanumeric") && (type != "numeric") && (type != "tone") && (type != "voice")
-         && !(((type == "short_message") || (type == "binary") || (type == "secure")) && (protocol == "flex")))
-        {
-            errorMessage = "Type must be alphanumeric, numeric, tone or voice (FLEX: or short_message, binary, secure)";
-            return 400;
-        }
-        if ((type == "voice") && ((protocol != "gsc") || text(post->getVoiceFile()).isEmpty()))
-        {
-            errorMessage = "A voice page is GSC and needs the WAV file (voiceFile)";
-            return 400;
-        }
-        bool addressOk = false;
-        qlonglong addressValue = address.toLongLong(&addressOk);
 
-        if (!addressOk || (addressValue < 0))
-        {
-            errorMessage = "The address must be a number";
-            return 400;
-        }
-        if ((post->getFunction() < 0) || (post->getFunction() > 3))
-        {
-            errorMessage = "Function must be 0 to 3";
-            return 400;
-        }
-        if (!polarity.isEmpty() && (polarity != "normal") && (polarity != "inverted"))
-        {
-            errorMessage = "Polarity must be normal or inverted";
+        // The limits of the page here; the transmitter checks the rest (its mode, numbering, the encoder)
+        errorMessage = page.check();
+
+        if (!errorMessage.isEmpty()) {
             return 400;
         }
 
-        if ((type == "short_message")
-         && ((post->getShortType() < 0) || (post->getShortType() > 2) || (post->getSource() < 0) || (post->getSource() > 7)))
-        {
-            errorMessage = "FLEX short message: shortType 0 (numeric), 1 (source) or 2 (numbered), source 0 to 7";
-            return 400;
-        }
-        if ((type == "binary") && ((post->getBlocking() < 0) || (post->getBlocking() > 16)))
-        {
-            errorMessage = "FLEX binary message: blocking 1 to 16 (0: 1)";
-            return 400;
-        }
-        if ((type == "secure") && ((post->getSecureType() < 0) || (post->getSecureType() > 2)))
-        {
-            errorMessage = "FLEX secure message: secureType 0 (alphanumeric), 1 (data defined separately) or 2 (binary)";
-            return 400;
-        }
-
-        MessageRecord record = pageRecord(transmitter, protocol, address, post->getFunction(), post->getPriority(), type,
-            text(post->getText()), text(post->getVoiceFile()), post->getSpeed(), polarity);
-        record.m_id = text(post->getId());
-
-        if (type == "short_message")
-        {
-            record.m_protocolData.insert("short_type", post->getShortType());
-            record.m_protocolData.insert("short_source", post->getSource());
-        }
-        else if (type == "binary")
-        {
-            // The keys of the received records
-            record.m_protocolData.insert("blocking", (post->getBlocking() == 0) ? 1 : post->getBlocking());
-            record.m_protocolData.insert("maildrop", post->getMailDrop() != 0);
-            record.m_protocolData.insert("display_direction", (post->getRightToLeft() != 0) ? "rtl" : "ltr");
-            record.m_protocolData.insert("header_message", post->getHeaderMessage() != 0);
-            record.m_protocolData.insert("status_info", post->getStatusInfo() != 0);
-        }
-        else if (type == "secure")
-        {
-            record.m_protocolData.insert("secure_type", post->getSecureType());
-        }
-
-        // Scheduling of the transmitter, checked by it (network mode, ranges, numbered FLEX types)
-        if (post->getRetransmit() != 0) {
-            record.m_protocolData.insert("retransmit", post->getRetransmit());
-        }
-        if (post->getRetransmitInterval() >= 0.0f) {
-            record.m_protocolData.insert("retransmit_interval", (double) post->getRetransmitInterval());
-        }
-        if (post->getSendDelay() != 0.0f) {
-            record.m_protocolData.insert("send_delay", (double) post->getSendDelay());
-        }
-        m_inputMessageQueue.push(MsgPostPage::create(record));
+        m_inputMessageQueue.push(MsgPostPage::create(page.toRecord()));
         return 202;
     }
     if (featureActionsKeys.contains("requeue") && swg->getRequeue())

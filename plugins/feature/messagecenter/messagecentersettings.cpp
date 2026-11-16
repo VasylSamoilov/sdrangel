@@ -42,6 +42,11 @@ void MessageCenterSettings::resetToDefaults()
     m_routes.clear();
     m_sinks.clear();
     m_sources.clear();
+    m_useReverseAPI = false;
+    m_reverseAPIAddress = "127.0.0.1";
+    m_reverseAPIPort = 8888;
+    m_reverseAPIFeatureSetIndex = 0;
+    m_reverseAPIFeatureIndex = 0;
     m_workspaceIndex = 0;
     m_geometryBytes.clear();
     m_hidden = false;
@@ -141,6 +146,11 @@ QByteArray MessageCenterSettings::serialize() const
     s.writeS32(10, m_workspaceIndex);
     s.writeBlob(11, m_geometryBytes);
     s.writeBool(12, m_hidden);
+    s.writeBool(13, m_useReverseAPI);
+    s.writeString(14, m_reverseAPIAddress);
+    s.writeU32(15, m_reverseAPIPort);
+    s.writeU32(16, m_reverseAPIFeatureSetIndex);
+    s.writeU32(17, m_reverseAPIFeatureIndex);
 
     return s.final();
 }
@@ -183,6 +193,21 @@ bool MessageCenterSettings::deserialize(const QByteArray& data)
         d.readS32(10, &m_workspaceIndex, 0);
         d.readBlob(11, &m_geometryBytes);
         d.readBool(12, &m_hidden, false);
+        d.readBool(13, &m_useReverseAPI, false);
+        d.readString(14, &m_reverseAPIAddress, "127.0.0.1");
+        uint32_t utmp;
+        d.readU32(15, &utmp, 0);
+
+        if ((utmp > 1023) && (utmp < 65535)) {
+            m_reverseAPIPort = utmp;
+        } else {
+            m_reverseAPIPort = 8888;
+        }
+
+        d.readU32(16, &utmp, 0);
+        m_reverseAPIFeatureSetIndex = utmp > 99 ? 99 : utmp;
+        d.readU32(17, &utmp, 0);
+        m_reverseAPIFeatureIndex = utmp > 99 ? 99 : utmp;
         return true;
     }
 
@@ -215,6 +240,21 @@ void MessageCenterSettings::applySettings(const QStringList& settingsKeys, const
     }
     if (settingsKeys.contains("sources")) {
         m_sources = settings.m_sources;
+    }
+    if (settingsKeys.contains("useReverseAPI")) {
+        m_useReverseAPI = settings.m_useReverseAPI;
+    }
+    if (settingsKeys.contains("reverseAPIAddress")) {
+        m_reverseAPIAddress = settings.m_reverseAPIAddress;
+    }
+    if (settingsKeys.contains("reverseAPIPort")) {
+        m_reverseAPIPort = settings.m_reverseAPIPort;
+    }
+    if (settingsKeys.contains("reverseAPIFeatureSetIndex")) {
+        m_reverseAPIFeatureSetIndex = settings.m_reverseAPIFeatureSetIndex;
+    }
+    if (settingsKeys.contains("reverseAPIFeatureIndex")) {
+        m_reverseAPIFeatureIndex = settings.m_reverseAPIFeatureIndex;
     }
     if (settingsKeys.contains("workspaceIndex")) {
         m_workspaceIndex = settings.m_workspaceIndex;

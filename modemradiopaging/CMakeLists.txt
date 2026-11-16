@@ -18,6 +18,7 @@ set(modemradiopaging_SOURCES
     radiopagingtxstream.cpp
     radiopagingwav.cpp
     radiopagingvoicestore.cpp
+    radiopagingpage.cpp
 )
 
 set(modemradiopaging_HEADERS
@@ -39,11 +40,13 @@ set(modemradiopaging_HEADERS
     radiopagingtxstream.h
     radiopagingwav.h
     radiopagingvoicestore.h
+    radiopagingpage.h
 )
 
 include_directories(
     ${CMAKE_SOURCE_DIR}/exports
     ${CMAKE_SOURCE_DIR}/sdrbase
+    ${CMAKE_SOURCE_DIR}/swagger/sdrangel/code/qt5/client
 )
 
 add_library(modemradiopaging
@@ -53,13 +56,14 @@ add_library(modemradiopaging
 target_link_libraries(modemradiopaging
     Qt::Core
     sdrbase
+    swagger
 )
 
 install(TARGETS modemradiopaging DESTINATION ${INSTALL_LIB_DIR})
 
 # Self tests of the codecs and the demodulator, not built by default:
-#   cmake --build <build dir> --target radiopagingtest radiopaginggsctest radiopagingflextest radiopagingflexdecodertest radiopagingflexreceivertest radiopagingfskmodtest radiopagingtxstreamtest
-foreach(radiopaging_test radiopagingtest radiopaginggsctest radiopagingflextest radiopagingflexdecodertest radiopagingflexreceivertest radiopagingfskmodtest radiopagingtxstreamtest)
+#   cmake --build <build dir> --target radiopagingtest radiopaginggsctest radiopagingflextest radiopagingflexdecodertest radiopagingflexreceivertest radiopagingfskmodtest radiopagingtxstreamtest radiopagingpagetest
+foreach(radiopaging_test radiopagingtest radiopaginggsctest radiopagingflextest radiopagingflexdecodertest radiopagingflexreceivertest radiopagingfskmodtest radiopagingtxstreamtest radiopagingpagetest)
     add_executable(${radiopaging_test} EXCLUDE_FROM_ALL test/${radiopaging_test}.cpp)
     target_link_libraries(${radiopaging_test} modemradiopaging)
     target_include_directories(${radiopaging_test} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test)
