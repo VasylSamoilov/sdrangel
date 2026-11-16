@@ -21,6 +21,8 @@
 #include <memory>
 #include <vector>
 
+#include <QDateTime>
+
 #include "audio/audiofifo.h"
 #include "channel/channelgui.h"
 #include "util/messagerecord.h"
@@ -97,6 +99,9 @@ private:
     void displayProtocol();
     bool messageIsFlex() const;
     void updateMessageTypes();
+    void fillTimeZones();
+    QDateTime flexTimeNow() const;
+    void displayTime(bool flex);
     //! The text field of the message: the path of a sound file (with the browse button) for a voice page
     void displayMessageType();
 
@@ -148,6 +153,13 @@ private slots:
     void on_ssidLocalId_valueChanged(int value);
     void on_ssidCountry_valueChanged(int value);
     void on_ssidFlags_valueChanged(int value);
+    void on_flexTime_toggled(bool checked);
+    void on_flexTimeReference_currentIndexChanged(int index);
+    void on_flexTimeDaylightSaving_toggled(bool checked);
+    void on_flexTimeSendZone_toggled(bool checked);
+    void on_flexTimeZone_currentIndexChanged(int index);
+    void on_flexTimeClock_toggled(bool checked);
+    void on_flexTimeSet_editingFinished();
     void on_voiceSeconds_valueChanged(int value);
     void on_mixPocsag_toggled(bool checked);
     void on_mixShared_toggled(bool checked);

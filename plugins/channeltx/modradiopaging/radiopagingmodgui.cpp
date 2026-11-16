@@ -16,6 +16,7 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include <QDateTime>
+#include <QDateTimeEdit>
 #include <QDebug>
 #include <QFileDialog>
 #include <QAction>
@@ -384,6 +385,145 @@ void RadioPagingModGUI::on_ssidFlags_valueChanged(int value)
 {
     m_settings.m_ssidTrafficFlags = value;
     applySettings(QStringList("ssidTrafficFlags"));
+}
+
+// FLEX date and time: the zones of STD-43A Table 3.7.2-3, west to east
+void RadioPagingModGUI::fillTimeZones()
+{
+    QList<int> zones;
+
+    for (int code = 0; code < 32; code++)
+    {
+        int minutes;
+
+        if (RadioPagingFlex::timeZoneMinutes((unsigned) code, minutes)) {
+            zones.append(minutes);
+        }
+    }
+
+    std::sort(zones.begin(), zones.end());
+    QSignalBlocker blocker(ui->flexTimeZone);
+    ui->flexTimeZone->clear();
+
+    for (int minutes : zones)
+    {
+        ui->flexTimeZone->addItem(QString("UTC%1%2:%3").arg(minutes < 0 ? "-" : "+").arg(std::abs(minutes) / 60, 2, 10, QChar('0'))
+            .arg(std::abs(minutes) % 60, 2, 10, QChar('0')), minutes);
+    }
+}
+
+// Time sent now (local, as set by the settings): the grid time plus the offset, the zone and daylight saving
+QDateTime RadioPagingModGUI::flexTimeNow() const
+{
+    qint64 seconds = QDateTime::currentSecsSinceEpoch() + m_settings.m_flexTimeOffsetSeconds
+        + (qint64) (m_settings.m_flexTimeZoneMinutes + (m_settings.m_flexTimeDaylightSaving ? 60 : 0)) * 60;
+    return QDateTime::fromSecsSinceEpoch(seconds, Qt::UTC);
+}
+
+void RadioPagingModGUI::displayTime(bool flex)
+{
+    QSignalBlocker timeBlocker(ui->flexTime);
+    QSignalBlocker referenceBlocker(ui->flexTimeReference);
+    QSignalBlocker dstBlocker(ui->flexTimeDaylightSaving);
+    QSignalBlocker sendZoneBlocker(ui->flexTimeSendZone);
+    QSignalBlocker zoneBlocker(ui->flexTimeZone);
+    QSignalBlocker clockBlocker(ui->flexTimeClock);
+    QSignalBlocker setBlocker(ui->flexTimeSet);
+
+    for (QWidget *w : QList<QWidget*>({ui->flexTime, ui->flexTimeReference, ui->flexTimeDaylightSaving, ui->flexTimeSendZone,
+            ui->flexTimeZone, ui->flexTimeClock, ui->flexTimeSet})) {
+        w->setVisible(flex);
+    }
+
+    ui->flexTime->setChecked(m_settings.m_flexTime);
+    ui->flexTimeReference->setCurrentIndex(m_settings.m_flexTimeFrameZero ? 0 : 1);
+    ui->flexTimeDaylightSaving->setChecked(m_settings.m_flexTimeDaylightSaving);
+    ui->flexTimeSendZone->setChecked(m_settings.m_flexTimeSendZone);
+    int zoneIndex = ui->flexTimeZone->findData(m_settings.m_flexTimeZoneMinutes);
+    ui->flexTimeZone->setCurrentIndex((zoneIndex >= 0) ? zoneIndex : ui->flexTimeZone->findData(0));
+    bool clock = (m_settings.m_flexTimeOffsetSeconds == 0);
+    ui->flexTimeClock->setChecked(clock);
+    ui->flexTimeSet->setDateTime(flexTimeNow());
+
+    for (QWidget *w : QList<QWidget*>({ui->flexTimeReference, ui->flexTimeDaylightSaving, ui->flexTimeSendZone, ui->flexTimeZone,
+            ui->flexTimeClock})) {
+        w->setEnabled(m_settings.m_flexTime);
+    }
+
+    ui->flexTimeSet->setEnabled(m_settings.m_flexTime && !clock);
+}
+
+void RadioPagingModGUI::on_flexTime_toggled(bool checked)
+{
+    m_settings.m_flexTime = checked;
+    applySettings(QStringList("flexTime"));
+    displayTime(true);
+}
+
+void RadioPagingModGUI::on_flexTimeReference_currentIndexChanged(int index)
+{
+    m_settings.m_flexTimeFrameZero = (index == 0);
+    applySettings(QStringList("flexTimeFrameZero"));
+}
+
+void RadioPagingModGUI::on_flexTimeDaylightSaving_toggled(bool checked)
+{
+    // The time shown and sent keeps its value when Clock is off: the offset takes back the hour
+    if (m_settings.m_flexTimeOffsetSeconds != 0) {
+        m_settings.m_flexTimeOffsetSeconds += checked ? -3600 : 3600;
+    }
+
+    m_settings.m_flexTimeDaylightSaving = checked;
+    applySettings(QStringList({"flexTimeDaylightSaving", "flexTimeOffsetSeconds"}));
+    displayTime(true);
+}
+
+void RadioPagingModGUI::on_flexTimeSendZone_toggled(bool checked)
+{
+    m_settings.m_flexTimeSendZone = checked;
+    applySettings(QStringList("flexTimeSendZone"));
+}
+
+void RadioPagingModGUI::on_flexTimeZone_currentIndexChanged(int index)
+{
+    int minutes = ui->flexTimeZone->itemData(index).toInt();
+
+    // The time shown and sent keeps its value when Clock is off: the offset takes back the change of zone
+    if (m_settings.m_flexTimeOffsetSeconds != 0) {
+        m_settings.m_flexTimeOffsetSeconds -= (qint64) (minutes - m_settings.m_flexTimeZoneMinutes) * 60;
+    }
+
+    m_settings.m_flexTimeZoneMinutes = minutes;
+    applySettings(QStringList({"flexTimeZoneMinutes", "flexTimeOffsetSeconds"}));
+    displayTime(true);
+}
+
+void RadioPagingModGUI::on_flexTimeClock_toggled(bool checked)
+{
+    if (checked) {
+        m_settings.m_flexTimeOffsetSeconds = 0;
+    } else {
+        // From the time of the clock, set it then; 1 s keeps it apart from the clock (offset 0)
+        m_settings.m_flexTimeOffsetSeconds = 1;
+    }
+
+    applySettings(QStringList("flexTimeOffsetSeconds"));
+    displayTime(true);
+}
+
+void RadioPagingModGUI::on_flexTimeSet_editingFinished()
+{
+    // Local time wanted now (the editor shows the local time as such): the offset is what it lacks from the
+    // clock with the zone and daylight saving
+    QDateTime shown = ui->flexTimeSet->dateTime();
+    shown.setTimeSpec(Qt::UTC);
+    qint64 wanted = shown.toSecsSinceEpoch();
+    qint64 offset = wanted - QDateTime::currentSecsSinceEpoch()
+        - (qint64) (m_settings.m_flexTimeZoneMinutes + (m_settings.m_flexTimeDaylightSaving ? 60 : 0)) * 60;
+
+    // Offset 0 is the clock: a time set equal to the clock is kept 1 s apart
+    m_settings.m_flexTimeOffsetSeconds = (offset == 0) ? 1 : offset;
+    applySettings(QStringList("flexTimeOffsetSeconds"));
 }
 
 void RadioPagingModGUI::on_voiceSeconds_valueChanged(int value)
@@ -1018,6 +1158,7 @@ RadioPagingModGUI::RadioPagingModGUI(PluginAPI* pluginAPI, DeviceUISet *deviceUI
     m_settings.setRollupState(&m_rollupState);
 
     displayProtocolAvailability();
+    fillTimeZones();
     displaySettings();
     makeUIConnections();
     applySettings(QStringList(), true);
@@ -1182,6 +1323,8 @@ void RadioPagingModGUI::displayProtocol()
     for (QWidget *w : QList<QWidget*>({ui->ssidZone, ui->ssidLocalId, ui->ssidCountry, ui->ssidFlags})) {
         w->setEnabled(m_settings.m_flexRoaming);
     }
+
+    displayTime(flex);
 
     ui->collapse->setValue(m_settings.m_flexCollapse);
     // Collapse: the re-synchronization length; network: also the schedule of the frames
@@ -1486,6 +1629,13 @@ void RadioPagingModGUI::makeUIConnections()
     QObject::connect(ui->ssidLocalId, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_ssidLocalId_valueChanged);
     QObject::connect(ui->ssidCountry, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_ssidCountry_valueChanged);
     QObject::connect(ui->ssidFlags, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_ssidFlags_valueChanged);
+    QObject::connect(ui->flexTime, &QCheckBox::toggled, this, &RadioPagingModGUI::on_flexTime_toggled);
+    QObject::connect(ui->flexTimeReference, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_flexTimeReference_currentIndexChanged);
+    QObject::connect(ui->flexTimeDaylightSaving, &QCheckBox::toggled, this, &RadioPagingModGUI::on_flexTimeDaylightSaving_toggled);
+    QObject::connect(ui->flexTimeSendZone, &QCheckBox::toggled, this, &RadioPagingModGUI::on_flexTimeSendZone_toggled);
+    QObject::connect(ui->flexTimeZone, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_flexTimeZone_currentIndexChanged);
+    QObject::connect(ui->flexTimeClock, &QCheckBox::toggled, this, &RadioPagingModGUI::on_flexTimeClock_toggled);
+    QObject::connect(ui->flexTimeSet, &QDateTimeEdit::editingFinished, this, &RadioPagingModGUI::on_flexTimeSet_editingFinished);
     QObject::connect(ui->voiceSeconds, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_voiceSeconds_valueChanged);
     QObject::connect(ui->mixPocsag, &QCheckBox::toggled, this, &RadioPagingModGUI::on_mixPocsag_toggled);
     QObject::connect(ui->mixShared, &QCheckBox::toggled, this, &RadioPagingModGUI::on_mixShared_toggled);

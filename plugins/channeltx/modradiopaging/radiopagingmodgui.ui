@@ -784,6 +784,80 @@
       </property>
      </widget>
     </item>
+    <item row="9" column="0">
+     <widget class="QCheckBox" name="flexTime">
+      <property name="toolTip">
+       <string>FLEX date and time: send the date, the time and the time zone in block information words 001, 010 and 101 (STD-43A 3.7.2). They fill the block information words left free in every frame (after the system ID words of roaming) and take turns when they do not all fit</string>
+      </property>
+      <property name="text">
+       <string>Time</string>
+      </property>
+     </widget>
+    </item>
+    <item row="9" column="1">
+     <widget class="QComboBox" name="flexTimeReference">
+      <property name="toolTip">
+       <string>Time sent: of frame 0 of the cycle (STD-43A 3.7.2, the pager adds 1.875 s for each frame), or of the frame that carries it (pagers that show the time as received)</string>
+      </property>
+      <item>
+       <property name="text">
+        <string>Frame 0</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>This frame</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="9" column="2">
+     <widget class="QCheckBox" name="flexTimeDaylightSaving">
+      <property name="toolTip">
+       <string>The time is daylight saving time: one hour ahead of the standard time of the zone; the time zone word has L0 = 0</string>
+      </property>
+      <property name="text">
+       <string>DST</string>
+      </property>
+     </widget>
+    </item>
+    <item row="9" column="3">
+     <widget class="QCheckBox" name="flexTimeSendZone">
+      <property name="toolTip">
+       <string>Send the time zone word (block information word 101, A = 0101): the zone, the daylight saving flag and the seconds in 1/64 minute steps</string>
+      </property>
+      <property name="text">
+       <string>Zone word</string>
+      </property>
+     </widget>
+    </item>
+    <item row="10" column="0" colspan="2">
+     <widget class="QComboBox" name="flexTimeZone">
+      <property name="toolTip">
+       <string>Time zone: offset of its standard time from UTC (STD-43A Table 3.7.2-3). The time sent is the local time</string>
+      </property>
+     </widget>
+    </item>
+    <item row="10" column="2">
+     <widget class="QCheckBox" name="flexTimeClock">
+      <property name="toolTip">
+       <string>Checked: the time of the computer clock. Unchecked: the date and time set on the right, running from now on</string>
+      </property>
+      <property name="text">
+       <string>Clock</string>
+      </property>
+     </widget>
+    </item>
+    <item row="10" column="3">
+     <widget class="QDateTimeEdit" name="flexTimeSet">
+      <property name="toolTip">
+       <string>Local date and time to send now (when Clock is unchecked); it runs on from the moment it is set</string>
+      </property>
+      <property name="displayFormat">
+       <string>yyyy-MM-dd HH:mm</string>
+      </property>
+     </widget>
+    </item>
    </layout>
   </widget>
   <widget class="QWidget" name="messageContainer" native="true">
