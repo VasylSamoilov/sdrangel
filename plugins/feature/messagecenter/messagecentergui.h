@@ -28,6 +28,7 @@
 #include <QWidget>
 
 #include "feature/featuregui.h"
+#include "gui/pagingmessagetable.h"
 #include "util/messagequeue.h"
 #include "settings/rollupstate.h"
 
@@ -88,8 +89,7 @@ private:
 
     // The log
     MessageCenterFilterWidget *m_logFilter;
-    QTableWidget *m_logTable;
-    QPushButton *m_playButton;
+    PagingMessageTable *m_logTable;
     // The endpoints and the queue
     QTableWidget *m_endpointsTable;
     QTableWidget *m_queueTable;
@@ -146,7 +146,6 @@ private slots:
     void handleInputMessages();
     void onMenuDialogCalled(const QPoint &p);
     void onWidgetRolled(QWidget* widget, bool rollDown);
-    void playSelected();
     void post();
     void pageAction(int action);
     void addRoute();

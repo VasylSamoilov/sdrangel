@@ -642,66 +642,10 @@
      </layout>
     </item>
     <item>
-     <widget class="QTableWidget" name="messages">
+     <widget class="PagingMessageTable" name="messages">
       <property name="toolTip">
-       <string>Received messages, newest at the bottom. Duplicates are greyed</string>
+       <string>Received messages, newest at the bottom. Duplicates are greyed. Right click the header to choose the columns</string>
       </property>
-      <property name="editTriggers">
-       <set>QAbstractItemView::EditTrigger::NoEditTriggers</set>
-      </property>
-      <property name="selectionBehavior">
-       <enum>QAbstractItemView::SelectionBehavior::SelectRows</enum>
-      </property>
-      <column>
-       <property name="text">
-        <string>Time</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Proto</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Rate</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Pol</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Address</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Type</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Message</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Fragment</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Info</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Errors</string>
-       </property>
-      </column>
      </widget>
     </item>
    </layout>
@@ -725,6 +669,11 @@
    <extends>QWidget</extends>
    <header>gui/levelmeter.h</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>PagingMessageTable</class>
+   <extends>QTableWidget</extends>
+   <header>gui/pagingmessagetable.h</header>
   </customwidget>
  </customwidgets>
  <resources>

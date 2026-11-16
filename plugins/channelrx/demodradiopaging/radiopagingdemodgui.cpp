@@ -94,277 +94,6 @@ bool RadioPagingDemodGUI::deserialize(const QByteArray& data)
     }
 }
 
-namespace {
-
-// Cells with chips and colours keep their HTML in this role; the display text stays plain
-// (copy, sort, width)
-const int htmlRole = Qt::UserRole + 1;
-const int voiceFileRole = Qt::UserRole + 2;     // On the time item of a voice message: the file recorded
-
-class HtmlDelegate : public QStyledItemDelegate
-{
-public:
-    using QStyledItemDelegate::QStyledItemDelegate;
-
-    void paint(QPainter *painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override
-    {
-        QString html = index.data(htmlRole).toString();
-
-        if (html.isEmpty())
-        {
-            QStyledItemDelegate::paint(painter, option, index);
-            return;
-        }
-
-        QStyleOptionViewItem opt = option;
-        initStyleOption(&opt, index);
-        opt.text.clear();
-        opt.widget->style()->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
-
-        QTextDocument doc;
-        doc.setDocumentMargin(1);
-        doc.setDefaultFont(opt.font);
-        doc.setHtml(html);
-        painter->save();
-        painter->translate(opt.rect.left(), opt.rect.top() + (opt.rect.height() - doc.size().height()) / 2);
-        doc.drawContents(painter, QRectF(0, 0, opt.rect.width(), opt.rect.height()));
-        painter->restore();
-    }
-
-    QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override
-    {
-        QString html = index.data(htmlRole).toString();
-
-        if (html.isEmpty()) {
-            return QStyledItemDelegate::sizeHint(option, index);
-        }
-
-        QTextDocument doc;
-        doc.setDocumentMargin(1);
-        doc.setDefaultFont(option.font);
-        doc.setHtml(html);
-        return QSize((int) doc.idealWidth() + 4, std::max((int) doc.size().height(), QStyledItemDelegate::sizeHint(option, index).height()));
-    }
-};
-
-QString chip(const QString& text, const QString& fg, const QString& bg)
-{
-    return QString("<span style=\"color:%1;background-color:%2;font-weight:bold\">&nbsp;%3&nbsp;</span>")
-        .arg(fg, bg, text.toHtmlEscaped());
-}
-
-// Type chips
-QString typeChip(const QString& type)
-{
-    static const QMap<QString, QPair<QString, QString>> labels = {
-        {"alphanumeric", {"ALPHA", "#a5d6a7|#1b5e20"}},
-        {"numeric", {"NUM", "#90caf9|#1a237e"}},
-        {"tone", {"TONE", "#ce93d8|#4a148c"}},
-        {"voice", {"VOICE", "#81d4fa|#01579b"}},
-        {"secure", {"SEC", "#cfd8dc|#37474f"}},
-        {"special_numeric", {"SPEC", "#90caf9|#1a237e"}},
-        {"numbered_numeric", {"NNUM", "#90caf9|#1a237e"}},
-        {"numbered_special_numeric", {"NSPEC", "#90caf9|#1a237e"}},
-        {"binary", {"BIN", "#cfd8dc|#37474f"}},
-        {"short_message", {"SMSG", "#cfd8dc|#37474f"}},
-        {"short_instruction", {"SI", "#cfd8dc|#37474f"}}
-    };
-    auto it = labels.find(type);
-    QString label = (it != labels.end()) ? it->first : type.toUpper();
-    QStringList colours = ((it != labels.end()) ? it->second : QString("#cfd8dc|#37474f")).split('|');
-    return chip(label, colours[0], colours[1]);
-}
-
-QString infoChip(const QString& text)
-{
-    return chip(text, "#b39ddb", "#2e2e2e");
-}
-
-QString checkChip(const QString& name, const QString& check)
-{
-    if (check == "ok") {
-        return chip(name + ":ok", "#66bb6a", "#2e2e2e");
-    } else if (check == "failed") {
-        return chip(name + ":bad", "#ff5252", "#2e2e2e");
-    } else if (check == "incomplete") {
-        return chip(name + ":?", "#ffca28", "#2e2e2e");
-    }
-    return QString();
-}
-
-} // namespace
-
-// Size the columns using dummy data
-void RadioPagingDemodGUI::resizeTable()
-{
-    int row = ui->messages->rowCount();
-    ui->messages->setRowCount(row + 1);
-    ui->messages->setItem(row, COL_TIME, new QTableWidgetItem("00:00:00"));
-    ui->messages->setItem(row, COL_PROTOCOL, new QTableWidgetItem("POCSAG"));
-    ui->messages->setItem(row, COL_RATE, new QTableWidgetItem("3200/4"));
-    ui->messages->setItem(row, COL_POLARITY, new QTableWidgetItem("I"));
-    ui->messages->setItem(row, COL_ADDRESS, new QTableWidgetItem("0001234567"));
-    ui->messages->setItem(row, COL_TYPE, new QTableWidgetItem("VOICE"));
-    ui->messages->setItem(row, COL_MESSAGE, new QTableWidgetItem("ABCEDGHIJKLMNOPQRSTUVWXYZABCDEFGHIJ"));
-    ui->messages->setItem(row, COL_FRAGMENT, new QTableWidgetItem("REASM 99"));
-    ui->messages->setItem(row, COL_INFO, new QTableWidgetItem("PH:A C03/F031 #99 R MD K:ok S:ok"));
-    ui->messages->setItem(row, COL_ERRORS, new QTableWidgetItem("X99"));
-    ui->messages->resizeColumnsToContents();
-    ui->messages->removeRow(row);
-}
-
-// Chips of the protocol fields of a record, plain text and HTML
-void RadioPagingDemodGUI::recordInfo(const MessageRecord& record, QString& plain, QString& html, QString& tip)
-{
-    const QVariantMap& d = record.m_protocolData;
-    QStringList items;
-    QStringList chips;
-    auto add = [&](const QString& text, const QString& chipHtml = QString()) {
-        items.append(text);
-        chips.append(chipHtml.isEmpty() ? infoChip(text) : chipHtml);
-    };
-
-    if (record.m_protocol == "pocsag")
-    {
-        add(QString("B:%1").arg(d.value("batch").toInt() + 1));
-        if (d.value("truncated").toBool()) {
-            add("TRUNC");
-        }
-    }
-    else if (record.m_protocol == "flex")
-    {
-        add(QString("PH:%1 C%2/F%3").arg(d.value("phase").toString())
-            .arg(d.value("cycle").toInt(), 2, 10, QChar('0')).arg(d.value("frame").toInt(), 3, 10, QChar('0')));
-        // The message number as the pager shows it: N + 1 (STD-43A 3.10.1.3 N)
-        if (d.value("message_number").toInt() >= 0) {
-            add(QString("#%1").arg(d.value("message_number").toInt() + 1));
-        }
-        if (d.value("retrieval").toBool()) {
-            add("R");
-        }
-        // Numbers of the address skipped before this message (R = 1): messages missed
-        if (d.contains("missed_numbers"))
-        {
-            QVariantList missed = d.value("missed_numbers").toList();
-            QString text = (missed.size() > 3)
-                ? QString("MISSED #%1-#%2 (%3)").arg(missed.first().toInt() + 1).arg(missed.last().toInt() + 1).arg(missed.size())
-                : QString("MISSED");
-
-            if (missed.size() <= 3)
-            {
-                for (const QVariant& n : missed) {
-                    text += QString(" #%1").arg(n.toInt() + 1);
-                }
-            }
-
-            add(text, chip(text, "#ef9a9a", "#3a1414"));
-        }
-        if (d.value("maildrop").toBool()) {
-            add("MD");
-        }
-        if (d.value("priority").toBool()) {
-            add("PRI");
-        }
-
-        QString addrType = d.value("addr_type").toString();
-        if (addrType == "long") {
-            add("LONG");
-        } else if ((addrType != "short") && (addrType != "temporary") && !addrType.isEmpty()) {
-            add(addrType.toUpper(), chip(addrType.toUpper(), "#ce93d8", "#2e2e2e"));
-        }
-
-        // Network ID, or a system message of the NID (the NID change instruction has an unpublished layout)
-        if (d.contains("nid_service_area"))
-        {
-            add(QString("NID A%1 M%2 T%3").arg(d.value("nid_service_area").toInt()).arg(d.value("nid_multiplier").toInt())
-                .arg(d.value("nid_traffic_flags").toInt(), 4, 2, QChar('0')));
-        }
-        if (d.value("nid_change").toBool()) {
-            add("NID CHG");
-        } else if (d.value("nid_system_message").toBool()) {
-            add("NID MSG");
-        }
-        if (d.contains("hex_nibble_bits"))
-        {
-            add(QString("HEX%1 %2 %3b").arg(d.value("hex_nibble_bits").toInt())
-                .arg(d.value("hex_bit_order").toString() == "lsb_first" ? "LSB" : "MSB").arg(d.value("hex_bits").toInt()));
-        }
-        if (d.value("payload_unknown").toBool()) {
-            add("NO LAYOUT");
-        }
-        if (d.contains("fragment_control") && (d.value("fragment_control").toString() != "00")) {
-            add(QString("UV%1").arg(d.value("fragment_control").toString()));
-        }
-        if (d.value("nul_error").toBool()) {
-            add("NUL?");
-        }
-        if (d.contains("blocking"))
-        {
-            add(QString("B%1").arg(d.value("blocking").toInt()));
-            add(d.value("display_direction").toString() == "rtl" ? "RTL" : "LTR");
-            if (d.value("header_message").toBool()) {
-                add("HDR");
-            }
-            if (d.value("status_info").toBool()) {
-                add("STAT");
-            }
-        }
-        if (d.contains("secure_type")) {
-            add(QString("T%1%2").arg(d.value("secure_type").toInt() >> 1 & 1).arg(d.value("secure_type").toInt() & 1));
-        }
-        if (d.value("registration_ack").toBool()) {
-            add("REGACK");
-        }
-
-        if (d.contains("group_slot"))
-        {
-            QStringList members = d.value("group_capcodes").toStringList();
-            bool tracked = d.value("group_tracked").toBool();
-            QString g = QString("G%1[%2]").arg(d.value("group_slot").toInt()).arg(tracked ? QString::number(members.size()) : QString("?"));
-            add(g, chip(g, "#80cbc4", "#103a35"));
-            tip = tracked ? QString("G%1 members: %2").arg(d.value("group_slot").toInt()).arg(members.join(", "))
-                          : QString("G%1: the group assignment was not received").arg(d.value("group_slot").toInt());
-        }
-
-        QString k = checkChip("K", d.value("checksum").toString());
-        if (!k.isEmpty()) {
-            add(QString("K:%1").arg(d.value("checksum").toString()), k);
-        }
-        QString s = checkChip("S", d.value("signature").toString());
-        if (!s.isEmpty()) {
-            add(QString("S:%1").arg(d.value("signature").toString()), s);
-        }
-    }
-    else if (record.m_protocol == "gsc")
-    {
-        if (d.value("non_battery_saver").toBool()) {
-            add("NBS");
-        } else if (d.value("batch_mode").toBool()) {
-            add("BATCH");
-        }
-        add(QString("S:%1").arg(d.value("slot").toInt()));
-        if (d.contains("checksum_passed")) {
-            add(d.value("checksum_passed").toBool() ? "CK:ok" : "CK:bad",
-                checkChip("CK", d.value("checksum_passed").toBool() ? "ok" : "failed"));
-        }
-        if (d.value("interleaved").toBool()) {
-            add("INTL");
-        }
-        if (d.value("truncated").toBool()) {
-            add("TRUNC");
-        }
-    }
-
-    if (record.m_duplicate == MessageRecord::DuplicateDup) {
-        add("DUP", chip("DUP", "#bbbbbb", "#3a3a3a"));
-    } else if (record.m_duplicate == MessageRecord::DuplicateDupPlus) {
-        add("DUP+", chip("DUP+", "#66bb6a", "#3a3a3a"));
-    }
-
-    plain = items.join(" ");
-    html = chips.join(" ");
-}
-
 bool RadioPagingDemodGUI::handleMessage(const Message& message)
 {
     if (RadioPagingDemod::MsgConfigureRadioPagingDemod::match(message))
@@ -381,7 +110,7 @@ bool RadioPagingDemodGUI::handleMessage(const Message& message)
     else if (MainCore::MsgMessageRecord::match(message))
     {
         const MainCore::MsgMessageRecord& msg = (const MainCore::MsgMessageRecord&) message;
-        recordReceived(msg.getRecord());
+        ui->messages->addRecord(msg.getRecord());
         return true;
     }
     else if (DSPSignalNotification::match(message))
@@ -396,148 +125,6 @@ bool RadioPagingDemodGUI::handleMessage(const Message& message)
     }
 
     return false;
-}
-
-// Newest message at the bottom, the view follows while it is at the bottom. The end of a voice
-// message updates the row of its voice page. Duplicates are greyed
-void RadioPagingDemodGUI::recordReceived(const MessageRecord& record)
-{
-    QString text = record.m_text;
-
-    if (record.m_protocolData.contains("voice_end"))
-    {
-        text = QString("voice ended: %1 after %2 s")
-            .arg(record.m_protocolData.value("voice_end").toString())
-            .arg(record.m_protocolData.value("voice_seconds").toDouble(), 0, 'f', 1);
-
-        for (int row = 0; row < ui->messages->rowCount(); row++)
-        {
-            QTableWidgetItem *item = ui->messages->item(row, COL_TIME);
-
-            if (item && (item->data(Qt::UserRole).toString() == record.m_id))
-            {
-                QTableWidgetItem *messageItem = ui->messages->item(row, COL_MESSAGE);
-                QString file = record.m_protocolData.value("voice_file").toString();
-
-                // The voice recorded: double-click plays it
-                if (!file.isEmpty())
-                {
-                    item->setData(voiceFileRole, file);
-                    text += " (double-click to play)";
-                }
-
-                messageItem->setText(text);
-                messageItem->setToolTip(file.isEmpty() ? text : QString("%1\n%2").arg(text).arg(file));
-                if (!messageItem->data(htmlRole).toString().isEmpty()) {
-                    messageItem->setData(htmlRole, text.toHtmlEscaped());
-                }
-                return;
-            }
-        }
-    }
-
-    const QVariantMap& d = record.m_protocolData;
-    bool duplicate = record.m_duplicate != MessageRecord::DuplicateNone;
-    QScrollBar *sb = ui->messages->verticalScrollBar();
-    bool atBottom = sb->value() == sb->maximum();
-    int row = ui->messages->rowCount();
-    ui->messages->setRowCount(row + 1);
-
-    // Duplicates are plain grey text, the others keep their chips
-    auto cell = [&](int col, const QString& plain, const QString& html = QString(), const QString& tip = QString()) {
-        QTableWidgetItem *item = new QTableWidgetItem(plain);
-        if (duplicate) {
-            item->setForeground(QColor("#777777"));
-        } else if (!html.isEmpty()) {
-            item->setData(htmlRole, html);
-        }
-        if (!tip.isEmpty()) {
-            item->setToolTip(tip);
-        }
-        ui->messages->setItem(row, col, item);
-        return item;
-    };
-
-    QDateTime dateTime = QDateTime::fromMSecsSinceEpoch(record.m_timestamp);
-    QTableWidgetItem *timeItem = cell(COL_TIME, dateTime.toString("HH:mm:ss"), QString(), dateTime.toString(Qt::ISODate));
-    timeItem->setData(Qt::UserRole, record.m_id);
-    cell(COL_PROTOCOL, record.m_protocol.toUpper());
-    cell(COL_RATE, record.m_mode);
-
-    bool inverted = record.m_polarity == MessageRecord::PolarityInverted;
-    cell(COL_POLARITY, inverted ? "I" : "N",
-        inverted ? chip("I", "#2a1f00", "#ffcc44") : chip("N", "#0d1a2a", "#88aacc"),
-        inverted ? tr("Inverted polarity") : tr("Normal polarity"));
-    cell(COL_ADDRESS, record.m_address);
-    cell(COL_TYPE, record.m_msgType, typeChip(record.m_msgType), record.m_msgType);
-
-    // Message, with the alternative decode in grey italics
-    QString message = text;
-    if (message.isEmpty() && ((record.m_msgType == "tone") || d.value("tone_only").toBool())) {
-        message = tr("(tone only)");
-    }
-    QString messageHtml = message.toHtmlEscaped();
-    QString messageTip = text;
-    QString altText = d.value("alt_text").toString();
-    if ((record.m_rawBits > 0) && !altText.isEmpty())
-    {
-        QString altType = d.value("alt_type").toString();
-        messageHtml += QString(" <i style=\"color:#888888\">[%1: %2]</i>").arg(altType.toHtmlEscaped(), altText.toHtmlEscaped());
-        messageTip += QString("\n%1: %2").arg(altType, altText);
-    }
-    cell(COL_MESSAGE, message, messageHtml, messageTip);
-
-    // Fragment: the n-th fragment received, or the reassembled message of n fragments
-    if (d.value("is_fragment").toBool())
-    {
-        QString f = QString::number(d.value("fragment_count").toInt());
-        cell(COL_FRAGMENT, f, chip(f, "#3a2a00", "#ffb74d"), tr("Fragment %1 received").arg(f));
-    }
-    else if (d.value("fragmented").toBool())
-    {
-        int n = d.value("fragment_count").toInt();
-        bool complete = d.value("complete").toBool();
-        QString f = QString("%1 %2").arg(complete ? "REASM" : "INCOMPLETE").arg(n);
-        cell(COL_FRAGMENT, f, complete ? chip(f, "#0d2a3a", "#4fc3f7") : chip(f, "#2a1000", "#ff8a65"),
-            complete ? tr("Reassembled from %1 fragments").arg(n)
-                     : tr("%1 fragments, fragments missing or timed out").arg(n));
-    }
-    else
-    {
-        cell(COL_FRAGMENT, QString());
-    }
-
-    QString infoPlain, infoHtml, infoTip;
-    recordInfo(record, infoPlain, infoHtml, infoTip);
-    cell(COL_INFO, infoPlain, infoHtml, infoTip.isEmpty() ? infoPlain : infoTip);
-
-    // Errors: X uncorrectable codewords, ~ corrected bits
-    QString errors, errorsHtml;
-    if (record.m_errorsUncorrectable > 0)
-    {
-        errors = QString("X%1").arg(record.m_errorsUncorrectable);
-        errorsHtml = QString("<span style=\"color:#ff5252;font-weight:bold\">%1</span>").arg(errors);
-    }
-    else if (record.m_errorsCorrected > 0)
-    {
-        errors = QString("~%1").arg(record.m_errorsCorrected);
-        errorsHtml = QString("<span style=\"color:#ffca28\">%1</span>").arg(errors);
-    }
-    else
-    {
-        errors = "ok";
-        errorsHtml = "<span style=\"color:#66bb6a\">ok</span>";
-    }
-    cell(COL_ERRORS, errors, errorsHtml,
-        tr("%1 bit errors corrected, %2 codewords uncorrectable").arg(record.m_errorsCorrected).arg(record.m_errorsUncorrectable));
-
-    while (ui->messages->rowCount() > m_maxRows) {
-        ui->messages->removeRow(0);
-    }
-
-    if (atBottom) {
-        ui->messages->scrollToBottom();
-    }
 }
 
 void RadioPagingDemodGUI::handleInputMessages()
@@ -640,26 +227,6 @@ void RadioPagingDemodGUI::on_gscVoiceRecord_toggled(bool checked)
 {
     m_settings.m_gscVoiceRecord = checked;
     applySettings(QStringList("gscVoiceRecord"));
-}
-
-// A voice message with a file is played with the player of the system
-void RadioPagingDemodGUI::on_messages_cellDoubleClicked(int row, int column)
-{
-    (void) column;
-    QTableWidgetItem *item = ui->messages->item(row, COL_TIME);
-    QString file = item ? item->data(voiceFileRole).toString() : QString();
-
-    if (file.isEmpty()) {
-        return;
-    }
-
-    if (!QFileInfo::exists(file))
-    {
-        QMessageBox::information(this, "Voice message", QString("%1\nis not there any more (deleted with the old voice files).").arg(file));
-        return;
-    }
-
-    QDesktopServices::openUrl(QUrl::fromLocalFile(file));
 }
 
 void RadioPagingDemodGUI::on_channelAlias_editingFinished()
@@ -902,13 +469,19 @@ RadioPagingDemodGUI::RadioPagingDemodGUI(PluginAPI* pluginAPI, DeviceUISet *devi
     connect(&m_channelMarker, SIGNAL(highlightedByCursor()), this, SLOT(channelMarkerHighlightedByCursor()));
     connect(getInputMessageQueue(), SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
 
-    ui->messages->setItemDelegate(new HtmlDelegate(ui->messages));
+    ui->messages->setMaxRows(m_maxRows);
+    ui->messages->setDefaultColumns({PagingMessageTable::ColTime, PagingMessageTable::ColProtocol, PagingMessageTable::ColRate,
+        PagingMessageTable::ColPolarity, PagingMessageTable::ColAddress, PagingMessageTable::ColType, PagingMessageTable::ColMessage,
+        PagingMessageTable::ColFragment, PagingMessageTable::ColInfo, PagingMessageTable::ColErrors});
+    connect(ui->messages, &PagingMessageTable::columnsChanged, this, [this]() {
+        m_settings.m_messageColumns = ui->messages->columns();
+        applySettings(QStringList("messageColumns"));
+    });
 
     CRightClickEnabler *audioRightClickEnabler = new CRightClickEnabler(ui->gscAudio);
     connect(audioRightClickEnabler, SIGNAL(rightClick(const QPoint &)), this, SLOT(audioSelect(const QPoint &)));
     CRightClickEnabler *recordRightClickEnabler = new CRightClickEnabler(ui->gscVoiceRecord);
     connect(recordRightClickEnabler, SIGNAL(rightClick(const QPoint &)), this, SLOT(voiceDirectorySelect(const QPoint &)));
-    resizeTable();
 
     displaySettings();
     makeUIConnections();
@@ -968,6 +541,11 @@ void RadioPagingDemodGUI::displaySettings()
     displayVoiceRecordToolTip();
     ui->volume->setValue(std::round(m_settings.m_volume * 100.0f));
     ui->volumeText->setText(QString::number(ui->volume->value()));
+
+    // The columns the user chose; the first time the usual ones
+    if (!ui->messages->setColumns(m_settings.m_messageColumns)) {
+        ui->messages->sizeColumns();
+    }
 
     updateIndexLabel();
 
@@ -1227,7 +805,6 @@ void RadioPagingDemodGUI::makeUIConnections()
     QObject::connect(ui->gscAudio, &QToolButton::toggled, this, &RadioPagingDemodGUI::on_gscAudio_toggled);
     QObject::connect(ui->gscVoiceRecord, &QToolButton::toggled, this, &RadioPagingDemodGUI::on_gscVoiceRecord_toggled);
     QObject::connect(ui->gscVoiceFiles, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_gscVoiceFiles_clicked);
-    QObject::connect(ui->messages, &QTableWidget::cellDoubleClicked, this, &RadioPagingDemodGUI::on_messages_cellDoubleClicked);
     QObject::connect(ui->channelAlias, &QLineEdit::editingFinished, this, &RadioPagingDemodGUI::on_channelAlias_editingFinished);
     QObject::connect(ui->volume, &QDial::valueChanged, this, &RadioPagingDemodGUI::on_volume_valueChanged);
     QObject::connect(ui->clearTable, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_clearTable_clicked);

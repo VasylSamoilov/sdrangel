@@ -67,19 +67,6 @@ public slots:
     void channelMarkerHighlightedByCursor();
 
 private:
-    enum MessageCol {
-        COL_TIME,
-        COL_PROTOCOL,
-        COL_RATE,
-        COL_POLARITY,
-        COL_ADDRESS,
-        COL_TYPE,
-        COL_MESSAGE,
-        COL_FRAGMENT,
-        COL_INFO,
-        COL_ERRORS
-    };
-
     static const int m_maxRows = 500;
 
     Ui::RadioPagingDemodGUI* ui;
@@ -106,13 +93,10 @@ private:
     void updateAbsoluteCenterFrequency();
     void leaveEvent(QEvent*);
     void enterEvent(EnterEventType*);
-    void resizeTable();
-    void recordReceived(const MessageRecord& record);
     void updateStatus();
     static void setStatus(QLabel *label, const RadioPagingDemodSink::Status& status, int protocol, bool sync,
         const QString& state, const QString& detail);
     static QString polarityHtml(bool inverted);
-    static void recordInfo(const MessageRecord& record, QString& plain, QString& html, QString& tip);
     static QString flexDetails(const RadioPagingDemodSink::Status& status);
     QString flexToolTip(const RadioPagingDemodSink::Status& status);
     static QString qualityHtml(const RadioPagingBerWindow& ber, bool live);
@@ -132,7 +116,6 @@ private slots:
     void on_gscAudio_toggled(bool checked);
     void on_gscVoiceRecord_toggled(bool checked);
     void on_gscVoiceFiles_clicked();
-    void on_messages_cellDoubleClicked(int row, int column);
     void on_channelAlias_editingFinished();
     void voiceDirectorySelect(const QPoint& p);
     void displayVoiceRecordToolTip();

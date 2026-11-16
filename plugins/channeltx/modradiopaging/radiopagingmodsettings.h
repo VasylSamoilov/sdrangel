@@ -102,6 +102,7 @@ struct RadioPagingModSettings
     int m_workspaceIndex;
     QByteArray m_geometryBytes;
     bool m_hidden;
+    QByteArray m_messageColumns;            //!< The columns of the log of messages: order, sizes, hidden
 
     RadioPagingModSettings();
     void resetToDefaults();

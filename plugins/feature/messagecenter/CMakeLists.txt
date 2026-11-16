@@ -77,3 +77,12 @@ if(NOT SERVER_MODE)
     target_include_directories(messagecenterenginetest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(messagecenterenginetest Qt::Core sdrbase)
 endif()
+
+# Self test of the table of paging messages (offscreen), not built by default:
+#   cmake --build <build dir> --target pagingmessagetabletest
+if(NOT SERVER_MODE)
+    add_executable(pagingmessagetabletest EXCLUDE_FROM_ALL
+        test/pagingmessagetabletest.cpp
+    )
+    target_link_libraries(pagingmessagetabletest Qt::Widgets sdrbase sdrgui)
+endif()

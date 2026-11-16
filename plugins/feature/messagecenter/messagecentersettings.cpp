@@ -50,6 +50,7 @@ void MessageCenterSettings::resetToDefaults()
     m_workspaceIndex = 0;
     m_geometryBytes.clear();
     m_hidden = false;
+    m_logColumns.clear();
 }
 
 QByteArray MessageCenterSettings::routesToJson(const std::vector<MessageCenterEngine::Route>& routes)
@@ -151,6 +152,7 @@ QByteArray MessageCenterSettings::serialize() const
     s.writeU32(15, m_reverseAPIPort);
     s.writeU32(16, m_reverseAPIFeatureSetIndex);
     s.writeU32(17, m_reverseAPIFeatureIndex);
+    s.writeBlob(18, m_logColumns);
 
     return s.final();
 }
@@ -208,6 +210,7 @@ bool MessageCenterSettings::deserialize(const QByteArray& data)
         m_reverseAPIFeatureSetIndex = utmp > 99 ? 99 : utmp;
         d.readU32(17, &utmp, 0);
         m_reverseAPIFeatureIndex = utmp > 99 ? 99 : utmp;
+        d.readBlob(18, &m_logColumns);
         return true;
     }
 
@@ -255,6 +258,9 @@ void MessageCenterSettings::applySettings(const QStringList& settingsKeys, const
     }
     if (settingsKeys.contains("reverseAPIFeatureIndex")) {
         m_reverseAPIFeatureIndex = settings.m_reverseAPIFeatureIndex;
+    }
+    if (settingsKeys.contains("logColumns")) {
+        m_logColumns = settings.m_logColumns;
     }
     if (settingsKeys.contains("workspaceIndex")) {
         m_workspaceIndex = settings.m_workspaceIndex;

@@ -67,6 +67,7 @@ struct RadioPagingDemodSettings
     int m_workspaceIndex;
     QByteArray m_geometryBytes;
     bool m_hidden;
+    QByteArray m_messageColumns;            //!< The columns of the table of messages: order, sizes, hidden
 
     static const int m_channelSampleRate = 38400;   //!< Multiple of 512, 1200, 2400, 1600, 3200 and 600 baud
     static double m_legOffsetAllowance;             //!< Offset room each side of a leg, Hz

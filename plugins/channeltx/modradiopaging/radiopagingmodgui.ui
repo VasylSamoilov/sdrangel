@@ -1387,49 +1387,10 @@
      </layout>
     </item>
     <item>
-     <widget class="QTableWidget" name="txLog">
+     <widget class="PagingMessageTable" name="txLog">
       <property name="toolTip">
-       <string>The last messages transmitted: queued, sent or dropped. Double-click a voice message to play the voice recorded</string>
+       <string>The last messages transmitted: queued, sent or dropped. Double-click a voice message to play the voice recorded. Right click the header to choose the columns</string>
       </property>
-      <property name="editTriggers">
-       <set>QAbstractItemView::NoEditTriggers</set>
-      </property>
-      <property name="selectionBehavior">
-       <enum>QAbstractItemView::SelectRows</enum>
-      </property>
-      <property name="columnCount">
-       <number>6</number>
-      </property>
-      <column>
-       <property name="text">
-        <string>Time</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Protocol</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Address</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Type</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Text</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>State</string>
-       </property>
-      </column>
      </widget>
     </item>
     <item>
@@ -1466,6 +1427,11 @@
    <extends>QWidget</extends>
    <header>gui/levelmeter.h</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>PagingMessageTable</class>
+   <extends>QTableWidget</extends>
+   <header>gui/pagingmessagetable.h</header>
   </customwidget>
  </customwidgets>
  <tabstops>

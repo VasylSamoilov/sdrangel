@@ -949,65 +949,11 @@ void RadioPagingModGUI::on_channelAlias_editingFinished()
     applySettings(QStringList("channelAlias"));
 }
 
-// The last messages transmitted, the newest first: a row per message, its state updated as it is
-// sent or dropped
+// The last messages transmitted: a row per message, its state updated as it is sent or dropped; a copy
+// (retransmission) has a row of its own
 void RadioPagingModGUI::showTx(const MessageRecord& record, const QString& status)
 {
-    const int maxRows = 100;
-    // A copy (retransmission) has a row of its own
-    const int copy = record.m_protocolData.value("retransmission", 0).toInt();
-    QString id = record.m_protocolData.value("tx_id").toString() + ((copy > 0) ? QString("/%1").arg(copy) : QString());
-    int row = -1;
-
-    for (int i = 0; i < ui->txLog->rowCount(); i++)
-    {
-        if (ui->txLog->item(i, 0) && (ui->txLog->item(i, 0)->data(Qt::UserRole).toString() == id)) {
-            row = i;
-            break;
-        }
-    }
-
-    if (row < 0)
-    {
-        ui->txLog->insertRow(0);
-        row = 0;
-
-        while (ui->txLog->rowCount() > maxRows) {
-            ui->txLog->removeRow(ui->txLog->rowCount() - 1);
-        }
-
-        for (int column = 0; column < 6; column++) {
-            ui->txLog->setItem(row, column, new QTableWidgetItem());
-        }
-    }
-
-    QString text = (record.m_msgType == "voice") ? QString("(voice)") : record.m_text;
-    QString file = record.m_protocolData.value("voice_file").toString();
-
-    if (!file.isEmpty()) {
-        text = QString("(voice %1 s) %2").arg(record.m_protocolData.value("voice_seconds").toDouble(), 0, 'f', 1).arg(QFileInfo(file).fileName());
-    }
-
-    ui->txLog->item(row, 0)->setText(QDateTime::fromMSecsSinceEpoch(record.m_timestamp).toString("HH:mm:ss"));
-    ui->txLog->item(row, 0)->setData(Qt::UserRole, id);
-    ui->txLog->item(row, 0)->setData(Qt::UserRole + 1, file);
-    ui->txLog->item(row, 1)->setText(QString("%1 %2").arg(record.m_protocol).arg(record.m_mode));
-    ui->txLog->item(row, 2)->setText(record.m_address);
-    ui->txLog->item(row, 3)->setText(record.m_msgType);
-    ui->txLog->item(row, 4)->setText(text);
-    ui->txLog->item(row, 5)->setText((copy > 0) ? QString("%1 (copy %2)").arg(status).arg(copy) : status);
-    ui->txLog->resizeColumnsToContents();
-}
-
-// A voice message is played from its file
-void RadioPagingModGUI::on_txLog_cellDoubleClicked(int row, int column)
-{
-    (void) column;
-    QString file = ui->txLog->item(row, 0) ? ui->txLog->item(row, 0)->data(Qt::UserRole + 1).toString() : QString();
-
-    if (!file.isEmpty()) {
-        QDesktopServices::openUrl(QUrl::fromLocalFile(file));
-    }
+    ui->txLog->addRecord(record, status);
 }
 
 // The files of the voice sent: the statistics of the directory, the files kept, the deletion of the old ones
@@ -1213,6 +1159,14 @@ RadioPagingModGUI::RadioPagingModGUI(PluginAPI* pluginAPI, DeviceUISet *deviceUI
 
     m_settings.setChannelMarker(&m_channelMarker);
     m_settings.setRollupState(&m_rollupState);
+
+    ui->txLog->setMaxRows(100);
+    ui->txLog->setDefaultColumns({PagingMessageTable::ColTime, PagingMessageTable::ColProtocol, PagingMessageTable::ColAddress,
+        PagingMessageTable::ColType, PagingMessageTable::ColMessage, PagingMessageTable::ColInfo, PagingMessageTable::ColState});
+    connect(ui->txLog, &PagingMessageTable::columnsChanged, this, [this]() {
+        m_settings.m_messageColumns = ui->txLog->columns();
+        applySettings(QStringList("messageColumns"));
+    });
 
     displayProtocolAvailability();
     fillTimeZones();
@@ -1619,6 +1573,11 @@ void RadioPagingModGUI::displaySettings()
     ui->rampDown->setValue(m_settings.m_rampDownMs);
     ui->rampRange->setValue(m_settings.m_rampRange);
 
+    // The columns the user chose; the first time the usual ones
+    if (!ui->txLog->setColumns(m_settings.m_messageColumns)) {
+        ui->txLog->sizeColumns();
+    }
+
     getRollupContents()->restoreState(m_rollupState);
     updateAbsoluteCenterFrequency();
     blockApplySettings(false);
@@ -1718,7 +1677,6 @@ void RadioPagingModGUI::makeUIConnections()
     QObject::connect(&m_micFifo, &AudioFifo::dataReady, this, &RadioPagingModGUI::micDataReady);
     QObject::connect(ui->channelAlias, &QLineEdit::editingFinished, this, &RadioPagingModGUI::on_channelAlias_editingFinished);
     QObject::connect(ui->voiceFiles, &QToolButton::clicked, this, &RadioPagingModGUI::on_voiceFiles_clicked);
-    QObject::connect(ui->txLog, &QTableWidget::cellDoubleClicked, this, &RadioPagingModGUI::on_txLog_cellDoubleClicked);
     m_browseAction = ui->text->addAction(style()->standardIcon(QStyle::SP_DirOpenIcon), QLineEdit::TrailingPosition);
     m_browseAction->setToolTip("Choose the sound file");
     m_browseAction->setVisible(false);

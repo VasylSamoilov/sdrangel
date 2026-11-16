@@ -104,6 +104,7 @@ void RadioPagingModSettings::resetToDefaults()
     m_reverseAPIChannelIndex = 0;
     m_workspaceIndex = 0;
     m_hidden = false;
+    m_messageColumns.clear();
 }
 
 void RadioPagingModSettings::validate()
@@ -260,6 +261,7 @@ QByteArray RadioPagingModSettings::serialize() const
     s.writeS64(58, m_flexTimeOffsetSeconds);
     s.writeBool(59, m_flexNumbering);
     s.writeS32(60, m_flexMaxMessageNumber);
+    s.writeBlob(61, m_messageColumns);
 
     return s.final();
 }
@@ -364,6 +366,7 @@ bool RadioPagingModSettings::deserialize(const QByteArray& data)
         d.readS64(58, &m_flexTimeOffsetSeconds, 0);
         d.readBool(59, &m_flexNumbering, true);
         d.readS32(60, &m_flexMaxMessageNumber, 63);
+        d.readBlob(61, &m_messageColumns);
         m_gscVoiceKeepDays = std::max(0, std::min(3650, m_gscVoiceKeepDays));
         m_gscVoiceKeepMin = std::max(0, std::min(100000, m_gscVoiceKeepMin));
 
@@ -535,6 +538,9 @@ void RadioPagingModSettings::applySettings(const QStringList& settingsKeys, cons
     }
     if (settingsKeys.contains("hidden")) {
         m_hidden = settings.m_hidden;
+    }
+    if (settingsKeys.contains("messageColumns")) {
+        m_messageColumns = settings.m_messageColumns;
     }
 }
 

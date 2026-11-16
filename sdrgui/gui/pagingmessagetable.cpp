@@ -1,0 +1,663 @@
+///////////////////////////////////////////////////////////////////////////////////
+// Copyright (C) 2026 Vasyl Samoilov <vasyl.samoilov@gmail.com>                  //
+//                                                                               //
+// This program is free software; you can redistribute it and/or modify          //
+// it under the terms of the GNU General Public License as published by          //
+// the Free Software Foundation as version 3 of the License, or                  //
+// (at your option) any later version.                                           //
+//                                                                               //
+// This program is distributed in the hope that it will be useful,               //
+// but WITHOUT ANY WARRANTY; without even the implied warranty of                //
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the                  //
+// GNU General Public License V3 for more details.                               //
+//                                                                               //
+// You should have received a copy of the GNU General Public License             //
+// along with this program. If not, see <http://www.gnu.org/licenses/>.          //
+///////////////////////////////////////////////////////////////////////////////////
+
+#include <QAction>
+#include <QApplication>
+#include <QClipboard>
+#include <QDateTime>
+#include <QDesktopServices>
+#include <QFileInfo>
+#include <QHeaderView>
+#include <QJsonDocument>
+#include <QMap>
+#include <QMessageBox>
+#include <QPainter>
+#include <QScrollBar>
+#include <QStyledItemDelegate>
+#include <QTextDocument>
+#include <QUrl>
+
+#include <algorithm>
+
+#include "pagingmessagetable.h"
+
+namespace {
+
+// The cells with chips and colours keep their HTML in this role; the display text stays plain (copy, width)
+const int htmlRole = Qt::UserRole + 1;
+const int voiceFileRole = Qt::UserRole + 2;     // On the time item of a voice message: the file recorded
+const int jsonRole = Qt::UserRole + 3;          // On the time item: the record as JSON
+
+class HtmlDelegate : public QStyledItemDelegate
+{
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    void paint(QPainter *painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override
+    {
+        QString html = index.data(htmlRole).toString();
+
+        if (html.isEmpty())
+        {
+            QStyledItemDelegate::paint(painter, option, index);
+            return;
+        }
+
+        QStyleOptionViewItem opt = option;
+        initStyleOption(&opt, index);
+        opt.text.clear();
+        opt.widget->style()->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
+
+        QTextDocument doc;
+        doc.setDocumentMargin(1);
+        doc.setDefaultFont(opt.font);
+        doc.setHtml(html);
+        painter->save();
+        painter->translate(opt.rect.left(), opt.rect.top() + (opt.rect.height() - doc.size().height()) / 2);
+        doc.drawContents(painter, QRectF(0, 0, opt.rect.width(), opt.rect.height()));
+        painter->restore();
+    }
+
+    QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override
+    {
+        QString html = index.data(htmlRole).toString();
+
+        if (html.isEmpty()) {
+            return QStyledItemDelegate::sizeHint(option, index);
+        }
+
+        QTextDocument doc;
+        doc.setDocumentMargin(1);
+        doc.setDefaultFont(option.font);
+        doc.setHtml(html);
+        return QSize((int) doc.idealWidth() + 4, std::max((int) doc.size().height(), QStyledItemDelegate::sizeHint(option, index).height()));
+    }
+};
+
+QString chip(const QString& text, const QString& fg, const QString& bg)
+{
+    return QString("<span style=\"color:%1;background-color:%2;font-weight:bold\">&nbsp;%3&nbsp;</span>")
+        .arg(fg, bg, text.toHtmlEscaped());
+}
+
+QString typeChip(const QString& type)
+{
+    static const QMap<QString, QPair<QString, QString>> labels = {
+        {"alphanumeric", {"ALPHA", "#a5d6a7|#1b5e20"}},
+        {"numeric", {"NUM", "#90caf9|#1a237e"}},
+        {"tone", {"TONE", "#ce93d8|#4a148c"}},
+        {"voice", {"VOICE", "#81d4fa|#01579b"}},
+        {"secure", {"SEC", "#cfd8dc|#37474f"}},
+        {"special_numeric", {"SPEC", "#90caf9|#1a237e"}},
+        {"numbered_numeric", {"NNUM", "#90caf9|#1a237e"}},
+        {"numbered_special_numeric", {"NSPEC", "#90caf9|#1a237e"}},
+        {"binary", {"BIN", "#cfd8dc|#37474f"}},
+        {"short_message", {"SMSG", "#cfd8dc|#37474f"}},
+        {"short_instruction", {"SI", "#cfd8dc|#37474f"}}
+    };
+    auto it = labels.find(type);
+    QString label = (it != labels.end()) ? it->first : type.toUpper();
+    QStringList colours = ((it != labels.end()) ? it->second : QString("#cfd8dc|#37474f")).split('|');
+    return chip(label, colours[0], colours[1]);
+}
+
+QString infoChip(const QString& text)
+{
+    return chip(text, "#b39ddb", "#2e2e2e");
+}
+
+QString checkChip(const QString& name, const QString& check)
+{
+    if (check == "ok") {
+        return chip(name + ":ok", "#66bb6a", "#2e2e2e");
+    } else if (check == "failed") {
+        return chip(name + ":bad", "#ff5252", "#2e2e2e");
+    } else if (check == "incomplete") {
+        return chip(name + ":?", "#ffca28", "#2e2e2e");
+    }
+    return QString();
+}
+
+const char *headers[PagingMessageTable::ColumnCount] = {
+    "Time", "Dir", "Channel", "Proto", "Rate", "Pol", "Address", "Type", "Message", "Fragment", "Info", "Errors", "State"
+};
+
+} // namespace
+
+PagingMessageTable::PagingMessageTable(QWidget *parent) :
+    QTableWidget(0, ColumnCount, parent),
+    m_columnMenu(new QMenu(this))
+{
+    QStringList labels;
+
+    for (int i = 0; i < ColumnCount; i++) {
+        labels.append(headers[i]);
+    }
+
+    setHorizontalHeaderLabels(labels);
+    setEditTriggers(QAbstractItemView::NoEditTriggers);
+    setSelectionBehavior(QAbstractItemView::SelectRows);
+    setSelectionMode(QAbstractItemView::SingleSelection);
+    setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    setItemDelegate(new HtmlDelegate(this));
+    verticalHeader()->setVisible(false);
+    horizontalHeader()->setSectionsMovable(true);
+    horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
+    setContextMenuPolicy(Qt::CustomContextMenu);
+
+    connect(horizontalHeader(), &QHeaderView::customContextMenuRequested, this, &PagingMessageTable::showColumnMenu);
+    connect(horizontalHeader(), &QHeaderView::sectionMoved, this, &PagingMessageTable::columnsChanged);
+    connect(horizontalHeader(), &QHeaderView::sectionResized, this, &PagingMessageTable::columnsChanged);
+    connect(this, &QWidget::customContextMenuRequested, this, &PagingMessageTable::showRowMenu);
+    connect(this, &QTableWidget::cellDoubleClicked, this, [this](int row, int) { playVoice(row); });
+
+    m_defaultColumns = {ColTime, ColProtocol, ColAddress, ColType, ColMessage, ColInfo};
+    setDefaultColumns(m_defaultColumns);
+}
+
+void PagingMessageTable::setDefaultColumns(const QList<Column>& shown)
+{
+    m_defaultColumns = shown;
+
+    for (int i = 0; i < ColumnCount; i++) {
+        setColumnHidden(i, !shown.contains((Column) i));
+    }
+}
+
+QByteArray PagingMessageTable::columns() const
+{
+    return horizontalHeader()->saveState();
+}
+
+bool PagingMessageTable::setColumns(const QByteArray& state)
+{
+    if (state.isEmpty()) {
+        return false;
+    }
+
+    QSignalBlocker blocker(horizontalHeader());
+    return horizontalHeader()->restoreState(state);
+}
+
+// The columns sized to the usual content: a row of the longest values, taken out again
+void PagingMessageTable::sizeColumns()
+{
+    int row = rowCount();
+    setRowCount(row + 1);
+
+    const char *cells[ColumnCount] = {
+        "00:00:00", "TX", "Channel alias", "POCSAG", "3200/4", "I", "0001234567A", "VOICE",
+        "ABCEDGHIJKLMNOPQRSTUVWXYZABCDEFGHIJ", "REASM 99", "PH:A C03/F031 #99 R MD K:ok S:ok", "X99", "transmitted"
+    };
+
+    for (int c = 0; c < ColumnCount; c++) {
+        setItem(row, c, new QTableWidgetItem(cells[c]));
+    }
+
+    QSignalBlocker blocker(horizontalHeader());
+    resizeColumnsToContents();
+    removeRow(row);
+}
+
+int PagingMessageTable::findRow(const QString& id) const
+{
+    if (id.isEmpty()) {
+        return -1;
+    }
+
+    for (int row = rowCount() - 1; row >= 0; row--)
+    {
+        QTableWidgetItem *item = this->item(row, ColTime);
+
+        if (item && (item->data(Qt::UserRole).toString() == id)) {
+            return row;
+        }
+    }
+
+    return -1;
+}
+
+QString PagingMessageTable::selectedId() const
+{
+    int row = currentRow();
+    return ((row >= 0) && item(row, ColTime)) ? item(row, ColTime)->data(Qt::UserRole).toString() : QString();
+}
+
+void PagingMessageTable::selectId(const QString& id)
+{
+    int row = findRow(id);
+
+    if (row >= 0) {
+        selectRow(row);
+    }
+}
+
+QString PagingMessageTable::recordText(const MessageRecord& record)
+{
+    const QVariantMap& d = record.m_protocolData;
+
+    if (d.contains("voice_end"))
+    {
+        QString text = QString("voice ended: %1 after %2 s").arg(d.value("voice_end").toString())
+            .arg(d.value("voice_seconds").toDouble(), 0, 'f', 1);
+        return d.value("voice_file").toString().isEmpty() ? text : text + " (double-click to play)";
+    }
+    if (record.m_text.isEmpty() && (record.m_msgType == "voice"))
+    {
+        // The voice sent, recorded by its transmitter
+        return d.contains("voice_seconds") ? QString("voice, %1 s").arg(d.value("voice_seconds").toDouble(), 0, 'f', 1)
+            : QString("(voice)");
+    }
+    if (record.m_text.isEmpty() && ((record.m_msgType == "tone") || d.value("tone_only").toBool())) {
+        return QString("(tone only)");
+    }
+
+    return record.m_text;
+}
+
+// Chips of the protocol fields of a record, plain text and HTML
+void PagingMessageTable::recordInfo(const MessageRecord& record, QString& plain, QString& html, QString& tip)
+{
+    const QVariantMap& d = record.m_protocolData;
+    QStringList items;
+    QStringList chips;
+    auto add = [&](const QString& text, const QString& chipHtml = QString()) {
+        items.append(text);
+        chips.append(chipHtml.isEmpty() ? infoChip(text) : chipHtml);
+    };
+
+    if (record.m_protocol == "pocsag")
+    {
+        if (d.contains("batch")) {
+            add(QString("B:%1").arg(d.value("batch").toInt() + 1));
+        }
+        if (d.value("truncated").toBool()) {
+            add("TRUNC");
+        }
+    }
+    else if (record.m_protocol == "flex")
+    {
+        if (d.contains("phase"))
+        {
+            add(QString("PH:%1 C%2/F%3").arg(d.value("phase").toString())
+                .arg(d.value("cycle").toInt(), 2, 10, QChar('0')).arg(d.value("frame").toInt(), 3, 10, QChar('0')));
+        }
+        // The message number as the pager shows it: N + 1 (STD-43A 3.10.1.3 N)
+        if (d.contains("message_number") && (d.value("message_number").toInt() >= 0)) {
+            add(QString("#%1").arg(d.value("message_number").toInt() + 1));
+        }
+        if (d.value("retrieval").toBool()) {
+            add("R");
+        }
+        // Numbers of the address skipped before this message (R = 1): messages missed
+        if (d.contains("missed_numbers"))
+        {
+            QVariantList missed = d.value("missed_numbers").toList();
+            QString text = (missed.size() > 3)
+                ? QString("MISSED #%1-#%2 (%3)").arg(missed.first().toInt() + 1).arg(missed.last().toInt() + 1).arg(missed.size())
+                : QString("MISSED");
+
+            if (missed.size() <= 3)
+            {
+                for (const QVariant& n : missed) {
+                    text += QString(" #%1").arg(n.toInt() + 1);
+                }
+            }
+
+            add(text, chip(text, "#ef9a9a", "#3a1414"));
+        }
+        if (d.value("maildrop").toBool()) {
+            add("MD");
+        }
+        if (d.value("priority").toBool()) {
+            add("PRI");
+        }
+
+        QString addrType = d.value("addr_type").toString();
+        if (addrType == "long") {
+            add("LONG");
+        } else if ((addrType != "short") && (addrType != "temporary") && !addrType.isEmpty()) {
+            add(addrType.toUpper(), chip(addrType.toUpper(), "#ce93d8", "#2e2e2e"));
+        }
+
+        // Network ID, or a system message of the NID (the NID change instruction has an unpublished layout)
+        if (d.contains("nid_service_area"))
+        {
+            add(QString("NID A%1 M%2 T%3").arg(d.value("nid_service_area").toInt()).arg(d.value("nid_multiplier").toInt())
+                .arg(d.value("nid_traffic_flags").toInt(), 4, 2, QChar('0')));
+        }
+        if (d.value("nid_change").toBool()) {
+            add("NID CHG");
+        } else if (d.value("nid_system_message").toBool()) {
+            add("NID MSG");
+        }
+        if (d.contains("hex_nibble_bits"))
+        {
+            add(QString("HEX%1 %2 %3b").arg(d.value("hex_nibble_bits").toInt())
+                .arg(d.value("hex_bit_order").toString() == "lsb_first" ? "LSB" : "MSB").arg(d.value("hex_bits").toInt()));
+        }
+        if (d.value("payload_unknown").toBool()) {
+            add("NO LAYOUT");
+        }
+        if (d.contains("fragment_control") && (d.value("fragment_control").toString() != "00")) {
+            add(QString("UV%1").arg(d.value("fragment_control").toString()));
+        }
+        if (d.value("nul_error").toBool()) {
+            add("NUL?");
+        }
+        if (d.contains("blocking"))
+        {
+            add(QString("B%1").arg(d.value("blocking").toInt()));
+            add(d.value("display_direction").toString() == "rtl" ? "RTL" : "LTR");
+            if (d.value("header_message").toBool()) {
+                add("HDR");
+            }
+            if (d.value("status_info").toBool()) {
+                add("STAT");
+            }
+        }
+        if (d.contains("secure_type")) {
+            add(QString("T%1%2").arg(d.value("secure_type").toInt() >> 1 & 1).arg(d.value("secure_type").toInt() & 1));
+        }
+        if (d.value("registration_ack").toBool()) {
+            add("REGACK");
+        }
+
+        if (d.contains("group_slot"))
+        {
+            QStringList members = d.value("group_capcodes").toStringList();
+            bool tracked = d.value("group_tracked").toBool();
+            QString g = QString("G%1[%2]").arg(d.value("group_slot").toInt()).arg(tracked ? QString::number(members.size()) : QString("?"));
+            add(g, chip(g, "#80cbc4", "#103a35"));
+            tip = tracked ? QString("G%1 members: %2").arg(d.value("group_slot").toInt()).arg(members.join(", "))
+                          : QString("G%1: the group assignment was not received").arg(d.value("group_slot").toInt());
+        }
+
+        QString k = checkChip("K", d.value("checksum").toString());
+        if (!k.isEmpty()) {
+            add(QString("K:%1").arg(d.value("checksum").toString()), k);
+        }
+        QString s = checkChip("S", d.value("signature").toString());
+        if (!s.isEmpty()) {
+            add(QString("S:%1").arg(d.value("signature").toString()), s);
+        }
+    }
+    else if (record.m_protocol == "gsc")
+    {
+        if (d.value("non_battery_saver").toBool()) {
+            add("NBS");
+        } else if (d.value("batch_mode").toBool()) {
+            add("BATCH");
+        }
+        if (d.contains("slot")) {
+            add(QString("S:%1").arg(d.value("slot").toInt()));
+        }
+        if (d.contains("checksum_passed")) {
+            add(d.value("checksum_passed").toBool() ? "CK:ok" : "CK:bad",
+                checkChip("CK", d.value("checksum_passed").toBool() ? "ok" : "failed"));
+        }
+        if (d.value("interleaved").toBool()) {
+            add("INTL");
+        }
+        if (d.value("truncated").toBool()) {
+            add("TRUNC");
+        }
+    }
+
+    // A transmitted copy of a message sent before (retransmission)
+    if (d.contains("retransmission")) {
+        add(QString("COPY %1").arg(d.value("retransmission").toInt()), chip(QString("COPY %1").arg(d.value("retransmission").toInt()), "#ffe082", "#3a2a00"));
+    }
+
+    if (record.m_duplicate == MessageRecord::DuplicateDup) {
+        add("DUP", chip("DUP", "#bbbbbb", "#3a3a3a"));
+    } else if (record.m_duplicate == MessageRecord::DuplicateDupPlus) {
+        add("DUP+", chip("DUP+", "#66bb6a", "#3a3a3a"));
+    }
+
+    plain = items.join(" ");
+    html = chips.join(" ");
+}
+
+// The cells of a row from a record. Duplicates are plain grey text, the others keep their chips
+void PagingMessageTable::fillRow(int row, const MessageRecord& record, const QString& state)
+{
+    const QVariantMap& d = record.m_protocolData;
+    const bool duplicate = (record.m_duplicate != MessageRecord::DuplicateNone);
+
+    auto cell = [&](int col, const QString& plain, const QString& html = QString(), const QString& tip = QString()) {
+        QTableWidgetItem *item = this->item(row, col);
+
+        if (!item)
+        {
+            item = new QTableWidgetItem();
+            setItem(row, col, item);
+        }
+
+        item->setText(plain);
+        item->setData(htmlRole, (duplicate || html.isEmpty()) ? QVariant() : QVariant(html));
+        item->setToolTip(tip);
+        item->setForeground(duplicate ? QBrush(QColor("#777777")) : QBrush());
+        return item;
+    };
+
+    QDateTime dateTime = QDateTime::fromMSecsSinceEpoch(record.m_timestamp);
+    QTableWidgetItem *timeItem = cell(ColTime, dateTime.toString("HH:mm:ss"), QString(), dateTime.toString(Qt::ISODate));
+    timeItem->setData(Qt::UserRole, record.m_id);
+    timeItem->setData(voiceFileRole, d.value("voice_file").toString());
+    timeItem->setData(jsonRole, QString::fromUtf8(QJsonDocument(record.toJson()).toJson(QJsonDocument::Compact)));
+
+    bool transmitted = (record.m_direction == MessageRecord::DirectionTX);
+    cell(ColDirection, transmitted ? "TX" : "RX");
+    cell(ColChannel, record.m_channelAlias);
+    cell(ColProtocol, record.m_protocol.toUpper());
+    cell(ColRate, record.m_mode);
+
+    bool inverted = (record.m_polarity == MessageRecord::PolarityInverted);
+    if (record.m_polarity == MessageRecord::PolarityUnknown) {
+        cell(ColPolarity, QString());
+    } else {
+        cell(ColPolarity, inverted ? "I" : "N", inverted ? chip("I", "#2a1f00", "#ffcc44") : chip("N", "#0d1a2a", "#88aacc"),
+            inverted ? tr("Inverted polarity") : tr("Normal polarity"));
+    }
+
+    cell(ColAddress, record.m_address);
+    cell(ColType, record.m_msgType, typeChip(record.m_msgType), record.m_msgType);
+
+    // Message, with the alternative decode in grey italics
+    QString text = recordText(record);
+    QString messageHtml = text.toHtmlEscaped();
+    QString messageTip = text;
+    QString altText = d.value("alt_text").toString();
+
+    if ((record.m_rawBits > 0) && !altText.isEmpty())
+    {
+        QString altType = d.value("alt_type").toString();
+        messageHtml += QString(" <i style=\"color:#888888\">[%1: %2]</i>").arg(altType.toHtmlEscaped(), altText.toHtmlEscaped());
+        messageTip += QString("\n%1: %2").arg(altType, altText);
+    }
+    if (!d.value("voice_file").toString().isEmpty()) {
+        messageTip += "\n" + d.value("voice_file").toString();
+    }
+
+    cell(ColMessage, text, messageHtml, messageTip);
+
+    // Fragment: the n-th fragment received, or the reassembled message of n fragments
+    if (d.value("is_fragment").toBool())
+    {
+        QString f = QString::number(d.value("fragment_count").toInt());
+        cell(ColFragment, f, chip(f, "#3a2a00", "#ffb74d"), tr("Fragment %1 received").arg(f));
+    }
+    else if (d.value("fragmented").toBool())
+    {
+        int n = d.value("fragment_count").toInt();
+        bool complete = d.value("complete").toBool();
+        QString f = QString("%1 %2").arg(complete ? "REASM" : "INCOMPLETE").arg(n);
+        cell(ColFragment, f, complete ? chip(f, "#0d2a3a", "#4fc3f7") : chip(f, "#2a1000", "#ff8a65"),
+            complete ? tr("Reassembled from %1 fragments").arg(n) : tr("%1 fragments, fragments missing or timed out").arg(n));
+    }
+    else {
+        cell(ColFragment, QString());
+    }
+
+    QString infoPlain, infoHtml, infoTip;
+    recordInfo(record, infoPlain, infoHtml, infoTip);
+    cell(ColInfo, infoPlain, infoHtml, infoTip.isEmpty() ? infoPlain : infoTip);
+
+    // Errors: X uncorrectable codewords, ~ corrected bits; none for a message that was not received
+    if ((record.m_errorsCorrected < 0) && (record.m_errorsUncorrectable < 0))
+    {
+        cell(ColErrors, QString());
+    }
+    else
+    {
+        QString errors, errorsHtml;
+
+        if (record.m_errorsUncorrectable > 0)
+        {
+            errors = QString("X%1").arg(record.m_errorsUncorrectable);
+            errorsHtml = QString("<span style=\"color:#ff5252;font-weight:bold\">%1</span>").arg(errors);
+        }
+        else if (record.m_errorsCorrected > 0)
+        {
+            errors = QString("~%1").arg(record.m_errorsCorrected);
+            errorsHtml = QString("<span style=\"color:#ffca28\">%1</span>").arg(errors);
+        }
+        else
+        {
+            errors = "ok";
+            errorsHtml = "<span style=\"color:#66bb6a\">ok</span>";
+        }
+
+        cell(ColErrors, errors, errorsHtml,
+            tr("%1 bit errors corrected, %2 codewords uncorrectable").arg(record.m_errorsCorrected).arg(record.m_errorsUncorrectable));
+    }
+
+    cell(ColState, state);
+}
+
+void PagingMessageTable::addRecord(const MessageRecord& record, const QString& state)
+{
+    int row = findRow(record.m_id);
+
+    if (row >= 0)
+    {
+        // The end of a voice message completes its row
+        if (record.m_protocolData.contains("voice_end") && record.m_text.isEmpty())
+        {
+            QTableWidgetItem *timeItem = item(row, ColTime);
+            QTableWidgetItem *messageItem = item(row, ColMessage);
+            QString file = record.m_protocolData.value("voice_file").toString();
+            QString text = recordText(record);
+
+            timeItem->setData(voiceFileRole, file);
+            messageItem->setText(text);
+            messageItem->setToolTip(file.isEmpty() ? text : QString("%1\n%2").arg(text).arg(file));
+            messageItem->setData(htmlRole, QVariant());
+            return;
+        }
+
+        fillRow(row, record, state);
+        return;
+    }
+
+    QScrollBar *sb = verticalScrollBar();
+    bool atBottom = (sb->value() == sb->maximum());
+    row = rowCount();
+    setRowCount(row + 1);
+    fillRow(row, record, state);
+
+    while (rowCount() > m_maxRows) {
+        removeRow(0);
+    }
+
+    if (atBottom) {
+        scrollToBottom();
+    }
+}
+
+// A voice message with a file is played with the player of the system
+void PagingMessageTable::playVoice(int row)
+{
+    QTableWidgetItem *timeItem = item(row, ColTime);
+    QString file = timeItem ? timeItem->data(voiceFileRole).toString() : QString();
+
+    if (file.isEmpty()) {
+        return;
+    }
+
+    if (!QFileInfo::exists(file))
+    {
+        QMessageBox::information(this, "Voice message", QString("%1\nis not there any more (deleted with the old voice files).").arg(file));
+        return;
+    }
+
+    QDesktopServices::openUrl(QUrl::fromLocalFile(file));
+}
+
+// Right click in the header: the columns to show
+void PagingMessageTable::showColumnMenu(const QPoint& pos)
+{
+    m_columnMenu->clear();
+
+    for (int i = 0; i < ColumnCount; i++)
+    {
+        QAction *action = m_columnMenu->addAction(headers[i]);
+        action->setCheckable(true);
+        action->setChecked(!isColumnHidden(i));
+        connect(action, &QAction::triggered, this, [this, i](bool checked) {
+            setColumnHidden(i, !checked);
+            emit columnsChanged();
+        });
+    }
+
+    m_columnMenu->popup(horizontalHeader()->viewport()->mapToGlobal(pos));
+}
+
+// Right click in a row: copy
+void PagingMessageTable::showRowMenu(const QPoint& pos)
+{
+    QTableWidgetItem *clicked = itemAt(pos);
+
+    if (!clicked) {
+        return;
+    }
+
+    int row = clicked->row();
+    QMenu menu(this);
+
+    connect(menu.addAction(tr("Copy cell")), &QAction::triggered, this, [clicked]() {
+        QApplication::clipboard()->setText(clicked->text());
+    });
+    connect(menu.addAction(tr("Copy row")), &QAction::triggered, this, [this, row]() {
+        QStringList cells;
+
+        for (int c = 0; c < ColumnCount; c++)
+        {
+            if (!isColumnHidden(c) && item(row, c)) {
+                cells.append(item(row, c)->text());
+            }
+        }
+
+        QApplication::clipboard()->setText(cells.join('\t'));
+    });
+    connect(menu.addAction(tr("Copy as JSON")), &QAction::triggered, this, [this, row]() {
+        QApplication::clipboard()->setText(item(row, ColTime)->data(jsonRole).toString());
+    });
+
+    menu.exec(viewport()->mapToGlobal(pos));
+}

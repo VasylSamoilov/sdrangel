@@ -182,7 +182,6 @@ private slots:
     void on_voiceSource_currentIndexChanged(int index);
     void on_channelAlias_editingFinished();
     void on_voiceFiles_clicked();
-    void on_txLog_cellDoubleClicked(int row, int column);
     void micAudioSelect(const QPoint& p);
     void micDataReady();
     void on_clear_clicked();

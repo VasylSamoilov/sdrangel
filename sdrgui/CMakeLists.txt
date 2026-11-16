@@ -39,6 +39,7 @@ set(sdrgui_SOURCES
     gui/dialogpositioner.cpp
     gui/journalinebrowser.cpp
     gui/messagedialog.cpp
+    gui/pagingmessagetable.cpp
     gui/dialpopup.cpp
     gui/dmsspinbox.cpp
     gui/fastheaderview.cpp
@@ -194,6 +195,7 @@ set(sdrgui_HEADERS
     gui/dialogpositioner.h
     gui/journalinebrowser.h
     gui/messagedialog.h
+    gui/pagingmessagetable.h
     gui/dialpopup.h
     gui/dmsspinbox.h
     gui/doublevalidator.h

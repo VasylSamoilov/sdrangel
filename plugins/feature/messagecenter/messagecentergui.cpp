@@ -32,6 +32,7 @@
 #include "feature/featureuiset.h"
 #include "gui/basicfeaturesettingsdialog.h"
 #include "gui/dialogpositioner.h"
+#include "gui/pagingmessagetable.h"
 
 #include "radiopagingpage.h"
 #include "messagecentergui.h"
@@ -39,7 +40,6 @@
 namespace {
 
 const int idRole = Qt::UserRole;
-const int voiceRole = Qt::UserRole + 1;
 
 QTableWidget *makeTable(const QStringList& headers, QWidget *parent)
 {
@@ -293,17 +293,21 @@ void MessageCenterGUI::buildLog(QWidget *container)
     QVBoxLayout *layout = new QVBoxLayout(container);
     layout->setContentsMargins(2, 2, 2, 2);
     m_logFilter = new MessageCenterFilterWidget(container);
-    m_logTable = makeTable({"Time", "Dir", "Channel", "Protocol", "Address", "Type", "Text", "Voice"}, container);
+    m_logTable = new PagingMessageTable(container);
     m_logTable->setMinimumHeight(220);
-    m_playButton = new QPushButton("Play the voice", container);
-    m_playButton->setToolTip("Play the recorded voice of the selected message (double-click a row does the same)");
+    m_logTable->setMaxRows(m_maxLogRows);
+    m_logTable->setDefaultColumns({PagingMessageTable::ColTime, PagingMessageTable::ColDirection, PagingMessageTable::ColChannel,
+        PagingMessageTable::ColProtocol, PagingMessageTable::ColAddress, PagingMessageTable::ColType, PagingMessageTable::ColMessage,
+        PagingMessageTable::ColInfo});
+    m_logTable->setToolTip("The messages the routes put in the log. Double-click a voice message to play it. Right click the header to choose the columns");
     layout->addWidget(m_logFilter);
     layout->addWidget(m_logTable);
-    layout->addWidget(m_playButton);
 
     connect(m_logFilter, &MessageCenterFilterWidget::changed, this, [this]() { m_shownLogged = -1; refreshLog(); });
-    connect(m_playButton, &QPushButton::clicked, this, &MessageCenterGUI::playSelected);
-    connect(m_logTable, &QTableWidget::cellDoubleClicked, this, [this]() { playSelected(); });
+    connect(m_logTable, &PagingMessageTable::columnsChanged, this, [this]() {
+        m_settings.m_logColumns = m_logTable->columns();
+        applySettings(QStringList("logColumns"));
+    });
 }
 
 void MessageCenterGUI::buildEndpoints(QWidget *container)
@@ -522,6 +526,11 @@ void MessageCenterGUI::displaySettings()
     refreshRoutes();
     refreshFiles();
     m_doApplySettings = true;
+
+    // The columns the user chose; the first time the usual ones
+    if (!m_logTable->setColumns(m_settings.m_logColumns)) {
+        m_logTable->sizeColumns();
+    }
     getRollupContents()->restoreState(m_rollupState);
     getRollupContents()->arrangeRollups();
 }
@@ -575,44 +584,16 @@ void MessageCenterGUI::refreshLog()
     m_shownLogged = engine.logged();
     std::vector<MessageRecord> records = engine.select(m_logFilter->filter());
     size_t first = (records.size() > (size_t) m_maxLogRows) ? records.size() - m_maxLogRows : 0;
-    int rows = (int) (records.size() - first);
-    QString selected = selectedId(m_logTable);
+    QString selected = m_logTable->selectedId();
 
     m_logTable->setUpdatesEnabled(false);
-    m_logTable->setRowCount(rows);
+    m_logTable->setRowCount(0);
 
-    for (int i = 0; i < rows; i++)
-    {
-        const MessageRecord& r = records[first + i];
-        QString file = r.m_protocolData.value("voice_file").toString();
-        QString text = r.m_text;
-
-        if (r.m_msgType == "voice" && text.isEmpty()) {
-            text = r.m_protocolData.contains("voice_end") ? QString("voice, %1 s").arg(r.m_protocolData.value("voice_seconds").toDouble(), 0, 'f', 1)
-                : QString("voice");
-        }
-
-        setRow(m_logTable, i, {
-            QDateTime::fromMSecsSinceEpoch(r.m_timestamp).toString("yyyy-MM-dd HH:mm:ss"),
-            r.m_direction == MessageRecord::DirectionTX ? "TX" : "RX",
-            r.m_channelAlias, QString("%1 %2").arg(r.m_protocol).arg(r.m_mode), r.m_address, r.m_msgType, text,
-            file.isEmpty() ? QString() : QFileInfo(file).fileName()
-        });
-        m_logTable->item(i, 0)->setData(idRole, r.m_id);
-        m_logTable->item(i, 0)->setData(voiceRole, file);
-        m_logTable->item(i, 6)->setToolTip(text);
-
-        if (r.m_duplicate != MessageRecord::DuplicateNone)
-        {
-            for (int c = 0; c < m_logTable->columnCount(); c++) {
-                m_logTable->item(i, c)->setForeground(QColor("#777777"));
-            }
-        }
-        if (r.m_id == selected) {
-            m_logTable->selectRow(i);
-        }
+    for (size_t i = first; i < records.size(); i++) {
+        m_logTable->addRecord(records[i]);
     }
 
+    m_logTable->selectId(selected);
     m_logTable->setUpdatesEnabled(true);
     m_logTable->scrollToBottom();
 }
@@ -723,25 +704,6 @@ QString MessageCenterGUI::selectedId(QTableWidget *table) const
 {
     int row = table->currentRow();
     return ((row >= 0) && table->item(row, 0)) ? table->item(row, 0)->data(idRole).toString() : QString();
-}
-
-// A voice message with its file is played with the player of the system
-void MessageCenterGUI::playSelected()
-{
-    int row = m_logTable->currentRow();
-    QString file = ((row >= 0) && m_logTable->item(row, 0)) ? m_logTable->item(row, 0)->data(voiceRole).toString() : QString();
-
-    if (file.isEmpty()) {
-        return;
-    }
-
-    if (!QFileInfo::exists(file))
-    {
-        QMessageBox::information(this, "Voice message", QString("%1\nis not there any more (deleted with the old voice files).").arg(file));
-        return;
-    }
-
-    QDesktopServices::openUrl(QUrl::fromLocalFile(file));
 }
 
 void MessageCenterGUI::transmitterChanged()

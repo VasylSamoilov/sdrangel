@@ -97,6 +97,7 @@ void RadioPagingDemodSettings::resetToDefaults()
     m_reverseAPIChannelIndex = 0;
     m_workspaceIndex = 0;
     m_hidden = false;
+    m_messageColumns.clear();
 }
 
 // Tags 12 to 20 and 27 to 30 are the usual channel tags, 21 the audio device. New tags are only appended
@@ -143,6 +144,7 @@ QByteArray RadioPagingDemodSettings::serialize() const
     s.writeS32(34, m_gscVoiceKeepMin);
     s.writeString(35, m_channelAlias);
     s.writeS32(36, m_flexMaxMessageNumber);
+    s.writeBlob(37, m_messageColumns);
 
     return s.final();
 }
@@ -215,6 +217,7 @@ bool RadioPagingDemodSettings::deserialize(const QByteArray& data)
         d.readString(35, &m_channelAlias, "");
         d.readS32(36, &m_flexMaxMessageNumber, 63);
         m_flexMaxMessageNumber = std::max(0, std::min(63, m_flexMaxMessageNumber));
+        d.readBlob(37, &m_messageColumns);
         m_gscVoiceKeepDays = std::max(0, std::min(3650, m_gscVoiceKeepDays));
         m_gscVoiceKeepMin = std::max(0, std::min(100000, m_gscVoiceKeepMin));
 
@@ -312,6 +315,9 @@ void RadioPagingDemodSettings::applySettings(const QStringList& settingsKeys, co
     }
     if (settingsKeys.contains("hidden")) {
         m_hidden = settings.m_hidden;
+    }
+    if (settingsKeys.contains("messageColumns")) {
+        m_messageColumns = settings.m_messageColumns;
     }
 }
 

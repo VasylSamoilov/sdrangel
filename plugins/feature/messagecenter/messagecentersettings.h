@@ -56,6 +56,7 @@ struct MessageCenterSettings
     int m_workspaceIndex;
     QByteArray m_geometryBytes;
     bool m_hidden;
+    QByteArray m_logColumns;                //!< The columns of the table of the log: order, sizes, hidden
 
     MessageCenterSettings();
     void resetToDefaults();
