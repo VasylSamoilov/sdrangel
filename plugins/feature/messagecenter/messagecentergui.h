@@ -98,6 +98,9 @@ private:
     PagingComposer *m_composer;
     // The routes and the files
     QTableWidget *m_routesTable;
+    QSpinBox *m_logSize;
+    QSpinBox *m_claimTimeout;
+    QSpinBox *m_silentTime;
     QTableWidget *m_sinksTable;
     QTableWidget *m_sourcesTable;
     QPlainTextEdit *m_errors;
@@ -112,6 +115,7 @@ private:
     void buildCompose(QWidget *container);
     void buildRoutes(QWidget *container);
     void buildFiles(QWidget *container);
+    void buildOptions(QWidget *container);
 
     void applySettings(const QStringList& settingsKeys, bool force = false);
     void displaySettings();

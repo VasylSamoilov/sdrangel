@@ -271,6 +271,7 @@ MessageCenterGUI::MessageCenterGUI(PluginAPI* pluginAPI, FeatureUISet *featureUI
     buildCompose(makeRollup("Page"));
     buildRoutes(makeRollup("Routes"));
     buildFiles(makeRollup("Files"));
+    buildOptions(makeRollup("Options"));
     rollupContents->arrangeRollups();
     connect(rollupContents, SIGNAL(widgetRolled(QWidget*,bool)), this, SLOT(onWidgetRolled(QWidget*,bool)));
     sizeToContents();
@@ -314,7 +315,7 @@ void MessageCenterGUI::buildEndpoints(QWidget *container)
 {
     QVBoxLayout *layout = new QVBoxLayout(container);
     layout->setContentsMargins(2, 2, 2, 2);
-    m_endpointsTable = makeTable({"Channel", "Role", "Status", "Protocols", "Queue", "Seen"}, container);
+    m_endpointsTable = makeTable({"Channel", "Role", "Status", "Protocols", "Speeds", "Polarity", "Queue", "Seen"}, container);
     m_endpointsTable->setToolTip("The channels that announced themselves");
     layout->addWidget(m_endpointsTable);
 }
@@ -323,7 +324,7 @@ void MessageCenterGUI::buildQueue(QWidget *container)
 {
     QVBoxLayout *layout = new QVBoxLayout(container);
     layout->setContentsMargins(2, 2, 2, 2);
-    m_queueTable = makeTable({"Page", "Transmitter", "Protocol", "Address", "Text", "State", "Tries", "Reason"}, container);
+    m_queueTable = makeTable({"Page", "Transmitter", "Protocol", "Address", "Text", "State", "Tries", "Retries", "Reason"}, container);
     QHBoxLayout *buttons = new QHBoxLayout();
     QPushButton *requeue = new QPushButton("Requeue", container);
     requeue->setToolTip("A dead page goes back to pending with its attempts reset");
@@ -418,6 +419,42 @@ void MessageCenterGUI::buildFiles(QWidget *container)
     connect(removeSource, &QPushButton::clicked, this, &MessageCenterGUI::removeSource);
 }
 
+void MessageCenterGUI::buildOptions(QWidget *container)
+{
+    QFormLayout *layout = new QFormLayout(container);
+    layout->setContentsMargins(2, 2, 2, 2);
+
+    m_logSize = new QSpinBox(container);
+    m_logSize->setRange(100, 1000000);
+    m_logSize->setSingleStep(100);
+    m_logSize->setToolTip("Messages kept in the log; the oldest go first");
+    m_claimTimeout = new QSpinBox(container);
+    m_claimTimeout->setRange(1, 3600);
+    m_claimTimeout->setSuffix(" s");
+    m_claimTimeout->setToolTip("A page given to a transmitter that does not claim it in this time goes back to the queue");
+    m_silentTime = new QSpinBox(container);
+    m_silentTime->setRange(6, 3600);
+    m_silentTime->setSuffix(" s");
+    m_silentTime->setToolTip("A channel that does not announce itself for this time is offline");
+
+    layout->addRow("Log size", m_logSize);
+    layout->addRow("Claim time", m_claimTimeout);
+    layout->addRow("Offline after", m_silentTime);
+
+    connect(m_logSize, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int value) {
+        m_settings.m_logSize = value;
+        applySettings(QStringList("logSize"));
+    });
+    connect(m_claimTimeout, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int value) {
+        m_settings.m_claimTimeoutSec = value;
+        applySettings(QStringList("claimTimeoutSec"));
+    });
+    connect(m_silentTime, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int value) {
+        m_settings.m_silentSec = value;
+        applySettings(QStringList("silentSec"));
+    });
+}
+
 void MessageCenterGUI::onWidgetRolled(QWidget* widget, bool rollDown)
 {
     (void) widget;
@@ -470,6 +507,9 @@ void MessageCenterGUI::displaySettings()
     setWindowTitle(m_settings.m_title);
     setTitle(m_settings.m_title);
     m_doApplySettings = false;
+    m_logSize->setValue(m_settings.m_logSize);
+    m_claimTimeout->setValue(m_settings.m_claimTimeoutSec);
+    m_silentTime->setValue(m_settings.m_silentSec);
     refreshRoutes();
     refreshFiles();
     m_doApplySettings = true;
@@ -554,9 +594,18 @@ void MessageCenterGUI::refreshEndpoints()
 
     for (const MessageEndpoint& e : endpoints)
     {
+        QStringList speeds, polarities;
+
+        for (int s : e.m_speeds) {
+            speeds << QString::number(s);
+        }
+        for (int p : e.m_polarities) {
+            polarities << ((p == (int) MessageRecord::PolarityInverted) ? "inverted" : "normal");
+        }
+
         setRow(m_endpointsTable, row++, {
             e.m_alias, e.m_role == MessageEndpoint::Transmitter ? "transmitter" : "receiver", statuses[(int) e.m_status],
-            e.m_protocols.join(", "),
+            e.m_protocols.join(", "), speeds.join(", "), polarities.join(", "),
             e.m_role == MessageEndpoint::Transmitter ? QString("%1/%2").arg(e.m_queueDepth).arg(e.m_capacity) : QString(),
             QDateTime::fromMSecsSinceEpoch(e.m_lastSeen).toString("HH:mm:ss")
         });
@@ -574,7 +623,7 @@ void MessageCenterGUI::refreshQueue()
         const MessageCenterPage& p = pages[i];
         setRow(m_queueTable, i, {
             p.m_record.m_id.left(8), p.transmitter(), p.m_record.m_protocol, p.m_record.m_address, p.m_record.m_text,
-            MessageCenterPage::stateName(p.m_state), QString::number(p.m_attempts), p.m_reason
+            MessageCenterPage::stateName(p.m_state), QString::number(p.m_attempts), QString::number(p.m_retransmits), p.m_reason
         });
         m_queueTable->item(i, 0)->setData(idRole, p.m_record.m_id);
 

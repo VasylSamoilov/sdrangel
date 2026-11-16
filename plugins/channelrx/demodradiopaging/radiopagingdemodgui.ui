@@ -295,7 +295,7 @@
        <number>2</number>
       </property>
       <item row="0" column="0">
-       <widget class="QCheckBox" name="pocsagEnabled">
+       <widget class="ButtonSwitch" name="pocsagEnabled">
         <property name="toolTip">
          <string>Decode POCSAG</string>
         </property>
@@ -344,7 +344,7 @@
        </widget>
       </item>
       <item row="1" column="0">
-       <widget class="QCheckBox" name="flexEnabled">
+       <widget class="ButtonSwitch" name="flexEnabled">
         <property name="toolTip">
          <string>Decode FLEX</string>
         </property>
@@ -412,7 +412,7 @@
        </widget>
       </item>
       <item row="2" column="0">
-       <widget class="QCheckBox" name="gscEnabled">
+       <widget class="ButtonSwitch" name="gscEnabled">
         <property name="toolTip">
          <string>Decode GSC (Golay sequential code)</string>
         </property>
@@ -669,6 +669,11 @@
    <extends>QWidget</extends>
    <header>gui/levelmeter.h</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ButtonSwitch</class>
+   <extends>QToolButton</extends>
+   <header>gui/buttonswitch.h</header>
   </customwidget>
   <customwidget>
    <class>PagingMessageTable</class>
