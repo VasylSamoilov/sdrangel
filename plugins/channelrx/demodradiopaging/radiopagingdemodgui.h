@@ -123,6 +123,7 @@ private slots:
     void on_rfBW_valueChanged(int value);
     void on_pocsagDeviation_valueChanged(int value);
     void on_flexDeviation_valueChanged(int value);
+    void on_flexMaxMessageNumber_valueChanged(int value);
     void on_pocsagEnabled_clicked(bool checked);
     void on_flexEnabled_clicked(bool checked);
     void on_gscEnabled_clicked(bool checked);

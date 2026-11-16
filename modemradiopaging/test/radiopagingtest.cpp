@@ -26,6 +26,7 @@
 #include <string>
 
 #include "radiopagingbch.h"
+#include "radiopagingdedup.h"
 #include "radiopagingfskdemod.h"
 #include "radiopagingpocsag.h"
 #include "radiopagingpocsagdecoder.h"
@@ -718,12 +719,74 @@ void testPocsagDuplicates()
     bool otherNew = (out[2].size() == out[0].size());
 
     for (const auto& m : out[0]) { firstNew = firstNew && !m.m_duplicate; }
-    for (const auto& m : out[1]) { againDup = againDup && m.m_duplicate; }
+    // A tone only page has nothing a pager stores: it is not a duplicate
+    for (const auto& m : out[1]) { againDup = againDup && (m.m_duplicate == (m.m_rawBits > 0)); }
     for (const auto& m : out[2]) { otherNew = otherNew && !m.m_duplicate && (m.m_polarity == RadioPagingPocsagDecoder::Inverted); }
 
     check(firstNew, "POCSAG duplicates: first copy is not a duplicate");
-    check(againDup, "POCSAG duplicates: second copy is output again, marked duplicate");
+    check(againDup, "POCSAG duplicates: second copy is output again, marked duplicate (tone only pages are not)");
     check(otherNew, "POCSAG duplicates: the same messages on the other polarity are not duplicates");
+}
+
+// Duplicate detection of a receiver: the last 16 messages of each key (frequency, protocol, polarity, address),
+// within the window
+void testDedup()
+{
+    std::vector<uint8_t> a = {1, 2, 3};
+    std::vector<uint8_t> b = {4, 5, 6};
+
+    {
+        RadioPagingDedup dedup("pocsag");
+        dedup.setFrequency(466025000);
+        bool ok = !dedup.check(0, "1234567A", a, 24, 0.0) && dedup.check(0, "1234567A", a, 24, 1.0);
+        ok = ok && !dedup.check(1, "1234567A", a, 24, 2.0);         // Other polarity
+        ok = ok && !dedup.check(0, "1234567B", a, 24, 3.0);         // Other function
+        ok = ok && !dedup.check(0, "1234567A", b, 24, 4.0);         // Other payload
+        dedup.setFrequency(466075000);
+        ok = ok && !dedup.check(0, "1234567A", a, 24, 5.0);         // Other frequency
+        dedup.setFrequency(466025000);
+        ok = ok && dedup.check(0, "1234567A", b, 24, 6.0);
+        check(ok, "dedup: the key is the frequency, polarity and address with its function");
+    }
+    {
+        RadioPagingDedup pocsag("pocsag");
+        RadioPagingDedup gsc("gsc");
+        pocsag.check(0, "100", a, 24, 0.0);
+        // Each receiver has its own: the protocol is part of the key
+        check(!gsc.check(0, "100", a, 24, 0.0), "dedup: the protocol is part of the key");
+    }
+    {
+        RadioPagingDedup dedup("flex");
+        bool ok = true;
+        for (int i = 0; i < 16; i++) {
+            ok = ok && !dedup.check(0, "0000004096", std::vector<uint8_t>(1, (uint8_t) i), 8, i);
+        }
+        ok = ok && dedup.check(0, "0000004096", std::vector<uint8_t>(1, 0), 8, 20.0);     // Still in the backlog
+        ok = ok && !dedup.check(0, "0000004096", std::vector<uint8_t>(1, 16), 8, 21.0);   // 17th: the oldest (0) goes
+        ok = ok && !dedup.check(0, "0000004096", std::vector<uint8_t>(1, 0), 8, 22.0);
+        // Another address does not take the place of these
+        for (int i = 0; i < 40; i++) {
+            dedup.check(0, "0000008192", std::vector<uint8_t>(1, (uint8_t) i), 8, 23.0);
+        }
+        ok = ok && dedup.check(0, "0000004096", std::vector<uint8_t>(1, 16), 8, 24.0);
+        check(ok, "dedup: the last 16 messages of each key are remembered");
+    }
+    {
+        RadioPagingDedup dedup("pocsag");
+        dedup.setWindow(60.0);
+        bool ok = !dedup.check(0, "1A", a, 24, 0.0) && dedup.check(0, "1A", a, 24, 59.0) && !dedup.check(0, "1A", a, 24, 61.0);
+        ok = ok && !dedup.check(0, "1A", std::vector<uint8_t>(), 0, 62.0) && !dedup.check(0, "1A", std::vector<uint8_t>(), 0, 63.0);
+        check(ok, "dedup: a message older than the window is forgotten, a message without payload is not remembered");
+    }
+    {
+        RadioPagingDedup dedup("pocsag");
+        for (size_t i = 0; i <= RadioPagingDedup::m_maxKeys; i++) {
+            dedup.check(0, std::to_string(i), a, 24, 0.0);
+        }
+        // The least recently used key ("0") was dropped
+        check((dedup.size() == RadioPagingDedup::m_maxKeys) && !dedup.check(0, "0", a, 24, 1.0)
+            && dedup.check(0, std::to_string(RadioPagingDedup::m_maxKeys), a, 24, 1.0), "dedup: the least recently used key is dropped when full");
+    }
 }
 
 } // namespace
@@ -738,6 +801,7 @@ int main()
     testFsk();
     testBerWindow();
     testPocsagDuplicates();
+    testDedup();
     std::printf("%s (%d failure%s)\n", failures ? "FAILED" : "OK", failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;
 }

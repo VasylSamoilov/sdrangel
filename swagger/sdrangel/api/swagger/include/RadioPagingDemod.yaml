@@ -26,6 +26,10 @@ RadioPagingDemodSettings:
       description: FLEX outer symbol frequency deviation in Hz
       type: number
       format: float
+    flexMaxMessageNumber:
+      description: "FLEX largest message number of the network, 0 to 63 (default 63): the messages with R = 1 of each address are checked for skipped numbers (missed_numbers of the record), after it the sequence starts from 0 again"
+      type: integer
+      format: int32
     gscEnabled:
       description: "Decode GSC (1 for yes, 0 for no)"
       type: integer

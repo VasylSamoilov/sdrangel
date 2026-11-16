@@ -542,6 +542,26 @@ std::string RadioPagingGsc::addressText(const std::string& address, int addressN
     return text + (char) ('0' + addressNumber);
 }
 
+char RadioPagingGsc::functionLetter(int addressNumber)
+{
+    return ((addressNumber >= 1) && (addressNumber <= 4)) ? (char) ('A' + addressNumber - 1) : 0;
+}
+
+int RadioPagingGsc::addressNumber(char numberOrFunction)
+{
+    if ((numberOrFunction >= '1') && (numberOrFunction <= '4')) {
+        return numberOrFunction - '0';
+    }
+    if ((numberOrFunction >= 'A') && (numberOrFunction <= 'D')) {
+        return numberOrFunction - 'A' + 1;
+    }
+    if ((numberOrFunction >= 'a') && (numberOrFunction <= 'd')) {
+        return numberOrFunction - 'a' + 1;
+    }
+
+    return 0;
+}
+
 bool RadioPagingGsc::decodeAddress(uint16_t word1, uint16_t word2, int preamble, std::string& address)
 {
     int group = word1Index(word1);

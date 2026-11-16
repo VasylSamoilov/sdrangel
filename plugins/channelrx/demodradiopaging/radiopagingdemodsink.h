@@ -97,8 +97,13 @@ public:
     double getMagSq() const { return m_magsq; }
     AudioFifo *getAudioFifo() { return &m_audioFifo; }
     void setAudioFifoLabel(const QString& label) { m_audioFifo.setLabel(label); }
-    //!< Centre frequency of the device, Hz: with the channel offset it names the voice files
-    void setCenterFrequency(qint64 frequency) { m_centerFrequency = frequency; }
+    //!< Centre frequency of the device, Hz: with the channel offset it names the voice files and is the frequency of
+    //!< the receivers (part of their duplicate key)
+    void setCenterFrequency(qint64 frequency)
+    {
+        m_centerFrequency = frequency;
+        applyReceiverFrequency();
+    }
     void applyAudioSampleRate(int sampleRate);
     int getAudioSampleRate() const { return m_audioSampleRate; }
     Status getStatus() const;
@@ -250,6 +255,8 @@ private:
     void sendRecord(MessageRecord& record, int protocol);
     void sendPocsag(const RadioPagingPocsagDecoder::Message& message, int baud);
     void sendFlex(const RadioPagingFlexDecoder::Message& message);
+    //!< Frequency of the channel to the receivers
+    void applyReceiverFrequency();
     void sendGsc(const RadioPagingGscDecoder::Message& message);
     static MessageRecord::Polarity polarity(bool inverted);
     static QString checkName(int check);

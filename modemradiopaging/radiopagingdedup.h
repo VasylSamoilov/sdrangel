@@ -20,56 +20,108 @@
 
 #include <cstdint>
 #include <deque>
+#include <list>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
-// Duplicate detection for the messages of a receiver. A message is a duplicate of an earlier
-// one received within the window on the same network (polarity), to the same address
-// (with its function), with the same payload. Duplicates are not dropped: the receiver
-// marks them and outputs them.
+// Duplicate detection of the receiver of one network, as a pager does it: a pager keeps the last messages it
+// received and takes a message that is one of them again as a duplicate. The key of a pager is the frequency of
+// the receiver, the protocol, the network (polarity) and the address (with its function, the address number of
+// GSC). A message is a duplicate of one of the last m_backlog messages of its key with the same payload, received
+// within the window. The least recently used key is dropped when m_maxKeys are kept. Duplicates are not dropped:
+// the receiver marks them and outputs them.
 class RadioPagingDedup
 {
 public:
-    static const size_t m_maxEntries = 64;
+    static const size_t m_backlog = 16;         //!< Messages remembered for each key
+    static const size_t m_maxKeys = 4096;
 
+    explicit RadioPagingDedup(const std::string& protocol = std::string(), double window = 60.0) :
+        m_protocol(protocol),
+        m_window(window)
+    {}
+
+    //!< Seconds a message is remembered (default 60 s)
     void setWindow(double seconds) { m_window = seconds; }
-    void reset() { m_entries.clear(); }
-    size_t size() const { return m_entries.size(); }
+    double window() const { return m_window; }
+    //!< Frequency of the receiver, Hz: part of the key
+    void setFrequency(int64_t frequency) { m_frequency = frequency; }
+    void reset()
+    {
+        m_keys.clear();
+        m_index.clear();
+    }
+    //!< Keys kept
+    size_t size() const { return m_keys.size(); }
 
-    //!< True if the message is a duplicate. A message that is not is remembered
+    //!< True if the message is a duplicate. A message that is not is remembered. A message without payload (tone
+    //!< only, a voice page) is not: a pager has nothing of it to store
     bool check(int polarity, const std::string& address, const std::vector<uint8_t>& data, int bits, double time)
     {
-        while (!m_entries.empty() && ((time - m_entries.front().m_time) > m_window)) {
-            m_entries.pop_front();
+        if (bits <= 0) {
+            return false;
+        }
+        const std::string key = std::to_string(m_frequency) + "|" + m_protocol + "|" + std::to_string(polarity) + "|" + address;
+        auto found = m_index.find(key);
+        Keyed *keyed;
+
+        if (found != m_index.end())
+        {
+            // Most recently used first
+            m_keys.splice(m_keys.begin(), m_keys, found->second);
+            keyed = &m_keys.front();
+        }
+        else
+        {
+            while (m_keys.size() >= m_maxKeys)
+            {
+                m_index.erase(m_keys.back().first);
+                m_keys.pop_back();
+            }
+
+            m_keys.emplace_front(key, std::deque<Entry>());
+            m_index[key] = m_keys.begin();
+            keyed = &m_keys.front();
         }
 
-        for (const Entry& e : m_entries)
+        std::deque<Entry>& entries = keyed->second;
+
+        while (!entries.empty() && ((time - entries.front().m_time) > m_window)) {
+            entries.pop_front();
+        }
+
+        for (const Entry& e : entries)
         {
-            if ((e.m_polarity == polarity) && (e.m_bits == bits) && (e.m_address == address) && (e.m_data == data)) {
+            if ((e.m_bits == bits) && (e.m_data == data)) {
                 return true;
             }
         }
 
-        if (m_entries.size() >= m_maxEntries) {
-            m_entries.pop_front();
+        if (entries.size() >= m_backlog) {
+            entries.pop_front();
         }
 
-        m_entries.push_back(Entry{polarity, address, data, bits, time});
+        entries.push_back(Entry{data, bits, time});
         return false;
     }
 
 private:
     struct Entry
     {
-        int m_polarity;
-        std::string m_address;
         std::vector<uint8_t> m_data;
         int m_bits;
         double m_time;
     };
 
-    double m_window = 60.0;
-    std::deque<Entry> m_entries;
+    typedef std::pair<std::string, std::deque<Entry>> Keyed;
+
+    std::string m_protocol;
+    int64_t m_frequency = 0;
+    double m_window;
+    std::list<Keyed> m_keys;
+    std::unordered_map<std::string, std::list<Keyed>::iterator> m_index;
 };
 
 #endif // MODEMRADIOPAGING_RADIOPAGINGDEDUP_H

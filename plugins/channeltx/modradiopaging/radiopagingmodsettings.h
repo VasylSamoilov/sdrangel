@@ -70,6 +70,8 @@ struct RadioPagingModSettings
     bool m_flexTimeSendZone;                    //!< Send the time zone word
     bool m_flexTimeDaylightSaving;              //!< The time is daylight saving time (one hour ahead)
     qint64 m_flexTimeOffsetSeconds;             //!< Added to the time of the frame grid (UTC): any date and time can be sent
+    bool m_flexNumbering;                       //!< The network numbers the messages of each address (STD-43A 8.4); off: N = 0, R = 0
+    int m_flexMaxMessageNumber;                 //!< Largest message number of the network, 0-63: then 0 again
     int m_gscMode;                              //!< RadioPagingGsc::Mode: auto, single, batch, non battery saver. One-shot only
     bool m_gscInverted;                         //!< Set: binary 1 is a negative deviation (normal: positive)
     int m_gscVoiceSeconds;                      //!< Length of the voice of a GSC voice page in seconds, a longer sound file is cut

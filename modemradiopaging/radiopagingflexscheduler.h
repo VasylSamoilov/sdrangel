@@ -56,14 +56,18 @@ public:
         uint32_t m_absolute;    //!< cycle * 128 + frame
     };
 
-    //! Message number (0-63) of each capcode, advanced by one for every message. The first
-    //! number of a capcode is 1. The least recently used capcode is dropped when the table is full
+    //! Message number sequence of each capcode (STD-43A 3.10.1.3 N, 8.4): the first number of a capcode is 0,
+    //! the next ones ascend by one up to the largest number of the network, then 0 again. The least recently
+    //! used capcode is dropped when the table is full
     class NumberCounter
     {
     public:
         explicit NumberCounter(size_t maxEntries = m_numberCounterMax) : m_maxEntries(maxEntries) {}
-        uint8_t next(uint64_t capcode);
-        int peek(uint64_t capcode) const;     //!< -1 if the capcode has no counter
+        //!< The next number of the capcode, after maxNumber (0-63) comes 0
+        uint8_t next(uint64_t capcode, int maxNumber = 63);
+        //!< The number next() would give, without taking it
+        uint8_t upcoming(uint64_t capcode, int maxNumber = 63) const;
+        int peek(uint64_t capcode) const;     //!< Last number given, -1 if the capcode has no counter
         void set(uint64_t capcode, uint8_t value);
         size_t size() const { return m_order.size(); }
 
@@ -185,15 +189,34 @@ public:
     //!< Collapse 0-7, a pager listens to one frame in 2^collapse. False and error if out of range
     bool setCollapse(int collapse, std::string& error);
     int collapse() const { return m_collapse; }
+
+    //! Message numbering of the network (STD-43A 8.4, 3.10.1.1-3.10.1.4 N and R; numbering is optional).
+    //! On: the numbered types (alphanumeric, HEX/binary, numbered short message) of an address take one sequence
+    //! of numbers, from 0 up to the largest number of the network (63 at most, the pagers are set to it) then 0
+    //! again, with R = 1. A HEX/binary header message (H = 1) and the message after it to the address share the
+    //! number. Off: R = 0, a numbered short message is refused. A message the network does not number (numbering
+    //! off, and a secure message, which is never numbered) takes the lowest number no message of the address in
+    //! progress has (with numbering on, not the next number of the sequence either), 0 when the address has none:
+    //! the fragments of a message are told apart (3.10.1.2-3.10.1.4 N). Tone, numeric, and short numeric and
+    //! source messages have no number and leave the sequence alone
+    struct Numbering
+    {
+        bool m_enabled = true;
+        int m_maxNumber = 63;       //!< 0-63
+    };
+
+    //!< False and an error if the largest number is out of range
+    bool setNumbering(const Numbering& numbering, std::string& error);
+    const Numbering& numbering() const { return m_numbering; }
     //!< One entry per frame (128), non zero = reserved. Frames 0-3 can not be reserved: the table
     //!< is not applied and false is returned. An empty table clears all reservations
     bool setReservedFrames(const std::vector<uint8_t>& table, std::string& error);
     const std::vector<uint8_t>& reservedFrames() const { return m_reserved; }
 
     //!< Queue a message. Rejected if the capcode or text is invalid, the message does not fit
-    //!< in a frame, or every frame the capcode is eligible in is reserved. A HEX/binary or secure
-    //!< message longer than a frame is split into fragments (RadioPagingFlex::fragmentMessage), sent
-    //!< in successive frames of the capcode under the one id
+    //!< in a frame, or every frame the capcode is eligible in is reserved. An alphanumeric, HEX/binary or
+    //!< secure message longer than a frame is split into fragments (RadioPagingFlex::fragmentMessage) under
+    //!< the one id: the first in a frame of the capcode, the others in the frames after it (STD-43A 4.2.1)
     EnqueueResult enqueue(const TxMessage& message);
     //!< Queued messages and fragments still to send
     size_t pending() const { return m_queue.size(); }
@@ -219,9 +242,10 @@ private:
         uint32_t m_id;      //!< The same for all the fragments of a message
         TxMessage m_message;    //!< The text of the fragment
         int m_number;       //!< -1 until the first placement attempt; the fragments take the number of the first
-        int m_fragment = 0;     //!< Fragment index (HEX/binary and secure), in queue order
+        bool m_retrieval = false;   //!< R of the message, set with the number
+        int m_fragment = 0;     //!< Fragment index (alphanumeric, HEX/binary and secure), in queue order
         int m_fragments = 1;
-        int m_signature = -1;   //!< HEX/binary first fragment: signature of the whole message
+        int m_signature = -1;   //!< Alphanumeric and HEX/binary first fragment: signature of the whole message
         int m_phase = -1;       //!< Fragments after the first: the phase of the first fragment, -1 until it is sent
     };
 
@@ -234,16 +258,22 @@ private:
     //!< fragment or an unfragmented message, any frame for the fragments after the first (STD-43A 4.2.1)
     bool frameFor(const Item& item, uint32_t frame) const;
     static RadioPagingFlex::PhaseMessage phaseMessage(const Item& item);
+    //!< Message number and R of the item and of its other fragments (see Numbering)
+    void assignNumber(Item& item);
+    //!< The lowest number no message of the capcode in progress (numbered, still queued) has, apart from avoid
+    int freeNumber(uint64_t capcode, int avoid) const;
 
     RadioPagingFlex::Mode m_mode;
     bool m_inverted;
     int m_collapse;
+    Numbering m_numbering;
     Roaming m_roaming;
     TimeService m_time;
     std::vector<uint8_t> m_reserved;
     std::list<Item> m_queue;
     uint32_t m_nextId;
     RadioPagingFlexScheduler::NumberCounter m_numbers;
+    std::unordered_map<uint64_t, int> m_headerNumbers;  //!< Number of a header message, for the next message of the capcode
 };
 
 #endif // MODEMRADIOPAGING_RADIOPAGINGFLEXSCHEDULER_H

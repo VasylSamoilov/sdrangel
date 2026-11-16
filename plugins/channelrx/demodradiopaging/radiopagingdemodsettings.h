@@ -50,6 +50,7 @@ struct RadioPagingDemodSettings
     int m_gscVoiceKeepDays;                     //!< Voice files older than this many days may be deleted, 0 to keep them all
     int m_gscVoiceKeepMin;                      //!< The newest voice files this many are not deleted
     QString m_channelAlias;                     //!< Name of the demodulator in the message records and voice file names, empty for its frequency
+    int m_flexMaxMessageNumber;                 //!< FLEX: largest message number of the network, 0-63: skipped numbers are reported
     Real m_volume;                              //!< Voice audio gain
     QString m_audioDeviceName;                  //!< Voice audio output
 

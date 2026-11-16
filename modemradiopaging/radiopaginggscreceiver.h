@@ -69,8 +69,10 @@ public:
     void setNonBatterySaver(bool enable);
     //!< Longest voice message without a turn-off word, in seconds
     void setVoiceTimeout(double seconds);
-    //!< Pages received again within this time are marked duplicate (default 60 s)
+    //!< Pages remembered for duplicates: the last ones of each pager, within this time (default 60 s)
     void setDuplicateWindow(double seconds) { m_dedup.setWindow(seconds); }
+    //!< Frequency of the receiver, Hz: a pager is on one frequency (part of the duplicate key)
+    void setFrequency(int64_t frequency) { m_dedup.setFrequency(frequency); }
 
     void process(float sample);
     //!< The signal is gone: finish the transmissions in progress
@@ -109,7 +111,7 @@ private:
     };
     NbsPolarity m_nbsPolarity;
     std::vector<RadioPagingGscDecoder::Message> m_nbsPending[2];   //!< Held messages, by decoder polarity
-    RadioPagingDedup m_dedup;
+    RadioPagingDedup m_dedup{"gsc"};
     double m_time = 0.0;                        //!< Seconds of signal received, for the duplicate window
 
     void collect();

@@ -453,6 +453,31 @@ void RadioPagingModGUI::displayTime(bool flex)
     ui->flexTimeSet->setEnabled(m_settings.m_flexTime && !clock);
 }
 
+void RadioPagingModGUI::displayNumbering(bool flex)
+{
+    QSignalBlocker numberingBlocker(ui->flexNumbering);
+    QSignalBlocker maxBlocker(ui->flexMaxMessageNumber);
+
+    ui->flexNumbering->setVisible(flex);
+    ui->flexMaxMessageNumber->setVisible(flex);
+    ui->flexNumbering->setChecked(m_settings.m_flexNumbering);
+    ui->flexMaxMessageNumber->setValue(m_settings.m_flexMaxMessageNumber);
+    ui->flexMaxMessageNumber->setEnabled(m_settings.m_flexNumbering);
+}
+
+void RadioPagingModGUI::on_flexNumbering_toggled(bool checked)
+{
+    m_settings.m_flexNumbering = checked;
+    applySettings(QStringList("flexNumbering"));
+    displayNumbering(true);
+}
+
+void RadioPagingModGUI::on_flexMaxMessageNumber_valueChanged(int value)
+{
+    m_settings.m_flexMaxMessageNumber = value;
+    applySettings(QStringList("flexMaxMessageNumber"));
+}
+
 void RadioPagingModGUI::on_flexTime_toggled(bool checked)
 {
     m_settings.m_flexTime = checked;
@@ -609,9 +634,10 @@ void RadioPagingModGUI::send()
             ui->send->setEnabled(false);
         }
 
-        log(QString("%1/%2 %3: %4")
+        log(QString("%1/%2 (%3) %4: %5")
             .arg(gscAddress)
             .arg(request.m_gsc.m_addressNumber)
+            .arg(QChar(RadioPagingGsc::functionLetter(request.m_gsc.m_addressNumber)))
             .arg(ui->messageType->currentText())
             .arg(microphone ? QString("microphone") : voice ? request.m_voiceFile : QString::fromStdString(text)));
     }
@@ -1249,20 +1275,23 @@ void RadioPagingModGUI::displayProtocol()
 
     bool gsc = (m_settings.m_protocol == RadioPagingModSettings::Gsc);
 
-    // The function of a message: the function A to D of POCSAG, the address number 1 to 4 of GSC
+    // The function of a message: the function A to D of POCSAG, the address number 1 to 4 (function A to D) of GSC
     {
         QSignalBlocker functionBlocker(ui->function);
         int functionIndex = std::max(0, ui->function->currentIndex());
         ui->function->clear();
 
         if (gsc) {
-            ui->function->addItems(QStringList({"1", "2", "3", "4"}));
+            ui->function->addItems(QStringList({"1 (A)", "2 (B)", "3 (C)", "4 (D)"}));
         } else {
             ui->function->addItems(QStringList({"A (0)", "B (1)", "C (2)", "D (3)"}));
         }
 
         ui->function->setCurrentIndex(functionIndex);
-        ui->function->setToolTip(gsc ? "GSC address number 1 to 4" : "POCSAG function (sub address)");
+        ui->function->setToolTip(gsc
+            ? "GSC address number 1 to 4 (function A to D): 1 address words as encoded, 2 word 2 complemented, "
+              "3 word 1 complemented, 4 both words complemented"
+            : "POCSAG function (sub address)");
     }
 
     if (gsc)
@@ -1325,6 +1354,7 @@ void RadioPagingModGUI::displayProtocol()
     }
 
     displayTime(flex);
+    displayNumbering(flex);
 
     ui->collapse->setValue(m_settings.m_flexCollapse);
     // Collapse: the re-synchronization length; network: also the schedule of the frames
@@ -1633,6 +1663,8 @@ void RadioPagingModGUI::makeUIConnections()
     QObject::connect(ui->flexTimeReference, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_flexTimeReference_currentIndexChanged);
     QObject::connect(ui->flexTimeDaylightSaving, &QCheckBox::toggled, this, &RadioPagingModGUI::on_flexTimeDaylightSaving_toggled);
     QObject::connect(ui->flexTimeSendZone, &QCheckBox::toggled, this, &RadioPagingModGUI::on_flexTimeSendZone_toggled);
+    QObject::connect(ui->flexNumbering, &QCheckBox::toggled, this, &RadioPagingModGUI::on_flexNumbering_toggled);
+    QObject::connect(ui->flexMaxMessageNumber, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_flexMaxMessageNumber_valueChanged);
     QObject::connect(ui->flexTimeZone, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_flexTimeZone_currentIndexChanged);
     QObject::connect(ui->flexTimeClock, &QCheckBox::toggled, this, &RadioPagingModGUI::on_flexTimeClock_toggled);
     QObject::connect(ui->flexTimeSet, &QDateTimeEdit::editingFinished, this, &RadioPagingModGUI::on_flexTimeSet_editingFinished);

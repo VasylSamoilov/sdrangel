@@ -72,6 +72,10 @@ public:
     void setFlexTimeDaylightSaving(qint32 value);
     qint64 getFlexTimeOffsetSeconds();
     void setFlexTimeOffsetSeconds(qint64 value);
+    qint32 getFlexNumbering();
+    void setFlexNumbering(qint32 value);
+    qint32 getFlexMaxMessageNumber();
+    void setFlexMaxMessageNumber(qint32 value);
     qint32 getGscMode();
     void setGscMode(qint32 value);
     qint32 getGscInverted();
@@ -171,6 +175,10 @@ private:
     bool m_flexTimeDaylightSavingIsSet = false;
     qint64 m_flexTimeOffsetSeconds = 0;
     bool m_flexTimeOffsetSecondsIsSet = false;
+    qint32 m_flexNumbering = 0;
+    bool m_flexNumberingIsSet = false;
+    qint32 m_flexMaxMessageNumber = 0;
+    bool m_flexMaxMessageNumberIsSet = false;
     qint32 m_gscMode = 0;
     bool m_gscModeIsSet = false;
     qint32 m_gscInverted = 0;

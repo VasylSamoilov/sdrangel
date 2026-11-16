@@ -53,20 +53,33 @@ void RadioPagingFlexScheduler::NumberCounter::insert(uint64_t capcode, uint8_t v
     m_index[capcode] = m_order.begin();
 }
 
-uint8_t RadioPagingFlexScheduler::NumberCounter::next(uint64_t capcode)
+uint8_t RadioPagingFlexScheduler::NumberCounter::upcoming(uint64_t capcode, int maxNumber) const
 {
+    auto found = m_index.find(capcode);
+
+    if (found == m_index.end()) {
+        return 0;
+    }
+
+    int value = found->second->second;
+    return (value >= std::max(0, std::min(63, maxNumber))) ? 0 : (uint8_t) (value + 1);
+}
+
+uint8_t RadioPagingFlexScheduler::NumberCounter::next(uint64_t capcode, int maxNumber)
+{
+    uint8_t value = upcoming(capcode, maxNumber);
     auto found = m_index.find(capcode);
 
     if (found != m_index.end())
     {
         List::iterator it = found->second;
         touch(it);
-        it->second = (it->second + 1) & 0x3f;
-        return it->second;
+        it->second = value;
+        return value;
     }
 
-    insert(capcode, 1);
-    return 1;
+    insert(capcode, value);
+    return value;
 }
 
 int RadioPagingFlexScheduler::NumberCounter::peek(uint64_t capcode) const
@@ -186,6 +199,94 @@ bool RadioPagingFlexEncoder::setReservedFrames(const std::vector<uint8_t>& table
     return true;
 }
 
+bool RadioPagingFlexEncoder::setNumbering(const Numbering& numbering, std::string& error)
+{
+    if ((numbering.m_maxNumber < 0) || (numbering.m_maxNumber > 63))
+    {
+        error = "Largest message number must be 0 to 63";
+        return false;
+    }
+
+    m_numbering = numbering;
+    return true;
+}
+
+int RadioPagingFlexEncoder::freeNumber(uint64_t capcode, int avoid) const
+{
+    bool used[64] = {false};
+
+    if ((avoid >= 0) && (avoid < 64)) {
+        used[avoid] = true;
+    }
+
+    // Messages of the address in progress: numbered and still queued (fragments to go, or placed in the frame
+    // being built)
+    for (const Item& other : m_queue)
+    {
+        if ((other.m_message.m_capcode == capcode) && (other.m_number >= 0)) {
+            used[other.m_number & 0x3f] = true;
+        }
+    }
+
+    for (int n = 0; n < 64; n++)
+    {
+        if (!used[n]) {
+            return n;
+        }
+    }
+
+    return 0;
+}
+
+void RadioPagingFlexEncoder::assignNumber(Item& item)
+{
+    const TxMessage& m = item.m_message;
+    const uint64_t capcode = m.m_capcode;
+    const bool numbered = (m.m_type == RadioPagingFlex::Alphanumeric) || (m.m_type == RadioPagingFlex::Binary)
+        || ((m.m_type == RadioPagingFlex::ShortMessage) && (m.m_shortType == RadioPagingFlex::ShortNumbered));
+    int number = 0;
+    bool retrieval = false;
+    // The data message after a header message has the number of the header (3.10.1.2 H)
+    auto header = ((m.m_type == RadioPagingFlex::Binary) && !m.m_binary.m_header) ? m_headerNumbers.find(capcode)
+        : m_headerNumbers.end();
+
+    if (header != m_headerNumbers.end())
+    {
+        number = header->second;
+        retrieval = m_numbering.m_enabled;
+        m_headerNumbers.erase(header);
+    }
+    else if (numbered && m_numbering.m_enabled)
+    {
+        number = m_numbers.next(capcode, m_numbering.m_maxNumber);
+        retrieval = true;
+    }
+    else if ((m.m_type == RadioPagingFlex::Secure) || numbered)
+    {
+        // Not numbered: a number that tells the message apart from the others of the address in progress
+        // (3.10.1.2-3.10.1.4 N), not the next one of the sequence. 0 when the address has none in progress
+        int avoid = m_numbering.m_enabled ? (int) m_numbers.upcoming(capcode, m_numbering.m_maxNumber) : -1;
+        number = freeNumber(capcode, avoid);
+    }
+
+    if ((m.m_type == RadioPagingFlex::Binary) && m.m_binary.m_header) {
+        m_headerNumbers[capcode] = number;
+    }
+
+    // The fragments of a message have the number of its first fragment (N, 3.10.1.2 p.60)
+    for (Item& other : m_queue)
+    {
+        if ((other.m_id == item.m_id) && (other.m_number < 0))
+        {
+            other.m_number = number;
+            other.m_retrieval = retrieval;
+        }
+    }
+
+    item.m_number = number;
+    item.m_retrieval = retrieval;
+}
+
 bool RadioPagingFlexEncoder::schedulable(uint64_t capcode) const
 {
     for (int f = 0; f < RadioPagingFlexScheduler::m_framesPerCycle; f++)
@@ -208,6 +309,7 @@ RadioPagingFlex::PhaseMessage RadioPagingFlexEncoder::phaseMessage(const Item& i
     pm.m_text = m.m_text;
     pm.m_priority = m.m_priority;
     pm.m_number = item.m_number;
+    pm.m_retrieval = item.m_retrieval;
     pm.m_shortType = m.m_shortType;
     pm.m_source = m.m_source;
     pm.m_binary = m.m_binary;
@@ -279,10 +381,17 @@ RadioPagingFlexEncoder::EnqueueResult RadioPagingFlexEncoder::enqueue(const TxMe
     pm.m_source = message.m_source;
     pm.m_binary = message.m_binary;
 
-    // HEX/binary and secure messages are split into fragments of a frame each; the others are one piece
+    // The numbered short message tells that the network numbers the messages (STD-43A 3.9.2, 8.4)
+    if ((pm.m_type == RadioPagingFlex::ShortMessage) && (pm.m_shortType == RadioPagingFlex::ShortNumbered) && !m_numbering.m_enabled)
+    {
+        result.m_error = "Numbered short message: the network has no message numbering";
+        return result;
+    }
+
+    // Alphanumeric, HEX/binary and secure messages are split into fragments of a frame each; the others are one piece
     std::vector<RadioPagingFlex::PhaseMessage> parts;
 
-    if ((pm.m_type == RadioPagingFlex::Binary) || (pm.m_type == RadioPagingFlex::Secure))
+    if ((pm.m_type == RadioPagingFlex::Alphanumeric) || (pm.m_type == RadioPagingFlex::Binary) || (pm.m_type == RadioPagingFlex::Secure))
     {
         if (!RadioPagingFlex::fragmentMessage(pm, parts, result.m_error)) {
             return result;
@@ -719,17 +828,8 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
             {
                 Item& item = *c.m_item;
 
-                if (item.m_number < 0)
-                {
-                    item.m_number = m_numbers.next(item.m_message.m_capcode);
-
-                    // The fragments of a message have the number of its first fragment (N, 3.10.1.2 p.60)
-                    for (Item& other : m_queue)
-                    {
-                        if ((other.m_id == item.m_id) && (other.m_number < 0)) {
-                            other.m_number = item.m_number;
-                        }
-                    }
+                if (item.m_number < 0) {
+                    assignNumber(item);
                 }
 
                 messages.push_back(phaseMessage(item));

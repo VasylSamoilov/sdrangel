@@ -94,6 +94,8 @@ void RadioPagingFlexReceiver::reset()
     m_decoder.reset();
     m_levelsMeasured = false;
     m_messages.clear();
+    m_dedup.reset();
+    m_time = 0.0;
     m_recentPower.clear();
     m_syncs = 0;
     m_frames = 0;
@@ -117,10 +119,27 @@ void RadioPagingFlexReceiver::backToHunting()
     m_syncDemod.setHoldLevels(false);
 }
 
+// A complete message whose content and message number are those of one of the last messages of the pager (address,
+// polarity) is a duplicate: a network without numbering sends every message with N = 0 and R = 0, so its messages are
+// told apart by content; a numbered message sent again with a new number is a new message to the pager. The decoder
+// also marks the retransmissions of numbered messages (R = 0, the words of the stored copy). Fragments, incomplete
+// messages and messages without content (tone only) are not remembered
 RadioPagingFlexDecoder::Message RadioPagingFlexReceiver::takeMessage()
 {
     RadioPagingFlexDecoder::Message message = m_messages.front();
     m_messages.pop_front();
+
+    if (!message.m_isFragment && message.m_complete && !message.m_text.empty())
+    {
+        std::string content = std::to_string((int) message.m_type) + "|" + std::to_string(message.m_messageNumber) + "|"
+            + message.m_text;
+        std::vector<uint8_t> data(content.begin(), content.end());
+        bool duplicate = m_dedup.check(message.m_inverted ? 1 : 0, RadioPagingFlex::addressText(message.m_capcode), data,
+            (int) data.size() * 8, m_time);
+
+        message.m_duplicate = message.m_duplicate || duplicate;
+    }
+
     return message;
 }
 
@@ -183,6 +202,8 @@ bool RadioPagingFlexReceiver::ersActive() const
 void RadioPagingFlexReceiver::process(float sample, float magsq)
 {
     RadioPagingFskDemod::Symbol symbol;
+
+    m_time += 1.0 / m_sampleRate;
 
     // The sync demodulator keeps its symbol clock running through the data part, so the
     // next frame's sync is found without a new acquisition

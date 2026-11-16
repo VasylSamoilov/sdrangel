@@ -96,7 +96,7 @@ public:
     struct Message
     {
         std::string m_address;              //!< 6 digits: index, group, 3 address digits. Index is '?' in non battery saver mode
-        int m_addressNumber = 1;            //!< 1-4
+        int m_addressNumber = 1;            //!< 1-4 (function A-D), from the complemented address words
         RadioPagingGsc::MessageType m_type = RadioPagingGsc::Tone;   //!< Tone, Voice or Data
         std::vector<uint8_t> m_rawData;     //!< Message bits, packed 8 per byte, first bit in the MSB
         int m_rawBits = 0;                  //!< Number of message bits, a multiple of 48; 0 = tone only or voice

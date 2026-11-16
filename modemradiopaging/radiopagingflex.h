@@ -99,7 +99,7 @@ public:
     static const int m_maxPhases = 4;
     static const int m_syncBaud = 1600;
     static const int m_maxCollapse = 7;
-    static const int m_maxAlphaChars = 251;     //!< Characters of one alphanumeric message, short address (STD-43A 4.1)
+    static const int m_maxAlphaChars = 251;     //!< Characters of an alphanumeric message in one frame, short address (STD-43A 4.1); longer messages are fragmented
     //!< Most message words (message field, and the second vector word of a long address) of one message in
     //!< a frame (STD-43A 4.1): 88 less the block information word, the address and the vector words: 85
     //!< with a short address, 84 with a long one (2 address words, 2 vector words, the first message word
@@ -122,24 +122,27 @@ public:
         MessageType m_type = Alphanumeric;
         std::string m_text;
         bool m_priority = false;    //!< Address in the priority part of the address field
-        int m_number = 0;           //!< Message number 0-63, sent in alphanumeric and numbered short messages
+        int m_number = 0;           //!< Message number N 0-63: alphanumeric, HEX/binary, secure and numbered short messages
+        bool m_retrieval = true;    //!< Message retrieval flag R: alphanumeric, HEX/binary and numbered short messages
         ShortType m_shortType = ShortNumeric;   //!< Short message only
         int m_source = 0;           //!< Short message source and numbered types: source code S2-S0, 0-7
         BinaryParams m_binary;      //!< HEX/binary and secure messages only
-        int m_fragment = 0;         //!< HEX/binary and secure: fragment index, 0 the first (fragmentMessage)
-        int m_fragments = 1;        //!< HEX/binary and secure: fragments of the message
-        int m_signature = -1;       //!< HEX/binary first fragment: signature of the whole message, -1 of the text
+        int m_fragment = 0;         //!< Alphanumeric, HEX/binary and secure: fragment index, 0 the first (fragmentMessage)
+        int m_fragments = 1;        //!< Alphanumeric, HEX/binary and secure: fragments of the message
+        int m_signature = -1;       //!< Alphanumeric and HEX/binary first fragment: signature of the whole message, -1 of the text
     };
 
-    static const int m_maxFragments = 64;   //!< Fragments of a HEX/binary or secure message (an implementation limit)
+    static const int m_maxFragments = 64;   //!< Fragments of an alphanumeric, HEX/binary or secure message (an implementation limit)
 
-    //!< Split a HEX/binary or secure message into fragments of one frame each (STD-43A 3.10.1.2, 3.10.1.4).
-    //!< A fragment that is not the last is packed full: its data end on a character boundary with fewer
-    //!< than a character of bits left in its last word, no fill and no padding word (binary data: a
-    //!< multiple of the blocking length and of 4 bits, the hex digits; secure binary and data defined
+    //!< Split an alphanumeric, HEX/binary or secure message into fragments of one frame each (STD-43A 4.1,
+    //!< 3.10.1.2, 3.10.1.3, 3.10.1.4). A fragment that is not the last is packed full: its data end on a character
+    //!< boundary with fewer than a character of bits left in its last word, no fill and no padding word
+    //!< (alphanumeric: 3 characters a word after the signature slot of the first fragment, no ETX; binary data:
+    //!< a multiple of the blocking length and of 4 bits, the hex digits; secure binary and data defined
     //!< separately: whole words; secure alphanumeric: 3 characters a word, no ETX). The last fragment takes
-    //!< the rest with its termination. The fragments carry m_fragment, m_fragments and, HEX/binary, the
-    //!< signature of the whole message. False and an error if the message is not valid
+    //!< the rest with its termination. The fragments carry m_fragment, m_fragments and, alphanumeric and
+    //!< HEX/binary, the signature of the whole message. Other types give one piece. False and an error if the
+    //!< message is not valid
     static bool fragmentMessage(const PhaseMessage& message, std::vector<PhaseMessage>& fragments, std::string& error);
 
     struct PhaseParams

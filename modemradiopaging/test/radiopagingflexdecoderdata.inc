@@ -2549,7 +2549,7 @@
 	0, {}
 },
 {
-	"fragments", "abandon", 0, 0, 7, 64,
+	"fragments", "complete during stream", 0, 0, 7, 64,
 		"aaaaaaaa78f359395555870ca6c62e020221",
 		"aed845127b9e90a654204f2629385301d61f1f3b783f1c001f0f60e548cb3f42"
 		"f8b0620c0deaea6a2aaaeaeaeaaa6a2aaaeaeaea6a2a2a2aaaaa6aaa2aaa2a6a"
@@ -2563,7 +2563,7 @@
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaa",
-	2, {{2600ULL, "alphanumeric", "stream start, ", 30, 0, 1}, {2600ULL, "alphanumeric", "complete message", 31, 1, 0}},
+	1, {{2600ULL, "alphanumeric", "complete message", 31, 1, 0}},
 	1, {"0000002600 ALN|complete message"}
 },
 {
@@ -2693,7 +2693,7 @@
 	1, {"0000003300 ALN|a different and longer message with the same number"}
 },
 {
-	"duplicates", "new message with R", 0, 0, 9, 22,
+	"duplicates", "same message again with R", 0, 0, 9, 22,
 		"aaaaaaaa78f359395555870ca6c6f9680676",
 		"aed845127bb182df083847777e310345d01f1f30660500231f070e89429e0a53"
 		"ebd47d726f3f247a2904ff7f8c30292011ffbd2eaee6c10affefa72d3ab2adb0"
@@ -2707,8 +2707,8 @@
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaa",
-	1, {{3300ULL, "alphanumeric", "a different and longer message with the same number", 3, 1, 0}},
-	1, {"0000003300 ALN|a different and longer message with the same number"}
+	0, {},
+	0, {}
 },
 {
 	"special", "operator alpha", 0, 0, 10, 10,

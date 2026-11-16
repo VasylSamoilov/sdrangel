@@ -760,6 +760,7 @@ void RadioPagingFlexDecoder::decodeShortMessage(Message& proto, const AddressCon
         proto.m_shortSource = (int) (d & 7);
         proto.m_messageNumber = (int) ((d >> 3) & 0x3f);
         proto.m_retrieval = ((d >> 9) & 1) != 0;
+        checkSequence(proto, a);
     }
 
     setRaw(proto, raw);
@@ -784,7 +785,6 @@ void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& 
         return;
 
     case FragmentComplete:
-        reassemblyInvalidate(a.m_capcode, -1);
         emitMessage(msg);
         return;
 
@@ -1034,7 +1034,7 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
 
         if (result == -1)
         {
-            HistoryEntry *entry = historyFind(a.m_capcode, hdrN, vecType, phaseIndex);
+            HistoryEntry *entry = m_historyMatch;
 
             if (entry)
             {
@@ -1183,6 +1183,11 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
     msg.m_fragmented = (kind == FragmentFirst) || (kind == FragmentMiddle) || (kind == FragmentLast);
     msg.m_fragmentControl = hasFragControl ? ((hdrU << 1) | hdrV) : -1;
     msg.m_nulError = nulError;
+
+    // R is in the first fragment: the message takes its place in the sequence of the address there
+    if (!secure && initial) {
+        checkSequence(msg, a);
+    }
 
     // Signature of the whole message in the first fragment. Checked here for a message in one piece
     if (sigSlot)
@@ -1334,7 +1339,7 @@ void RadioPagingFlexDecoder::decodeNumeric(Message& proto, const AddressContext&
 
         if (result == -1)
         {
-            HistoryEntry *entry = historyFind(a.m_capcode, number, vecType, m_name - 'A');
+            HistoryEntry *entry = m_historyMatch;
 
             if (entry)
             {
@@ -1466,6 +1471,7 @@ void RadioPagingFlexDecoder::decodeNumeric(Message& proto, const AddressContext&
     msg.m_special = (special != 0) || (vecType == 4);
     msg.m_recovered = recovered;
     msg.m_duplicate = duplicate;
+    checkSequence(msg, a);
 
     for (int w : words) {
         msg.m_wordMap += statusChar(m_w[w].m_status);
@@ -1565,7 +1571,7 @@ void RadioPagingFlexDecoder::decodeBinary(Message& proto, const AddressContext& 
 
         if (result == -1)
         {
-            HistoryEntry *entry = historyFind(a.m_capcode, hexN, 6, phaseIndex);
+            HistoryEntry *entry = m_historyMatch;
 
             if (entry)
             {
@@ -1670,6 +1676,11 @@ void RadioPagingFlexDecoder::decodeBinary(Message& proto, const AddressContext& 
     msg.m_blocking = blocking;
     msg.m_displayRtl = displayRtl;
     msg.m_headerMessage = headerMessage;
+
+    // R is in the first fragment (header word 2): the place of the message in the sequence of the address
+    if (initial) {
+        checkSequence(msg, a);
+    }
     msg.m_statusInfo = statusInfo;
     msg.m_reservedBits = reservedBits;
     msg.m_signature = signatureCheck;

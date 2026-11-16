@@ -260,9 +260,10 @@ int MessageCenter::postToTransmitter(const MessageCenterPage& page, QString& err
     }
     else
     {
-        // GSC: the 6 digits of the record address as an integer, the address number 1-4 as the function 0-3
+        // GSC: the 6 digits of the record address as an integer, the address number 1-4 as the function 0-3 (A-D)
         tx->setCapcode(r.m_address.left(6).toLongLong());
-        tx->setFunction(std::max(1, d.value("address_number").toInt()) - 1);
+        tx->setFunction(d.contains("address_number") ? std::max(1, std::min(4, d.value("address_number").toInt())) - 1
+            : (d.value("function").toInt() & 3));
     }
 
     actions->setTx(tx);
@@ -294,7 +295,7 @@ MessageRecord MessageCenter::pageRecord(const QString& transmitter, const QStrin
     r.m_protocolData.insert("transmitter", transmitter);
 
     // The address and its keys as in the records of the receivers and transmitters: POCSAG ric and function
-    // 0-3, FLEX capcode, GSC address number 1-4 (function 0-3 is the address number less 1)
+    // 0-3, FLEX capcode, GSC address number 1-4 and function 0-3 (A-D, the address number less 1)
     if (protocol == "pocsag")
     {
         r.m_address = QString::fromStdString(RadioPagingPocsag::addressText((uint32_t) address.toULongLong(), function));
@@ -305,6 +306,7 @@ MessageRecord MessageCenter::pageRecord(const QString& transmitter, const QStrin
     {
         r.m_address = QString::fromStdString(RadioPagingGsc::addressText(address.toStdString(), (function & 3) + 1));
         r.m_protocolData.insert("address_number", (function & 3) + 1);
+        r.m_protocolData.insert("function", function & 3);
     }
     else
     {

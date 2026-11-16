@@ -1374,11 +1374,12 @@ void testReceiverDuplicates()
     bool otherNew = (out[2].size() == batch.size());
 
     for (const auto& m : out[0]) { firstNew = firstNew && !m.m_duplicate; }
-    for (const auto& m : out[1]) { againDup = againDup && m.m_duplicate; }
+    // A tone only page has nothing a pager stores: it is not a duplicate
+    for (const auto& m : out[1]) { againDup = againDup && (m.m_duplicate == (m.m_rawBits > 0)); }
     for (const auto& m : out[2]) { otherNew = otherNew && !m.m_duplicate; }
 
     check(firstNew, "Receiver duplicates: first copy of the batch is new");
-    check(againDup, "Receiver duplicates: second copy of the batch is output again, marked duplicate");
+    check(againDup, "Receiver duplicates: second copy of the batch is output again, marked duplicate (tone only pages are not)");
     check(otherNew, "Receiver duplicates: the same batch on the other polarity is not a duplicate");
 }
 
@@ -1409,6 +1410,14 @@ int main()
     // Address of the message records: 6 characters (zero padded, N index of non battery saver) and the number 1-4
     check((RadioPagingGsc::addressText("123456", 2) == "1234562") && (RadioPagingGsc::addressText("42", 1) == "0000421")
         && (RadioPagingGsc::addressText("N23456", 4) == "N234564"), "record address: 6 characters and the address number");
+    // Address number 1-4 and function A-D are the same four address word combinations
+    check((RadioPagingGsc::functionLetter(1) == 'A') && (RadioPagingGsc::functionLetter(4) == 'D')
+        && (RadioPagingGsc::functionLetter(0) == 0) && (RadioPagingGsc::functionLetter(5) == 0),
+        "function letter of the address number");
+    check((RadioPagingGsc::addressNumber('1') == 1) && (RadioPagingGsc::addressNumber('4') == 4)
+        && (RadioPagingGsc::addressNumber('B') == 2) && (RadioPagingGsc::addressNumber('d') == 4)
+        && (RadioPagingGsc::addressNumber('0') == 0) && (RadioPagingGsc::addressNumber('5') == 0)
+        && (RadioPagingGsc::addressNumber('E') == 0), "address number of a number or a function letter");
     testCodes();
     testStartCodeCopies();
     testCharacterSets();

@@ -95,18 +95,12 @@ void MessageRecord::resetToDefaults()
     m_protocolData.clear();
 }
 
-// Network (protocol and polarity: each has its own state) and address, which has the POCSAG function and the GSC
-// address number; and the message number of the messages that have one (FLEX)
+// The key of the duplicate detection of the receiver of the message (RadioPagingDedup): the frequency, the protocol,
+// the network (polarity) and the address, which has the POCSAG function and the GSC address number. The receiver
+// compares a message with the last messages of its key
 QString MessageRecord::dedupKey() const
 {
-    QString key = QString("%1|%2|%3").arg(m_protocol, m_address, polarityToString(m_polarity));
-    int number = m_protocolData.value("message_number", -1).toInt();
-
-    if (number >= 0) {
-        key += "|n" + QString::number(number);
-    }
-
-    return key;
+    return QString("%1|%2|%3|%4").arg(m_frequency).arg(m_protocol, polarityToString(m_polarity), m_address);
 }
 
 QJsonObject MessageRecord::toJson() const

@@ -102,6 +102,7 @@ private:
     void fillTimeZones();
     QDateTime flexTimeNow() const;
     void displayTime(bool flex);
+    void displayNumbering(bool flex);
     //! The text field of the message: the path of a sound file (with the browse button) for a voice page
     void displayMessageType();
 
@@ -157,6 +158,8 @@ private slots:
     void on_flexTimeReference_currentIndexChanged(int index);
     void on_flexTimeDaylightSaving_toggled(bool checked);
     void on_flexTimeSendZone_toggled(bool checked);
+    void on_flexNumbering_toggled(bool checked);
+    void on_flexMaxMessageNumber_valueChanged(int value);
     void on_flexTimeZone_currentIndexChanged(int index);
     void on_flexTimeClock_toggled(bool checked);
     void on_flexTimeSet_editingFinished();

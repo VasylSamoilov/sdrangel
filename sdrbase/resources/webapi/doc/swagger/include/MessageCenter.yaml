@@ -63,7 +63,7 @@ MessageCenterPost:
       description: "POCSAG: the address. FLEX: the capcode. GSC: the address of up to 6 digits"
       type: string
     function:
-      description: "POCSAG function 0 to 3 (A to D). GSC: address number 0 to 3 (1 to 4)"
+      description: "POCSAG function 0 to 3 (A to D). GSC function 0 to 3 (A to D), the address number 1 to 4"
       type: integer
     priority:
       description: "FLEX: priority address (1 for yes)"

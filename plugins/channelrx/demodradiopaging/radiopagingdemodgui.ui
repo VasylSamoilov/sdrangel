@@ -382,7 +382,26 @@
         </property>
        </widget>
       </item>
-      <item row="1" column="3" colspan="2">
+      <item row="1" column="3">
+       <widget class="QSpinBox" name="flexMaxMessageNumber">
+        <property name="toolTip">
+         <string>FLEX largest message number of the network (as the pagers are set): the messages with R = 1 of an address are checked for skipped numbers, after it the sequence starts from 0 again</string>
+        </property>
+        <property name="keyboardTracking">
+         <bool>false</bool>
+        </property>
+        <property name="prefix">
+         <string>Max N </string>
+        </property>
+        <property name="maximum">
+         <number>63</number>
+        </property>
+        <property name="value">
+         <number>63</number>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="4">
        <widget class="QLabel" name="flexStatus">
         <property name="toolTip">
          <string>FLEX state: HUNT or SYNC with the mode and polarity of the frame, the bit error rate of the reception (green: no errors, yellow: errors corrected, red: errors the code cannot correct), df the carrier frequency offset (measured as the DC offset of the discriminator) and the number of messages</string>

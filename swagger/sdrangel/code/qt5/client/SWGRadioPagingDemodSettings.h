@@ -34,6 +34,8 @@ public:
     void setFlexEnabled(qint32 value);
     float getFlexDeviation();
     void setFlexDeviation(float value);
+    qint32 getFlexMaxMessageNumber();
+    void setFlexMaxMessageNumber(qint32 value);
     qint32 getGscEnabled();
     void setGscEnabled(qint32 value);
     float getGscDeviation();
@@ -89,6 +91,8 @@ private:
     bool m_flexEnabledIsSet = false;
     float m_flexDeviation = 0;
     bool m_flexDeviationIsSet = false;
+    qint32 m_flexMaxMessageNumber = 0;
+    bool m_flexMaxMessageNumberIsSet = false;
     qint32 m_gscEnabled = 0;
     bool m_gscEnabledIsSet = false;
     float m_gscDeviation = 0;

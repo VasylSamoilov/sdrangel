@@ -376,6 +376,19 @@ void RadioPagingDemodSink::applyChannelSettings(int channelSampleRate, int chann
 
     m_channelSampleRate = channelSampleRate;
     m_channelFrequencyOffset = channelFrequencyOffset;
+    applyReceiverFrequency();
+}
+
+void RadioPagingDemodSink::applyReceiverFrequency()
+{
+    qint64 frequency = m_centerFrequency + m_channelFrequencyOffset;
+
+    for (auto& pocsag : m_pocsag) {
+        pocsag.setFrequency(frequency);
+    }
+
+    m_flex.setFrequency(frequency);
+    m_gsc.setFrequency(frequency);
 }
 
 void RadioPagingDemodSink::applySettings(const QStringList& settingsKeys, const RadioPagingDemodSettings& settings, bool force)
@@ -401,6 +414,10 @@ void RadioPagingDemodSink::applySettings(const QStringList& settingsKeys, const 
 
     if (legs) {
         applyLegs();
+    }
+
+    if (settingsKeys.contains("flexMaxMessageNumber") || force) {
+        m_flex.setMaxMessageNumber(m_settings.m_flexMaxMessageNumber);
     }
 
     // A protocol switched off starts from scratch when it is switched on again
@@ -843,6 +860,18 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
     }
     record.m_protocolData.insert("maildrop", message.m_mailDrop);
     record.m_protocolData.insert("retrieval", message.m_retrieval);
+
+    // Numbers of the sequence of the address skipped before this message (R = 1): missed messages
+    if (!message.m_missedNumbers.empty())
+    {
+        QVariantList missed;
+
+        for (int n : message.m_missedNumbers) {
+            missed.append(n);
+        }
+
+        record.m_protocolData.insert("missed_numbers", missed);
+    }
     record.m_protocolData.insert("special", message.m_special);
     record.m_protocolData.insert("checksum", checkName(message.m_checksum));
     record.m_protocolData.insert("signature", checkName(message.m_signature));
@@ -947,7 +976,7 @@ void RadioPagingDemodSink::sendGsc(const RadioPagingGscDecoder::Message& message
     MessageRecord record;
     int pol = (message.m_polarity == RadioPagingGscDecoder::Inverted) ? 1 : 0;
 
-    // Address and address number 1-4; the page type is in the message type
+    // Address and address number 1-4 (function A-D, 0-3 as in POCSAG); the page type is in the message type
     record.m_protocol = "gsc";
     record.m_mode = "600";
     record.m_speed = 600;
@@ -958,6 +987,7 @@ void RadioPagingDemodSink::sendGsc(const RadioPagingGscDecoder::Message& message
     record.m_errorsCorrected = message.m_errorsCorrected;
     record.m_errorsUncorrectable = message.m_errorsUncorrectable;
     record.m_protocolData.insert("address_number", message.m_addressNumber);
+    record.m_protocolData.insert("function", message.m_addressNumber - 1);
     record.m_protocolData.insert("preamble", message.m_preamble);
     // Batch mode (the batch of the transmission), not the batch index of POCSAG
     record.m_protocolData.insert("batch_mode", message.m_batch);

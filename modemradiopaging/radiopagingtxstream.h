@@ -195,6 +195,8 @@ public:
     //!< Date and time of the frames sent (see RadioPagingFlexEncoder::TimeService). False and an error if a
     //!< field is out of range
     bool setTimeService(const RadioPagingFlexEncoder::TimeService& time, std::string& error);
+    //!< Message numbering of the network (see RadioPagingFlexEncoder::Numbering). False and an error if out of range
+    bool setNumbering(const RadioPagingFlexEncoder::Numbering& numbering, std::string& error);
     //!< False and an error if out of range. Applies to the next re-synchronization
     bool setCollapse(int collapse, std::string& error);
     //!< Collapse of the frames (block information word, placement): network only, 0 for one-shot
@@ -371,6 +373,7 @@ public:
         int m_switchMs[3] = {400, 200, 100};    //!< 750 bps pattern before POCSAG: 512, 1200, 2400
         RadioPagingFlexEncoder::Roaming m_roaming;  //!< Frames 0-3 are FLEX whatever the plan; with roaming they carry the system ID
         RadioPagingFlexEncoder::TimeService m_time; //!< Date and time of the FLEX frames
+        RadioPagingFlexEncoder::Numbering m_numbering;  //!< Message numbering of the FLEX network
     };
 
     static const int m_minuteFrames = 32;   //!< Frames of a minute

@@ -858,6 +858,32 @@
       </property>
      </widget>
     </item>
+    <item row="11" column="0" colspan="2">
+     <widget class="QCheckBox" name="flexNumbering">
+      <property name="toolTip">
+       <string>FLEX message numbering of the network (STD-43A 8.4, optional): the alphanumeric, HEX/binary and numbered short messages of each address are numbered from 0 with R = 1. Unchecked: N = 0 and R = 0 (a message in fragments takes a number apart from the other messages of the address in progress), numbered short messages are refused</string>
+      </property>
+      <property name="text">
+       <string>Message numbers</string>
+      </property>
+     </widget>
+    </item>
+    <item row="11" column="2" colspan="2">
+     <widget class="QSpinBox" name="flexMaxMessageNumber">
+      <property name="toolTip">
+       <string>Largest message number of the network (the pagers are set to it): after it the numbers of an address start from 0 again</string>
+      </property>
+      <property name="prefix">
+       <string>Max N </string>
+      </property>
+      <property name="maximum">
+       <number>63</number>
+      </property>
+      <property name="value">
+       <number>63</number>
+      </property>
+     </widget>
+    </item>
    </layout>
   </widget>
   <widget class="QWidget" name="messageContainer" native="true">

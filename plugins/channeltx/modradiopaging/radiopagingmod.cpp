@@ -448,6 +448,7 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
         record.m_speed = 600;
         record.m_address = QString::fromStdString(RadioPagingGsc::addressText(m.m_address, m.m_addressNumber));
         record.m_protocolData.insert("address_number", m.m_addressNumber);
+        record.m_protocolData.insert("function", m.m_addressNumber - 1);
         record.m_msgType = (m.m_type == RadioPagingGsc::Voice) ? "voice" : (m.m_type == RadioPagingGsc::Tone) ? "tone"
             : (m.m_type == RadioPagingGsc::Numeric) ? "numeric" : "alphanumeric";
         record.m_text = QString::fromStdString(m.m_text);
@@ -956,6 +957,12 @@ int RadioPagingMod::webapiSettingsPutPatch(
         errorMessage = "flexTimeZoneMinutes must be a zone of STD-43A Table 3.7.2-3 (offset from UTC in minutes)";
         return 400;
     }
+    if (channelSettingsKeys.contains("flexMaxMessageNumber")
+        && ((swg->getFlexMaxMessageNumber() < 0) || (swg->getFlexMaxMessageNumber() > 63)))
+    {
+        errorMessage = "flexMaxMessageNumber must be 0 to 63";
+        return 400;
+    }
 
     QMutexLocker mutexLocker(&m_settingsMutex);
     RadioPagingModSettings settings = m_settings;
@@ -1073,6 +1080,12 @@ void RadioPagingMod::webapiUpdateChannelSettings(
     }
     if (channelSettingsKeys.contains("flexTimeOffsetSeconds")) {
         settings.m_flexTimeOffsetSeconds = swg->getFlexTimeOffsetSeconds();
+    }
+    if (channelSettingsKeys.contains("flexNumbering")) {
+        settings.m_flexNumbering = swg->getFlexNumbering() != 0;
+    }
+    if (channelSettingsKeys.contains("flexMaxMessageNumber")) {
+        settings.m_flexMaxMessageNumber = swg->getFlexMaxMessageNumber();
     }
     if (channelSettingsKeys.contains("gscMode")) {
         settings.m_gscMode = swg->getGscMode();
@@ -1338,7 +1351,7 @@ int RadioPagingMod::webapiActionsPost(
             }
             if ((swgTx->getFunction() < 0) || (swgTx->getFunction() > 3))
             {
-                errorMessage = "GSC address number (function) must be 0 to 3, for 1 to 4";
+                errorMessage = "GSC function must be 0 to 3 (A to D), for the address number 1 to 4";
                 return 400;
             }
 
@@ -1395,6 +1408,8 @@ void RadioPagingMod::webapiFormatChannelSettings(SWGSDRangel::SWGChannelSettings
     swg->setFlexTimeSendZone(settings.m_flexTimeSendZone ? 1 : 0);
     swg->setFlexTimeDaylightSaving(settings.m_flexTimeDaylightSaving ? 1 : 0);
     swg->setFlexTimeOffsetSeconds(settings.m_flexTimeOffsetSeconds);
+    swg->setFlexNumbering(settings.m_flexNumbering ? 1 : 0);
+    swg->setFlexMaxMessageNumber(settings.m_flexMaxMessageNumber);
     swg->setSsidLocalId(settings.m_ssidLocalId);
     swg->setSsidCoverageZone(settings.m_ssidCoverageZone);
     swg->setSsidCountryCode(settings.m_ssidCountryCode);
@@ -1623,6 +1638,12 @@ void RadioPagingMod::webapiFormatChannelSettings(
     }
     if (channelSettingsKeys.contains("flexTimeOffsetSeconds") || force) {
         swg->setFlexTimeOffsetSeconds(settings.m_flexTimeOffsetSeconds);
+    }
+    if (channelSettingsKeys.contains("flexNumbering") || force) {
+        swg->setFlexNumbering(settings.m_flexNumbering ? 1 : 0);
+    }
+    if (channelSettingsKeys.contains("flexMaxMessageNumber") || force) {
+        swg->setFlexMaxMessageNumber(settings.m_flexMaxMessageNumber);
     }
     if (channelSettingsKeys.contains("gscMode") || force) {
         swg->setGscMode(settings.m_gscMode);

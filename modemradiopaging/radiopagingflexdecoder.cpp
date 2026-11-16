@@ -81,6 +81,8 @@ void RadioPagingFlexDecoder::reset()
         m_pol[p].m_reassembly.assign(m_reassemblySlots, Reassembly());
         m_pol[p].m_history.assign(m_historySize, HistoryEntry());
     }
+
+    m_historyMatch = nullptr;
 }
 
 const char *RadioPagingFlexDecoder::addressTypeName(AddressType type)
@@ -1256,7 +1258,9 @@ int RadioPagingFlexDecoder::reassemblyAlloc(uint64_t capcode, int number, int ve
     return index;
 }
 
-// A new message for an address that has a fragment stream open abandons the stream
+// A first fragment of an address that has a fragment stream open abandons the stream: an address sends one
+// fragmented message at a time (STD-43A 3.8.5 (2), 4.2 (1)). An unfragmented message does not: the address can
+// have one in a frame while it sends a fragmented message (3.8.5 (3), 4.2.3)
 void RadioPagingFlexDecoder::reassemblyInvalidate(uint64_t capcode, int excludeNumber)
 {
     for (Reassembly& slot : pol().m_reassembly)
@@ -1323,13 +1327,69 @@ void RadioPagingFlexDecoder::emitIncomplete(Reassembly& slot)
     emitMessage(msg);
 }
 
-// Message history: retransmissions of messages with a message number
+// Message number sequence of an address (STD-43A 3.10.1.3 N and R, 4.3.7): the numbers of the messages with R = 1
+// ascend by one up to the largest number of the network, then 0 again. A number further on tells messages were
+// missed; the same number again is a copy of the last message. Messages with R = 0 are out of the sequence
+void RadioPagingFlexDecoder::checkSequence(Message& msg, const AddressContext& a)
+{
+    if (!msg.m_retrieval || (msg.m_messageNumber < 0) || (a.m_type == AddressTemporary)) {
+        return;
+    }
 
-RadioPagingFlexDecoder::HistoryEntry *RadioPagingFlexDecoder::historyFind(uint64_t capcode, int number, int vector, int phase)
+    const uint64_t capcode = a.m_capcode;
+    std::unordered_map<uint64_t, int>& last = pol().m_lastNumbers;
+    auto found = last.find(capcode);
+    const int number = msg.m_messageNumber & 0x3f;
+
+    if (found != last.end())
+    {
+        // A number above the largest of the setting: the network counts further, 63 at most
+        const int modulus = std::max(m_maxMessageNumber, std::max(number, found->second)) + 1;
+        int expected = (found->second + 1) % modulus;
+
+        if (number != found->second)
+        {
+            for (int n = expected; n != number; n = (n + 1) % modulus) {
+                msg.m_missedNumbers.push_back(n);
+            }
+        }
+
+        found->second = number;
+        return;
+    }
+
+    if (last.size() >= m_maxSequenceAddresses) {
+        last.clear();
+    }
+
+    last[capcode] = number;
+}
+
+// Message history: as a pager, the last messages of each capcode, for duplicates and the repair of a copy with lost words
+
+RadioPagingFlexDecoder::HistoryEntry *RadioPagingFlexDecoder::historyFind(uint64_t capcode, int number, int vector, int phase,
+    const Word *words, int wordCount, int fragCount, bool isLong, int blocking)
 {
     for (HistoryEntry& e : pol().m_history)
     {
-        if (e.m_active && (e.m_capcode == capcode) && (e.m_number == number) && (e.m_vector == vector) && (e.m_phase == phase)) {
+        if (!e.m_active || (e.m_capcode != capcode) || (e.m_number != number) || (e.m_vector != vector) || (e.m_phase != phase)
+            || (e.m_wordCount != wordCount) || (e.m_fragCount != fragCount) || (e.m_long != isLong) || (e.m_blocking != blocking))
+        {
+            continue;
+        }
+
+        bool same = true;
+
+        for (int i = 0; same && (i < wordCount) && (i < wordsPerFrame); i++)
+        {
+            bool storedOk = (e.m_words[i].m_status == WordClean) || (e.m_words[i].m_status == WordCorrected);
+            bool wordOk = (words[i].m_status == WordClean) || (words[i].m_status == WordCorrected);
+            uint32_t mask = retransmissionMask(vector, isLong, i);
+
+            same = !(storedOk && wordOk && ((e.m_words[i].m_data & mask) != (words[i].m_data & mask)));
+        }
+
+        if (same) {
             return &e;
         }
     }
@@ -1341,7 +1401,29 @@ RadioPagingFlexDecoder::HistoryEntry *RadioPagingFlexDecoder::historyStore(uint6
     const Word *words, int wordCount, int fragCount, bool isLong, int blocking, uint32_t frame)
 {
     std::vector<HistoryEntry>& history = pol().m_history;
-    HistoryEntry *target = historyFind(capcode, number, vector, phase);
+    HistoryEntry *target = nullptr;
+    int own = 0;
+    uint32_t ownOldestAge = 0;
+    HistoryEntry *ownOldest = nullptr;
+
+    for (HistoryEntry& e : history)
+    {
+        if (e.m_active && (e.m_capcode == capcode))
+        {
+            uint32_t age = (frame - e.m_frame + framesPerHour) % framesPerHour;
+
+            own++;
+            if (!ownOldest || (age > ownOldestAge))
+            {
+                ownOldestAge = age;
+                ownOldest = &e;
+            }
+        }
+    }
+
+    if (own >= m_historyBacklog) {
+        target = ownOldest;
+    }
 
     if (!target)
     {
@@ -1420,32 +1502,42 @@ void RadioPagingFlexDecoder::historyExpire()
     }
 }
 
-// Returns 0: a new message, 1: a duplicate (retransmission without gain), -1: a duplicate whose
-// words repair the history entry: uncorrectable words of this copy are replaced. A duplicate is
-// output again, marked as such
+// Bits of a message word that are the same in a retransmission of the message: all but the checksum K and the
+// retrieval flag R, which is 0 in a retransmission (STD-43A 3.10.1.1-3.10.1.3; 4.3.7.6). words start at the first
+// message word of the message field: the first header word of a long address is in the vector field
+uint32_t RadioPagingFlexDecoder::retransmissionMask(int vector, bool isLong, int index)
+{
+    switch (vector)
+    {
+    case 5:     // Alphanumeric: header K bits 0-9, R bit 19
+        return (!isLong && (index == 0)) ? ~(0x3ffu | (1u << 19)) : 0x1fffffu;
+    case 6:     // HEX/binary: header word 1 K bits 0-11, header word 2 R bit 0
+        if (!isLong) {
+            return (index == 0) ? ~0xfffu : (index == 1) ? ~1u : 0x1fffffu;
+        }
+        return (index == 0) ? ~1u : 0x1fffffu;
+    case 7:     // Numbered numeric: first word K bits 0-1, R bit 8
+        return (!isLong && (index == 0)) ? ~(0x3u | (1u << 8)) : 0x1fffffu;
+    default:
+        return 0x1fffffu;
+    }
+}
+
+// Returns 0: a new message, 1: a duplicate (a copy without gain), -1: a duplicate whose words repair the stored copy
+// (m_historyMatch): uncorrectable words of this copy are replaced. A duplicate is output again, marked as such. As a
+// pager the decoder keeps the last messages of each capcode and takes a message that is one of them again as a
+// duplicate, whatever its R: a network without message numbering sends every message with N = 0 and R = 0 (8.4), and
+// a numbered message sent again with a new number is a new message
 int RadioPagingFlexDecoder::checkRetransmission(uint64_t capcode, bool retrieval, int number, int vector, int phase,
     const Word *words, int wordCount, int fragCount, bool isLong, int blocking)
 {
+    (void) retrieval;
     uint32_t frame = absFrame();
+    HistoryEntry *entry = historyFind(capcode, number, vector, phase, words, wordCount, fragCount, isLong, blocking);
 
-    // R = 1: a new message
-    if (retrieval)
-    {
-        historyStore(capcode, number, vector, phase, words, wordCount, fragCount, isLong, blocking, frame);
-        return 0;
-    }
-
-    HistoryEntry *entry = historyFind(capcode, number, vector, phase);
+    m_historyMatch = entry;
 
     if (!entry)
-    {
-        historyStore(capcode, number, vector, phase, words, wordCount, fragCount, isLong, blocking, frame);
-        return 0;
-    }
-
-    // The same message number for another message
-    if ((entry->m_wordCount != wordCount) || (entry->m_fragCount != fragCount) || (entry->m_long != isLong)
-        || (entry->m_blocking != blocking))
     {
         historyStore(capcode, number, vector, phase, words, wordCount, fragCount, isLong, blocking, frame);
         return 0;

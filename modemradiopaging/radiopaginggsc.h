@@ -51,10 +51,14 @@
 //
 // Word 1 selects two digits of the address (the table has 50 entries, the second word
 // carries a +50 offset for groups 50-99), word 2 the last three digits. The address
-// number 1-4 is carried by complementing word 1 (number bit 1) and word 2 (number bit 0).
+// number 1-4, also called the function A-D, is the combination of the two address words:
+//   1 (A)  word 1 and word 2 as encoded
+//   2 (B)  word 2 complemented
+//   3 (C)  word 1 complemented
+//   4 (D)  word 1 and word 2 complemented
 // An address (capcode) is written as 6 digits: index, group (2 digits) and 3 address
-// digits; without a preamble (non battery saver) the index is N. The function (address
-// number) is written after it: capcode and function, e.g. 2197892 or N197892.
+// digits; without a preamble (non battery saver) the index is N. The address number is
+// written after it, e.g. 2197892 or N197892.
 //
 // A data block is 8 BCH(15,7) codewords of 7 bits, interleaved bit by bit into 120 bits.
 // Words 0-5 and the low 6 bits of word 6 carry 48 payload bits, bit 6 of word 6 is the
@@ -113,7 +117,7 @@ public:
     struct TxMessage
     {
         std::string m_address;      //!< 6 digits: index, group, 3 address digits
-        int m_addressNumber = 1;    //!< 1-4
+        int m_addressNumber = 1;    //!< 1-4 (function A-D)
         MessageType m_type = Alphanumeric;
         std::string m_text;         //!< Numeric: 0-9 A-H J L N P R U space - and the triple bar (UTF-8 U+2261, also = or *)  Alphanumeric: ASCII 0x20-0x5d, letters of either case, @ [ ] sent as \ { }, others as space
     };
@@ -181,6 +185,10 @@ public:
     //!< Address of the message records: the 6 characters of the address (index, group, 3 digits; N for the index
     //!< of non battery saver) and the address number 1-4, the same in RX, TX and the message center
     static std::string addressText(const std::string& address, int addressNumber);
+    //!< Function letter A-D of an address number 1-4, 0 if out of range
+    static char functionLetter(int addressNumber);
+    //!< Address number 1-4 of a number 1-4 or a function letter A-D (either case), 0 if it is none
+    static int addressNumber(char numberOrFunction);
     //!< Index of a word 1 value in the table of 50 values, -1 if it is none
     static int word1Index(uint16_t word1);
 

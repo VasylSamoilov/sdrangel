@@ -173,6 +173,15 @@ RadioPagingFlexEncoder::TimeService RadioPagingModSource::timeService(const Radi
     return t;
 }
 
+RadioPagingFlexEncoder::Numbering RadioPagingModSource::numbering(const RadioPagingModSettings& settings)
+{
+    RadioPagingFlexEncoder::Numbering n;
+
+    n.m_enabled = settings.m_flexNumbering;
+    n.m_maxNumber = settings.m_flexMaxMessageNumber;
+    return n;
+}
+
 RadioPagingMixTxStream::Config RadioPagingModSource::mixConfig(const RadioPagingModSettings& settings)
 {
     RadioPagingMixTxStream::Config config;
@@ -184,6 +193,7 @@ RadioPagingMixTxStream::Config RadioPagingModSource::mixConfig(const RadioPaging
     config.m_shared = settings.m_mixShared;
     config.m_roaming = roaming(settings);
     config.m_time = timeService(settings);
+    config.m_numbering = numbering(settings);
     config.m_flexDeviation = settings.m_deviation;
     config.m_pocsagDeviation = settings.m_pocsagDeviation;
     config.m_pocsagBaud = settings.m_pocsagSpeed;
@@ -234,6 +244,9 @@ void RadioPagingModSource::applyStreamDefaults()
             flex->setRoaming(roaming(m_settings));
 
             if (!flex->setTimeService(timeService(m_settings), error)) {
+                qWarning() << "RadioPagingModSource::applyStreamDefaults:" << QString::fromStdString(error);
+            }
+            if (!flex->setNumbering(numbering(m_settings), error)) {
                 qWarning() << "RadioPagingModSource::applyStreamDefaults:" << QString::fromStdString(error);
             }
         }

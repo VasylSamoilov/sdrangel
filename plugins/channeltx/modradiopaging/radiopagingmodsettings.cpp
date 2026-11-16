@@ -76,6 +76,8 @@ void RadioPagingModSettings::resetToDefaults()
     m_flexTimeSendZone = true;
     m_flexTimeDaylightSaving = false;
     m_flexTimeOffsetSeconds = 0;
+    m_flexNumbering = true;
+    m_flexMaxMessageNumber = 63;
     m_gscMode = (int) RadioPagingGsc::Auto;
     m_gscInverted = false;
     m_gscVoiceSeconds = 30;
@@ -135,6 +137,7 @@ void RadioPagingModSettings::validate()
         m_flexTimeZoneMinutes = 0;
     }
 
+    m_flexMaxMessageNumber = std::max(0, std::min(63, m_flexMaxMessageNumber));
     m_gscVoiceSeconds = std::max(1, std::min(50, m_gscVoiceSeconds));
     m_pocsagDeviation = std::max(500.0f, std::min(10000.0f, m_pocsagDeviation));
     m_mixFramesPerMinute = std::max(0, std::min(m_mixShared ? 128 : 32, m_mixFramesPerMinute));
@@ -188,7 +191,7 @@ QString RadioPagingModSettings::protocolName(Protocol protocol)
     return "";
 }
 
-// Tags 1 to 14 and 33 to 58 are the modulator settings, 20 to 32 the usual channel tags. New tags are only appended
+// Tags 1 to 14 and 33 to 60 are the modulator settings, 20 to 32 the usual channel tags. New tags are only appended
 QByteArray RadioPagingModSettings::serialize() const
 {
     SimpleSerializer s(1);
@@ -255,6 +258,8 @@ QByteArray RadioPagingModSettings::serialize() const
     s.writeBool(56, m_flexTimeSendZone);
     s.writeBool(57, m_flexTimeDaylightSaving);
     s.writeS64(58, m_flexTimeOffsetSeconds);
+    s.writeBool(59, m_flexNumbering);
+    s.writeS32(60, m_flexMaxMessageNumber);
 
     return s.final();
 }
@@ -357,6 +362,8 @@ bool RadioPagingModSettings::deserialize(const QByteArray& data)
         d.readBool(56, &m_flexTimeSendZone, true);
         d.readBool(57, &m_flexTimeDaylightSaving, false);
         d.readS64(58, &m_flexTimeOffsetSeconds, 0);
+        d.readBool(59, &m_flexNumbering, true);
+        d.readS32(60, &m_flexMaxMessageNumber, 63);
         m_gscVoiceKeepDays = std::max(0, std::min(3650, m_gscVoiceKeepDays));
         m_gscVoiceKeepMin = std::max(0, std::min(100000, m_gscVoiceKeepMin));
 
@@ -447,6 +454,12 @@ void RadioPagingModSettings::applySettings(const QStringList& settingsKeys, cons
     }
     if (settingsKeys.contains("flexTimeOffsetSeconds")) {
         m_flexTimeOffsetSeconds = settings.m_flexTimeOffsetSeconds;
+    }
+    if (settingsKeys.contains("flexNumbering")) {
+        m_flexNumbering = settings.m_flexNumbering;
+    }
+    if (settingsKeys.contains("flexMaxMessageNumber")) {
+        m_flexMaxMessageNumber = settings.m_flexMaxMessageNumber;
     }
     if (settingsKeys.contains("gscMode")) {
         m_gscMode = settings.m_gscMode;
@@ -603,6 +616,12 @@ QString RadioPagingModSettings::getDebugString(const QStringList& settingsKeys, 
     }
     if (settingsKeys.contains("flexTimeOffsetSeconds") || force) {
         ostr << " m_flexTimeOffsetSeconds: " << m_flexTimeOffsetSeconds;
+    }
+    if (settingsKeys.contains("flexNumbering") || force) {
+        ostr << " m_flexNumbering: " << m_flexNumbering;
+    }
+    if (settingsKeys.contains("flexMaxMessageNumber") || force) {
+        ostr << " m_flexMaxMessageNumber: " << m_flexMaxMessageNumber;
     }
     if (settingsKeys.contains("gscMode") || force) {
         ostr << " m_gscMode: " << m_gscMode;

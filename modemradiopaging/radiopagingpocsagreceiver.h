@@ -60,8 +60,10 @@ public:
     void create(double sampleRate, int baud);
     void reset();
     void setPolarities(bool normal, bool inverted) { m_normalEnabled = normal; m_invertedEnabled = inverted; }
-    //!< Messages received again within this time are marked duplicate (default 60 s)
+    //!< Messages remembered for duplicates: the last ones of each pager, within this time (default 60 s)
     void setDuplicateWindow(double seconds) { m_dedup.setWindow(seconds); }
+    //!< Frequency of the receiver, Hz: a pager is on one frequency (part of the duplicate key)
+    void setFrequency(int64_t frequency) { m_dedup.setFrequency(frequency); }
     int getBaud() const { return m_baud; }
 
     void process(float sample);
@@ -89,7 +91,7 @@ private:
     bool m_preambleLocked;
     int m_bitsSincePreamble;            //!< Bits since the last run of m_preambleLockBits reversals
     std::deque<RadioPagingPocsagDecoder::Message> m_messages;
-    RadioPagingDedup m_dedup;
+    RadioPagingDedup m_dedup{"pocsag"};
     double m_time = 0.0;                //!< Seconds of signal received, for the duplicate window
     bool m_levelsMeasured = false;
     float m_measuredDc = 0.0f;

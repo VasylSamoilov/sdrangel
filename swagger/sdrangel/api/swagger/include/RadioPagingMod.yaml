@@ -102,6 +102,14 @@ RadioPagingModSettings:
       description: "FLEX time: seconds added to the time of the frame grid (UTC from the computer clock), to send any date and time"
       type: integer
       format: int64
+    flexNumbering:
+      description: "FLEX message numbering of the network (STD-43A 8.4, optional): 1 the alphanumeric, HEX/binary and numbered short messages of each address are numbered 0, 1 ... flexMaxMessageNumber, 0 ... with R = 1; 0 the network does not number them: N = 0 and R = 0 (a message in fragments takes a number apart from the other messages of the address in progress) and numbered short messages are refused"
+      type: integer
+      format: int32
+    flexMaxMessageNumber:
+      description: "FLEX largest message number of the network, 0 to 63 (the pagers are set to it): after it the numbers of an address start from 0 again"
+      type: integer
+      format: int32
     gscMode:
       description: "GSC transmissions (one-shot only, GSC has no network mode): 0 auto (a batch of messages of the same preamble value, a message alone after its own preamble), 1 single (one message per transmission), 2 batch (a batch even for one message), 3 non battery saver (all queued messages of a polarity after one 1100 pattern)"
       type: integer
@@ -265,7 +273,7 @@ RadioPagingModTx:
       type: integer
       format: int32
     function:
-      description: "POCSAG: function 0 to 3 (A to D). GSC: address number 0 to 3, for 1 to 4"
+      description: "POCSAG: function 0 to 3 (A to D). GSC: function 0 to 3 (A to D), the address number 1 to 4"
       type: integer
       format: int32
     capcode:

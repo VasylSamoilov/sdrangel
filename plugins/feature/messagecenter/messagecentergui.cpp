@@ -349,7 +349,7 @@ void MessageCenterGUI::buildCompose(QWidget *container)
     m_address->setPlaceholderText("address / capcode");
     m_function = new QComboBox(container);
     m_function->addItems({"1 (A)", "2 (B)", "3 (C)", "4 (D)"});
-    m_function->setToolTip("POCSAG function A to D, GSC address number 1 to 4");
+    m_function->setToolTip("POCSAG function A to D, GSC address number 1 to 4 (function A to D)");
     m_type = new QComboBox(container);
     m_type->addItems({"alphanumeric", "numeric", "tone", "voice", "short_message", "binary", "secure"});
     m_text = new QLineEdit(container);

@@ -475,6 +475,11 @@ bool RadioPagingFlexTxStream::setTimeService(const RadioPagingFlexEncoder::TimeS
     return m_encoders[0].setTimeService(time, error) && m_encoders[1].setTimeService(time, error);
 }
 
+bool RadioPagingFlexTxStream::setNumbering(const RadioPagingFlexEncoder::Numbering& numbering, std::string& error)
+{
+    return m_encoders[0].setNumbering(numbering, error) && m_encoders[1].setNumbering(numbering, error);
+}
+
 bool RadioPagingFlexTxStream::setReservedFrames(const std::vector<uint8_t>& table, std::string& error)
 {
     return m_encoders[0].setReservedFrames(table, error) && m_encoders[1].setReservedFrames(table, error);
@@ -1024,6 +1029,9 @@ bool RadioPagingMixTxStream::setConfig(const Config& config, std::string& error)
     m_flex.setRoaming(c.m_roaming);
 
     if (!m_flex.setTimeService(c.m_time, error)) {
+        return false;
+    }
+    if (!m_flex.setNumbering(c.m_numbering, error)) {
         return false;
     }
 

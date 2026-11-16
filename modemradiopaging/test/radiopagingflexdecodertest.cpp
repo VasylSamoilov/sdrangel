@@ -983,12 +983,15 @@ void testFragments()
         check(a.size() == 1 && a[0].m_isFragment && b.size() == 2 && b[0].m_isFragment && !b[1].m_isFragment, "fragments: report fragments option");
     }
     {
-        // A complete message of an address with an open stream abandons the stream (reported incomplete)
+        // A complete message of an address with an open stream: the address may have one while it sends a fragmented
+        // message (STD-43A 3.8.5 (3), 4.2.3), the stream stays open
         Dec d;
         d.decodeFrame(rxOf("fragments", "open stream"));
-        std::vector<Dec::Message> out = d.decodeFrame(rxOf("fragments", "abandon"));
-        check(out.size() == 2 && !out[0].m_complete && out[1].m_complete && (out[1].m_text == "complete message"),
-            "fragments: new message abandons an open stream");
+        std::vector<Dec::Message> out = d.decodeFrame(rxOf("fragments", "complete during stream"));
+        std::vector<Dec::Message> rest = d.flush();
+        check(out.size() == 1 && out[0].m_complete && (out[0].m_text == "complete message") && (rest.size() == 1) && !rest[0].m_complete
+            && (rest[0].m_text == "stream start, "),
+            "fragments: a complete message of the address does not abandon an open stream");
     }
 }
 
@@ -1049,6 +1052,41 @@ void testDuplicates()
             fresh = fresh && !m.m_duplicate;
         }
         check(fresh, "duplicates: history is kept per polarity (same messages on the other polarity are not duplicates)");
+    }
+    {
+        // A network without message numbering: every message has N = 0 and R = 0. Another message of the length of
+        // the one before it is not a retransmission; the same message sent again is
+        Enc enc;
+        std::string error;
+        Enc::Numbering numbering;
+        numbering.m_enabled = false;
+        enc.setNumbering(numbering, error);
+        Dec dec;
+        std::vector<Dec::Message> out;
+        uint64_t index = 0;
+        for (const char *text : {"message one", "message two", "message two"})
+        {
+            // One message a frame
+            Enc::TxMessage m;
+            m.m_capcode = 4096;
+            m.m_text = text;
+            enc.enqueue(m);
+            for (; (index < 400) && (enc.pending() > 0); index++)
+            {
+                Enc::Frame f = enc.buildFrame(index);
+                Dec::RxFrame rx = toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data);
+                std::vector<Dec::Message> o = dec.decodeFrame(rx);
+                out.insert(out.end(), o.begin(), o.end());
+            }
+        }
+        bool ok = (out.size() == 3) && (out[0].m_messageNumber == 0) && !out[0].m_retrieval && !out[0].m_duplicate
+            && !out[1].m_duplicate && out[2].m_duplicate && (out[2].m_text == "message two");
+        std::string why;
+        for (const Dec::Message& m : out) {
+            why += " [" + m.m_text + " N" + std::to_string(m.m_messageNumber) + " d" + std::to_string(m.m_duplicate) + "]";
+        }
+        check(ok, ("duplicates: N = 0 R = 0 of a network without numbering, another message of the same length is new, the same one a duplicate"
+            + why).c_str());
     }
 }
 
@@ -1962,7 +2000,9 @@ void testBinaryTx()
         if (ok)
         {
             const Dec::Message& r = out[0];
-            ok = (r.m_capcode == c.m_capcode) && (r.m_checksum == Dec::CheckOk) && (r.m_messageNumber == 1)
+            // The first number of the sequence is 0; a secure message is not numbered: the lowest number that is
+            // not the next one of the sequence
+            ok = (r.m_capcode == c.m_capcode) && (r.m_checksum == Dec::CheckOk) && (r.m_messageNumber == ((c.m_type == Flex::Secure) ? 1 : 0))
                 && (r.m_fragment == Dec::FragmentComplete);
 
             if (c.m_type == Flex::Binary)
@@ -2024,6 +2064,8 @@ void testBinaryTx()
         {"secure type 11 reserved", Flex::Secure, "1234", reserved},
         {"secure binary not hex", Flex::Secure, "xyz", secParams(Flex::SecureBinary)},
         {"secure alphanumeric more than 64 fragments", Flex::Secure, std::string(64 * 252 + 1, 'a'), secParams(Flex::SecureAlphanumeric)},
+        // 251 characters in the first fragment, 252 in the others
+        {"alphanumeric more than 64 fragments", Flex::Alphanumeric, std::string(251 + 63 * 252 + 1, 'a'), Flex::BinaryParams()},
     };
 
     for (const Bad& b : bad)
@@ -2083,7 +2125,7 @@ void testBinaryTx()
         Flex::MessageType m_type;
         std::string m_text;
         Flex::BinaryParams m_binary;
-        std::vector<int> m_bits;    // Data bits of each fragment
+        std::vector<int> m_bits;    // Data bits of each fragment (alphanumeric: characters of each fragment)
         Flex::Mode m_mode;
     };
 
@@ -2126,6 +2168,16 @@ void testBinaryTx()
         // 1764 bits, then 236 bits in 12 words read whole (no termination)
         {"secure data defined separately 500 digits", 1234567, Flex::Secure, hex600.substr(0, 500), secParams(Flex::SecureSeparate),
             {1764, 252}, Flex::Mode1600_2},
+        // Alphanumeric (STD-43A 4.1): the first fragment 251 characters after the signature slot (84 full words),
+        // the others 252, no ETX; the signature of the whole message in the first fragment
+        {"alphanumeric 600 characters", 1234567, Flex::Alphanumeric, chars, Flex::BinaryParams(), {251, 252, 97}, Flex::Mode1600_2},
+        // Long address: 83 character words: 248, then 249
+        {"alphanumeric long address 600 characters", 2101300, Flex::Alphanumeric, chars, Flex::BinaryParams(), {248, 249, 103},
+            Flex::Mode1600_2},
+        // The last fragment ends exactly at a word end: no ETX
+        {"alphanumeric last fragment exact end", 1234567, Flex::Alphanumeric, chars.substr(0, 503), Flex::BinaryParams(), {251, 252},
+            Flex::Mode1600_2},
+        {"alphanumeric 6400/4 600 characters", 1234567, Flex::Alphanumeric, chars, Flex::BinaryParams(), {251, 252, 97}, Flex::Mode6400_4},
     };
 
     for (const Frag& c : frags)
@@ -2158,7 +2210,8 @@ void testBinaryTx()
         }
 
         bool binary = (c.m_type == Flex::Binary);
-        bool hexData = binary || (c.m_binary.m_secureType != Flex::SecureAlphanumeric);
+        bool alphanumeric = (c.m_type == Flex::Alphanumeric);
+        bool hexData = binary || (!alphanumeric && (c.m_binary.m_secureType != Flex::SecureAlphanumeric));
         size_t expected = c.m_bits.empty() ? (c.m_text.size() + 251) / 252 : c.m_bits.size();
         bool ok = er.m_ok && (queued == expected) && whole && (parts.size() == expected) && (frames >= (int) expected);
         std::string why;
@@ -2166,10 +2219,19 @@ void testBinaryTx()
         for (size_t k = 0; ok && (k < parts.size()); k++)
         {
             const Dec::Message& p = *parts[k];
-            ok = (p.m_checksum == Dec::CheckOk) && (p.m_messageNumber == 1)
+            ok = (p.m_checksum == Dec::CheckOk) && (p.m_messageNumber == ((c.m_type == Flex::Secure) ? 1 : 0))
                 && (p.m_fragment == ((k == 0) ? Dec::FragmentFirst : (k + 1 == parts.size()) ? Dec::FragmentLast : Dec::FragmentMiddle));
             if (ok && hexData && !c.m_bits.empty()) {
                 ok = (p.m_dataBits == c.m_bits[k]) && (p.m_fillState == 0);
+            }
+            // Alphanumeric: the characters of the fragment, U0 V0 = 00 in the fragments after the first
+            if (ok && alphanumeric)
+            {
+                int start = 0;
+                for (size_t i = 0; i < k; i++) {
+                    start += c.m_bits[i];
+                }
+                ok = (p.m_text == c.m_text.substr(start, c.m_bits[k])) && (p.m_fragmentControl == ((k == 0) ? -1 : 0));
             }
             if (!ok)
             {
@@ -2195,6 +2257,9 @@ void testBinaryTx()
                 ok = (whole->m_signature == Dec::CheckOk) && (whole->m_dataBits == (int) c.m_text.size() * 4)
                     && (whole->m_blocking == (c.m_binary.m_blocking & 0xf)) && (whole->m_displayRtl == c.m_binary.m_rightToLeft)
                     && (whole->m_mailDrop == c.m_binary.m_mailDrop);
+            }
+            if (ok && alphanumeric) {
+                ok = (whole->m_signature == Dec::CheckOk) && whole->m_retrieval;
             }
             if (!ok && whole)
             {
@@ -2432,6 +2497,191 @@ void testFragmentScheduling()
 }
 
 // Date and time (STD-43A 3.7.2): word layout, zone table, civil date, the encoder time service decoded
+// Message numbering of the network (STD-43A 8.4, 3.10.1.1-3.10.1.4 N and R)
+void testNumbering()
+{
+    auto msg = [](uint64_t capcode, Flex::MessageType type, const std::string& text) {
+        Enc::TxMessage m;
+        m.m_capcode = capcode;
+        m.m_type = type;
+        m.m_text = text;
+        return m;
+    };
+
+    // Numbering on: one sequence from 0 over the numbered types of the address, R = 1. Tone and numeric
+    // messages have no number and leave the sequence alone; a secure message is not numbered
+    {
+        Enc enc;
+        enc.enqueue(msg(4096, Flex::Alphanumeric, "first"));
+        enc.enqueue(msg(4096, Flex::Tone, ""));
+        enc.enqueue(msg(4096, Flex::Numeric, "123"));
+        Enc::TxMessage bin = msg(4096, Flex::Binary, "A5A5");
+        bin.m_binary.m_blocking = 8;
+        enc.enqueue(bin);
+        Enc::TxMessage shortNumbered = msg(4096, Flex::ShortMessage, "");
+        shortNumbered.m_shortType = Flex::ShortNumbered;
+        shortNumbered.m_source = 2;
+        enc.enqueue(shortNumbered);
+        Enc::TxMessage secure = msg(4096, Flex::Secure, "secret");
+        enc.enqueue(secure);
+        enc.enqueue(msg(4096, Flex::Alphanumeric, "last"));
+        Dec dec;
+        std::vector<Dec::Message> out = runEncoder(enc, dec);
+        std::string seen;
+
+        for (const Dec::Message& m : out) {
+            seen += std::to_string((int) m.m_type) + ":" + std::to_string(m.m_messageNumber) + (m.m_retrieval ? "R " : " ");
+        }
+
+        bool ok = (out.size() == 7);
+        for (const Dec::Message& m : out)
+        {
+            if ((m.m_type == Dec::TypeAlphanumeric) && (m.m_text == "first")) {
+                ok = ok && (m.m_messageNumber == 0) && m.m_retrieval;
+            } else if (m.m_type == Dec::TypeBinary) {
+                ok = ok && (m.m_messageNumber == 1) && m.m_retrieval;
+            } else if (m.m_type == Dec::TypeShortMessage) {
+                ok = ok && (m.m_messageNumber == 2) && m.m_retrieval;
+            } else if (m.m_type == Dec::TypeSecure) {
+                ok = ok && (m.m_messageNumber != 3);
+            } else if ((m.m_type == Dec::TypeAlphanumeric) && (m.m_text == "last")) {
+                ok = ok && (m.m_messageNumber == 3) && m.m_retrieval;
+            }
+        }
+        check(ok, ("numbering on: one sequence 0, 1, 2, 3 over alphanumeric, binary and numbered short messages, R = 1; "
+            "tone, numeric and secure messages do not take numbers of it (" + seen + ")").c_str());
+    }
+
+    // The largest number of the network: 2, then 0 again
+    {
+        Enc enc;
+        std::string error;
+        Enc::Numbering numbering;
+        numbering.m_maxNumber = 2;
+        bool set = enc.setNumbering(numbering, error);
+        numbering.m_maxNumber = 64;
+        bool refused = !enc.setNumbering(numbering, error) && (enc.numbering().m_maxNumber == 2);
+        for (int i = 0; i < 5; i++) {
+            enc.enqueue(msg(4096, Flex::Alphanumeric, "m" + std::to_string(i)));
+        }
+        Dec dec;
+        std::vector<Dec::Message> out = runEncoder(enc, dec);
+        std::string numbers;
+        for (const Dec::Message& m : out) {
+            numbers += std::to_string(m.m_messageNumber);
+        }
+        check(set && refused && (numbers == "01201"), ("numbering: wraps after the largest number of the network, 64 refused (" + numbers + ")").c_str());
+    }
+
+    // A header message and the data message after it share the number; the sequence goes on after them
+    {
+        Enc enc;
+        Enc::TxMessage header = msg(4096, Flex::Binary, "48454144");
+        header.m_binary.m_blocking = 8;
+        header.m_binary.m_header = true;
+        Enc::TxMessage data = msg(4096, Flex::Binary, "0123456789ABCDEF");
+        data.m_binary.m_blocking = 1;
+        enc.enqueue(header);
+        enc.enqueue(data);
+        enc.enqueue(msg(4096, Flex::Alphanumeric, "after"));
+        Dec dec;
+        std::vector<Dec::Message> out = runEncoder(enc, dec);
+        bool ok = (out.size() == 3) && (out[0].m_messageNumber == 0) && out[0].m_headerMessage && (out[1].m_messageNumber == 0)
+            && !out[1].m_headerMessage && (out[2].m_messageNumber == 1);
+        check(ok, "numbering: header message and its data message have one number (3.10.1.2 H)");
+    }
+
+    // Numbering off: R = 0, N = 0 when the address has no other message in progress. The short message goes in
+    // the frame of the last fragment of the message sent in fragments (N = 0): it takes 1
+    {
+        Enc enc;
+        std::string error;
+        Enc::Numbering numbering;
+        numbering.m_enabled = false;
+        enc.setNumbering(numbering, error);
+        std::string chars;
+        for (int i = 0; i < 261; i++) {
+            chars += (char) ('a' + (i % 26));
+        }
+        Enc::TxMessage shortNumbered = msg(4096, Flex::ShortMessage, "");
+        shortNumbered.m_shortType = Flex::ShortNumbered;
+        bool refused = !enc.enqueue(shortNumbered).m_ok;
+        enc.enqueue(msg(4096, Flex::Alphanumeric, chars));
+        enc.enqueue(msg(4096, Flex::Alphanumeric, "short one"));
+        Dec dec;
+        std::vector<Dec::Message> out = runEncoder(enc, dec);
+        const Dec::Message *single = nullptr;
+        const Dec::Message *whole = nullptr;
+        for (const Dec::Message& m : out)
+        {
+            if (m.m_text == "short one") {
+                single = &m;
+            } else if (m.m_text == chars) {
+                whole = &m;
+            }
+        }
+        bool ok = refused && single && whole && (single->m_messageNumber == 1) && !single->m_retrieval
+            && (whole->m_messageNumber == 0) && !whole->m_retrieval && whole->m_complete && (whole->m_fragmentCount == 2);
+        std::string why;
+        for (const Dec::Message& m : out) {
+            why += " [" + m.m_text.substr(0, 10) + " N" + std::to_string(m.m_messageNumber) + " R" + std::to_string(m.m_retrieval)
+                + " c" + std::to_string(m.m_complete) + "]";
+        }
+        check(ok, ("numbering off: R = 0, N 0 or a number apart from the message of the address in progress, the short message "
+            "does not abandon the fragments, numbered short message refused (refused " + std::to_string(refused) + why + ")").c_str());
+    }
+
+    // Receiver: the messages with R = 1 of an address are checked for skipped numbers; the sequence wraps after the
+    // largest number of the network
+    {
+        auto runOne = [&](int txMax, int rxMax, int skip, int count) {
+            Enc enc;
+            std::string error;
+            Enc::Numbering numbering;
+            numbering.m_maxNumber = txMax;
+            enc.setNumbering(numbering, error);
+            Dec dec;
+            dec.setMaxMessageNumber(rxMax);
+            std::vector<Dec::Message> out;
+            uint64_t index = 0;
+            for (int i = 0; i < count; i++)
+            {
+                enc.enqueue(msg(4096, Flex::Alphanumeric, "m" + std::to_string(i)));
+                for (; (index < 400) && (enc.pending() > 0); index++)
+                {
+                    Enc::Frame f = enc.buildFrame(index);
+                    if (i == skip) {
+                        continue;   // Not received
+                    }
+                    std::vector<Dec::Message> o = dec.decodeFrame(toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data));
+                    out.insert(out.end(), o.begin(), o.end());
+                }
+            }
+            return out;
+        };
+        auto missed = [](const Dec::Message& m) {
+            std::string s;
+            for (int n : m.m_missedNumbers) {
+                s += std::to_string(n) + ",";
+            }
+            return s;
+        };
+
+        std::vector<Dec::Message> a = runOne(63, 63, 1, 4);
+        bool ok = (a.size() == 3) && a[0].m_missedNumbers.empty() && (missed(a[1]) == "1,") && (a[1].m_messageNumber == 2)
+            && a[2].m_missedNumbers.empty();
+        std::vector<Dec::Message> b = runOne(2, 2, -1, 5);
+        bool wrap = (b.size() == 5);
+        for (const Dec::Message& m : b) {
+            wrap = wrap && m.m_missedNumbers.empty();
+        }
+        std::vector<Dec::Message> c = runOne(2, 63, -1, 4);
+        bool mismatch = (c.size() == 4) && (c[3].m_messageNumber == 0) && (c[3].m_missedNumbers.size() == 61) && (c[3].m_missedNumbers[0] == 3);
+        check(ok && wrap && mismatch, ("numbering: receiver reports the numbers skipped before a message, wraps after the largest number ("
+            + (a.size() > 1 ? missed(a[1]) : std::string("?")) + ")").c_str());
+    }
+}
+
 void testTime()
 {
     // Fig. 3.7.2-1: date word of December 31, 1999, the 32 bits in transmission order
@@ -2590,6 +2840,7 @@ int main()
     check((Flex::addressText(1234567) == "0001234567") && (Flex::addressText(4297068542ULL) == "4297068542"),
         "record address: capcode in 10 digits");
     testTime();
+    testNumbering();
     testFragmentScheduling();
     testBinaryTx();
     testHexBits();

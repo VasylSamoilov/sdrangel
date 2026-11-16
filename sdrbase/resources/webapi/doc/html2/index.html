@@ -15494,7 +15494,7 @@ margin-bottom: 20px;
     },
     "function" : {
       "type" : "integer",
-      "description" : "POCSAG function 0 to 3 (A to D). GSC: address number 0 to 3 (1 to 4)"
+      "description" : "POCSAG function 0 to 3 (A to D). GSC function 0 to 3 (A to D), the address number 1 to 4"
     },
     "priority" : {
       "type" : "integer",
@@ -18995,6 +18995,11 @@ margin-bottom: 20px;
       "format" : "float",
       "description" : "FLEX outer symbol frequency deviation in Hz"
     },
+    "flexMaxMessageNumber" : {
+      "type" : "integer",
+      "format" : "int32",
+      "description" : "FLEX largest message number of the network, 0 to 63 (default 63): the messages with R = 1 of each address are checked for skipped numbers (missed_numbers of the record), after it the sequence starts from 0 again"
+    },
     "gscEnabled" : {
       "type" : "integer",
       "format" : "int32",
@@ -19394,7 +19399,7 @@ margin-bottom: 20px;
     "function" : {
       "type" : "integer",
       "format" : "int32",
-      "description" : "POCSAG: function 0 to 3 (A to D). GSC: address number 0 to 3, for 1 to 4"
+      "description" : "POCSAG: function 0 to 3 (A to D). GSC: function 0 to 3 (A to D), the address number 1 to 4"
     },
     "capcode" : {
       "type" : "integer",

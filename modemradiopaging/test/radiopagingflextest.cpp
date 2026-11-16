@@ -749,7 +749,7 @@ void testMessages()
                     int kind = (c.m_type == Flex::Tone) ? 0 : (c.m_type == Flex::Numeric) ? 1 : 2;
                     good = (m->m_kind == kind) && m->m_ok && (m->m_text == c.m_text);
                     if (c.m_type == Flex::Alphanumeric) {
-                        good = good && (m->m_number == 1);
+                        good = good && (m->m_number == 0);
                     }
                 }
                 if (!good && ok)
@@ -980,9 +980,6 @@ void testRejections()
     allRejected = allRejected && !enc.enqueue(makeMessage(1933313, Flex::Alphanumeric, "x")).m_ok;
     allRejected = allRejected && !enc.enqueue(makeMessage(4297068543ULL, Flex::Tone, "")).m_ok;
     allRejected = allRejected && !enc.enqueue(makeMessage(10, Flex::Alphanumeric, "")).m_ok;
-    // STD-43A 4.1: 251 characters with a short address, 248 with a long one
-    allRejected = allRejected && !enc.enqueue(makeMessage(10, Flex::Alphanumeric, std::string(252, 'a'))).m_ok;
-    allRejected = allRejected && !enc.enqueue(makeMessage(2101300, Flex::Alphanumeric, std::string(249, 'a'))).m_ok;
     allRejected = allRejected && !enc.enqueue(makeMessage(10, Flex::Alphanumeric, "caf\xc3\xa9")).m_ok;
     allRejected = allRejected && !enc.enqueue(makeMessage(10, Flex::Numeric, "")).m_ok;
     allRejected = allRejected && !enc.enqueue(makeMessage(10, Flex::Numeric, "12a")).m_ok;
@@ -995,6 +992,13 @@ void testRejections()
     check(ok.m_ok && ok2.m_ok && ok3.m_ok && ok.m_id != ok2.m_id && enc.pending() == 3,
         "enqueue: longest alphanumeric messages (251 short, 248 long address) and tone accepted, unique ids");
     check(enc.remove(ok.m_id) && !enc.remove(ok.m_id) && enc.pending() == 2, "enqueue: queued message removed by id");
+
+    // STD-43A 4.1: 251 characters in a frame with a short address, 248 with a long one; one more is a second fragment
+    Encoder::EnqueueResult f1 = enc.enqueue(makeMessage(10, Flex::Alphanumeric, std::string(252, 'a')));
+    size_t queued = enc.pending();
+    Encoder::EnqueueResult f2 = enc.enqueue(makeMessage(2101300, Flex::Alphanumeric, std::string(249, 'a')));
+    check(f1.m_ok && f2.m_ok && (queued == 4) && (enc.pending() == 6),
+        "enqueue: alphanumeric message one character longer than a frame in 2 fragments (short and long address)");
 }
 
 void testNumbers()
@@ -1041,18 +1045,18 @@ void testNumbers()
     {
         if (s.first[0] == 'A')
         {
-            // First number is 1, advances by one and wraps from 63 to 0
-            sequence = sequence && (s.second == (countA + 1) % 64) && (s.first == "A" + std::to_string(countA));
+            // First number is 0, advances by one and wraps from 63 to 0
+            sequence = sequence && (s.second == countA % 64) && (s.first == "A" + std::to_string(countA));
             countA++;
         }
         else
         {
-            sequence = sequence && (s.second == countB + 1) && (s.first == "B" + std::to_string(countB));
+            sequence = sequence && (s.second == countB) && (s.first == "B" + std::to_string(countB));
             countB++;
         }
     }
 
-    check(sequence && countA == 70 && countB == 3, "numbers: per capcode message number 1, 2 ... 63, 0, 1 in transmission order, other capcode independent");
+    check(sequence && countA == 70 && countB == 3, "numbers: per capcode message number 0, 1 ... 63, 0, 1 in transmission order, other capcode independent");
     check(maxPerFrame == 2, "numbers: the same address is used at most twice in a frame");
 
     RadioPagingFlexScheduler::NumberCounter counter(3);
@@ -1061,10 +1065,13 @@ void testNumbers()
     counter.next(3);
     counter.next(1);
     counter.next(4);   // drops capcode 2, the least recently used
-    check(counter.peek(1) == 2 && counter.peek(2) == -1 && counter.peek(3) == 1 && counter.peek(4) == 1 && counter.size() == 3,
+    check(counter.peek(1) == 1 && counter.peek(2) == -1 && counter.peek(3) == 0 && counter.peek(4) == 0 && counter.size() == 3,
         "numbers: least recently used capcode dropped when the table is full");
     counter.set(3, 63);
     check(counter.next(3) == 0, "numbers: counter wraps after 63");
+    counter.set(3, 9);
+    check((counter.upcoming(3, 9) == 0) && (counter.next(3, 9) == 0) && (counter.next(3, 9) == 1) && (counter.upcoming(5, 9) == 0),
+        "numbers: counter wraps after the largest number of the network, upcoming does not take a number");
 }
 
 void testPlacement()

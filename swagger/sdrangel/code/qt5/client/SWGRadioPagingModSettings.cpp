@@ -43,6 +43,8 @@ void SWGRadioPagingModSettings::init()
     m_flexTimeSendZone = 0; m_flexTimeSendZoneIsSet = false;
     m_flexTimeDaylightSaving = 0; m_flexTimeDaylightSavingIsSet = false;
     m_flexTimeOffsetSeconds = 0; m_flexTimeOffsetSecondsIsSet = false;
+    m_flexNumbering = 0; m_flexNumberingIsSet = false;
+    m_flexMaxMessageNumber = 0; m_flexMaxMessageNumberIsSet = false;
     m_gscMode = 0; m_gscModeIsSet = false;
     m_gscInverted = 0; m_gscInvertedIsSet = false;
     m_gscVoiceSeconds = 0; m_gscVoiceSecondsIsSet = false;
@@ -99,6 +101,8 @@ void SWGRadioPagingModSettings::fromJsonObject(QJsonObject& json)
     if (json.contains("flexTimeSendZone")) { ::SWGSDRangel::setValue(&m_flexTimeSendZone,json["flexTimeSendZone"],"qint32",""); m_flexTimeSendZoneIsSet = true; }
     if (json.contains("flexTimeDaylightSaving")) { ::SWGSDRangel::setValue(&m_flexTimeDaylightSaving,json["flexTimeDaylightSaving"],"qint32",""); m_flexTimeDaylightSavingIsSet = true; }
     if (json.contains("flexTimeOffsetSeconds")) { ::SWGSDRangel::setValue(&m_flexTimeOffsetSeconds,json["flexTimeOffsetSeconds"],"qint64",""); m_flexTimeOffsetSecondsIsSet = true; }
+    if (json.contains("flexNumbering")) { ::SWGSDRangel::setValue(&m_flexNumbering,json["flexNumbering"],"qint32",""); m_flexNumberingIsSet = true; }
+    if (json.contains("flexMaxMessageNumber")) { ::SWGSDRangel::setValue(&m_flexMaxMessageNumber,json["flexMaxMessageNumber"],"qint32",""); m_flexMaxMessageNumberIsSet = true; }
     if (json.contains("gscMode")) { ::SWGSDRangel::setValue(&m_gscMode,json["gscMode"],"qint32",""); m_gscModeIsSet = true; }
     if (json.contains("gscInverted")) { ::SWGSDRangel::setValue(&m_gscInverted,json["gscInverted"],"qint32",""); m_gscInvertedIsSet = true; }
     if (json.contains("gscVoiceSeconds")) { ::SWGSDRangel::setValue(&m_gscVoiceSeconds,json["gscVoiceSeconds"],"qint32",""); m_gscVoiceSecondsIsSet = true; }
@@ -156,6 +160,8 @@ QJsonObject* SWGRadioPagingModSettings::asJsonObject()
     if (m_flexTimeSendZoneIsSet) { object->insert("flexTimeSendZone",QJsonValue(m_flexTimeSendZone)); }
     if (m_flexTimeDaylightSavingIsSet) { object->insert("flexTimeDaylightSaving",QJsonValue(m_flexTimeDaylightSaving)); }
     if (m_flexTimeOffsetSecondsIsSet) { object->insert("flexTimeOffsetSeconds",QJsonValue(m_flexTimeOffsetSeconds)); }
+    if (m_flexNumberingIsSet) { object->insert("flexNumbering",QJsonValue(m_flexNumbering)); }
+    if (m_flexMaxMessageNumberIsSet) { object->insert("flexMaxMessageNumber",QJsonValue(m_flexMaxMessageNumber)); }
     if (m_gscModeIsSet) { object->insert("gscMode",QJsonValue(m_gscMode)); }
     if (m_gscInvertedIsSet) { object->insert("gscInverted",QJsonValue(m_gscInverted)); }
     if (m_gscVoiceSecondsIsSet) { object->insert("gscVoiceSeconds",QJsonValue(m_gscVoiceSeconds)); }
@@ -184,7 +190,7 @@ QJsonObject* SWGRadioPagingModSettings::asJsonObject()
 }
 bool SWGRadioPagingModSettings::isSet()
 {
-    return m_channelAliasIsSet || m_gscVoiceDirectoryIsSet || m_gscVoiceKeepDaysIsSet || m_gscVoiceKeepMinIsSet || m_inputFrequencyOffsetIsSet || m_protocolIsSet || m_modeIsSet || m_deviationIsSet || m_gainIsSet || m_channelMuteIsSet || m_rampUpMsIsSet || m_rampDownMsIsSet || m_rampRangeIsSet || m_pocsagSpeedIsSet || m_pocsagInvertedIsSet || m_flexModeIsSet || m_flexInvertedIsSet || m_flexCollapseIsSet || m_flexRoamingIsSet || m_ssidLocalIdIsSet || m_ssidCoverageZoneIsSet || m_ssidCountryCodeIsSet || m_ssidTrafficFlagsIsSet || m_flexTimeIsSet || m_flexTimeFrameZeroIsSet || m_flexTimeZoneMinutesIsSet || m_flexTimeSendZoneIsSet || m_flexTimeDaylightSavingIsSet || m_flexTimeOffsetSecondsIsSet || m_gscModeIsSet || m_gscInvertedIsSet || m_gscVoiceSecondsIsSet || m_mixPocsagIsSet || m_pocsagDeviationIsSet || m_mixFramesPerMinuteIsSet || m_mixSharedIsSet || m_mixSwitchMs512IsSet || m_mixSwitchMs1200IsSet || m_mixSwitchMs2400IsSet || m_rgbColorIsSet || m_titleIsSet || m_streamIndexIsSet || m_useReverseAPIIsSet || m_reverseAPIAddressIsSet || m_reverseAPIPortIsSet || m_reverseAPIDeviceIndexIsSet || m_reverseAPIChannelIndexIsSet || m_channelMarkerIsSet || m_rollupStateIsSet;
+    return m_channelAliasIsSet || m_gscVoiceDirectoryIsSet || m_gscVoiceKeepDaysIsSet || m_gscVoiceKeepMinIsSet || m_inputFrequencyOffsetIsSet || m_protocolIsSet || m_modeIsSet || m_deviationIsSet || m_gainIsSet || m_channelMuteIsSet || m_rampUpMsIsSet || m_rampDownMsIsSet || m_rampRangeIsSet || m_pocsagSpeedIsSet || m_pocsagInvertedIsSet || m_flexModeIsSet || m_flexInvertedIsSet || m_flexCollapseIsSet || m_flexRoamingIsSet || m_ssidLocalIdIsSet || m_ssidCoverageZoneIsSet || m_ssidCountryCodeIsSet || m_ssidTrafficFlagsIsSet || m_flexTimeIsSet || m_flexTimeFrameZeroIsSet || m_flexTimeZoneMinutesIsSet || m_flexTimeSendZoneIsSet || m_flexTimeDaylightSavingIsSet || m_flexTimeOffsetSecondsIsSet || m_flexNumberingIsSet || m_flexMaxMessageNumberIsSet || m_gscModeIsSet || m_gscInvertedIsSet || m_gscVoiceSecondsIsSet || m_mixPocsagIsSet || m_pocsagDeviationIsSet || m_mixFramesPerMinuteIsSet || m_mixSharedIsSet || m_mixSwitchMs512IsSet || m_mixSwitchMs1200IsSet || m_mixSwitchMs2400IsSet || m_rgbColorIsSet || m_titleIsSet || m_streamIndexIsSet || m_useReverseAPIIsSet || m_reverseAPIAddressIsSet || m_reverseAPIPortIsSet || m_reverseAPIDeviceIndexIsSet || m_reverseAPIChannelIndexIsSet || m_channelMarkerIsSet || m_rollupStateIsSet;
 }
 qint64 SWGRadioPagingModSettings::getInputFrequencyOffset() { return m_inputFrequencyOffset; }
 void SWGRadioPagingModSettings::setInputFrequencyOffset(qint64 value) { m_inputFrequencyOffset = value; m_inputFrequencyOffsetIsSet = true; }
@@ -236,6 +242,10 @@ qint32 SWGRadioPagingModSettings::getFlexTimeDaylightSaving() { return m_flexTim
 void SWGRadioPagingModSettings::setFlexTimeDaylightSaving(qint32 value) { m_flexTimeDaylightSaving = value; m_flexTimeDaylightSavingIsSet = true; }
 qint64 SWGRadioPagingModSettings::getFlexTimeOffsetSeconds() { return m_flexTimeOffsetSeconds; }
 void SWGRadioPagingModSettings::setFlexTimeOffsetSeconds(qint64 value) { m_flexTimeOffsetSeconds = value; m_flexTimeOffsetSecondsIsSet = true; }
+qint32 SWGRadioPagingModSettings::getFlexNumbering() { return m_flexNumbering; }
+void SWGRadioPagingModSettings::setFlexNumbering(qint32 value) { m_flexNumbering = value; m_flexNumberingIsSet = true; }
+qint32 SWGRadioPagingModSettings::getFlexMaxMessageNumber() { return m_flexMaxMessageNumber; }
+void SWGRadioPagingModSettings::setFlexMaxMessageNumber(qint32 value) { m_flexMaxMessageNumber = value; m_flexMaxMessageNumberIsSet = true; }
 qint32 SWGRadioPagingModSettings::getGscMode() { return m_gscMode; }
 void SWGRadioPagingModSettings::setGscMode(qint32 value) { m_gscMode = value; m_gscModeIsSet = true; }
 qint32 SWGRadioPagingModSettings::getGscInverted() { return m_gscInverted; }

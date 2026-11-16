@@ -427,6 +427,9 @@ void RadioPagingDemod::webapiUpdateChannelSettings(
     if (channelSettingsKeys.contains("flexDeviation")) {
         settings.m_flexDeviation = model->getFlexDeviation();
     }
+    if (channelSettingsKeys.contains("flexMaxMessageNumber")) {
+        settings.m_flexMaxMessageNumber = std::max(0, std::min(63, model->getFlexMaxMessageNumber()));
+    }
     if (channelSettingsKeys.contains("gscEnabled")) {
         settings.m_gscEnabled = model->getGscEnabled() != 0;
     }
@@ -512,6 +515,7 @@ void RadioPagingDemod::webapiFormatChannelSettings(SWGSDRangel::SWGChannelSettin
     model->setPocsagDeviation(settings.m_pocsagDeviation);
     model->setFlexEnabled(settings.m_flexEnabled ? 1 : 0);
     model->setFlexDeviation(settings.m_flexDeviation);
+    model->setFlexMaxMessageNumber(settings.m_flexMaxMessageNumber);
     model->setGscEnabled(settings.m_gscEnabled ? 1 : 0);
     model->setGscDeviation(settings.m_gscDeviation);
     model->setGscVoiceTimeout(settings.m_gscVoiceTimeout);
@@ -649,6 +653,9 @@ void RadioPagingDemod::webapiFormatChannelSettings(
     }
     if (channelSettingsKeys.contains("flexDeviation") || force) {
         model->setFlexDeviation(settings.m_flexDeviation);
+    }
+    if (channelSettingsKeys.contains("flexMaxMessageNumber") || force) {
+        model->setFlexMaxMessageNumber(settings.m_flexMaxMessageNumber);
     }
     if (channelSettingsKeys.contains("gscEnabled") || force) {
         model->setGscEnabled(settings.m_gscEnabled ? 1 : 0);

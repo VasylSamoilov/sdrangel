@@ -46,6 +46,11 @@ curl_code PATCH /deviceset/0/channel/0/settings '{"channelType":"RadioPagingMod"
 curl_code POST /deviceset/0/device/run > /dev/null
 sleep 1
 
+# Message numbering of the network: on by default with the largest number 63; 64 refused
+S=$(curl -s "$U/deviceset/0/channel/0/settings" | tr -d '\n ')
+check "message numbering on, largest number 63 by default" '[[ "$S" == *"\"flexNumbering\":1"* && "$S" == *"\"flexMaxMessageNumber\":63"* ]]'
+check "largest message number 64 is refused" '[ "$(curl_code PATCH /deviceset/0/channel/0/settings "{\"channelType\":\"RadioPagingMod\",\"direction\":1,\"RadioPagingModSettings\":{\"flexMaxMessageNumber\":64}}")" = 400 ]'
+
 # 64 bits B=8 (fill); 84 bits B=4 ending exactly at a word end with a uniform last character (padding
 # word); B=7 right to left with M H; secure alphanumeric; secure binary at an exact word end (termination word)
 check "binary B=8 is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000001,\"type\":\"binary\",\"blocking\":8,\"text\":\"0123456789ABCDEF\"}")" = 202 ]'
@@ -57,18 +62,20 @@ check "binary bits not a multiple of B are refused" '[ "$(tx "{\"protocol\":\"fl
 check "binary right to left with B=1 is refused" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000006,\"type\":\"binary\",\"rightToLeft\":1,\"text\":\"12\"}")" = 400 ]'
 check "binary not hex is refused" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000006,\"type\":\"binary\",\"text\":\"12G4\"}")" = 400 ]'
 check "secure type 3 is refused" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000006,\"type\":\"secure\",\"secureType\":3,\"text\":\"12\"}")" = 400 ]'
-# Longer than a frame: 600 digits B=8 in 2 fragments (1720 and 680 bits); 600 secure characters in 3
+# Longer than a frame: 600 digits B=8 in 2 fragments (1720 and 680 bits); 600 secure characters in 3, 600
+# alphanumeric characters in 3 (251, 252 and 97)
 HEX600=$(for i in $(seq 75); do printf '1A2B3C4D'; done)
 ALPHA600=$(for i in $(seq 60); do printf 'abcdefghij'; done)
 check "binary of 600 digits (fragmented) is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000009,\"type\":\"binary\",\"blocking\":8,\"text\":\"$HEX600\"}")" = 202 ]'
 check "secure alphanumeric of 600 characters (fragmented) is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000010,\"type\":\"secure\",\"secureType\":0,\"text\":\"$ALPHA600\"}")" = 202 ]'
+check "alphanumeric of 600 characters (fragmented) is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000011,\"type\":\"alphanumeric\",\"text\":\"$ALPHA600\"}")" = 202 ]'
 
 # A page of the message center, claimed by the modulator once it has announced itself (every 5 s)
 check "a binary page is accepted by the message center" '[ "$(curl_code POST /featureset/feature/0/actions "{\"featureType\":\"MessageCenter\",\"MessageCenterActions\":{\"post\":{\"id\":\"p-bin\",\"transmitter\":\"t1\",\"protocol\":\"flex\",\"address\":\"1000007\",\"type\":\"binary\",\"blocking\":8,\"mailDrop\":1,\"text\":\"A5A5\"}}}")" = 202 ]'
 check "a secure page of type 3 is refused by the message center" '[ "$(curl_code POST /featureset/feature/0/actions "{\"featureType\":\"MessageCenter\",\"MessageCenterActions\":{\"post\":{\"id\":\"p-sec\",\"transmitter\":\"t1\",\"protocol\":\"flex\",\"address\":\"1000008\",\"type\":\"secure\",\"secureType\":3,\"text\":\"12\"}}}")" = 400 ]'
 
-for i in $(seq 60); do [ "$(sent)" = "8" ] && break; sleep 1; done
-check "the modulator sent the eight messages" '[ "$(sent)" = "8" ]'
+for i in $(seq 60); do [ "$(sent)" = "9" ] && break; sleep 1; done
+check "the modulator sent the nine messages" '[ "$(sent)" = "9" ]'
 R=$(report)
 check "the sent binary record has its header fields" '[[ "$R" == *"\"blocking\":7"*"\"display_direction\":\"rtl\""* || "$R" == *"\"display_direction\":\"rtl\""*"\"blocking\":7"* ]]'
 sleep 2
@@ -85,10 +92,11 @@ curl_code PATCH /deviceset/1/channel/0/settings '{"channelType":"RadioPagingDemo
 curl_code POST /deviceset/1/device/run > /dev/null
 
 SECS=$(( $(stat -c %s "$OUT") / (48000 * 4) + 5 ))
-for i in $(seq "$SECS"); do [ -n "$(rxRecord 1000007)" ] && [ -n "$(rxRecord 1000009)" ] && [ -n "$(rxRecord 1000010)" ] && break; sleep 1; done
+for i in $(seq "$SECS"); do [ -n "$(rxRecord 1000007)" ] && [ -n "$(rxRecord 1000009)" ] && [ -n "$(rxRecord 1000010)" ] && [ -n "$(rxRecord 1000011)" ] && break; sleep 1; done
 
 A=$(rxRecord 1000001)
 check "binary B=8: text, 64 bits, K and signature" '[[ "$A" == *"\"text\":\"0123456789ABCDEF\""* && "$A" == *"\"hex_bits\":64"* && "$A" == *"\"blocking\":8"* && "$A" == *"\"checksum\":\"ok\""* && "$A" == *"\"signature\":\"ok\""* ]]'
+check "binary B=8: first message number of the address 0, R = 1" '[[ "$A" == *"\"message_number\":0"* && "$A" == *"\"retrieval\":true"* ]]'
 A=$(rxRecord 1000002)
 check "binary B=4 exact end: padding word removed, 84 bits" '[[ "$A" == *"\"text\":\"123456789ABCDEF12345F\""* && "$A" == *"\"hex_bits\":84"* && "$A" == *"\"signature\":\"ok\""* ]]'
 A=$(rxRecord 1000003)
@@ -103,6 +111,8 @@ A=$(rxRecord 1000009)
 check "fragmented binary: reassembled, 2400 bits, signature of the whole message" '[[ "$A" == *"\"text\":\"$HEX600\""* && "$A" == *"\"hex_bits\":2400"* && "$A" == *"\"signature\":\"ok\""* && "$A" == *"\"checksum\":\"ok\""* ]]'
 A=$(rxRecord 1000010)
 check "fragmented secure alphanumeric: reassembled" '[[ "$A" == *"\"text\":\"$ALPHA600\""* && "$A" == *"\"secure_type\":0"* && "$A" == *"\"checksum\":\"ok\""* ]]'
+A=$(rxRecord 1000011)
+check "fragmented alphanumeric: reassembled, signature of the whole message" '[[ "$A" == *"\"text\":\"$ALPHA600\""* && "$A" == *"\"signature\":\"ok\""* && "$A" == *"\"checksum\":\"ok\""* ]]'
 
 if [ "$failed" -ne 0 ]; then
     report | sed 's/},{/}\n{/g' | grep "\"direction\":\"rx\""

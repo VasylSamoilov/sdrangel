@@ -52,8 +52,6 @@ namespace {
 const uint32_t shortAddressOffset = 32768;
 const uint32_t idleOnes = 0xffffffffu;
 const uint32_t idleZeros = 0x00000000u;
-// Most message words of a message in one frame: a short address (STD-43A 4.1)
-const int maxMessageWords = RadioPagingFlex::m_wordsPerFrame - 3;
 const int maxNumericWords = 8;
 const int numericOverheadBits = 2;
 const uint32_t alphaEtx = 0x03;
@@ -140,49 +138,54 @@ uint32_t alphaSignature(const std::string& text)
     return (~sum) & 0x7f;
 }
 
-// Message body words (data bits, not yet encoded) of an alphanumeric message
-std::vector<uint32_t> alphaBody(const std::string& text, int number)
+// Message body words (data bits, not yet encoded) of a fragment of an alphanumeric message (STD-43A Fig.
+// 3.10.1.3-1, -2). retrieval: R of the first fragment. signature: of the whole message, -1 of the text
+std::vector<uint32_t> alphaBody(const std::string& text, int number, bool retrieval, int fragment, int fragments, int signature)
 {
-    std::vector<uint32_t> msg(maxMessageWords, 0);
-    size_t length = std::min<size_t>(text.size(), RadioPagingFlex::m_maxAlphaChars);
+    const bool first = (fragment == 0);
+    const bool last = (fragment == fragments - 1);
+    std::vector<uint32_t> msg(1, 0);
 
-    // Header: fragment number 3 (only fragment), message number, retrieval flag
-    msg[0] = (3u << 11) | (((uint32_t) number & 0x3f) << 13) | (1u << 19);
+    // Header word: K in bits 0-9 (set last), C in bit 10 (more fragments follow), F in bits 11-12, N in bits
+    // 13-18; then R and M = 0 in the first fragment, the fragment control bits U0 V0 = 00 (enhanced
+    // fragmentation not supported) in the others
+    msg[0] = ((last ? 0u : 1u) << 10) | (RadioPagingFlex::fragmentNumber(fragment) << 11) | (((uint32_t) number & 0x3f) << 13);
 
-    // Characters, 7 bits each, 3 per word; the first character slot of word 1 holds the signature
-    int wordIndex = 1;
-    int shift = 7;
+    if (first && retrieval) {
+        msg[0] |= 1u << 19;
+    }
 
-    for (size_t i = 0; i < length; i++)
+    // Characters, 7 bits each, 3 a word from word 2; the first character slot of the first fragment holds the
+    // signature. Unused character slots of the last word hold ETX
+    int shift = 0;
+
+    if (first)
     {
-        msg[wordIndex] |= (((uint32_t) (unsigned char) text[i]) & 0x7f) << shift;
-        shift += 7;
-        if (shift == 21)
-        {
-            if (++wordIndex >= maxMessageWords) {
-                break;
-            }
-            shift = 0;
+        msg.push_back((signature >= 0) ? ((uint32_t) signature & 0x7f) : alphaSignature(text));
+        shift = 7;
+    }
+
+    for (char c : text)
+    {
+        if (shift == 0) {
+            msg.push_back(0);
         }
+        msg.back() |= (((uint32_t) (unsigned char) c) & 0x7f) << shift;
+        shift = (shift + 7) % 21;
+    }
+    while (shift != 0)
+    {
+        msg.back() |= alphaEtx << shift;
+        shift = (shift + 7) % 21;
     }
 
-    // Unused character slots of the last word hold ETX
-    if (shift == 7) {
-        msg[wordIndex++] |= (alphaEtx << 7) | (alphaEtx << 14);
-    } else if (shift == 14) {
-        msg[wordIndex++] |= alphaEtx << 14;
-    }
-
-    msg[1] |= alphaSignature(text);
-
-    // Checksum of the message words in 3 groups per word, in the 10 low bits of the header
+    // K: 1's complement of the sum of 3 groups per word of all words, K counted as 0, 10 bits kept
     uint32_t sum = 0;
-    for (int i = 0; i < wordIndex; i++) {
-        sum += groupSum(msg[i]);
+    for (uint32_t w : msg) {
+        sum += groupSum(w);
     }
     msg[0] |= (~sum) & 0x3ff;
 
-    msg.resize(wordIndex);
     return msg;
 }
 
@@ -349,11 +352,12 @@ int estimateBody(const RadioPagingFlex::PhaseMessage& message)
         return 0;
     case RadioPagingFlex::Alphanumeric:
     {
-        if ((len == 0) || (len > (size_t) RadioPagingFlex::maxAlphaChars(message.m_capcode))) {
+        if (len == 0) {
             return -1;
         }
-        // Header word, then the signature slot and the characters, 3 a word
-        int words = 1 + (int) ((len + 1 + 2) / 3);
+        // Header word, then the characters, 3 a word; the first fragment has the signature slot first
+        int slots = (int) len + ((message.m_fragment == 0) ? 1 : 0);
+        int words = 1 + (slots + 2) / 3;
         return (words > RadioPagingFlex::maxMessageWords(message.m_capcode)) ? -1 : words;
     }
     case RadioPagingFlex::Numeric:
@@ -834,12 +838,13 @@ bool RadioPagingFlex::fragmentMessage(const PhaseMessage& message, std::vector<P
     whole.m_fragments = 1;
     whole.m_signature = -1;
 
-    if ((message.m_type != Binary) && (message.m_type != Secure))
+    if ((message.m_type != Binary) && (message.m_type != Secure) && (message.m_type != Alphanumeric))
     {
         fragments.push_back(whole);
         return true;
     }
 
+    const bool alphanumeric = (message.m_type == Alphanumeric);
     const bool alpha = (message.m_type == Secure) && (message.m_binary.m_secureType == SecureAlphanumeric);
     // Characters: of B bits (HEX/binary); of 1 bit (secure binary, and data defined separately, which has
     // no termination: its fragments end on whole words so that their bits join)
@@ -858,7 +863,15 @@ bool RadioPagingFlex::fragmentMessage(const PhaseMessage& message, std::vector<P
         const std::string rest = message.m_text.substr(pos);
         size_t take;
 
-        if (alpha)
+        if (alphanumeric)
+        {
+            // 3 characters a word, the signature slot first in the first fragment (STD-43A 4.1: 251 characters
+            // with a short address). A fragment that is not the last has full words (no ETX): with the
+            // fragment control bits U0 V0 = 00 a character may continue in the next fragment (3.10.1.3)
+            const size_t room = (size_t) dataWords * 3 - (pieces.empty() ? 1 : 0);
+            take = std::min(rest.size(), room);
+        }
+        else if (alpha)
         {
             // 3 characters a word; a fragment that is not the last has full words (no ETX)
             take = (rest.size() <= (size_t) dataWords * 3) ? rest.size() : (size_t) dataWords * 3;
@@ -919,8 +932,10 @@ bool RadioPagingFlex::fragmentMessage(const PhaseMessage& message, std::vector<P
         }
     }
 
-    // Signature of the whole message (HEX/binary): in header word 2 of the first fragment
-    const int signature = (message.m_type == Binary) ? (int) binarySignature(hexBits(message.m_text)) : -1;
+    // Signature of the whole message, in the first fragment: HEX/binary in header word 2, alphanumeric in the
+    // first character slot. A secure message has none
+    const int signature = (message.m_type == Binary) ? (int) binarySignature(hexBits(message.m_text))
+        : alphanumeric ? (int) alphaSignature(message.m_text) : -1;
 
     for (size_t k = 0; k < pieces.size(); k++)
     {
@@ -1088,12 +1103,6 @@ bool RadioPagingFlex::validateMessage(uint64_t capcode, MessageType type, const 
         if (text.empty())
         {
             error = "Empty alphanumeric message";
-            return false;
-        }
-        if (text.size() > (size_t) maxAlphaChars(capcode))
-        {
-            error = "Alphanumeric message too long: " + std::to_string(maxAlphaChars(capcode)) + " characters at most"
-                + (isLongAddress(capcode) ? " with a long address" : "");
             return false;
         }
         for (char c : text)
@@ -1393,8 +1402,7 @@ RadioPagingFlex::PhaseResult RadioPagingFlex::buildPhase(const PhaseParams& para
         {
             // No message field: the vector word(s) only
             uint32_t vw[2];
-            // Numbered: the retrieval flag is set, as in alphanumeric messages (the pager checks the numbers)
-            shortMessageVector(m.m_shortType, m.m_text, m.m_source, m.m_number, true, in.m_long, vw);
+            shortMessageVector(m.m_shortType, m.m_text, m.m_source, m.m_number, m.m_retrieval, in.m_long, vw);
 
             if (vecCursor < (unsigned) m_wordsPerFrame) {
                 words[vecCursor++] = vw[0];
@@ -1407,13 +1415,12 @@ RadioPagingFlex::PhaseResult RadioPagingFlex::buildPhase(const PhaseParams& para
 
         if (m.m_type == Alphanumeric)
         {
-            body = alphaBody(m.m_text, m.m_number);
+            body = alphaBody(m.m_text, m.m_number, m.m_retrieval, m.m_fragment, m.m_fragments, m.m_signature);
             vector = alphaVector(msgCursor, (unsigned) body.size());
         }
         else if (m.m_type == Binary)
         {
-            // Retrieval flag set, as in alphanumeric messages (the pager checks the numbers)
-            body = binaryBody(m.m_text, m.m_binary, m.m_number, true, m.m_fragment, m.m_fragments, m.m_signature);
+            body = binaryBody(m.m_text, m.m_binary, m.m_number, m.m_retrieval, m.m_fragment, m.m_fragments, m.m_signature);
             vector = messageVector(m_vectorBinary, msgCursor, (unsigned) body.size());
         }
         else if (m.m_type == Secure)

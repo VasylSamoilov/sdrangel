@@ -18,8 +18,10 @@
 #ifndef MODEMRADIOPAGING_RADIOPAGINGFLEXDECODER_H
 #define MODEMRADIOPAGING_RADIOPAGINGFLEXDECODER_H
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "export.h"
@@ -241,6 +243,7 @@ public:
         // Message header fields
         int m_messageNumber = -1;           //!< N, -1 if the message has none
         bool m_retrieval = false;           //!< R flag (alphanumeric, binary, numbered numeric, short message type 2)
+        std::vector<int> m_missedNumbers;   //!< R = 1: numbers of the sequence of the address skipped before this one (missed messages)
         bool m_mailDrop = false;            //!< M flag of an alphanumeric first fragment
         bool m_special = false;             //!< S flag of numbered numeric: special format
         int m_secureType = -1;              //!< t1 t0 of a secure message
@@ -388,6 +391,10 @@ public:
     void setReportFragments(bool enable) { m_reportFragments = enable; }
     //! 16-bit characters (Shift-JIS) in alphanumeric messages. Default off
     void setKanji(bool enable) { m_kanji = enable; }
+    //! Largest message number of the network (0-63, default 63): after it the sequence of an address is 0 again.
+    //! Messages with R = 1 of an address are checked for skipped numbers (STD-43A 3.10.1.3 N and R, 4.3.7)
+    void setMaxMessageNumber(int maxNumber) { m_maxMessageNumber = std::max(0, std::min(63, maxNumber)); }
+    int maxMessageNumber() const { return m_maxMessageNumber; }
     //! Year used to place the 5 bit year of the date in a 32 year period (|year - reference| <= 16). Default 2026
     void setReferenceYear(int year) { m_referenceYear = year; }
     //! The year field is the year - 1994 as sent, no period selection
@@ -401,8 +408,11 @@ public:
     static const int m_reassemblySlots = 16;
     static const int m_reassemblyMaxLength = 4096;
     static const int m_reassemblyTimeout = 64;      //!< Frames without a fragment
-    static const int m_historySize = 256;
-    static const int m_historyWindow = 1920;        //!< Frames
+    static const int m_historySize = 1024;
+    static const int m_historyBacklog = 16;         //!< Messages of a capcode in the history
+    //!< Frames a message stays in the history: shorter than the hour of the frame numbering (1920 frames), so that the
+    //!< age of an entry is not ambiguous
+    static const int m_historyWindow = 960;
     static const int m_tempSlots = 16;
     static const int m_tempTimeout = 128;           //!< Frames from the assignment to the group message
     static const int m_voteThreshold = 3;
@@ -578,6 +588,7 @@ private:
         std::vector<SubframeStore> m_stores[4];     //!< Per phase, contents waiting for copies
         BiwState m_biw;
         int m_lastCollapse = 0;             //!< System collapse of the last BIW 1 that decoded (clean or corrected)
+        std::unordered_map<uint64_t, int> m_lastNumbers;    //!< Last number with R = 1 of each address
     };
 
     Status m_status;
@@ -586,6 +597,7 @@ private:
     PolarityState m_pol[2];
     bool m_reportFragments;
     bool m_kanji;
+    int m_maxMessageNumber = 63;
     bool m_fixedYear;
     int m_referenceYear;
     unsigned m_lastFrameNumber[2];
@@ -632,13 +644,26 @@ private:
     void reassemblyExpire();
     void emitIncomplete(Reassembly& slot);
 
-    // History
-    HistoryEntry *historyFind(uint64_t capcode, int number, int vector, int phase);
+    // History: as a pager, the last m_historyBacklog messages of each capcode
+    //!< A stored copy of a message among the messages of the capcode: the same number, vector, phase and length,
+    //!< and the same words (K and R apart, words lost in either copy not compared). Null if there is none
+    HistoryEntry *historyFind(uint64_t capcode, int number, int vector, int phase, const Word *words, int wordCount,
+        int fragCount, bool isLong, int blocking);
+    static uint32_t retransmissionMask(int vector, bool isLong, int index);
+    //!< The numbers skipped before the message in the sequence of its address (R = 1 only; group messages of a
+    //!< temporary address have no numbers, 3.8.2.3)
+    void checkSequence(Message& msg, const AddressContext& a);
+    static const size_t m_maxSequenceAddresses = 25000;
+    //!< A new message of a capcode: the oldest of its own is replaced when it has m_historyBacklog, else a free entry,
+    //!< else the oldest of all
     HistoryEntry *historyStore(uint64_t capcode, int number, int vector, int phase, const Word *words, int wordCount,
         int fragCount, bool isLong, int blocking, uint32_t frame);
     void historyExpire();
+    //!< 0 a new message, 1 a duplicate, -1 a duplicate that repairs the stored copy (m_historyMatch): its words are
+    //!< those to decode
     int checkRetransmission(uint64_t capcode, bool retrieval, int number, int vector, int phase, const Word *words,
         int wordCount, int fragCount, bool isLong, int blocking);
+    HistoryEntry *m_historyMatch = nullptr;     //!< The stored copy found by the last checkRetransmission
 
     // Network time
     void voteDate(int year, unsigned month, unsigned day);

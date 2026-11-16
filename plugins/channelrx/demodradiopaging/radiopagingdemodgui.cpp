@@ -235,11 +235,29 @@ void RadioPagingDemodGUI::recordInfo(const MessageRecord& record, QString& plain
     {
         add(QString("PH:%1 C%2/F%3").arg(d.value("phase").toString())
             .arg(d.value("cycle").toInt(), 2, 10, QChar('0')).arg(d.value("frame").toInt(), 3, 10, QChar('0')));
+        // The message number as the pager shows it: N + 1 (STD-43A 3.10.1.3 N)
         if (d.value("message_number").toInt() >= 0) {
-            add(QString("#%1").arg(d.value("message_number").toInt()));
+            add(QString("#%1").arg(d.value("message_number").toInt() + 1));
         }
         if (d.value("retrieval").toBool()) {
             add("R");
+        }
+        // Numbers of the address skipped before this message (R = 1): messages missed
+        if (d.contains("missed_numbers"))
+        {
+            QVariantList missed = d.value("missed_numbers").toList();
+            QString text = (missed.size() > 3)
+                ? QString("MISSED #%1-#%2 (%3)").arg(missed.first().toInt() + 1).arg(missed.last().toInt() + 1).arg(missed.size())
+                : QString("MISSED");
+
+            if (missed.size() <= 3)
+            {
+                for (const QVariant& n : missed) {
+                    text += QString(" #%1").arg(n.toInt() + 1);
+                }
+            }
+
+            add(text, chip(text, "#ef9a9a", "#3a1414"));
         }
         if (d.value("maildrop").toBool()) {
             add("MD");
@@ -568,6 +586,12 @@ void RadioPagingDemodGUI::on_pocsagDeviation_valueChanged(int value)
 {
     m_settings.m_pocsagDeviation = value;
     applySettings(QStringList("pocsagDeviation"));
+}
+
+void RadioPagingDemodGUI::on_flexMaxMessageNumber_valueChanged(int value)
+{
+    m_settings.m_flexMaxMessageNumber = value;
+    applySettings(QStringList("flexMaxMessageNumber"));
 }
 
 void RadioPagingDemodGUI::on_flexDeviation_valueChanged(int value)
@@ -932,6 +956,7 @@ void RadioPagingDemodGUI::displaySettings()
     ui->rfBW->setValue(m_settings.m_rfBandwidth / 100.0);
     ui->pocsagDeviation->setValue(m_settings.m_pocsagDeviation);
     ui->flexDeviation->setValue(m_settings.m_flexDeviation);
+    ui->flexMaxMessageNumber->setValue(m_settings.m_flexMaxMessageNumber);
     ui->pocsagEnabled->setChecked(m_settings.m_pocsagEnabled);
     ui->flexEnabled->setChecked(m_settings.m_flexEnabled);
     ui->gscEnabled->setChecked(m_settings.m_gscEnabled);
@@ -1193,6 +1218,7 @@ void RadioPagingDemodGUI::makeUIConnections()
     QObject::connect(ui->rfBW, &QSlider::valueChanged, this, &RadioPagingDemodGUI::on_rfBW_valueChanged);
     QObject::connect(ui->pocsagDeviation, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingDemodGUI::on_pocsagDeviation_valueChanged);
     QObject::connect(ui->flexDeviation, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingDemodGUI::on_flexDeviation_valueChanged);
+    QObject::connect(ui->flexMaxMessageNumber, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingDemodGUI::on_flexMaxMessageNumber_valueChanged);
     QObject::connect(ui->pocsagEnabled, &QCheckBox::clicked, this, &RadioPagingDemodGUI::on_pocsagEnabled_clicked);
     QObject::connect(ui->flexEnabled, &QCheckBox::clicked, this, &RadioPagingDemodGUI::on_flexEnabled_clicked);
     QObject::connect(ui->gscEnabled, &QCheckBox::clicked, this, &RadioPagingDemodGUI::on_gscEnabled_clicked);

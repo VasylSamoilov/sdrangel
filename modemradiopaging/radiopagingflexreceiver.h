@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "export.h"
+#include "radiopagingdedup.h"
 #include "radiopagingflex.h"
 #include "radiopagingflexdecoder.h"
 #include "radiopagingfskdemod.h"
@@ -101,6 +102,12 @@ public:
     void setPolarities(bool normal, bool inverted) { m_enabled[0] = normal; m_enabled[1] = inverted; }
     //!< Also output each fragment of a fragmented message, before the reassembled message. Default off
     void setReportFragments(bool enable) { m_decoder.setReportFragments(enable); }
+    //!< Largest message number of the network (RadioPagingFlexDecoder::setMaxMessageNumber)
+    void setMaxMessageNumber(int maxNumber) { m_decoder.setMaxMessageNumber(maxNumber); }
+    //!< Messages remembered for duplicates: the last ones of each pager, within this time (default 30 minutes)
+    void setDuplicateWindow(double seconds) { m_dedup.setWindow(seconds); }
+    //!< Frequency of the receiver, Hz: a pager is on one frequency (part of the duplicate key)
+    void setFrequency(int64_t frequency) { m_dedup.setFrequency(frequency); }
 
     //!< Process one discriminator sample with its magnitude squared (pass 1 if not known)
     void process(float sample, float magsq = 1.0f);
@@ -171,6 +178,9 @@ private:
     float m_lastQuality;
 
     std::deque<RadioPagingFlexDecoder::Message> m_messages;
+    // The window of the message history of the decoder: 960 frames
+    RadioPagingDedup m_dedup{"flex", 1800.0};
+    double m_time = 0.0;                //!< Seconds of signal received, for the duplicate window
 
     void syncSymbol(const RadioPagingFskDemod::Symbol& symbol, float magsq);
     bool checkSync(RadioPagingFlex::Mode& mode, bool& inverted) const;
