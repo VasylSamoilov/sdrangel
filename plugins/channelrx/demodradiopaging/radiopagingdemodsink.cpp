@@ -771,7 +771,7 @@ void RadioPagingDemodSink::sendPocsag(const RadioPagingPocsagDecoder::Message& m
     record.m_mode = QString::number(baud);
     record.m_speed = baud;
     // RIC and function (sub-address A-D): the address of the pager
-    record.m_address = QString("%1%2").arg(message.m_address, 7, 10, QChar('0')).arg(QChar('A' + (message.m_function & 3)));
+    record.m_address = QString::fromStdString(RadioPagingPocsag::addressText(message.m_address, message.m_function));
     record.m_polarity = polarity(message.m_polarity == RadioPagingPocsagDecoder::Inverted);
     record.m_msgType = QString::fromStdString(interpretation.m_type);
     if (message.m_rawBits > 0) {
@@ -781,6 +781,7 @@ void RadioPagingDemodSink::sendPocsag(const RadioPagingPocsagDecoder::Message& m
     record.m_rawBits = message.m_rawBits;
     record.m_errorsCorrected = message.m_errorsCorrected;
     record.m_errorsUncorrectable = message.m_errorsUncorrectable;
+    record.m_protocolData.insert("ric", (qulonglong) message.m_address);
     record.m_protocolData.insert("function", message.m_function);
     record.m_protocolData.insert("batch", message.m_batch);
     record.m_protocolData.insert("truncated", message.m_truncated);
@@ -820,14 +821,29 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
     record.m_protocolData.insert("message_number", message.m_messageNumber);
     record.m_protocolData.insert("fragmented", message.m_fragmented);
     record.m_protocolData.insert("fragment_count", message.m_fragmentCount);
+    // Kind of the last fragment (complete for a message in one piece), its F field, and the frame of the first
+    record.m_protocolData.insert("fragment_kind", RadioPagingFlexDecoder::fragmentKindName(message.m_fragment));
+    record.m_protocolData.insert("fragment_number", message.m_fragmentNumber);
+    record.m_protocolData.insert("first_cycle", message.m_firstCycle);
+    record.m_protocolData.insert("first_frame", message.m_firstFrame);
     record.m_protocolData.insert("complete", message.m_complete);
     record.m_protocolData.insert("kanji", message.m_kanji);
     record.m_protocolData.insert("word_map", QString::fromStdString(message.m_wordMap));
     record.m_protocolData.insert("words_corrected", message.m_wordsCorrected);
+    record.m_protocolData.insert("parity_corrections", message.m_parityCorrections);
     record.m_protocolData.insert("quality", message.m_quality);
     record.m_protocolData.insert("addr_type", RadioPagingFlexDecoder::addressTypeName(message.m_addressType));
+
+    // Operator messaging address (STD-43A 3.8.2.4): what its address names and the first message word
+    if (!message.m_operatorSubtype.empty())
+    {
+        record.m_protocolData.insert("operator_subtype", QString::fromStdString(message.m_operatorSubtype));
+        record.m_protocolData.insert("operator_category", QString::fromStdString(message.m_operatorCategory));
+        record.m_protocolData.insert("operator_payload", (qlonglong) message.m_operatorPayload);
+    }
     record.m_protocolData.insert("maildrop", message.m_mailDrop);
     record.m_protocolData.insert("retrieval", message.m_retrieval);
+    record.m_protocolData.insert("special", message.m_special);
     record.m_protocolData.insert("checksum", checkName(message.m_checksum));
     record.m_protocolData.insert("signature", checkName(message.m_signature));
     record.m_protocolData.insert("is_fragment", message.m_isFragment);
@@ -885,7 +901,7 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
         QVariantList members;
 
         for (uint64_t capcode : message.m_groupMembers) {
-            members.append(QString("%1").arg((qulonglong) capcode, 10, 10, QChar('0')));
+            members.append(QString::fromStdString(RadioPagingFlex::addressText(capcode)));
         }
 
         record.m_protocolData.insert("group_slot", message.m_tempSlot);
@@ -910,8 +926,14 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
     if (message.m_type == RadioPagingFlexDecoder::TypeShortInstruction)
     {
         record.m_protocolData.insert("instruction_type", message.m_instructionType);
+        record.m_protocolData.insert("instruction_data", message.m_instructionData);
         record.m_protocolData.insert("instruction_slot", message.m_instructionSlot);
         record.m_protocolData.insert("instruction_frame", message.m_instructionFrame);
+
+        // System event (type 1): the event flags of the 14 data bits
+        if (message.m_instructionType == 1) {
+            record.m_protocolData.insert("event_flags", message.m_eventFlags);
+        }
     }
 
     record.m_duplicate = !message.m_duplicate ? MessageRecord::DuplicateNone
@@ -925,11 +947,11 @@ void RadioPagingDemodSink::sendGsc(const RadioPagingGscDecoder::Message& message
     MessageRecord record;
     int pol = (message.m_polarity == RadioPagingGscDecoder::Inverted) ? 1 : 0;
 
-    // Capcode and function (address number 1-4); the page type is in the message type
+    // Address and address number 1-4; the page type is in the message type
     record.m_protocol = "gsc";
     record.m_mode = "600";
     record.m_speed = 600;
-    record.m_address = QString::fromStdString(message.m_address) + QChar('0' + message.m_addressNumber);
+    record.m_address = QString::fromStdString(RadioPagingGsc::addressText(message.m_address, message.m_addressNumber));
     record.m_polarity = polarity(pol == 1);
     record.m_rawData = toByteArray(message.m_rawData);
     record.m_rawBits = message.m_rawBits;
@@ -937,11 +959,11 @@ void RadioPagingDemodSink::sendGsc(const RadioPagingGscDecoder::Message& message
     record.m_errorsUncorrectable = message.m_errorsUncorrectable;
     record.m_protocolData.insert("address_number", message.m_addressNumber);
     record.m_protocolData.insert("preamble", message.m_preamble);
-    record.m_protocolData.insert("batch", message.m_batch);
+    // Batch mode (the batch of the transmission), not the batch index of POCSAG
+    record.m_protocolData.insert("batch_mode", message.m_batch);
     record.m_protocolData.insert("slot", message.m_slot);
     record.m_protocolData.insert("non_battery_saver", message.m_nonBatterySaver);
     record.m_protocolData.insert("truncated", message.m_truncated);
-    record.m_protocolData.insert("function", message.m_addressNumber);
 
     m_lastGscPreamble = message.m_preamble;
     m_lastGscBatch = message.m_batch;

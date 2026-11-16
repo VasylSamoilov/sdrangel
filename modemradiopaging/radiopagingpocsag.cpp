@@ -353,6 +353,13 @@ RadioPagingPocsag::Interpretation RadioPagingPocsag::interpret(const std::vector
     return result;
 }
 
+std::string RadioPagingPocsag::addressText(uint32_t address, int function)
+{
+    char text[16];
+    std::snprintf(text, sizeof(text), "%07u%c", (unsigned) address, 'A' + (function & 3));
+    return text;
+}
+
 std::string RadioPagingPocsag::escapeControl(const std::string& text)
 {
     std::string out;

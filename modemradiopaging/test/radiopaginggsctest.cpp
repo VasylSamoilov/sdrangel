@@ -1406,6 +1406,9 @@ void testReceiver()
 
 int main()
 {
+    // Address of the message records: 6 characters (zero padded, N index of non battery saver) and the number 1-4
+    check((RadioPagingGsc::addressText("123456", 2) == "1234562") && (RadioPagingGsc::addressText("42", 1) == "0000421")
+        && (RadioPagingGsc::addressText("N23456", 4) == "N234564"), "record address: 6 characters and the address number");
     testCodes();
     testStartCodeCopies();
     testCharacterSets();

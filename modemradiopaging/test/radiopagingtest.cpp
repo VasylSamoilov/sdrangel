@@ -123,6 +123,9 @@ void testBCH()
     check(parityOk, "BCH reports a parity bit error and repairs it");
     check(oneAndParityOk, "BCH corrects one bit error in bits 31-1 with a parity bit error");
     check(tripleOk, "BCH reports every three bit error pattern as uncorrectable");
+    // Addresses of the message records, the same in RX, TX and the message center
+    check((RadioPagingPocsag::addressText(1234567, 2) == "1234567C") && (RadioPagingPocsag::addressText(8, 0) == "0000008A"),
+        "POCSAG record address: 7 digits and the function letter");
     check(RadioPagingBCH::reverse(0x80000001u) == 0x80000001u
         && RadioPagingBCH::reverse(0x00000002u) == 0x40000000u, "BCH bit reverse");
 }

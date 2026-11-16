@@ -36,6 +36,9 @@
 
 #include "channel/channelapi.h"
 #include "maincore.h"
+#include "radiopagingflex.h"
+#include "radiopaginggsc.h"
+#include "radiopagingpocsag.h"
 
 #include "messagecenter.h"
 
@@ -222,19 +225,19 @@ int MessageCenter::postToTransmitter(const MessageCenterPage& page, QString& err
     tx->setId(new QString(r.m_id));
     tx->setProtocol(new QString(r.m_protocol));
     tx->setType(new QString(type));
-    tx->setText(new QString((type == "voice") ? d.value("voiceFile").toString() : r.m_text));
+    tx->setText(new QString((type == "voice") ? d.value("voice_source").toString() : r.m_text));
     tx->setPolarity(new QString((r.m_polarity == MessageRecord::PolarityInverted) ? "inverted" : (r.m_polarity == MessageRecord::PolarityNormal) ? "normal" : ""));
-    tx->setFunction(d.value("function").toInt());
 
     if (r.m_protocol == "pocsag")
     {
-        tx->setAddress(d.value("address").toInt());
+        tx->setAddress((qint32) d.value("ric").toULongLong());
+        tx->setFunction(d.value("function").toInt());
         tx->setSpeed((r.m_speed > 0) ? r.m_speed : 0);
     }
     else if (r.m_protocol == "flex")
     {
         tx->setCapcode(d.value("capcode").toLongLong());
-        tx->setPriority(d.value("priority").toInt());
+        tx->setPriority(d.value("priority").toBool() ? 1 : 0);
 
         if (type == "short_message")
         {
@@ -255,8 +258,11 @@ int MessageCenter::postToTransmitter(const MessageCenterPage& page, QString& err
             tx->setSecureType(d.value("secure_type").toInt());
         }
     }
-    else {
-        tx->setCapcode(d.value("address").toLongLong());       // GSC: the address as an integer of up to 6 digits
+    else
+    {
+        // GSC: the 6 digits of the record address as an integer, the address number 1-4 as the function 0-3
+        tx->setCapcode(r.m_address.left(6).toLongLong());
+        tx->setFunction(std::max(1, d.value("address_number").toInt()) - 1);
     }
 
     actions->setTx(tx);
@@ -286,18 +292,33 @@ MessageRecord MessageCenter::pageRecord(const QString& transmitter, const QStrin
         : (polarity == "inverted") ? MessageRecord::PolarityInverted : MessageRecord::PolarityUnknown;
     r.m_speed = (speed > 0) ? speed : -1;
     r.m_protocolData.insert("transmitter", transmitter);
-    r.m_protocolData.insert("address", address);
-    r.m_protocolData.insert("capcode", address);
-    r.m_protocolData.insert("function", function);
-    r.m_protocolData.insert("priority", priority);
-    r.m_protocolData.insert("voiceFile", voiceFile);
 
-    if (protocol == "pocsag") {
-        r.m_address = QString("%1%2").arg(address.toLongLong(), 7, 10, QChar('0')).arg(QChar('A' + (function & 3)));
-    } else if (protocol == "gsc") {
-        r.m_address = address.rightJustified(6, QChar('0')) + QChar('1' + (function & 3));
-    } else {
-        r.m_address = address;
+    // The address and its keys as in the records of the receivers and transmitters: POCSAG ric and function
+    // 0-3, FLEX capcode, GSC address number 1-4 (function 0-3 is the address number less 1)
+    if (protocol == "pocsag")
+    {
+        r.m_address = QString::fromStdString(RadioPagingPocsag::addressText((uint32_t) address.toULongLong(), function));
+        r.m_protocolData.insert("ric", address.toULongLong());
+        r.m_protocolData.insert("function", function);
+    }
+    else if (protocol == "gsc")
+    {
+        r.m_address = QString::fromStdString(RadioPagingGsc::addressText(address.toStdString(), (function & 3) + 1));
+        r.m_protocolData.insert("address_number", (function & 3) + 1);
+    }
+    else
+    {
+        qulonglong capcode = address.toULongLong();
+        r.m_address = QString::fromStdString(RadioPagingFlex::addressText(capcode));
+        r.m_protocolData.insert("capcode", capcode);
+        r.m_protocolData.insert("long_address", RadioPagingFlex::isLongAddress(capcode));
+        r.m_protocolData.insert("addr_type", RadioPagingFlex::isLongAddress(capcode) ? "long" : "short");
+        r.m_protocolData.insert("priority", priority != 0);
+    }
+
+    // The sound file a voice page sends (voice_file is the record of the voice sent or received)
+    if (r.m_msgType == "voice") {
+        r.m_protocolData.insert("voice_source", voiceFile);
     }
 
     return r;

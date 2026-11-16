@@ -2587,6 +2587,8 @@ void testTime()
 
 int main()
 {
+    check((Flex::addressText(1234567) == "0001234567") && (Flex::addressText(4297068542ULL) == "4297068542"),
+        "record address: capcode in 10 digits");
     testTime();
     testFragmentScheduling();
     testBinaryTx();

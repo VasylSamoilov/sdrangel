@@ -100,6 +100,20 @@ const char *RadioPagingFlexDecoder::addressTypeName(AddressType type)
     return "unknown";
 }
 
+const char *RadioPagingFlexDecoder::fragmentKindName(FragmentKind kind)
+{
+    switch (kind)
+    {
+    case FragmentComplete: return "complete";
+    case FragmentFirst: return "first";
+    case FragmentMiddle: return "middle";
+    case FragmentLast: return "last";
+    case FragmentUnknown: return "unknown";
+    }
+
+    return "unknown";
+}
+
 const char *RadioPagingFlexDecoder::messageTypeName(MessageType type)
 {
     switch (type)
@@ -1147,11 +1161,9 @@ void RadioPagingFlexDecoder::setRaw(Message& msg, const std::vector<uint32_t>& w
 RadioPagingFlexDecoder::Message RadioPagingFlexDecoder::newMessage(const AddressContext& a) const
 {
     Message msg;
-    char digits[32];
 
     msg.m_capcode = a.m_capcode;
-    std::snprintf(digits, sizeof(digits), "%010llu", (unsigned long long) a.m_capcode);
-    msg.m_address = digits;
+    msg.m_address = RadioPagingFlex::addressText(a.m_capcode);
     msg.m_longAddress = a.m_long;
     msg.m_addressType = a.m_type;
     msg.m_priority = a.m_priority;
@@ -1174,11 +1186,8 @@ void RadioPagingFlexDecoder::emitMessage(Message& msg)
 {
     msg.m_typeName = messageTypeName(msg.m_type);
 
-    if (msg.m_address.empty())
-    {
-        char digits[32];
-        std::snprintf(digits, sizeof(digits), "%010llu", (unsigned long long) msg.m_capcode);
-        msg.m_address = digits;
+    if (msg.m_address.empty()) {
+        msg.m_address = RadioPagingFlex::addressText(msg.m_capcode);
     }
 
     m_status.m_messages++;

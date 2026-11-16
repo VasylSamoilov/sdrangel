@@ -148,7 +148,7 @@ public:
 
     struct Interpretation
     {
-        std::string m_type;         //!< alphanumeric, numeric or tone_only
+        std::string m_type;         //!< alphanumeric, numeric or tone
         std::string m_text;
         int m_score = 0;            //!< Content score of the winner, higher is better, can be negative
         std::string m_altType;      //!< The other candidate, empty if none
@@ -178,6 +178,9 @@ public:
     static bool encodeAddress(const std::string& address, int& preamble, uint16_t& word1, uint16_t& word2, std::string *error = nullptr);
     //!< Inverse of encodeAddress(). Needs the preamble index (-1 if none, non battery saver: the index is then N)
     static bool decodeAddress(uint16_t word1, uint16_t word2, int preamble, std::string& address);
+    //!< Address of the message records: the 6 characters of the address (index, group, 3 digits; N for the index
+    //!< of non battery saver) and the address number 1-4, the same in RX, TX and the message center
+    static std::string addressText(const std::string& address, int addressNumber);
     //!< Index of a word 1 value in the table of 50 values, -1 if it is none
     static int word1Index(uint16_t word1);
 

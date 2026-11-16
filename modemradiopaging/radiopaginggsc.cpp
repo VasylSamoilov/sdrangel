@@ -535,6 +535,13 @@ bool RadioPagingGsc::encodeAddress(const std::string& address, int& preamble, ui
     return true;
 }
 
+std::string RadioPagingGsc::addressText(const std::string& address, int addressNumber)
+{
+    // Zero padded to the 6 characters of the address
+    std::string text = (address.size() < 6) ? std::string(6 - address.size(), '0') + address : address;
+    return text + (char) ('0' + addressNumber);
+}
+
 bool RadioPagingGsc::decodeAddress(uint16_t word1, uint16_t word2, int preamble, std::string& address)
 {
     int group = word1Index(word1);

@@ -321,7 +321,7 @@ void RadioPagingDemodGUI::recordInfo(const MessageRecord& record, QString& plain
     {
         if (d.value("non_battery_saver").toBool()) {
             add("NBS");
-        } else if (d.value("batch").toBool()) {
+        } else if (d.value("batch_mode").toBool()) {
             add("BATCH");
         }
         add(QString("S:%1").arg(d.value("slot").toInt()));

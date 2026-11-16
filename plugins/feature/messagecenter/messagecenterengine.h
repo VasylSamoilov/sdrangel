@@ -56,7 +56,7 @@ struct MessageCenterFilter
     QList<int> m_speeds;                //!< Bits per second, empty for all
     QString m_address;                  //!< Wildcards * and ?, empty for all
     QString m_text;                     //!< Contained in the text, not case sensitive
-    QString m_msgType;                  //!< Message type (alphanumeric, numeric, tone_only, voice), empty for all
+    QString m_msgType;                  //!< Message type (alphanumeric, numeric, tone, voice, short_message, binary, secure), empty for all
     qint64 m_frequencyMin = -1;         //!< Hz, -1: no lower limit
     qint64 m_frequencyMax = -1;
     qint64 m_timeFrom = -1;             //!< Milliseconds since the epoch, -1: no limit

@@ -95,15 +95,15 @@ void MessageRecord::resetToDefaults()
     m_protocolData.clear();
 }
 
+// Network (protocol and polarity: each has its own state) and address, which has the POCSAG function and the GSC
+// address number; and the message number of the messages that have one (FLEX)
 QString MessageRecord::dedupKey() const
 {
     QString key = QString("%1|%2|%3").arg(m_protocol, m_address, polarityToString(m_polarity));
+    int number = m_protocolData.value("message_number", -1).toInt();
 
-    if (m_protocolData.contains("function")) {
-        key += "|f" + m_protocolData.value("function").toString();
-    }
-    if (m_protocolData.contains("msgNumber")) {
-        key += "|n" + m_protocolData.value("msgNumber").toString();
+    if (number >= 0) {
+        key += "|n" + QString::number(number);
     }
 
     return key;
@@ -138,6 +138,7 @@ QJsonObject MessageRecord::toJson() const
     json.insert("centerFrequency", intOrNull(m_centerFrequency));
     json.insert("channelOffset", m_centerFrequency < 0 ? QJsonValue(QJsonValue::Null) : QJsonValue(m_channelOffset));
     json.insert("duplicate", duplicateToString(m_duplicate));
+    json.insert("dedupKey", dedupKey());
     json.insert("partial", m_partial);
     json.insert("protocolData", QJsonObject::fromVariantMap(m_protocolData));
 
@@ -200,7 +201,7 @@ QStringList MessageRecord::csvHeader()
         "address", "polarity", "speed", "text", "rawData", "rawBits",
         "errorsCorrected", "errorsUncorrectable", "ber", "charStatus",
         "frequency", "channelAlias", "deviceSetIndex", "channelIndex",
-        "centerFrequency", "channelOffset", "duplicate", "partial", "protocolData"
+        "centerFrequency", "channelOffset", "duplicate", "dedupKey", "partial", "protocolData"
     };
 }
 
@@ -232,6 +233,7 @@ QString MessageRecord::toCSV() const
     fields.append(csvInt(m_centerFrequency));
     fields.append(m_centerFrequency < 0 ? QString("") : QString::number(m_channelOffset));
     fields.append(duplicateToString(m_duplicate));
+    fields.append(CSV::escape(dedupKey()));
     fields.append(m_partial ? "1" : "0");
     fields.append(CSV::escape(QString::fromUtf8(QJsonDocument(QJsonObject::fromVariantMap(m_protocolData)).toJson(QJsonDocument::Compact))));
 

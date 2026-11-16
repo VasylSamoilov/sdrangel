@@ -229,6 +229,9 @@ public:
     static bool isShortAddress(uint64_t capcode);
     static bool isLongAddress(uint64_t capcode);
     static bool isValidAddress(uint64_t capcode);
+    //!< Address of the message records: the capcode in 10 digits (the largest, 4297068542, has 10), the same in
+    //!< RX, TX and the message center
+    static std::string addressText(uint64_t capcode);
     static uint32_t shortAddressWord(uint32_t capcode);
     static bool longAddressWords(uint64_t capcode, uint32_t words[2]);
     //!< Capcode of a short address word (data bits) or of a pair of long address words (data bits)

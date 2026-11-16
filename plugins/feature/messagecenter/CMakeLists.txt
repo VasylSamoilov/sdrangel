@@ -18,6 +18,7 @@ set(messagecenter_HEADERS
 
 include_directories(
     ${CMAKE_SOURCE_DIR}/swagger/sdrangel/code/qt5/client
+    ${CMAKE_SOURCE_DIR}/modemradiopaging
 )
 
 if(NOT SERVER_MODE)
@@ -56,6 +57,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     Qt::Core
     ${TARGET_LIB}
     sdrbase
+    modemradiopaging
     ${TARGET_LIB_GUI}
 )
 

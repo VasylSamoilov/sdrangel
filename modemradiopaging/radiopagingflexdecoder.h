@@ -395,6 +395,8 @@ public:
 
     static const char *addressTypeName(AddressType type);
     static const char *messageTypeName(MessageType type);
+    //!< "unknown", "complete", "first", "middle", "last"
+    static const char *fragmentKindName(FragmentKind kind);
 
     static const int m_reassemblySlots = 16;
     static const int m_reassemblyMaxLength = 4096;

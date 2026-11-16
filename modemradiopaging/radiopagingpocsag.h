@@ -76,7 +76,7 @@ public:
 
     struct Interpretation
     {
-        std::string m_type;         //!< alphanumeric, numeric or tone_only
+        std::string m_type;         //!< alphanumeric, numeric or tone
         std::string m_text;
         int m_score = 0;            //!< 0-100, how well the content fits the type
         std::string m_altType;      //!< The other candidate, empty if none
@@ -102,6 +102,9 @@ public:
 
     //!< Replace characters below 0x20 and 0x7f by <0xNN>
     static std::string escapeControl(const std::string& text);
+    //!< Address of the message records: 7 digits and the function letter A-D (address 1234567 function 2:
+    //!< "1234567C"), the same in RX, TX and the message center
+    static std::string addressText(uint32_t address, int function);
 
     static const char m_numericChars[17];   //!< Index = 4-bit value
 };

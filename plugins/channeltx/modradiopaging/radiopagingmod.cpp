@@ -380,7 +380,9 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
         record.m_protocol = "pocsag";
         record.m_mode = QString::number(sourceRequest.m_pocsagBaud);
         record.m_speed = sourceRequest.m_pocsagBaud;
-        record.m_address = QString("%1%2").arg(m.m_address, 7, 10, QChar('0')).arg(QChar('A' + (m.m_function & 3)));
+        record.m_address = QString::fromStdString(RadioPagingPocsag::addressText(m.m_address, m.m_function));
+        record.m_protocolData.insert("ric", (qulonglong) m.m_address);
+        record.m_protocolData.insert("function", m.m_function);
         record.m_msgType = (m.m_type == RadioPagingPocsag::Tone) ? "tone"
             : (m.m_type == RadioPagingPocsag::Numeric) ? "numeric" : "alphanumeric";
         record.m_text = QString::fromStdString(m.m_text);
@@ -393,7 +395,12 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
         record.m_protocol = "flex";
         record.m_mode = RadioPagingFlex::modeName(mode);
         record.m_speed = RadioPagingFlex::bitRate(mode);
-        record.m_address = QString::number((qulonglong) m.m_capcode);
+        record.m_address = QString::fromStdString(RadioPagingFlex::addressText(m.m_capcode));
+        // The address keys of the decoder record (TX sends individual short and long addresses)
+        record.m_protocolData.insert("capcode", (qulonglong) m.m_capcode);
+        record.m_protocolData.insert("long_address", RadioPagingFlex::isLongAddress(m.m_capcode));
+        record.m_protocolData.insert("addr_type", RadioPagingFlex::isLongAddress(m.m_capcode) ? "long" : "short");
+        record.m_protocolData.insert("priority", m.m_priority);
         // FLEX names as the decoder: tone is the address alone; a short message without digits has the tone only payload
         record.m_msgType = (m.m_type == RadioPagingFlex::Tone) ? "tone" : (m.m_type == RadioPagingFlex::ShortMessage) ? "short_message"
             : (m.m_type == RadioPagingFlex::Binary) ? "binary" : (m.m_type == RadioPagingFlex::Secure) ? "secure"
@@ -439,7 +446,8 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
         record.m_protocol = "gsc";
         record.m_mode = "600";
         record.m_speed = 600;
-        record.m_address = QString::fromStdString(m.m_address) + QChar('0' + m.m_addressNumber);
+        record.m_address = QString::fromStdString(RadioPagingGsc::addressText(m.m_address, m.m_addressNumber));
+        record.m_protocolData.insert("address_number", m.m_addressNumber);
         record.m_msgType = (m.m_type == RadioPagingGsc::Voice) ? "voice" : (m.m_type == RadioPagingGsc::Tone) ? "tone"
             : (m.m_type == RadioPagingGsc::Numeric) ? "numeric" : "alphanumeric";
         record.m_text = QString::fromStdString(m.m_text);

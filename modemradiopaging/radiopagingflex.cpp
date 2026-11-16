@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <cstdio>
 #include <cstring>
 
 #include "radiopagingbch.h"
@@ -597,6 +598,13 @@ void RadioPagingFlex::civilTime(int64_t seconds, int& year, unsigned& month, uns
     hour = (unsigned) (rest / 3600);
     minute = (unsigned) ((rest % 3600) / 60);
     second = (unsigned) (rest % 60);
+}
+
+std::string RadioPagingFlex::addressText(uint64_t capcode)
+{
+    char digits[24];
+    std::snprintf(digits, sizeof(digits), "%010llu", (unsigned long long) capcode);
+    return digits;
 }
 
 bool RadioPagingFlex::isShortAddress(uint64_t capcode)
