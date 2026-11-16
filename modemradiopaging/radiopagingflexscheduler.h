@@ -20,6 +20,7 @@
 
 #include <cstdint>
 #include <list>
+#include <map>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -110,6 +111,16 @@ public:
         RadioPagingFlex::ShortType m_shortType = RadioPagingFlex::ShortNumeric;    //!< Short message only
         int m_source = 0;           //!< Short message source and numbered types: source code 0-7
         RadioPagingFlex::BinaryParams m_binary;     //!< HEX/binary and secure messages only
+        RadioPagingFlex::InstructionParams m_instruction;   //!< Short instruction only
+        //!< Frame 0-127 the message goes in, -1: a frame of the capcode (its collapse). Messages to a temporary address
+        //!< go in the frame their short instructions told
+        int m_frame = -1;
+        //!< A group message (STD-43A Chapter 5.2): the capcodes of the pagers, 2 to m_maxGroupMembers. The message (not
+        //!< fragmented, not numbered: numeric, alphanumeric, tone or short message) goes to a temporary address that
+        //!< a short instruction tells them, in the frame of the group message; m_capcode is not used. Not with
+        //!< retransmissions
+        std::vector<uint64_t> m_members;
+        int m_slot = -1;            //!< Group: temporary address 0-15, -1 the first one free
         //!< Retransmissions after the first transmission, 0-15 (STD-43A 4.3.7.6: a message sent again from the
         //!< retrieval storage has its number and R = 0). Numbered messages of a network with message numbering only
         int m_retransmit = 0;
@@ -119,6 +130,8 @@ public:
 
     static const int m_maxRetransmit = 15;
     static const int m_maxScheduleFrames = 1920;    //!< Longest retransmission interval and send delay: an hour
+    static const int m_maxGroupMembers = 64;
+    static const int m_maxGroupCollapse = 6;        //!< A group message follows its instructions within 128 frames (5.2)
 
     struct EnqueueResult
     {
@@ -140,6 +153,7 @@ public:
         std::vector<uint32_t> m_sentNumbers;                //!< Message number of each sent id
         std::vector<uint32_t> m_retransmittedIds;           //!< Messages sent again (retransmissions, R = 0)
         std::vector<uint32_t> m_doneIds;                    //!< Messages with nothing more queued: sent and retransmitted
+        std::vector<uint32_t> m_failedIds;                  //!< Group messages dropped: a short instruction did not go before the group message
         RadioPagingFlex::FrameBytes m_bytes;
         std::vector<RadioPagingFlex::SymbolBlock> m_blocks; //!< Sync part then data part; empty if reserved
     };
@@ -265,7 +279,31 @@ private:
         int64_t m_notBefore = -1;   //!< First frame index it may go in, -1 until set (with m_delay)
         int m_retransmitsLeft = 0;  //!< Retransmissions still to come after this transmission
         bool m_retransmission = false;  //!< A copy sent again (R = 0)
+        int m_group = -1;           //!< Group message: its index in m_groups; the short instructions and the group messages
+        bool m_delivery = false;    //!< The group message itself (to the temporary address), not a short instruction
     };
+
+    // A group message in progress (STD-43A 5.2): the short instructions go to the members, then the group message to
+    // the temporary address in the frame they tell
+    struct Group
+    {
+        uint32_t m_id = 0;              //!< Id of the message
+        std::map<int, int> m_slots;     //!< Temporary address of each phase of the pagers (3.8.5 (1): an address goes in a frame twice at most)
+        std::vector<uint64_t> m_members;
+        TxMessage m_message;            //!< The group message, to the temporary address
+        bool m_targetSet = false;
+        uint64_t m_targetIndex = 0;     //!< Frame index of the group message; its frame number goes in the instructions
+        int m_deadline = 0;
+    };
+
+    //!< Queue the group message of a message with members
+    EnqueueResult enqueueGroup(const TxMessage& message);
+    //!< The frame of the group message once the first short instruction may go, the frame number in the instructions
+    void setGroupTargets(uint64_t frameIndex);
+    //!< The group messages whose short instructions did not all go before their frame: removed (see Frame::m_failedIds)
+    void failLateGroups(uint64_t frameIndex, Frame& frame);
+    bool groupReady(const Item& item) const;
+    void endGroup(int index);
 
     //!< The item may go in the frame of the frame index (its send delay or retransmission interval is over)
     static bool due(const Item& item, uint64_t frameIndex);
@@ -296,6 +334,9 @@ private:
     RadioPagingFlexScheduler::NumberCounter m_numbers;
     std::unordered_map<uint64_t, int> m_headerNumbers;  //!< Number of a header message, for the next message of the capcode
     std::unordered_map<uint32_t, std::vector<Item>> m_templates;    //!< Fragments of the messages to retransmit, by id
+    std::map<int, Group> m_groups;      //!< Group messages in progress, by the index of Item::m_group
+    int m_nextGroup = 0;
+    bool m_slotBusy[RadioPagingFlex::m_temporaryCount] = {};    //!< Temporary addresses in use
 };
 
 #endif // MODEMRADIOPAGING_RADIOPAGINGFLEXSCHEDULER_H

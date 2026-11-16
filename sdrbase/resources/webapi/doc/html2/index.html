@@ -15536,6 +15536,10 @@ margin-bottom: 20px;
       "type" : "integer",
       "description" : "FLEX secure type t1 t0 (STD-43A 3.10.1.4): 0 alphanumeric, 1 data defined separately (hex digits), 2 binary (hex digits)"
     },
+    "groupMembers" : {
+      "type" : "string",
+      "description" : "FLEX group message (STD-43A 5.2): the capcodes of the pagers, 2 to 64, separated by commas. The address is not used. The transmitter sends a short instruction to each pager, then the message to a temporary address"
+    },
     "retransmit" : {
       "type" : "integer",
       "description" : "Transmitter in network mode: copies sent after the message (POCSAG 0 to 10; FLEX 0 to 15, numbered types with message numbering, same number and R = 0). The page is sent with its first transmission"
@@ -19496,6 +19500,10 @@ margin-bottom: 20px;
       "type" : "integer",
       "format" : "int32",
       "description" : "FLEX secure type t1 t0 (STD-43A 3.10.1.4): 0 alphanumeric (7-bit characters), 1 data defined separately (hex digits, not terminated), 2 binary (hex digits)"
+    },
+    "groupMembers" : {
+      "type" : "string",
+      "description" : "FLEX group message (STD-43A 5.2): the capcodes of the pagers, 2 to 64, separated by commas. The address is not used. The message (numeric, alphanumeric, tone or a short message that is not numbered) goes to a temporary address that a short instruction tells the pagers; one temporary address for each phase of the pagers, so a group is limited by the 16 addresses of the network. Network collapse 6 or less, no copies"
     },
     "retransmit" : {
       "type" : "integer",

@@ -207,6 +207,14 @@ RadioPagingMod::TxRequest RadioPagingMod::requestFromPage(const RadioPagingPage&
             : (type == "numeric") ? RadioPagingFlex::Numeric : RadioPagingFlex::Alphanumeric;
         request.m_flex.m_text = text;
         request.m_flex.m_priority = page.m_priority;
+
+        for (qulonglong member : page.groupMembers()) {
+            request.m_flex.m_members.push_back((uint64_t) member);
+        }
+        // M of an alphanumeric message
+        if (type == "alphanumeric") {
+            request.m_flex.m_binary.m_mailDrop = page.m_mailDrop;
+        }
         // STD-43A Table 3.9.2-1: 0 numeric, 1 source, 2 numbered
         if (type == "short_message")
         {
@@ -501,11 +509,30 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
         record.m_protocol = "flex";
         record.m_mode = RadioPagingFlex::modeName(mode);
         record.m_speed = RadioPagingFlex::bitRate(mode);
-        record.m_address = QString::fromStdString(RadioPagingFlex::addressText(m.m_capcode));
-        // The address keys of the decoder record (TX sends individual short and long addresses)
-        record.m_protocolData.insert("capcode", (qulonglong) m.m_capcode);
-        record.m_protocolData.insert("long_address", RadioPagingFlex::isLongAddress(m.m_capcode));
-        record.m_protocolData.insert("addr_type", RadioPagingFlex::isLongAddress(m.m_capcode) ? "long" : "short");
+        if (!m.m_members.empty())
+        {
+            // A group message: the pagers, as the page has them
+            QStringList texts;
+            QVariantList list;
+
+            for (uint64_t member : m.m_members)
+            {
+                texts << QString::fromStdString(RadioPagingFlex::addressText(member));
+                list << (qulonglong) member;
+            }
+
+            record.m_address = texts.join(",");
+            record.m_protocolData.insert("group_members", list);
+        }
+        else
+        {
+            record.m_address = QString::fromStdString(RadioPagingFlex::addressText(m.m_capcode));
+            // The address keys of the decoder record (TX sends individual short and long addresses)
+            record.m_protocolData.insert("capcode", (qulonglong) m.m_capcode);
+            record.m_protocolData.insert("long_address", RadioPagingFlex::isLongAddress(m.m_capcode));
+            record.m_protocolData.insert("addr_type", RadioPagingFlex::isLongAddress(m.m_capcode) ? "long" : "short");
+        }
+
         record.m_protocolData.insert("priority", m.m_priority);
         // FLEX names as the decoder: tone is the address alone; a short message without digits has the tone only payload
         record.m_msgType = (m.m_type == RadioPagingFlex::Tone) ? "tone" : (m.m_type == RadioPagingFlex::ShortMessage) ? "short_message"
@@ -521,6 +548,10 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
             if (m.m_shortType != RadioPagingFlex::ShortNumeric) {
                 record.m_protocolData.insert("short_source", m.m_source);
             }
+        }
+        else if (m.m_type == RadioPagingFlex::Alphanumeric)
+        {
+            record.m_protocolData.insert("maildrop", m.m_binary.m_mailDrop);
         }
         else if ((m.m_type == RadioPagingFlex::Binary) || (m.m_type == RadioPagingFlex::Secure))
         {

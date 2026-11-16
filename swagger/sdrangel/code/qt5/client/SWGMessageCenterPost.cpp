@@ -16,6 +16,7 @@ void SWGMessageCenterPost::cleanup()
     delete m_text; m_text = nullptr;
     delete m_voiceFile; m_voiceFile = nullptr;
     delete m_polarity; m_polarity = nullptr;
+    delete m_groupMembers; m_groupMembers = nullptr;
 }
 void SWGMessageCenterPost::init()
 {
@@ -40,6 +41,7 @@ void SWGMessageCenterPost::init()
     m_statusInfo = 0; m_statusInfoIsSet = false;
     m_secureType = 0; m_secureTypeIsSet = false;
     m_retransmit = 0; m_retransmitIsSet = false;
+    m_groupMembers = new QString(); m_groupMembersIsSet = false;
     m_retransmitInterval = -1.0f; m_retransmitIntervalIsSet = false;
     m_sendDelay = 0.0f; m_sendDelayIsSet = false;
 }
@@ -68,6 +70,7 @@ void SWGMessageCenterPost::fromJsonObject(QJsonObject& json)
     if (json.contains("headerMessage")) { ::SWGSDRangel::setValue(&m_headerMessage,json["headerMessage"],"qint32",""); m_headerMessageIsSet = true; }
     if (json.contains("statusInfo")) { ::SWGSDRangel::setValue(&m_statusInfo,json["statusInfo"],"qint32",""); m_statusInfoIsSet = true; }
     if (json.contains("secureType")) { ::SWGSDRangel::setValue(&m_secureType,json["secureType"],"qint32",""); m_secureTypeIsSet = true; }
+    if (json.contains("groupMembers")) { ::SWGSDRangel::setValue(&m_groupMembers,json["groupMembers"],"QString","QString"); m_groupMembersIsSet = true; }
     if (json.contains("retransmit")) { ::SWGSDRangel::setValue(&m_retransmit,json["retransmit"],"qint32",""); m_retransmitIsSet = true; }
     if (json.contains("retransmitInterval")) { ::SWGSDRangel::setValue(&m_retransmitInterval,json["retransmitInterval"],"float",""); m_retransmitIntervalIsSet = true; }
     if (json.contains("sendDelay")) { ::SWGSDRangel::setValue(&m_sendDelay,json["sendDelay"],"float",""); m_sendDelayIsSet = true; }
@@ -98,6 +101,7 @@ QJsonObject* SWGMessageCenterPost::asJsonObject()
     if (m_headerMessageIsSet) { object->insert("headerMessage",QJsonValue(m_headerMessage)); }
     if (m_statusInfoIsSet) { object->insert("statusInfo",QJsonValue(m_statusInfo)); }
     if (m_secureTypeIsSet) { object->insert("secureType",QJsonValue(m_secureType)); }
+    if (m_groupMembers && (m_groupMembersIsSet || !m_groupMembers->isEmpty())) { toJsonValue(QString("groupMembers"),m_groupMembers,object,QString("QString")); }
     if (m_retransmitIsSet) { object->insert("retransmit",QJsonValue(m_retransmit)); }
     if (m_retransmitIntervalIsSet) { object->insert("retransmitInterval",QJsonValue(m_retransmitInterval)); }
     if (m_sendDelayIsSet) { object->insert("sendDelay",QJsonValue(m_sendDelay)); }
@@ -108,7 +112,7 @@ bool SWGMessageCenterPost::isSet()
     return m_idIsSet || m_transmitterIsSet || m_protocolIsSet || m_addressIsSet || m_functionIsSet || m_priorityIsSet || m_typeIsSet
         || m_textIsSet || m_voiceFileIsSet || m_speedIsSet || m_polarityIsSet || m_shortTypeIsSet || m_sourceIsSet
         || m_blockingIsSet || m_mailDropIsSet || m_rightToLeftIsSet || m_headerMessageIsSet || m_statusInfoIsSet || m_secureTypeIsSet
-        || m_retransmitIsSet || m_retransmitIntervalIsSet || m_sendDelayIsSet;
+        || m_retransmitIsSet || m_retransmitIntervalIsSet || m_sendDelayIsSet || m_groupMembersIsSet;
 }
 QString* SWGMessageCenterPost::getId() { return m_id; }
 void SWGMessageCenterPost::setId(QString* value) { if (m_id != value) { delete m_id; m_id = value; } m_idIsSet = true; }
@@ -148,6 +152,8 @@ qint32 SWGMessageCenterPost::getStatusInfo() { return m_statusInfo; }
 void SWGMessageCenterPost::setStatusInfo(qint32 value) { m_statusInfo = value; m_statusInfoIsSet = true; }
 qint32 SWGMessageCenterPost::getSecureType() { return m_secureType; }
 void SWGMessageCenterPost::setSecureType(qint32 value) { m_secureType = value; m_secureTypeIsSet = true; }
+QString* SWGMessageCenterPost::getGroupMembers() { return m_groupMembers; }
+void SWGMessageCenterPost::setGroupMembers(QString* value) { if (m_groupMembers != value) { delete m_groupMembers; m_groupMembers = value; } m_groupMembersIsSet = true; }
 qint32 SWGMessageCenterPost::getRetransmit() { return m_retransmit; }
 void SWGMessageCenterPost::setRetransmit(qint32 value) { m_retransmit = value; m_retransmitIsSet = true; }
 float SWGMessageCenterPost::getRetransmitInterval() { return m_retransmitInterval; }

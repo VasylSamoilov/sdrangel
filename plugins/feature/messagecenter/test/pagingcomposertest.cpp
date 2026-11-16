@@ -72,9 +72,14 @@ QLineEdit *addressEdit(QWidget& composer)
     return composer.findChildren<QLineEdit*>().value(0);
 }
 
-QLineEdit *textEdit(QWidget& composer)
+QLineEdit *groupEdit(QWidget& composer)
 {
     return composer.findChildren<QLineEdit*>().value(1);
+}
+
+QLineEdit *textEdit(QWidget& composer)
+{
+    return composer.findChildren<QLineEdit*>().value(2);
 }
 
 } // namespace
@@ -124,6 +129,17 @@ int main(int argc, char **argv)
     comboWith(composer, "Separate")->setCurrentIndex(2);
     p = composer.page();
     check((p.m_type == "secure") && (p.m_secureType == 2) && p.check().isEmpty(), "FLEX secure page: binary");
+
+    // A group message: the pagers replace the address, no copies
+    select(composer, "Alphanumeric");
+    composer.setNetworkMode(true);
+    composer.setFlexNumbering(true);
+    QLineEdit *group = groupEdit(composer);
+    group->setText("1000, 2000");
+    p = composer.page();
+    check((p.m_groupMembers == "1000, 2000") && (p.groupMembers().size() == 2) && p.check().isEmpty(), "FLEX group page: the pagers, no address needed");
+    group->setText(QString());
+    composer.setNetworkMode(false);
 
     // GSC: the address number, the voice file
     select(composer, "GSC");

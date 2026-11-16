@@ -60,11 +60,15 @@ public:
     void setSecureType(qint32 value);
     qint32 getRetransmit();
     void setRetransmit(qint32 value);
+    QString* getGroupMembers();
+    void setGroupMembers(QString* value);
     float getRetransmitInterval();
     void setRetransmitInterval(float value);
     float getSendDelay();
     void setSendDelay(float value);
 private:
+    QString* m_groupMembers = nullptr;
+    bool m_groupMembersIsSet = false;
     qint32 m_retransmit = 0;
     bool m_retransmitIsSet = false;
     float m_retransmitInterval = -1.0f;

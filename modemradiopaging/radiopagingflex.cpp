@@ -139,20 +139,24 @@ uint32_t alphaSignature(const std::string& text)
 }
 
 // Message body words (data bits, not yet encoded) of a fragment of an alphanumeric message (STD-43A Fig.
-// 3.10.1.3-1, -2). retrieval: R of the first fragment. signature: of the whole message, -1 of the text
-std::vector<uint32_t> alphaBody(const std::string& text, int number, bool retrieval, int fragment, int fragments, int signature)
+// 3.10.1.3-1, -2). retrieval: R of the first fragment. mailDrop: M of the first fragment. signature: of the whole
+// message, -1 of the text
+std::vector<uint32_t> alphaBody(const std::string& text, int number, bool retrieval, bool mailDrop, int fragment, int fragments, int signature)
 {
     const bool first = (fragment == 0);
     const bool last = (fragment == fragments - 1);
     std::vector<uint32_t> msg(1, 0);
 
     // Header word: K in bits 0-9 (set last), C in bit 10 (more fragments follow), F in bits 11-12, N in bits
-    // 13-18; then R and M = 0 in the first fragment, the fragment control bits U0 V0 = 00 (enhanced
+    // 13-18; then R and M in the first fragment, the fragment control bits U0 V0 = 00 (enhanced
     // fragmentation not supported) in the others
     msg[0] = ((last ? 0u : 1u) << 10) | (RadioPagingFlex::fragmentNumber(fragment) << 11) | (((uint32_t) number & 0x3f) << 13);
 
     if (first && retrieval) {
         msg[0] |= 1u << 19;
+    }
+    if (first && mailDrop) {
+        msg[0] |= 1u << 20;
     }
 
     // Characters, 7 bits each, 3 a word from word 2; the first character slot of the first fragment holds the
@@ -369,6 +373,7 @@ int estimateBody(const RadioPagingFlex::PhaseMessage& message)
         return std::max(1, std::min(words, maxNumericWords));
     }
     case RadioPagingFlex::ShortMessage:
+    case RadioPagingFlex::ShortInstruction:
         return 0;
     case RadioPagingFlex::Binary:
     {
@@ -988,6 +993,17 @@ void RadioPagingFlex::shortMessageVector(ShortType type, const std::string& digi
     words[1] = longAddress ? encodeWord(d2) : 0;
 }
 
+void RadioPagingFlex::shortInstructionVector(const InstructionParams& instruction, bool longAddress, uint32_t words[2])
+{
+    // The data: a temporary address is a3-a0 above the frame f6-f0; the events fill d0-d10. Unused bits are 0
+    uint32_t d = (instruction.m_type == InstructionParams::SystemEvent)
+        ? (instruction.m_events & 0x7ffu)
+        : (((uint32_t) instruction.m_frame & 0x7f) | (((uint32_t) instruction.m_slot & 0xf) << 7));
+
+    words[0] = encodeWord(addChecksum((m_vectorInstruction << 4) | (((uint32_t) instruction.m_type & 7) << 7) | (d << 10)));
+    words[1] = longAddress ? encodeWord(0) : 0;
+}
+
 void RadioPagingFlex::fillIdle(uint32_t *words, int phase, Mode mode)
 {
     bool lsbPhase = false;
@@ -1053,7 +1069,7 @@ bool RadioPagingFlex::validateMessage(uint64_t capcode, MessageType type, const 
 bool RadioPagingFlex::validateMessage(uint64_t capcode, MessageType type, const std::string& text, std::string& error,
     const BinaryParams& binary)
 {
-    if (!isValidAddress(capcode))
+    if (!isValidAddress(capcode) && !isTemporaryAddress(capcode) && (capcode != m_systemEventAddress))
     {
         error = "Capcode out of range";
         return false;
@@ -1202,6 +1218,32 @@ int RadioPagingFlex::messageCost(const PhaseMessage& message, std::string *error
 
     int vectorWords = isLong ? 2 : 1;
 
+    if (message.m_type == ShortInstruction)
+    {
+        const InstructionParams& i = message.m_instruction;
+        const bool temporary = (i.m_type == InstructionParams::TemporaryAddress);
+        const bool event = (i.m_type == InstructionParams::SystemEvent);
+
+        // The assignment is sent to an address of a pager, the notification to its own address (STD-43A 3.8.2.4)
+        if ((!temporary && !event) || (temporary && !isValidAddress(message.m_capcode)) || (event && (message.m_capcode != m_systemEventAddress))
+            || (i.m_slot < 0) || (i.m_slot >= (int) m_temporaryCount) || (i.m_frame < 0) || (i.m_frame >= 128) || (i.m_events > 0x7ffu))
+        {
+            if (error) {
+                *error = "Short instruction: a temporary address (0-15, frame 0-127) to the address of a pager, or the system event flags "
+                    "(0-2047) to the System Event Notification address";
+            }
+            return -1;
+        }
+
+        return addressWords + vectorWords;
+    }
+    if (message.m_capcode == m_systemEventAddress)
+    {
+        if (error) {
+            *error = "The System Event Notification address carries a short instruction";
+        }
+        return -1;
+    }
     if (message.m_type == ShortMessage)
     {
         if (((message.m_shortType != ShortNumeric) && (message.m_shortType != ShortSource) && (message.m_shortType != ShortNumbered))
@@ -1266,7 +1308,7 @@ RadioPagingFlex::PhaseResult RadioPagingFlex::buildPhase(const PhaseParams& para
             bool isTone = (m.m_type == Tone);
             bool inPass = (pass == 0) ? (m.m_priority && !isTone) : (pass == 1) ? (!m.m_priority && !isTone) : isTone;
 
-            if (!inPass || !isValidAddress(m.m_capcode)) {
+            if (!inPass || !(isValidAddress(m.m_capcode) || isTemporaryAddress(m.m_capcode) || (m.m_capcode == m_systemEventAddress))) {
                 continue;
             }
 
@@ -1275,7 +1317,7 @@ RadioPagingFlex::PhaseResult RadioPagingFlex::buildPhase(const PhaseParams& para
             in.m_addressWords = in.m_long ? 2 : 1;
             in.m_vectorWords = isTone ? 0 : (in.m_long ? 2 : 1);
 
-            if (!isTone && (m.m_type != ShortMessage))
+            if (!isTone && (m.m_type != ShortMessage) && (m.m_type != ShortInstruction))
             {
                 int body = estimateBody(m);
                 if (body < 0) {
@@ -1398,6 +1440,21 @@ RadioPagingFlex::PhaseResult RadioPagingFlex::buildPhase(const PhaseParams& para
         std::vector<uint32_t> body;
         uint32_t vector;
 
+        if (m.m_type == ShortInstruction)
+        {
+            // No message field: the vector word(s) only
+            uint32_t vw[2];
+            shortInstructionVector(m.m_instruction, in.m_long, vw);
+
+            if (vecCursor < (unsigned) m_wordsPerFrame) {
+                words[vecCursor++] = vw[0];
+            }
+            if (in.m_long && (vecCursor < (unsigned) m_wordsPerFrame)) {
+                words[vecCursor++] = vw[1];
+            }
+            continue;
+        }
+
         if (m.m_type == ShortMessage)
         {
             // No message field: the vector word(s) only
@@ -1415,7 +1472,7 @@ RadioPagingFlex::PhaseResult RadioPagingFlex::buildPhase(const PhaseParams& para
 
         if (m.m_type == Alphanumeric)
         {
-            body = alphaBody(m.m_text, m.m_number, m.m_retrieval, m.m_fragment, m.m_fragments, m.m_signature);
+            body = alphaBody(m.m_text, m.m_number, m.m_retrieval, m.m_binary.m_mailDrop, m.m_fragment, m.m_fragments, m.m_signature);
             vector = alphaVector(msgCursor, (unsigned) body.size());
         }
         else if (m.m_type == Binary)

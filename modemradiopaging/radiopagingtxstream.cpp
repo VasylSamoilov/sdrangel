@@ -717,6 +717,18 @@ void RadioPagingFlexTxStream::buildFrame()
     }
 
     // A message to retransmit keeps its id until its last retransmission (clear() removes what is left of it)
+    std::vector<uint64_t> failedIds;
+
+    for (uint32_t encoderId : frame.m_failedIds)
+    {
+        auto it = m_ids[p].find(encoderId);
+
+        if (it != m_ids[p].end())
+        {
+            failedIds.push_back(it->second);
+            m_ids[p].erase(it);
+        }
+    }
     for (uint32_t encoderId : frame.m_doneIds)
     {
         m_ids[p].erase(encoderId);
@@ -742,6 +754,7 @@ void RadioPagingFlexTxStream::buildFrame()
         {
             block.m_ids = ids;
             block.m_repeatIds = repeatIds;
+            block.m_failedIds = failedIds;
         }
 
         m_blocks.push_back(block);
@@ -755,6 +768,7 @@ void RadioPagingFlexTxStream::buildFrame()
         block.m_baud = RadioPagingFlex::m_syncBaud;
         block.m_shaping = m_shaping;
         block.m_levels = levels(RadioPagingFlex::ers(RadioPagingFlex::m_bitsPerFrame, m_inverted));
+        block.m_failedIds = failedIds;
         m_blocks.push_back(block);
     }
 }

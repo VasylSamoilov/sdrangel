@@ -70,6 +70,12 @@ PagingComposer::PagingComposer(QWidget *parent) :
     m_function = new QComboBox(this);
     m_priority = new QCheckBox(tr("Priority"), this);
     m_priority->setToolTip(tr("FLEX priority address"));
+    m_groupLabel = new QLabel(tr("Group"), this);
+    m_group = new QLineEdit(this);
+    m_group->setPlaceholderText(tr("capcodes separated by commas"));
+    m_group->setToolTip(tr("FLEX group message (STD-43A 5.2): the capcodes of 2 to 64 pagers, separated by commas. The address above is "
+        "not used. Each pager gets a short instruction with a temporary address and a frame, then the message goes to that address in "
+        "that frame. Numeric, alphanumeric, tone and short messages; no copies"));
 
     m_type = new QComboBox(this);
     m_polarity = new QComboBox(this);
@@ -195,6 +201,8 @@ PagingComposer::PagingComposer(QWidget *parent) :
     layout->addWidget(m_protocol, row++, 1, 1, 2);
     layout->addWidget(m_addressLabel, row, 0);
     layout->addLayout(addressRow, row++, 1, 1, 2);
+    layout->addWidget(m_groupLabel, row, 0);
+    layout->addWidget(m_group, row++, 1, 1, 2);
     layout->addWidget(new QLabel(tr("Type"), this), row, 0);
     layout->addLayout(typeRow, row++, 1, 1, 2);
     layout->addWidget(m_shortLabel, row, 0);
@@ -229,6 +237,8 @@ PagingComposer::PagingComposer(QWidget *parent) :
     connect(m_send, &QPushButton::clicked, this, &PagingComposer::sendRequested);
     connect(m_text, &QLineEdit::returnPressed, this, &PagingComposer::sendRequested);
     connect(m_address, &QLineEdit::returnPressed, this, &PagingComposer::sendRequested);
+    connect(m_group, &QLineEdit::textChanged, this, &PagingComposer::display);
+    connect(m_group, &QLineEdit::returnPressed, this, &PagingComposer::sendRequested);
 }
 
 void PagingComposer::setProtocols(const QStringList& protocols)
@@ -386,6 +396,8 @@ void PagingComposer::display()
         : flex ? tr("FLEX capcode: short 1 to 1933312, long 2101249 to 4297068542") : tr("POCSAG address 0 to 2097151"));
     m_function->setVisible(!flex);
     m_priority->setVisible(flex);
+    m_groupLabel->setVisible(flex);
+    m_group->setVisible(flex);
     m_overrideLabel->setVisible(pocsag);
     m_speed->setVisible(pocsag);
 
@@ -408,12 +420,17 @@ void PagingComposer::display()
         m_text->setEnabled(m_shortType->currentIndex() == 0);
     }
 
-    m_binaryLabel->setVisible(binary || secure);
-    m_binaryLabel->setText(binary ? tr("Header") : tr("Type"));
+    const bool alpha = flex && (type == "alphanumeric");
+    m_binaryLabel->setVisible(binary || secure || alpha);
+    m_binaryLabel->setText(secure ? tr("Type") : tr("Header"));
 
-    for (QWidget *w : QList<QWidget*>({m_blocking, m_mailDrop, m_rightToLeft, m_headerMessage, m_statusInfo})) {
+    for (QWidget *w : QList<QWidget*>({m_blocking, m_rightToLeft, m_headerMessage, m_statusInfo})) {
         w->setVisible(binary);
     }
+
+    m_mailDrop->setVisible(binary || alpha);
+    m_mailDrop->setToolTip(binary ? tr("FLEX binary: mail drop flag M, the message can be handled separately from ordinary messages")
+        : tr("FLEX alphanumeric: mail drop flag M, the message can be handled separately from ordinary messages"));
 
     m_secureType->setVisible(secure);
 
@@ -421,7 +438,7 @@ void PagingComposer::display()
     // with message numbering (STD-43A 4.3.7)
     const bool scheduled = m_network && !gsc;
     const bool flexNumbered = (type == "alphanumeric") || binary || (shortMessage && (m_shortType->currentIndex() == 2));
-    const bool copies = !flex || (m_flexNumbering && flexNumbered);
+    const bool copies = (!flex || (m_flexNumbering && flexNumbered)) && m_group->text().trimmed().isEmpty();
     m_scheduleLabel->setVisible(scheduled);
     m_retransmit->setVisible(scheduled);
     m_retransmitInterval->setVisible(scheduled);
@@ -468,6 +485,7 @@ RadioPagingPage PagingComposer::page() const
     p.m_address = m_address->text().trimmed();
     p.m_function = std::max(0, m_function->currentIndex());
     p.m_priority = m_priority->isVisible() && m_priority->isChecked();
+    p.m_groupMembers = m_group->isVisible() ? m_group->text().trimmed() : QString();
     p.m_text = (tone || voice || !m_text->isEnabled()) ? QString() : m_text->text();
     p.m_voiceFile = (voice && !microphoneSelected()) ? m_text->text().trimmed() : QString();
     p.m_speed = (m_speed->isVisible() && (m_speed->currentIndex() > 0)) ? pocsagSpeeds[m_speed->currentIndex() - 1] : 0;

@@ -620,6 +620,7 @@ int MessageCenter::webapiActionsPost(const QStringList& featureActionsKeys, SWGS
         page.m_address = text(post->getAddress()).trimmed();
         page.m_function = post->getFunction();
         page.m_priority = post->getPriority() != 0;
+        page.m_groupMembers = text(post->getGroupMembers());
         page.m_text = text(post->getText());
         page.m_voiceFile = text(post->getVoiceFile());
         page.m_speed = post->getSpeed();

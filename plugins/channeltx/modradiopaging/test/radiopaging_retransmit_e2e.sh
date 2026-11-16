@@ -63,6 +63,9 @@ curl_code PATCH /deviceset/1/channel/0/settings '{"channelType":"RadioPagingMod"
 check "FLEX: 16 copies are refused" '[ "$(tx 0 "{\"protocol\":\"flex\",\"capcode\":1100001,\"type\":\"alphanumeric\",\"retransmit\":16,\"text\":\"x\"}")" = 400 ]'
 check "FLEX: copies of a numeric message are refused" '[ "$(tx 0 "{\"protocol\":\"flex\",\"capcode\":1100001,\"type\":\"numeric\",\"retransmit\":1,\"text\":\"123\"}")" = 400 ]'
 check "POCSAG: 11 copies are refused" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":1100001,\"type\":\"alphanumeric\",\"retransmit\":11,\"text\":\"x\"}")" = 400 ]'
+check "FLEX: a group of one pager is refused" '[ "$(tx 0 "{\"protocol\":\"flex\",\"type\":\"alphanumeric\",\"groupMembers\":\"1100010\",\"text\":\"x\"}")" = 400 ]'
+check "FLEX: a binary group message is refused" '[ "$(tx 0 "{\"protocol\":\"flex\",\"type\":\"binary\",\"groupMembers\":\"1100010,1100011\",\"text\":\"A5\"}")" = 400 ]'
+check "FLEX: a group message with copies is refused" '[ "$(tx 0 "{\"protocol\":\"flex\",\"type\":\"alphanumeric\",\"groupMembers\":\"1100010,1100011\",\"retransmit\":1,\"text\":\"x\"}")" = 400 ]'
 check "an interval over 3600 s is refused" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":1100001,\"type\":\"alphanumeric\",\"retransmit\":1,\"retransmitInterval\":3601,\"text\":\"x\"}")" = 400 ]'
 check "a negative send delay is refused" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":1100001,\"type\":\"alphanumeric\",\"sendDelay\":-1,\"text\":\"x\"}")" = 400 ]'
 curl_code PATCH /deviceset/1/channel/0/settings '{"channelType":"RadioPagingMod","direction":1,"RadioPagingModSettings":{"mode":0}}' > /dev/null
@@ -78,6 +81,7 @@ sleep 1
 # message center with one copy
 check "FLEX: alphanumeric with 2 copies is accepted" '[ "$(tx 0 "{\"protocol\":\"flex\",\"capcode\":1100002,\"type\":\"alphanumeric\",\"retransmit\":2,\"retransmitInterval\":4,\"sendDelay\":2,\"text\":\"FLEX COPIES\"}")" = 202 ]'
 check "POCSAG: alphanumeric with 2 copies is accepted" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":1100003,\"type\":\"alphanumeric\",\"retransmit\":2,\"retransmitInterval\":3,\"sendDelay\":2,\"text\":\"POCSAG COPIES\"}")" = 202 ]'
+check "FLEX: a group message is accepted" '[ "$(tx 0 "{\"protocol\":\"flex\",\"type\":\"alphanumeric\",\"groupMembers\":\"1100010, 1100011\",\"text\":\"GROUP TEXT\"}")" = 202 ]'
 
 # The page waits for the modulator to announce itself (every 5 s)
 check "a page with a copy is accepted by the message center" '[ "$(curl_code POST /featureset/feature/0/actions "{\"featureType\":\"MessageCenter\",\"MessageCenterActions\":{\"post\":{\"id\":\"p-rep\",\"transmitter\":\"tp\",\"protocol\":\"pocsag\",\"address\":\"1100004\",\"type\":\"alphanumeric\",\"retransmit\":1,\"retransmitInterval\":2,\"text\":\"PAGE COPY\"}}}")" = 202 ]'
@@ -88,7 +92,8 @@ check "POCSAG: a record for the message and each copy" '[ "$(count tx 1100003)" 
 check "page: a record for the page and its copy" '[ "$(count tx 1100004)" = 2 ]'
 check "FLEX: the copies have R = 0 and their number" '[[ "$(records tx 1100002 | grep "\"retransmission\":1" | grep -c "\"retrieval\":false")" = 1 && "$(records tx 1100002 | grep "\"retransmission\":2" | grep -c "\"retrieval\":false")" = 1 ]]'
 check "page: sent once, with its first transmission" '[[ "$(report | sed "s/},{/}\n{/g" | grep "\"id\":\"p-rep\"" | grep -c "\"state\":\"sent\"")" -ge 1 ]]'
-check "the modulators report each message once" '[ "$(sent 0)" = 1 ] && [ "$(sent 1)" = 2 ]'
+check "the modulators report each message once" '[ "$(sent 0)" = 2 ] && [ "$(sent 1)" = 2 ]'
+check "FLEX: a record for the group message, with its pagers" '[[ "$(report | sed "s/},{/}\n{/g" | grep "\"direction\":\"tx\"" | grep "GROUP TEXT" | grep -c "group_members")" = 1 ]]'
 sleep 2
 curl_code DELETE /deviceset/0/device/run > /dev/null
 curl_code DELETE /deviceset/1/device/run > /dev/null
@@ -117,6 +122,8 @@ check "FLEX: the message received has R = 1, the copies R = 0" '[[ "$(records rx
 check "FLEX: the copies have the number of the message" '[ "$(records rx 1100002 | grep -c "\"message_number\":0")" = 3 ]'
 check "POCSAG: received once, the copies marked as duplicates" '[ "$(countRx 1100003 none)" = 1 ] && [ "$(countRx 1100003 dup)" = 2 ]'
 check "POCSAG page: received once, its copy marked as a duplicate" '[ "$(countRx 1100004 none)" = 1 ] && [ "$(countRx 1100004 dup)" = 1 ]'
+check "FLEX: the group message is received on its temporary address with its pagers" '[[ "$(records rx 2029568 | grep "GROUP TEXT" | grep -c "group_capcodes")" -ge 1 ]]'
+check "FLEX: both pagers have their short instruction" '[ "$(report | sed "s/},{/}\n{/g" | grep "\"direction\":\"rx\"" | grep -c "short_instruction")" -ge 2 ]'
 
 if [ "$failed" -ne 0 ]; then
     report | sed 's/},{/}\n{/g' | grep "11000" | sed 's/"ber".*"direction"/"direction"/; s/"errorsCorrected".*"id"/"id"/; s/"rawBits".*"text"/"text"/'

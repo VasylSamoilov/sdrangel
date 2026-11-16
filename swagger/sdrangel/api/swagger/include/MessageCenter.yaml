@@ -114,6 +114,9 @@ MessageCenterPost:
     secureType:
       description: "FLEX secure type t1 t0 (STD-43A 3.10.1.4): 0 alphanumeric, 1 data defined separately (hex digits), 2 binary (hex digits)"
       type: integer
+    groupMembers:
+      description: "FLEX group message (STD-43A 5.2): the capcodes of the pagers, 2 to 64, separated by commas. The address is not used. The transmitter sends a short instruction to each pager, then the message to a temporary address"
+      type: string
     retransmit:
       description: "Transmitter in network mode: copies sent after the message (POCSAG 0 to 10; FLEX 0 to 15, numbered types with message numbering, same number and R = 0). The page is sent with its first transmission"
       type: integer

@@ -47,7 +47,7 @@ bool same(const RadioPagingPage& a, const RadioPagingPage& b)
         && (a.m_shortType == b.m_shortType) && (a.m_source == b.m_source) && (a.m_blocking == b.m_blocking)
         && (a.m_mailDrop == b.m_mailDrop) && (a.m_rightToLeft == b.m_rightToLeft) && (a.m_headerMessage == b.m_headerMessage)
         && (a.m_statusInfo == b.m_statusInfo) && (a.m_secureType == b.m_secureType) && (a.m_retransmit == b.m_retransmit)
-        && (a.m_retransmitInterval == b.m_retransmitInterval) && (a.m_sendDelay == b.m_sendDelay);
+        && (a.m_retransmitInterval == b.m_retransmitInterval) && (a.m_sendDelay == b.m_sendDelay) && (a.m_groupMembers == b.m_groupMembers);
 }
 
 RadioPagingPage page(const char *protocol, const char *type, const char *address)
@@ -99,7 +99,11 @@ void testRoundTrips()
     RadioPagingPage gsc = page("gsc", "numeric", "001234");
     gsc.m_function = 1;
 
-    for (const RadioPagingPage& p : {pocsag, binary, shortMessage, secure, voice, gsc})
+    RadioPagingPage group = page("flex", "alphanumeric", "0");
+    group.m_groupMembers = "1000,2101249,5000";
+    group.m_mailDrop = true;
+
+    for (const RadioPagingPage& p : {pocsag, binary, shortMessage, secure, voice, gsc, group})
     {
         MessageRecord r = p.toRecord();
         RadioPagingPage fromRecord = RadioPagingPage::fromRecord(r);
@@ -129,6 +133,9 @@ void testRoundTrips()
     r = voice.toRecord();
     check(r.m_text.isNull() && (r.m_protocolData.value("voice_source").toString() == "/a/b.wav"),
         "GSC voice record: no text, the sound file as voice_source");
+    r = group.toRecord();
+    check((r.m_address == "0000001000,0002101249,0000005000") && (r.m_protocolData.value("group_members").toList().size() == 3)
+        && !r.m_protocolData.contains("capcode"), "FLEX group record: the pagers, no capcode");
 
     // Without a protocol the tx action is of the channel's
     SWGSDRangel::SWGRadioPagingModTx bare;
@@ -181,6 +188,18 @@ void testLimits()
     p = page("flex", "secure", "1");
     p.m_secureType = 3;
     refused.push_back({p, "secure type 3"});
+    p = page("flex", "alphanumeric", "0");
+    p.m_groupMembers = "1000";
+    refused.push_back({p, "a group of one pager"});
+    p = page("flex", "alphanumeric", "0");
+    p.m_groupMembers = "1000,x";
+    refused.push_back({p, "a group member that is not a number"});
+    p = page("flex", "alphanumeric", "0");
+    p.m_groupMembers = "1000,0";
+    refused.push_back({p, "a group member out of range"});
+    p = page("flex", "binary", "0");
+    p.m_groupMembers = "1000,2000";
+    refused.push_back({p, "a binary group message"});
     p = page("pocsag", "alphanumeric", "1");
     p.m_retransmit = -1;
     refused.push_back({p, "negative retransmissions"});

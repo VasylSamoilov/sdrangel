@@ -360,6 +360,9 @@ void RadioPagingModSource::feed()
 
     m_pushed += block.m_levels.size();
 
+    if (!block.m_failedIds.empty()) {
+        fail(block.m_failedIds);
+    }
     if (!block.m_ids.empty() || !block.m_repeatIds.empty()) {
         m_inFlight.push_back(InFlight{m_pushed, block.m_ids, block.m_repeatIds});
     }

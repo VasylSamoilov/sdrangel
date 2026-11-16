@@ -62,7 +62,23 @@ public:
         Alphanumeric,   //!< 7-bit characters
         ShortMessage,   //!< Short message vector (STD-43A 3.9.2), all the data in the vector, see ShortType
         Binary,         //!< HEX/binary message (vector 110, STD-43A 3.10.1.2): hex digits, see BinaryParams
-        Secure          //!< Secure message (vector 000, STD-43A 3.10.1.4), see BinaryParams::m_secureType
+        Secure,         //!< Secure message (vector 000, STD-43A 3.10.1.4), see BinaryParams::m_secureType
+        ShortInstruction    //!< Short instruction vector (001, STD-43A 3.9.6), all the data in the vector, see InstructionParams
+    };
+
+    //! Short instruction vector (STD-43A 3.9.6, Table 3.9.6-1): the instruction i2 i1 i0 in bits 7-9 and the data d0-d10
+    //! in bits 10-20
+    struct InstructionParams
+    {
+        enum Type {
+            TemporaryAddress = 0,   //!< 000: the pager listens to frame f6-f0 (d0-d6) for the temporary address a3-a0 (d7-d10)
+            SystemEvent = 1         //!< 001: system event flags e10-e0 (d0-d10), with the System Event Notification address
+        };
+
+        Type m_type = TemporaryAddress;
+        int m_slot = 0;             //!< Temporary address a3-a0: 0-15
+        int m_frame = 0;            //!< Frame f6-f0 of the group message: 0-127
+        unsigned m_events = 0;      //!< System event flags e10-e0: 0-0x7ff
     };
 
     //! Secure message type field t1 t0 (STD-43A 3.10.1.4)
@@ -78,7 +94,7 @@ public:
     struct BinaryParams
     {
         int m_blocking = 1;             //!< B: bits of a character 1-16 (16 is sent as 0000); default 0001
-        bool m_mailDrop = false;        //!< M
+        bool m_mailDrop = false;        //!< M (also of an alphanumeric message)
         bool m_rightToLeft = false;     //!< D: display from right to left, not allowed with B = 1
         bool m_header = false;          //!< H: header message, a transparent message of the same number follows
         bool m_statusInfo = false;      //!< I: the first 8 data bits name the encoding method (reserved)
@@ -127,6 +143,7 @@ public:
         ShortType m_shortType = ShortNumeric;   //!< Short message only
         int m_source = 0;           //!< Short message source and numbered types: source code S2-S0, 0-7
         BinaryParams m_binary;      //!< HEX/binary and secure messages only
+        InstructionParams m_instruction;    //!< Short instruction only
         int m_fragment = 0;         //!< Alphanumeric, HEX/binary and secure: fragment index, 0 the first (fragmentMessage)
         int m_fragments = 1;        //!< Alphanumeric, HEX/binary and secure: fragments of the message
         int m_signature = -1;       //!< Alphanumeric and HEX/binary first fragment: signature of the whole message, -1 of the text
@@ -232,6 +249,16 @@ public:
     static bool isShortAddress(uint64_t capcode);
     static bool isLongAddress(uint64_t capcode);
     static bool isValidAddress(uint64_t capcode);
+    //!< Temporary addresses and the System Event Notification address, as capcodes (the address word less 0x8000, as
+    //!< the short addresses): a message to one of them is the group message of a short instruction or the
+    //!< notification (STD-43A 3.8.2.3, 3.8.2.4)
+    static const uint64_t m_temporaryBase = 2029568;        //!< Address word 1F7800
+    static const uint64_t m_temporaryCount = 16;
+    static const uint64_t m_systemEventAddress = 2029599;   //!< Address word 1F781F
+    static bool isTemporaryAddress(uint64_t capcode) { return (capcode >= m_temporaryBase) && (capcode < m_temporaryBase + m_temporaryCount); }
+    //!< Short instruction vector (STD-43A Fig. 3.9.6-1): i2-i0 in bits 7-9, d0-d10 in bits 10-20; the second word of a
+    //!< long address is 0 (the instruction is for short addresses and the notification, words[1] is 0)
+    static void shortInstructionVector(const InstructionParams& instruction, bool longAddress, uint32_t words[2]);
     //!< Address of the message records: the capcode in 10 digits (the largest, 4297068542, has 10), the same in
     //!< RX, TX and the message center
     static std::string addressText(uint64_t capcode);
@@ -257,6 +284,7 @@ public:
     static const unsigned m_vectorAlpha = 5;
     static const unsigned m_vectorBinary = 6;
     static const unsigned m_vectorSecure = 0;
+    static const unsigned m_vectorInstruction = 1;
     //!< Vector of a message with a 7-bit length (alphanumeric, HEX/binary, secure)
     static uint32_t messageVector(unsigned type, unsigned start, unsigned words);
 

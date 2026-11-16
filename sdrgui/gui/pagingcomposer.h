@@ -79,6 +79,8 @@ private:
     QLabel *m_protocolLabel;
     QLabel *m_addressLabel;
     QLineEdit *m_address;
+    QLabel *m_groupLabel;
+    QLineEdit *m_group;
     QComboBox *m_function;
     QCheckBox *m_priority;
     QComboBox *m_type;

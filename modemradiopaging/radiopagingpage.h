@@ -20,6 +20,7 @@
 
 #include <QString>
 #include <QStringList>
+#include <QList>
 
 #include "export.h"
 #include "util/messagerecord.h"
@@ -42,6 +43,9 @@ struct MODEMRADIOPAGING_API RadioPagingPage
     QString m_address;                  //!< Digits: POCSAG address, FLEX capcode, GSC address (up to 6 digits)
     int m_function = 0;                 //!< POCSAG function 0-3 (A-D); GSC function 0-3, the address number 1-4
     bool m_priority = false;            //!< FLEX priority address
+    //!< FLEX group message: the capcodes of the pagers (digits separated by commas or spaces, 2 to 64); the address is
+    //!< not used. The message goes to a temporary address that a short instruction tells the pagers (STD-43A 5.2)
+    QString m_groupMembers;
     QString m_text;
     QString m_voiceFile;                //!< GSC voice: the sound file
     int m_speed = 0;                    //!< POCSAG baud, 0: the channel setting
@@ -67,6 +71,8 @@ struct MODEMRADIOPAGING_API RadioPagingPage
 
     //!< Empty if the page can be queued, else why not
     QString check() const;
+    //!< The capcodes of m_groupMembers
+    QList<qulonglong> groupMembers(bool *ok = nullptr) const;
     //!< The page as a TX record of the message center
     MessageRecord toRecord() const;
     //!< The page of a TX record (toRecord, or a record of a source file in the same keys)

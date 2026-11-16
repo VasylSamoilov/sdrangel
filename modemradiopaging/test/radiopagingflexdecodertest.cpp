@@ -26,6 +26,7 @@
 #include <cstring>
 #include <map>
 #include <random>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -2683,6 +2684,235 @@ void testNumbering()
 }
 
 // Retransmission and send delay (STD-43A 4.3.7.6: a message sent again has its number and R = 0)
+// M of an alphanumeric message: in the first fragment only (STD-43A 3.10.1.3)
+void testAlphaMailDrop()
+{
+    Enc enc;
+    Enc::TxMessage m;
+    m.m_capcode = 4096;
+    m.m_type = Flex::Alphanumeric;
+    m.m_text = "drop me";
+    m.m_binary.m_mailDrop = true;
+    Enc::TxMessage plain = m;
+    plain.m_capcode = 4097;
+    plain.m_binary.m_mailDrop = false;
+    Enc::EnqueueResult a = enc.enqueue(m);
+    Enc::EnqueueResult b = enc.enqueue(plain);
+    Dec dec;
+    int mailDrop = 0, others = 0;
+
+    for (uint64_t index = 100; (index < 110) && (enc.pending() > 0); index++)
+    {
+        Enc::Frame f = enc.buildFrame(index);
+
+        for (const Dec::Message& r : dec.decodeFrame(toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data)))
+        {
+            if (r.m_capcode == 4096) {
+                mailDrop += (r.m_mailDrop && (r.m_checksum == Dec::CheckOk) && (r.m_text == "drop me")) ? 1 : 0;
+            } else if (r.m_capcode == 4097) {
+                others += !r.m_mailDrop ? 1 : 0;
+            }
+        }
+    }
+
+    check(a.m_ok && b.m_ok && (mailDrop == 1) && (others == 1), "alphanumeric message: the mail drop flag M is sent and decoded");
+}
+
+// Group messages with temporary addresses (STD-43A 5.2) and the short instruction vector (3.9.6)
+void testGroupTx()
+{
+    // The way the pagers read it: the decoder tracks the assignment, then the message to the temporary address
+    for (int collapse : {0, 2})
+    {
+        Enc enc;
+        std::string error;
+        enc.setCollapse(collapse, error);
+        Enc::TxMessage m;
+        m.m_type = Flex::Alphanumeric;
+        m.m_text = "GROUP CALL";
+        m.m_members = {3000, 3001, 5000};
+        Enc::EnqueueResult er = enc.enqueue(m);
+        Dec dec;
+        std::vector<Dec::Message> instructions;
+        std::vector<std::pair<uint64_t, Dec::Message>> deliveries;
+        int sent = 0, failed = 0;
+
+        for (uint64_t index = 1000; (index < 1200) && (enc.pending() > 0); index++)
+        {
+            Enc::Frame f = enc.buildFrame(index);
+            sent += (int) f.m_sentIds.size();
+            failed += (int) f.m_failedIds.size();
+
+            for (const Dec::Message& r : dec.decodeFrame(toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data)))
+            {
+                if (r.m_type == Dec::TypeShortInstruction) {
+                    instructions.push_back(r);
+                } else if (r.m_addressType == Dec::AddressTemporary) {
+                    deliveries.push_back(std::make_pair(index, r));
+                }
+            }
+        }
+
+        bool ok = er.m_ok && (instructions.size() == 3) && (deliveries.size() == 1) && (sent == 1) && (failed == 0) && (enc.pending() == 0);
+
+        if (ok)
+        {
+            const Dec::Message& d = deliveries[0].second;
+            ok = (instructions[0].m_instructionType == 0) && (instructions[0].m_instructionSlot == 0)
+                && (instructions[0].m_instructionFrame == (int) (deliveries[0].first % 128)) && d.m_groupTracked && (d.m_groupMembers.size() == 3)
+                && (d.m_text == "GROUP CALL") && (d.m_checksum == Dec::CheckOk) && !d.m_retrieval;
+        }
+
+        check(ok, ("group message: a short instruction to each pager, then the message to the temporary address in the frame told (collapse "
+            + std::to_string(collapse) + ")").c_str());
+    }
+
+    // The temporary address is free again once the message went; two groups use two addresses
+    {
+        Enc enc;
+        Enc::TxMessage m;
+        m.m_type = Flex::Numeric;
+        m.m_text = "123";
+        m.m_members = {10, 20};
+        Enc::EnqueueResult a = enc.enqueue(m);
+        Enc::EnqueueResult b = enc.enqueue(m);
+        Enc::EnqueueResult c = enc.enqueue(m);
+        Dec dec;
+        std::set<int> slots;
+        int delivered = 0;
+
+        for (uint64_t index = 0; (index < 300) && (enc.pending() > 0); index++)
+        {
+            Enc::Frame f = enc.buildFrame(index);
+
+            for (const Dec::Message& r : dec.decodeFrame(toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data)))
+            {
+                if (r.m_type == Dec::TypeShortInstruction) {
+                    slots.insert(r.m_instructionSlot);
+                } else if (r.m_addressType == Dec::AddressTemporary) {
+                    delivered++;
+                }
+            }
+        }
+
+        Enc::EnqueueResult again = enc.enqueue(m);
+        check(a.m_ok && b.m_ok && c.m_ok && (slots.size() == 3) && (delivered == 3) && (enc.pending() > 0) && again.m_ok,
+            "group messages: each takes a temporary address, free again after its message");
+    }
+
+    // Pagers in different phases: the group message goes in each phase, in the same frame
+    {
+        Enc plain;
+        plain.setMode(Flex::Mode6400_4);
+        Enc::TxMessage single;
+        single.m_capcode = 24;
+        single.m_type = Flex::Alphanumeric;
+        single.m_text = "SINGLE";
+        plain.enqueue(single);
+        Dec single_dec;
+        bool seen = false;
+
+        for (uint64_t index = 0; (index < 5) && (plain.pending() > 0); index++)
+        {
+            Enc::Frame f = plain.buildFrame(index);
+
+            for (const Dec::Message& r : single_dec.decodeFrame(toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data))) {
+                seen = seen || ((r.m_text == "SINGLE") && (r.m_phase == 'C'));
+            }
+        }
+
+        check(seen, "6400/4: a message to a capcode of phase C");
+    }
+    {
+        Enc enc;
+        enc.setMode(Flex::Mode6400_4);
+        Enc::TxMessage m;
+        m.m_type = Flex::Alphanumeric;
+        m.m_text = "PHASES";
+        m.m_members = {16, 20, 24};     // Phases 0, 1 and 2 of the capcode
+        Enc::EnqueueResult er = enc.enqueue(m);
+        Dec dec;
+        std::vector<uint64_t> frames;
+        std::string phasesSeen;
+        int instructions = 0;
+
+        for (uint64_t index = 0; (index < 200) && (enc.pending() > 0); index++)
+        {
+            Enc::Frame f = enc.buildFrame(index);
+
+            for (const Dec::Message& r : dec.decodeFrame(toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data)))
+            {
+                if (r.m_type == Dec::TypeShortInstruction) {
+                    instructions++;
+                } else if ((r.m_addressType == Dec::AddressTemporary) && (r.m_text == "PHASES")) {
+                    frames.push_back(index);
+                    phasesSeen += std::string(" ") + r.m_phase + (r.m_duplicate ? "d" : "");
+                }
+            }
+        }
+
+        check(er.m_ok && (instructions == 3) && (frames.size() == 3) && (frames[0] == frames[1]) && (frames[1] == frames[2]),
+            ("group message: one message in each phase of the pagers, in the same frame (" + std::to_string(instructions) + " instructions, "
+            + std::to_string(frames.size()) + " messages, phases" + phasesSeen + ", pending " + std::to_string(enc.pending()) + ")").c_str());
+    }
+
+    // Refused
+    {
+        Enc enc;
+        Enc::TxMessage m;
+        m.m_type = Flex::Alphanumeric;
+        m.m_text = "x";
+        m.m_members = {10};
+        bool one = !enc.enqueue(m).m_ok;
+        m.m_members = {10, 10};
+        bool twice = !enc.enqueue(m).m_ok;
+        m.m_members = {10, 20};
+        m.m_type = Flex::Binary;
+        m.m_text = "A5";
+        bool binary = !enc.enqueue(m).m_ok;
+        m.m_type = Flex::Alphanumeric;
+        m.m_retransmit = 1;
+        bool again = !enc.enqueue(m).m_ok;
+        m.m_retransmit = 0;
+        m.m_members = {10, 0};
+        bool address = !enc.enqueue(m).m_ok;
+        Enc late;
+        std::string error;
+        late.setCollapse(7, error);
+        m.m_members = {10, 20};
+        bool collapse = !late.enqueue(m).m_ok;
+        check(one && twice && binary && again && address && collapse,
+            "group message refused: one pager, a pager twice, binary, copies, a capcode out of range, collapse 7");
+    }
+
+    // System Event Notification: the short instruction with the event flags to its address
+    {
+        Enc enc;
+        Enc::TxMessage m;
+        m.m_capcode = Flex::m_systemEventAddress;
+        m.m_type = Flex::ShortInstruction;
+        m.m_instruction.m_type = Flex::InstructionParams::SystemEvent;
+        m.m_instruction.m_events = 0x0a5;
+        m.m_frame = 7;
+        Enc::EnqueueResult er = enc.enqueue(m);
+        Dec dec;
+        bool got = false;
+
+        for (uint64_t index = 0; (index < 20) && (enc.pending() > 0); index++)
+        {
+            Enc::Frame f = enc.buildFrame(index);
+
+            for (const Dec::Message& r : dec.decodeFrame(toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data)))
+            {
+                got = got || ((r.m_type == Dec::TypeShortInstruction) && (r.m_instructionType == 1) && (r.m_eventFlags == 0xa5)
+                    && (index == 7) && (r.m_addressType == Dec::AddressOperator));
+            }
+        }
+
+        check(er.m_ok && got, "system event notification: the event flags to the notification address, in its frame");
+    }
+}
+
 void testRetransmission()
 {
     auto msg = [](const std::string& text) {
@@ -2945,6 +3175,8 @@ int main()
     testTime();
     testNumbering();
     testRetransmission();
+    testGroupTx();
+    testAlphaMailDrop();
     testFragmentScheduling();
     testBinaryTx();
     testHexBits();

@@ -242,6 +242,14 @@ void RadioPagingFlexEncoder::assignNumber(Item& item)
 {
     const TxMessage& m = item.m_message;
     const uint64_t capcode = m.m_capcode;
+
+    // A group message to a temporary address has no message number (STD-43A 5.2)
+    if (RadioPagingFlex::isTemporaryAddress(capcode))
+    {
+        item.m_number = 0;
+        item.m_retrieval = false;
+        return;
+    }
     const bool numbered = (m.m_type == RadioPagingFlex::Alphanumeric) || (m.m_type == RadioPagingFlex::Binary)
         || ((m.m_type == RadioPagingFlex::ShortMessage) && (m.m_shortType == RadioPagingFlex::ShortNumbered));
     int number = 0;
@@ -313,6 +321,7 @@ RadioPagingFlex::PhaseMessage RadioPagingFlexEncoder::phaseMessage(const Item& i
     pm.m_shortType = m.m_shortType;
     pm.m_source = m.m_source;
     pm.m_binary = m.m_binary;
+    pm.m_instruction = m.m_instruction;
     pm.m_fragment = item.m_fragment;
     pm.m_fragments = item.m_fragments;
     pm.m_signature = item.m_signature;
@@ -321,6 +330,11 @@ RadioPagingFlex::PhaseMessage RadioPagingFlexEncoder::phaseMessage(const Item& i
 
 bool RadioPagingFlexEncoder::fragmentReady(const Item& item) const
 {
+    // The group message goes once the short instructions of all its pagers have gone
+    if (item.m_delivery) {
+        return groupReady(item);
+    }
+
     if (item.m_fragment > 0)
     {
         // After the fragment before it (that one is erased from the queue once its frame is built)
@@ -358,6 +372,11 @@ bool RadioPagingFlexEncoder::frameFor(const Item& item, uint32_t frame) const
         return false;
     }
 
+    // A message with its own frame (the group message of a temporary address)
+    if (item.m_message.m_frame >= 0) {
+        return (int) frame == item.m_message.m_frame;
+    }
+
     // The first fragment and an unfragmented message go in a frame of the pager (its collapse); the
     // pager then receives the frames that follow until the last fragment, regardless of the collapse
     // (STD-43A 4.2.1 (1)): the other fragments go in any frame
@@ -373,6 +392,15 @@ RadioPagingFlexEncoder::EnqueueResult RadioPagingFlexEncoder::enqueue(const TxMe
     EnqueueResult result;
     RadioPagingFlex::PhaseMessage pm;
 
+    if (!message.m_members.empty()) {
+        return enqueueGroup(message);
+    }
+    if ((message.m_frame < -1) || (message.m_frame >= RadioPagingFlexScheduler::m_framesPerCycle))
+    {
+        result.m_error = "Frame 0 to 127";
+        return result;
+    }
+
     pm.m_capcode = message.m_capcode;
     pm.m_type = message.m_type;
     pm.m_text = (message.m_type == RadioPagingFlex::Tone) ? std::string() : message.m_text;
@@ -380,6 +408,7 @@ RadioPagingFlexEncoder::EnqueueResult RadioPagingFlexEncoder::enqueue(const TxMe
     pm.m_shortType = message.m_shortType;
     pm.m_source = message.m_source;
     pm.m_binary = message.m_binary;
+    pm.m_instruction = message.m_instruction;
 
     // The numbered short message tells that the network numbers the messages (STD-43A 3.9.2, 8.4)
     if ((pm.m_type == RadioPagingFlex::ShortMessage) && (pm.m_shortType == RadioPagingFlex::ShortNumbered) && !m_numbering.m_enabled)
@@ -434,7 +463,7 @@ RadioPagingFlexEncoder::EnqueueResult RadioPagingFlexEncoder::enqueue(const TxMe
             return result;
         }
     }
-    if (!schedulable(message.m_capcode))
+    if ((message.m_frame >= 0) ? m_reserved[message.m_frame] : !schedulable(message.m_capcode))
     {
         result.m_error = "All frames of the capcode are reserved";
         return result;
@@ -469,6 +498,296 @@ RadioPagingFlexEncoder::EnqueueResult RadioPagingFlexEncoder::enqueue(const TxMe
     return result;
 }
 
+// A group message (STD-43A 5.2): a short instruction to each pager gives it the temporary address and the frame of
+// the group message; the group message goes to the temporary address in that frame, in the phase of the pagers
+RadioPagingFlexEncoder::EnqueueResult RadioPagingFlexEncoder::enqueueGroup(const TxMessage& message)
+{
+    EnqueueResult result;
+    const bool tone = (message.m_type == RadioPagingFlex::Tone);
+    const bool shortMessage = (message.m_type == RadioPagingFlex::ShortMessage) && (message.m_shortType != RadioPagingFlex::ShortNumbered);
+
+    if ((message.m_members.size() < 2) || ((int) message.m_members.size() > m_maxGroupMembers))
+    {
+        result.m_error = "A group has 2 to 64 pagers";
+        return result;
+    }
+    if ((message.m_type != RadioPagingFlex::Numeric) && (message.m_type != RadioPagingFlex::Alphanumeric) && !tone && !shortMessage)
+    {
+        result.m_error = "A group message is numeric, alphanumeric, tone only or a short message that is not numbered";
+        return result;
+    }
+    if (message.m_retransmit != 0)
+    {
+        result.m_error = "A group message is not sent again";
+        return result;
+    }
+    if (message.m_frame >= 0)
+    {
+        result.m_error = "A group message goes in the frame of its short instructions";
+        return result;
+    }
+    if (m_collapse > m_maxGroupCollapse)
+    {
+        result.m_error = "A group message needs a collapse of 6 or less: it follows its short instructions within 128 frames";
+        return result;
+    }
+    if ((message.m_slot < -1) || (message.m_slot >= (int) RadioPagingFlex::m_temporaryCount))
+    {
+        result.m_error = "Temporary address 0 to 15";
+        return result;
+    }
+    if ((message.m_sendDelay < 0) || (message.m_sendDelay > m_maxScheduleFrames))
+    {
+        result.m_error = "Send delay 0 to 1920 frames";
+        return result;
+    }
+
+    for (size_t i = 0; i < message.m_members.size(); i++)
+    {
+        uint64_t member = message.m_members[i];
+
+        if (!RadioPagingFlex::isValidAddress(member))
+        {
+            result.m_error = "Capcode out of range";
+            return result;
+        }
+        if (std::find(message.m_members.begin(), message.m_members.begin() + (long) i, member) != message.m_members.begin() + (long) i)
+        {
+            result.m_error = "A pager is twice in the group";
+            return result;
+        }
+        if (!schedulable(member))
+        {
+            result.m_error = "All frames of a capcode of the group are reserved";
+            return result;
+        }
+    }
+
+    int slot = message.m_slot;
+    const int phases = RadioPagingFlex::phaseCount(m_mode);
+    std::map<int, int> phaseSlots;      // Phase of the pagers to temporary address
+
+    for (uint64_t member : message.m_members) {
+        phaseSlots[(int) (RadioPagingFlexScheduler::capcodeSlot(member).m_phase % (uint32_t) phases)] = -1;
+    }
+
+    // One temporary address for each phase of the pagers: a group message to one address in more than two phases
+    // would use the address more than twice in the frame (STD-43A 3.8.5 (1))
+    if ((slot >= 0) && ((phaseSlots.size() > 1) || m_slotBusy[slot]))
+    {
+        result.m_error = (phaseSlots.size() > 1) ? "A temporary address can be chosen for pagers of one phase" : "The temporary address is in use";
+        return result;
+    }
+
+    std::vector<bool> taken(RadioPagingFlex::m_temporaryCount, false);
+
+    for (auto& entry : phaseSlots)
+    {
+        if (slot >= 0)
+        {
+            entry.second = slot;
+            continue;
+        }
+
+        for (int s = 0; (entry.second < 0) && (s < (int) RadioPagingFlex::m_temporaryCount); s++)
+        {
+            if (!m_slotBusy[s] && !taken[s])
+            {
+                entry.second = s;
+                taken[s] = true;
+            }
+        }
+        if (entry.second < 0)
+        {
+            result.m_error = "No temporary address is free: the group messages in progress use them all";
+            return result;
+        }
+    }
+
+    Group group;
+    group.m_slots = phaseSlots;
+    group.m_members = message.m_members;
+    group.m_message = message;
+    group.m_message.m_members.clear();
+    group.m_message.m_capcode = RadioPagingFlex::m_temporaryBase + (uint64_t) phaseSlots.begin()->second;
+    group.m_message.m_sendDelay = 0;
+
+    // The group message and one short instruction have to fit a frame
+    RadioPagingFlex::PhaseMessage pm = phaseMessage(Item{0, group.m_message, 0});
+    std::string error;
+
+    if (RadioPagingFlex::messageCost(pm, &error) < 0)
+    {
+        result.m_error = error;
+        return result;
+    }
+
+    TxMessage instruction;
+    instruction.m_type = RadioPagingFlex::ShortInstruction;
+    instruction.m_instruction.m_type = RadioPagingFlex::InstructionParams::TemporaryAddress;
+    instruction.m_sendDelay = message.m_sendDelay;
+
+    const int key = m_nextGroup++;
+    const uint32_t id = m_nextId++;
+    group.m_id = id;
+    std::vector<Item> items;
+
+    for (uint64_t member : message.m_members)
+    {
+        Item item;
+        item.m_id = id;
+        item.m_message = instruction;
+        item.m_message.m_capcode = member;
+        item.m_message.m_instruction.m_slot = phaseSlots[(int) (RadioPagingFlexScheduler::capcodeSlot(member).m_phase % (uint32_t) phases)];
+        item.m_number = 0;
+        item.m_delay = message.m_sendDelay;
+        item.m_group = key;
+        items.push_back(item);
+    }
+
+    m_queue.insert(m_queue.end(), items.begin(), items.end());
+    m_groups[key] = group;
+
+    for (const auto& entry : phaseSlots) {
+        m_slotBusy[entry.second] = true;
+    }
+    result.m_ok = true;
+    result.m_id = id;
+    return result;
+}
+
+// The first short instruction of a group that may go fixes the frame of the group message: after the frames the
+// pagers listen to, one more for the instructions that wait for room, and not the frame right after the last
+// instruction (STD-43A 5.2.1)
+void RadioPagingFlexEncoder::setGroupTargets(uint64_t frameIndex)
+{
+    for (auto& entry : m_groups)
+    {
+        Group& group = entry.second;
+
+        if (group.m_targetSet) {
+            continue;
+        }
+
+        bool started = false;
+
+        for (const Item& item : m_queue)
+        {
+            if ((item.m_group == entry.first) && !item.m_delivery && due(item, frameIndex)) {
+                started = true;
+            }
+        }
+        if (!started) {
+            continue;
+        }
+
+        uint64_t target = frameIndex + (1u << m_collapse) + 2 + group.m_members.size() / 8;
+
+        for (int tries = 0; (tries < RadioPagingFlexScheduler::m_framesPerCycle) && m_reserved[target % RadioPagingFlexScheduler::m_framesPerCycle]; tries++) {
+            target++;
+        }
+
+        const int frame = (int) (target % RadioPagingFlexScheduler::m_framesPerCycle);
+
+        for (Item& item : m_queue)
+        {
+            if ((item.m_group == entry.first) && !item.m_delivery) {
+                item.m_message.m_instruction.m_frame = frame;
+            }
+        }
+
+        group.m_targetSet = true;
+        group.m_targetIndex = target;
+
+        // A group message in the phase of each pager, to the temporary address of the phase
+        for (const auto& phaseSlot : group.m_slots)
+        {
+            Item item;
+            item.m_id = group.m_id;
+            item.m_message = group.m_message;
+            item.m_message.m_capcode = RadioPagingFlex::m_temporaryBase + (uint64_t) phaseSlot.second;
+            item.m_message.m_frame = frame;
+            item.m_number = -1;
+            item.m_phase = phaseSlot.first;
+            item.m_delay = 0;
+            item.m_notBefore = (int64_t) target;
+            item.m_group = entry.first;
+            item.m_delivery = true;
+            m_queue.push_back(item);
+        }
+    }
+}
+
+bool RadioPagingFlexEncoder::groupReady(const Item& item) const
+{
+    for (const Item& other : m_queue)
+    {
+        if ((other.m_group == item.m_group) && !other.m_delivery) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void RadioPagingFlexEncoder::endGroup(int key)
+{
+    auto it = m_groups.find(key);
+
+    if (it != m_groups.end())
+    {
+        for (const auto& phaseSlot : it->second.m_slots) {
+            m_slotBusy[phaseSlot.second] = false;
+        }
+
+        m_groups.erase(it);
+    }
+}
+
+// A group message whose frame came and went without all its short instructions sent, or without its own message sent
+// (the pagers listen to it in that frame only): dropped
+void RadioPagingFlexEncoder::failLateGroups(uint64_t frameIndex, Frame& frame)
+{
+    std::vector<int> late;
+
+    for (const auto& entry : m_groups)
+    {
+        if (!entry.second.m_targetSet) {
+            continue;
+        }
+
+        bool instructions = false;
+        bool delivery = false;
+
+        for (const Item& item : m_queue)
+        {
+            if (item.m_group == entry.first) {
+                (item.m_delivery ? delivery : instructions) = true;
+            }
+        }
+
+        if (((frameIndex >= entry.second.m_targetIndex) && instructions) || ((frameIndex > entry.second.m_targetIndex) && delivery)) {
+            late.push_back(entry.first);
+        }
+    }
+
+    for (int key : late)
+    {
+        frame.m_failedIds.push_back(m_groups[key].m_id);
+
+        for (auto it = m_queue.begin(); it != m_queue.end();)
+        {
+            if (it->m_group == key) {
+                it = m_queue.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        endGroup(key);
+    }
+}
+
 bool RadioPagingFlexEncoder::due(const Item& item, uint64_t frameIndex)
 {
     if (item.m_notBefore < 0) {
@@ -484,8 +803,9 @@ std::vector<uint32_t> RadioPagingFlexEncoder::unschedulable() const
 
     for (const Item& item : m_queue)
     {
-        // Once per message (its first queued fragment)
-        if (!schedulable(item.m_message.m_capcode) && (std::find(ids.begin(), ids.end(), item.m_id) == ids.end())) {
+        // Once per message (its first queued fragment); a group message has its own frame
+        if (!item.m_delivery && (item.m_message.m_frame < 0) && !schedulable(item.m_message.m_capcode)
+            && (std::find(ids.begin(), ids.end(), item.m_id) == ids.end())) {
             ids.push_back(item.m_id);
         }
     }
@@ -512,6 +832,24 @@ bool RadioPagingFlexEncoder::remove(uint32_t id)
     }
 
     m_templates.erase(id);
+
+    for (auto it = m_groups.begin(); it != m_groups.end();)
+    {
+        if (it->second.m_id == id)
+        {
+            for (const auto& phaseSlot : it->second.m_slots) {
+                m_slotBusy[phaseSlot.second] = false;
+            }
+
+            it = m_groups.erase(it);
+            found = true;
+        }
+        else
+        {
+            ++it;
+        }
+    }
+
     return found;
 }
 
@@ -550,6 +888,10 @@ bool RadioPagingFlexEncoder::mandatory(uint64_t frameIndex) const
     for (const Item& item : m_queue)
     {
         if ((item.m_fragment > 0) && fragmentReady(item) && due(item, frameIndex)) {
+            return true;
+        }
+        // The group message goes in its frame only
+        if (item.m_delivery && frameFor(item, time.m_frame) && fragmentReady(item) && due(item, frameIndex)) {
             return true;
         }
     }
@@ -646,6 +988,8 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
         }
     }
 
+    failLateGroups(frameIndex, frame);
+    setGroupTargets(frameIndex);
     if (m_reserved[time.m_frame])
     {
         frame.m_reserved = true;
@@ -719,7 +1063,7 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
         {
             const TxMessage& m = it->m_message;
             bool isTone = (m.m_type == RadioPagingFlex::Tone);
-            bool continuation = (it->m_fragment > 0);
+            bool continuation = (it->m_fragment > 0) || it->m_delivery;
 
             if (!frameFor(*it, time.m_frame) || !fragmentReady(*it) || !due(*it, frameIndex)) {
                 continue;
@@ -903,6 +1247,33 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
     for (const auto& s : sent)
     {
         auto it = s.first;
+
+        // The short instructions of a group go once; the group message is sent with its last phase
+        if (it->m_group >= 0)
+        {
+            const int key = it->m_group;
+            const bool delivery = it->m_delivery;
+            m_queue.erase(it);
+
+            if (delivery)
+            {
+                bool more = false;
+
+                for (const Item& other : m_queue) {
+                    more = more || ((other.m_group == key) && other.m_delivery);
+                }
+                if (!more)
+                {
+                    const uint32_t id = m_groups[key].m_id;
+                    frame.m_sentIds.push_back(id);
+                    frame.m_sentNumbers.push_back(0);
+                    frame.m_doneIds.push_back(id);
+                    endGroup(key);
+                }
+            }
+
+            continue;
+        }
 
         // The fragments still to go take the phase of this one
         if (it->m_fragments > 1)
