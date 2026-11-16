@@ -159,17 +159,17 @@ bool RadioPagingModGUI::handleMessage(const Message& message)
         {
             // The live voice page is queued: the button becomes End, or the request was refused
             m_liveWaiting = false;
-            ui->send->setEnabled(true);
+            ui->composer->setSendEnabled(true);
 
             if (report.getId() != 0)
             {
                 m_liveId = report.getId();
                 m_liveSeen = false;
-                ui->send->setText("End (alert time)");
+                ui->composer->setSendText("End (alert time)");
             }
             else
             {
-                displayMessageType();
+                ui->composer->setSendText(QString());
             }
         }
 
@@ -199,8 +199,8 @@ bool RadioPagingModGUI::handleMessage(const Message& message)
             m_liveId = 0;
             stopMic();
             m_liveSeen = false;
-            ui->send->setEnabled(true);
-            displayMessageType();
+            ui->composer->setSendEnabled(true);
+            ui->composer->setSendText(QString());
         }
 
         return true;
@@ -470,7 +470,7 @@ void RadioPagingModGUI::on_flexNumbering_toggled(bool checked)
     m_settings.m_flexNumbering = checked;
     applySettings(QStringList("flexNumbering"));
     displayNumbering(true);
-    displayMessageType();       // FLEX copies need the numbering
+    displayMessage();           // FLEX copies need the numbering
 }
 
 void RadioPagingModGUI::on_flexMaxMessageNumber_valueChanged(int value)
@@ -576,15 +576,9 @@ void RadioPagingModGUI::on_rampRange_valueChanged(int value)
     applySettings(QStringList("rampRange"));
 }
 
-// The message of the protocol of the channel; the channel checks it and reports the result
+// The message of the composer, for the protocol it chose; the channel checks it and reports the result
 void RadioPagingModGUI::send()
 {
-    static const RadioPagingPocsag::MessageType pocsagTypes[3] = {
-        RadioPagingPocsag::Alphanumeric, RadioPagingPocsag::Numeric, RadioPagingPocsag::Tone
-    };
-    static const RadioPagingFlex::MessageType flexTypes[5] = {
-        RadioPagingFlex::Alphanumeric, RadioPagingFlex::Numeric, RadioPagingFlex::Tone, RadioPagingFlex::Binary, RadioPagingFlex::Secure
-    };
     // The button is End while a live voice page is going on
     if (m_liveId != 0)
     {
@@ -596,196 +590,64 @@ void RadioPagingModGUI::send()
         return;
     }
 
-    RadioPagingMod::TxRequest request;
-    bool gscMessage = (m_settings.m_protocol == RadioPagingModSettings::Gsc);
-    bool flexMessage = messageIsFlex();
-    int typeIndex = std::max(0, std::min(gscMessage ? 3 : flexMessage ? 4 : 2, ui->messageType->currentIndex()));
-    bool tone = (typeIndex == 2);
-    bool voice = gscMessage && (typeIndex == 3);
-    std::string text = (tone || voice) ? std::string() : ui->text->text().toStdString();
-    int overrideIndex = ui->messageSpeed->currentIndex();     // POCSAG speed
+    RadioPagingPage page = ui->composer->page();
+    const bool microphone = ui->composer->microphoneSelected();
+    QString error = page.check();
 
-    // A mixed FLEX channel also sends POCSAG messages
-    request.m_protocol = (m_settings.m_protocol == RadioPagingModSettings::Flex)
-        ? (int) (flexMessage ? RadioPagingModSettings::Flex : RadioPagingModSettings::Pocsag) : (int) m_settings.m_protocol;
-    request.m_polarity = ui->messagePolarity->currentIndex() - 1;
-
-    if (m_settings.m_protocol == RadioPagingModSettings::Gsc)
-    {
-        // Digits only, zero padded to the 6 digits of the address (as the WebAPI integer)
-        QString gscAddress = ui->capcode->text().trimmed();
-
-        if (!gscAddress.isEmpty() && (gscAddress.size() < 6)) {
-            gscAddress = gscAddress.rightJustified(6, QChar('0'));
-        }
-
-        request.m_gsc.m_address = gscAddress.toStdString();
-        request.m_gsc.m_addressNumber = ui->function->currentIndex() + 1;
-        request.m_gsc.m_type = voice ? RadioPagingGsc::Voice : (typeIndex == 2) ? RadioPagingGsc::Tone
-            : (typeIndex == 1) ? RadioPagingGsc::Numeric : RadioPagingGsc::Alphanumeric;
-        request.m_gsc.m_text = text;
-        bool microphone = voice && (ui->voiceSource->currentIndex() == 1);
-        request.m_voiceFile = (voice && !microphone) ? ui->text->text().trimmed() : QString();
-        request.m_live = microphone;
-        m_liveWaiting = microphone;
-
-        if (microphone)
-        {
-            // The page goes out, the microphone is taken after the alert time
-            ui->send->setEnabled(false);
-        }
-
-        log(QString("%1/%2 (%3) %4: %5")
-            .arg(gscAddress)
-            .arg(request.m_gsc.m_addressNumber)
-            .arg(QChar(RadioPagingGsc::functionLetter(request.m_gsc.m_addressNumber)))
-            .arg(ui->messageType->currentText())
-            .arg(microphone ? QString("microphone") : voice ? request.m_voiceFile : QString::fromStdString(text)));
+    // The microphone takes the place of the file: the page is checked without it
+    if (microphone && (page.m_type == "voice") && page.m_voiceFile.isEmpty()) {
+        page.m_voiceFile = "microphone";
+        error = page.check();
     }
-    else if (flexMessage)
+    if (!error.isEmpty())
     {
-        bool ok;
-        qulonglong capcode = ui->capcode->text().trimmed().toULongLong(&ok);
-
-        request.m_flex.m_capcode = ok ? capcode : 0;
-        request.m_flex.m_type = flexTypes[typeIndex];
-        request.m_flex.m_text = text;
-        request.m_flex.m_priority = ui->priority->isChecked();
-
-        QString header;
-
-        if (request.m_flex.m_type == RadioPagingFlex::Binary)
-        {
-            RadioPagingFlex::BinaryParams& b = request.m_flex.m_binary;
-            b.m_blocking = ui->blocking->value();
-            b.m_mailDrop = ui->mailDrop->isChecked();
-            b.m_rightToLeft = ui->rightToLeft->isChecked();
-            b.m_header = ui->headerMessage->isChecked();
-            b.m_statusInfo = ui->statusInfo->isChecked();
-            header = QString(" B=%1%2%3%4%5").arg(b.m_blocking).arg(b.m_mailDrop ? " M" : "").arg(b.m_rightToLeft ? " D" : "")
-                .arg(b.m_header ? " H" : "").arg(b.m_statusInfo ? " I" : "");
-        }
-        else if (request.m_flex.m_type == RadioPagingFlex::Secure)
-        {
-            request.m_flex.m_binary.m_secureType = (RadioPagingFlex::SecureType) ui->secureType->currentIndex();
-            header = " " + ui->secureType->currentText();
-        }
-
-        log(QString("%1%2 %3%4: %5")
-            .arg(ui->capcode->text().trimmed())
-            .arg(request.m_flex.m_priority ? " priority" : "")
-            .arg(ui->messageType->currentText())
-            .arg(header)
-            .arg(QString::fromStdString(text)));
-    }
-    else
-    {
-        request.m_pocsag.m_address = (uint32_t) ui->address->value();
-        request.m_pocsag.m_function = ui->function->currentIndex();
-        request.m_pocsag.m_type = pocsagTypes[typeIndex];
-        request.m_pocsag.m_text = text;
-        request.m_speed = (overrideIndex > 0) ? RadioPagingModSettings::m_pocsagSpeeds[overrideIndex - 1] : 0;
-
-        log(QString("%1 %2 %3: %4")
-            .arg(ui->address->value(), 7, 10, QChar('0'))
-            .arg(QChar('A' + request.m_pocsag.m_function))
-            .arg(ui->messageType->currentText())
-            .arg(QString::fromStdString(text)));
+        log(QString("Refused: %1").arg(error));
+        return;
     }
 
-    // Copies and send delay (network mode, checked by the modulator)
-    if (ui->retransmit->isVisible())
-    {
-        request.m_retransmit = ui->retransmit->isEnabled() ? ui->retransmit->value() : 0;
-        request.m_retransmitInterval = ui->retransmitInterval->value();
-        request.m_sendDelay = ui->sendDelay->value();
+    RadioPagingMod::TxRequest request = RadioPagingMod::requestFromPage(page);
+    request.m_live = microphone;
 
-        if ((request.m_retransmit > 0) || (request.m_sendDelay > 0.0))
-        {
-            log(QString("  %1 copies, interval %2, delay %3 s").arg(request.m_retransmit)
-                .arg((request.m_retransmitInterval < 0.0) ? QString("default") : QString("%1 s").arg(request.m_retransmitInterval))
-                .arg(request.m_sendDelay));
-        }
+    if (microphone)
+    {
+        // The page goes out, the microphone is taken after the alert time
+        request.m_voiceFile.clear();
+        m_liveWaiting = true;
+        ui->composer->setSendEnabled(false);
     }
 
+    log(ui->composer->summary());
     m_radioPagingMod->getInputMessageQueue()->push(RadioPagingMod::MsgTx::create(request));
 }
 
-void RadioPagingModGUI::on_send_clicked()
+// The composer for the channel: the protocols it sends (a FLEX channel with the mixing option also sends POCSAG),
+// copies in the network mode (not GSC), the numbering of FLEX, the microphone for voice
+void RadioPagingModGUI::displayMessage()
 {
-    send();
-}
+    const bool network = (m_settings.m_mode == RadioPagingModSettings::Network);
+    QStringList protocols;
 
-void RadioPagingModGUI::on_text_returnPressed()
-{
-    send();
-}
+    if (m_settings.m_protocol == RadioPagingModSettings::Pocsag) {
+        protocols << "pocsag";
+    } else if (m_settings.m_protocol == RadioPagingModSettings::Gsc) {
+        protocols << "gsc";
+    } else {
+        protocols << "flex";
 
-void RadioPagingModGUI::on_messageType_currentIndexChanged(int index)
-{
-    (void) index;
-    displayMessageType();
-}
-
-void RadioPagingModGUI::displayMessageType()
-{
-    bool voice = (m_settings.m_protocol == RadioPagingModSettings::Gsc) && (ui->messageType->currentIndex() == 3);
-
-    if (m_browseAction) {
-        m_browseAction->setVisible(voice);
+        if (network && m_settings.m_flexMixPocsag) {
+            protocols << "pocsag";
+        }
     }
 
-    // A voice page: the voice comes from a file, or from the microphone after the alert time
-    bool microphone = voice && (ui->voiceSource->currentIndex() == 1);
-    ui->voiceSource->setVisible(voice);
-    ui->micInput->setVisible(microphone);
-    ui->text->setVisible(!microphone);
-    ui->textLabel->setVisible(!microphone);
+    ui->composer->setProtocols(protocols);
+    ui->composer->setNetworkMode(network);
+    ui->composer->setFlexNumbering(m_settings.m_flexNumbering);
+    ui->composer->setMicrophone(true);
 
-    if (m_browseAction) {
-        m_browseAction->setVisible(voice && !microphone);
+    // The button is End while a live voice page goes on
+    if (m_liveId != 0) {
+        ui->composer->setSendEnabled(true);
     }
-
-    if (!microphone) {
-        ui->send->setText("Send");
-    } else if (m_liveId == 0) {
-        ui->send->setText("Send voice");
-    }
-
-    // FLEX HEX/binary: B and the flags of header word 2; secure: the type t1 t0
-    bool flexMessage = messageIsFlex();
-    bool binary = flexMessage && (ui->messageType->currentIndex() == 3);
-    bool secure = flexMessage && (ui->messageType->currentIndex() == 4);
-    bool hexText = binary || (secure && (ui->secureType->currentIndex() != (int) RadioPagingFlex::SecureAlphanumeric));
-    ui->binaryLabel->setVisible(binary || secure);
-    ui->binaryLabel->setText(binary ? "Header" : "Type");
-    for (QWidget *w : QList<QWidget*>({ui->blocking, ui->mailDrop, ui->rightToLeft, ui->headerMessage, ui->statusInfo})) {
-        w->setVisible(binary);
-    }
-    ui->secureType->setVisible(secure);
-
-    // Copies and send delay: network mode (POCSAG and FLEX); FLEX copies of the numbered types on a network
-    // with message numbering (STD-43A 4.3.7)
-    bool scheduled = (m_settings.m_mode == RadioPagingModSettings::Network) && (m_settings.m_protocol != RadioPagingModSettings::Gsc);
-    bool flexNumbered = (ui->messageType->currentIndex() == 0) || (ui->messageType->currentIndex() == 3);
-    bool copies = !flexMessage || (m_settings.m_flexNumbering && flexNumbered);
-    ui->scheduleLabel->setVisible(scheduled);
-    ui->retransmit->setVisible(scheduled);
-    ui->retransmitInterval->setVisible(scheduled);
-    ui->sendDelay->setVisible(scheduled);
-    ui->retransmit->setMaximum(flexMessage ? RadioPagingFlexEncoder::m_maxRetransmit : RadioPagingPocsagTxStream::m_maxRepeat);
-    ui->retransmit->setEnabled(copies);
-    ui->retransmitInterval->setEnabled(copies && (ui->retransmit->value() > 0));
-
-    ui->textLabel->setText(voice ? "File" : "Text");
-    ui->text->setPlaceholderText(voice ? "WAV file" : hexText ? "Hex digits" : QString());
-    ui->text->setToolTip(voice
-        ? "Path of a WAV file (8 to 32 bit PCM or float, up to 76.8 kHz). Sent after an alert of 2 s, "
-          "cut at the voice length. Enter to send"
-        : hexText
-        ? "Hex digits: digit i holds the data bits 4i to 4i+3, its least significant bit sent first. Binary: the bits are "
-          "a multiple of B. Enter to send"
-        : "Message text. Numeric: 0-9, space, U, -, ], [. Alphanumeric: 7-bit characters. Enter to send");
 }
 
 void RadioPagingModGUI::micAudioSelect(const QPoint& p)
@@ -800,17 +662,6 @@ void RadioPagingModGUI::micAudioSelect(const QPoint& p)
         m_settings.m_audioInputDeviceName = audioSelect.m_audioDeviceName;
         applySettings(QStringList("audioInputDeviceName"));
     }
-}
-
-void RadioPagingModGUI::on_micInput_clicked()
-{
-    micAudioSelect(QCursor::pos());
-}
-
-void RadioPagingModGUI::on_voiceSource_currentIndexChanged(int index)
-{
-    (void) index;
-    displayMessageType();
 }
 
 // The microphone is taken when the alert time of the live voice page is over (tick), and
@@ -903,8 +754,8 @@ void RadioPagingModGUI::endLive()
     m_liveId = 0;
     m_liveSeen = false;
     m_liveWaiting = false;
-    ui->send->setEnabled(true);
-    displayMessageType();
+    ui->composer->setSendEnabled(true);
+    ui->composer->setSendText(QString());
 }
 
 // The live voice page: the request, the End button and the counter while it goes on
@@ -934,12 +785,12 @@ void RadioPagingModGUI::updateLive(const RadioPagingModSource::Status& status)
 
     if (m_micRecording)
     {
-        ui->send->setText(QString("End %1 / %2 s").arg((double) m_micSent / RadioPagingWav::m_sampleRate, 0, 'f', 1)
+        ui->composer->setSendText(QString("End %1 / %2 s").arg((double) m_micSent / RadioPagingWav::m_sampleRate, 0, 'f', 1)
             .arg(m_settings.m_gscVoiceSeconds));
     }
     else
     {
-        ui->send->setText("End (alert time)");
+        ui->composer->setSendText("End (alert time)");
     }
 }
 
@@ -1026,15 +877,6 @@ void RadioPagingModGUI::on_voiceFiles_clicked()
 
     refresh();
     dialog.exec();
-}
-
-void RadioPagingModGUI::on_browse_triggered()
-{
-    QString file = QFileDialog::getOpenFileName(this, "Sound file", ui->text->text().trimmed(), "WAV files (*.wav);;All files (*)");
-
-    if (!file.isEmpty()) {
-        ui->text->setText(file);
-    }
 }
 
 void RadioPagingModGUI::on_clear_clicked()
@@ -1225,7 +1067,6 @@ void RadioPagingModGUI::displayProtocol()
 {
     bool flex = (m_settings.m_protocol == RadioPagingModSettings::Flex);
     QSignalBlocker speedBlocker(ui->speed);
-    QSignalBlocker messageSpeedBlocker(ui->messageSpeed);
     QSignalBlocker polarityBlocker(ui->polarity);
     QSignalBlocker collapseBlocker(ui->collapse);
     QSignalBlocker roamingBlocker(ui->roaming);
@@ -1244,40 +1085,9 @@ void RadioPagingModGUI::displayProtocol()
     QSignalBlocker mixSwitch1200Blocker(ui->mixSwitch1200);
     QSignalBlocker mixSwitch2400Blocker(ui->mixSwitch2400);
 
-    int messageSpeedIndex = ui->messageSpeed->currentIndex();
-
     ui->speed->clear();
-    ui->messageSpeed->clear();
-    ui->messageSpeed->addItem("Default");
-
-    // The POCSAG speed of a message: a POCSAG channel, or a mixed FLEX channel
-    for (int i = 0; i < RadioPagingModSettings::m_nbPocsagSpeeds; i++) {
-        ui->messageSpeed->addItem(QString::number(RadioPagingModSettings::m_pocsagSpeeds[i]));
-    }
-
-    ui->messageSpeed->setCurrentIndex(std::max(0, messageSpeedIndex));
-    ui->messageSpeed->setToolTip("POCSAG speed of this message; Default is the speed set for the channel");
 
     bool gsc = (m_settings.m_protocol == RadioPagingModSettings::Gsc);
-
-    // The function of a message: the function A to D of POCSAG, the address number 1 to 4 (function A to D) of GSC
-    {
-        QSignalBlocker functionBlocker(ui->function);
-        int functionIndex = std::max(0, ui->function->currentIndex());
-        ui->function->clear();
-
-        if (gsc) {
-            ui->function->addItems(QStringList({"1 (A)", "2 (B)", "3 (C)", "4 (D)"}));
-        } else {
-            ui->function->addItems(QStringList({"A (0)", "B (1)", "C (2)", "D (3)"}));
-        }
-
-        ui->function->setCurrentIndex(functionIndex);
-        ui->function->setToolTip(gsc
-            ? "GSC address number 1 to 4 (function A to D): 1 address words as encoded, 2 word 2 complemented, "
-              "3 word 1 complemented, 4 both words complemented"
-            : "POCSAG function (sub address)");
-    }
 
     if (gsc)
     {
@@ -1320,8 +1130,6 @@ void RadioPagingModGUI::displayProtocol()
     ui->channelAlias->setText(m_settings.m_channelAlias);
     ui->voiceSecondsLabel->setVisible(gsc);
     ui->voiceSeconds->setVisible(gsc);
-
-    updateMessageTypes();
 
     ui->roaming->setVisible(flex);
     ui->ssidZone->setVisible(flex);
@@ -1381,81 +1189,15 @@ void RadioPagingModGUI::displayProtocol()
         w->setEnabled(m_settings.m_flexMixPocsag);
     }
 
-    // The message section: the protocol selector with the mixing option, the fields of the protocol
-    bool mixActive = mixOptions && m_settings.m_flexMixPocsag;
-    ui->messageProtocolLabel->setVisible(mixActive);
-    ui->messageProtocol->setVisible(mixActive);
-
-    if (!mixActive) {
-        QSignalBlocker blocker(ui->messageProtocol);
-        ui->messageProtocol->setCurrentIndex(0);
-    }
-
-    // POCSAG: address, function and speed; FLEX: capcode and priority (the mode is the network's);
-    // GSC: the address of 6 digits (as the capcode) and the address number
-    bool flexMessage = messageIsFlex();
-    ui->messageSpeed->setVisible(!flexMessage && !gsc);
-    ui->address->setVisible(!flexMessage && !gsc);
-
     // GSC has no network mode: the combo shows one-shot, the setting is kept for the other protocols
     {
         QSignalBlocker modeBlocker(ui->mode);
         ui->mode->setCurrentIndex(gsc ? (int) RadioPagingModSettings::OneShot : (int) m_settings.m_mode);
     }
 
-    ui->function->setVisible(!flexMessage);
-    ui->capcode->setVisible(flexMessage || gsc);
-    ui->priority->setVisible(flexMessage);
-    ui->addressLabel->setText(gsc ? "Address" : flexMessage ? "Capcode" : "Address");
-    ui->capcode->setToolTip(gsc ? "GSC address: 6 digits (index, group, 3 address digits)"
-        : "FLEX capcode: short 1 to 1933312, long 2101249 to 4297068542");
     displayProtocolAvailability();
-    displayMessageType();
+    displayMessage();
 }
-
-// Message types after Alphanumeric, Numeric and Tone (indexes 0 to 2): Voice (3) for GSC, its text is the
-// path of a sound file; Binary (3) and Secure (4) for a FLEX message. The type selected is kept if it is there
-void RadioPagingModGUI::updateMessageTypes()
-{
-    QStringList extra;
-
-    if (m_settings.m_protocol == RadioPagingModSettings::Gsc) {
-        extra << "Voice";
-    } else if (messageIsFlex()) {
-        extra << "Binary" << "Secure";
-    }
-
-    QStringList current;
-    for (int i = 3; i < ui->messageType->count(); i++) {
-        current << ui->messageType->itemText(i);
-    }
-    if (current == extra) {
-        return;
-    }
-
-    QSignalBlocker typeBlocker(ui->messageType);
-    QString selected = ui->messageType->currentText();
-
-    while (ui->messageType->count() > 3) {
-        ui->messageType->removeItem(3);
-    }
-
-    ui->messageType->addItems(extra);
-    int index = ui->messageType->findText(selected);
-    ui->messageType->setCurrentIndex((index >= 0) ? index : 0);
-}
-
-// The message composed is FLEX: a FLEX channel, unless it mixes POCSAG and the message is POCSAG
-bool RadioPagingModGUI::messageIsFlex() const
-{
-    if (m_settings.m_protocol != RadioPagingModSettings::Flex) {
-        return false;
-    }
-
-    bool mixActive = (m_settings.m_mode == RadioPagingModSettings::Network) && m_settings.m_flexMixPocsag;
-    return !(mixActive && (ui->messageProtocol->currentIndex() == 1));
-}
-
 void RadioPagingModGUI::on_mixPocsag_toggled(bool checked)
 {
     m_settings.m_flexMixPocsag = checked;
@@ -1521,14 +1263,6 @@ void RadioPagingModGUI::on_mixSwitch2400_valueChanged(int value)
 {
     m_settings.m_mixSwitchMs[2] = value;
     applySettings(QStringList("mixSwitchMs2400"));
-}
-
-void RadioPagingModGUI::on_messageProtocol_currentIndexChanged(int index)
-{
-    (void) index;
-    blockApplySettings(true);
-    displayProtocol();
-    blockApplySettings(false);
 }
 
 void RadioPagingModGUI::blockApplySettings(bool block)
@@ -1668,21 +1402,11 @@ void RadioPagingModGUI::makeUIConnections()
     QObject::connect(ui->mixSwitch512, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_mixSwitch512_valueChanged);
     QObject::connect(ui->mixSwitch1200, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_mixSwitch1200_valueChanged);
     QObject::connect(ui->mixSwitch2400, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_mixSwitch2400_valueChanged);
-    QObject::connect(ui->messageProtocol, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_messageProtocol_currentIndexChanged);
-    QObject::connect(ui->send, &QPushButton::clicked, this, &RadioPagingModGUI::on_send_clicked);
-    QObject::connect(ui->retransmit, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_messageType_currentIndexChanged);
-    QObject::connect(ui->text, &QLineEdit::returnPressed, this, &RadioPagingModGUI::on_text_returnPressed);
-    QObject::connect(ui->micInput, &QToolButton::clicked, this, &RadioPagingModGUI::on_micInput_clicked);
-    QObject::connect(ui->voiceSource, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_voiceSource_currentIndexChanged);
+    QObject::connect(ui->composer, &PagingComposer::sendRequested, this, &RadioPagingModGUI::send);
+    QObject::connect(ui->composer, &PagingComposer::microphoneInputRequested, this, [this]() { micAudioSelect(QCursor::pos()); });
     QObject::connect(&m_micFifo, &AudioFifo::dataReady, this, &RadioPagingModGUI::micDataReady);
     QObject::connect(ui->channelAlias, &QLineEdit::editingFinished, this, &RadioPagingModGUI::on_channelAlias_editingFinished);
     QObject::connect(ui->voiceFiles, &QToolButton::clicked, this, &RadioPagingModGUI::on_voiceFiles_clicked);
-    m_browseAction = ui->text->addAction(style()->standardIcon(QStyle::SP_DirOpenIcon), QLineEdit::TrailingPosition);
-    m_browseAction->setToolTip("Choose the sound file");
-    m_browseAction->setVisible(false);
-    QObject::connect(m_browseAction, &QAction::triggered, this, &RadioPagingModGUI::on_browse_triggered);
-    QObject::connect(ui->messageType, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_messageType_currentIndexChanged);
-    QObject::connect(ui->secureType, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_messageType_currentIndexChanged);
     QObject::connect(ui->clear, &QPushButton::clicked, this, &RadioPagingModGUI::on_clear_clicked);
     QObject::connect(ui->abort, &QPushButton::clicked, this, &RadioPagingModGUI::on_abort_clicked);
 }

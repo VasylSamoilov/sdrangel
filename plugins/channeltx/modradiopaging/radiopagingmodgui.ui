@@ -898,410 +898,24 @@
    <property name="windowTitle">
     <string>Message</string>
    </property>
-   <layout class="QGridLayout" name="messageLayout">
+   <layout class="QVBoxLayout" name="messageLayout">
     <property name="leftMargin">
-     <number>2</number>
+     <number>0</number>
     </property>
     <property name="topMargin">
-     <number>2</number>
+     <number>0</number>
     </property>
     <property name="rightMargin">
-     <number>2</number>
+     <number>0</number>
     </property>
     <property name="bottomMargin">
-     <number>2</number>
+     <number>0</number>
     </property>
     <property name="spacing">
-     <number>3</number>
+     <number>0</number>
     </property>
-    <item row="0" column="0">
-     <widget class="QLabel" name="addressLabel">
-      <property name="text">
-       <string>Address</string>
-      </property>
-     </widget>
-    </item>
-    <item row="0" column="1">
-     <widget class="QSpinBox" name="address">
-      <property name="toolTip">
-       <string>POCSAG address (capcode), 21 bits</string>
-      </property>
-      <property name="maximum">
-       <number>2097151</number>
-      </property>
-     </widget>
-    </item>
-    <item row="0" column="1">
-     <widget class="QLineEdit" name="capcode">
-      <property name="toolTip">
-       <string>FLEX capcode: short 1 to 1933312, long 2101249 to 4297068542</string>
-      </property>
-      <property name="text">
-       <string>1</string>
-      </property>
-     </widget>
-    </item>
-    <item row="0" column="2">
-     <widget class="QCheckBox" name="priority">
-      <property name="toolTip">
-       <string>FLEX: address in the priority part of the address field</string>
-      </property>
-      <property name="text">
-       <string>Priority</string>
-      </property>
-     </widget>
-    </item>
-    <item row="0" column="2">
-     <widget class="QComboBox" name="function">
-      <property name="toolTip">
-       <string>POCSAG function (sub address)</string>
-      </property>
-      <item>
-       <property name="text">
-        <string>A (0)</string>
-       </property>
-      </item>
-      <item>
-       <property name="text">
-        <string>B (1)</string>
-       </property>
-      </item>
-      <item>
-       <property name="text">
-        <string>C (2)</string>
-       </property>
-      </item>
-      <item>
-       <property name="text">
-        <string>D (3)</string>
-       </property>
-      </item>
-     </widget>
-    </item>
-    <item row="0" column="3">
-     <widget class="QComboBox" name="messageType">
-      <property name="toolTip">
-       <string>Message type</string>
-      </property>
-      <item>
-       <property name="text">
-        <string>Alphanumeric</string>
-       </property>
-      </item>
-      <item>
-       <property name="text">
-        <string>Numeric</string>
-       </property>
-      </item>
-      <item>
-       <property name="text">
-        <string>Tone</string>
-       </property>
-      </item>
-     </widget>
-    </item>
-    <item row="1" column="0">
-     <widget class="QLabel" name="overrideLabel">
-      <property name="text">
-       <string>Send at</string>
-      </property>
-     </widget>
-    </item>
-    <item row="1" column="1">
-     <widget class="QComboBox" name="messageSpeed">
-      <property name="toolTip">
-       <string>Speed of this message; Default is the network setting</string>
-      </property>
-      <item>
-       <property name="text">
-        <string>Default</string>
-       </property>
-      </item>
-      <item>
-       <property name="text">
-        <string>512</string>
-       </property>
-      </item>
-      <item>
-       <property name="text">
-        <string>1200</string>
-       </property>
-      </item>
-      <item>
-       <property name="text">
-        <string>2400</string>
-       </property>
-      </item>
-     </widget>
-    </item>
-    <item row="1" column="2" colspan="2">
-     <widget class="QComboBox" name="messagePolarity">
-      <property name="toolTip">
-       <string>Polarity of this message; Default is the network setting</string>
-      </property>
-      <item>
-       <property name="text">
-        <string>Default polarity</string>
-       </property>
-      </item>
-      <item>
-       <property name="text">
-        <string>Normal</string>
-       </property>
-      </item>
-      <item>
-       <property name="text">
-        <string>Inverted</string>
-       </property>
-      </item>
-     </widget>
-    </item>
-    <item row="2" column="0">
-     <widget class="QLabel" name="textLabel">
-      <property name="text">
-       <string>Text</string>
-      </property>
-     </widget>
-    </item>
-    <item row="2" column="1" colspan="2">
-     <widget class="QLineEdit" name="text">
-      <property name="toolTip">
-       <string>Message text. Numeric: 0-9, space, U, -, ], [. Alphanumeric: 7-bit characters. Enter to send</string>
-      </property>
-     </widget>
-    </item>
-    <item row="2" column="3">
-     <widget class="QPushButton" name="send">
-      <property name="toolTip">
-       <string>Queue the message for transmission</string>
-      </property>
-      <property name="text">
-       <string>Send</string>
-      </property>
-     </widget>
-    </item>
-    <item row="3" column="0">
-     <widget class="QLabel" name="messageProtocolLabel">
-      <property name="text">
-       <string>Protocol</string>
-      </property>
-     </widget>
-    </item>
-    <item row="3" column="1">
-     <widget class="QComboBox" name="voiceSource">
-      <property name="toolTip">
-       <string>Voice of the page: a sound file, or the microphone. The microphone is taken 2 s after the page (the alert time) until End or the voice length</string>
-      </property>
-      <item>
-       <property name="text">
-        <string>File</string>
-       </property>
-      </item>
-      <item>
-       <property name="text">
-        <string>Microphone</string>
-       </property>
-      </item>
-     </widget>
-    </item>
-    <item row="3" column="2" colspan="2">
-     <widget class="QToolButton" name="micInput">
-      <property name="toolTip">
-       <string>Select the audio input of the microphone</string>
-      </property>
-      <property name="text">
-       <string>Audio input...</string>
-      </property>
-     </widget>
-    </item>
-    <item row="3" column="1">
-     <widget class="QComboBox" name="messageProtocol">
-      <property name="toolTip">
-       <string>Protocol of this message: a FLEX network with the mixing option also sends POCSAG</string>
-      </property>
-      <item>
-       <property name="text">
-        <string>FLEX</string>
-       </property>
-      </item>
-      <item>
-       <property name="text">
-        <string>POCSAG</string>
-       </property>
-      </item>
-     </widget>
-    </item>
-    <item row="4" column="0">
-     <widget class="QLabel" name="binaryLabel">
-      <property name="text">
-       <string>Header</string>
-      </property>
-     </widget>
-    </item>
-    <item row="4" column="1" colspan="3">
-     <layout class="QHBoxLayout" name="binaryLayout">
-      <property name="spacing">
-       <number>3</number>
-      </property>
-      <item>
-       <widget class="QSpinBox" name="blocking">
-        <property name="toolTip">
-         <string>FLEX binary: blocking length B, bits of a character (1 is the default of the standard); the bits of the text (4 a hex digit) are a multiple of it</string>
-        </property>
-        <property name="prefix">
-         <string>B </string>
-        </property>
-        <property name="minimum">
-         <number>1</number>
-        </property>
-        <property name="maximum">
-         <number>16</number>
-        </property>
-        <property name="value">
-         <number>1</number>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QCheckBox" name="mailDrop">
-        <property name="toolTip">
-         <string>FLEX binary: mail drop flag M, the message can be handled separately from ordinary messages</string>
-        </property>
-        <property name="text">
-         <string>M</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QCheckBox" name="rightToLeft">
-        <property name="toolTip">
-         <string>FLEX binary: display direction D, right to left; not allowed with a blocking length of 1</string>
-        </property>
-        <property name="text">
-         <string>D</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QCheckBox" name="headerMessage">
-        <property name="toolTip">
-         <string>FLEX binary: header message flag H, a transparent message of the same number follows</string>
-        </property>
-        <property name="text">
-         <string>H</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QCheckBox" name="statusInfo">
-        <property name="toolTip">
-         <string>FLEX binary: status information field enabler I, the first 8 data bits name the encoding method (reserved)</string>
-        </property>
-        <property name="text">
-         <string>I</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QComboBox" name="secureType">
-        <property name="toolTip">
-         <string>FLEX secure message type t1 t0: 00 alphanumeric (7-bit characters), 01 data defined separately (hex digits, not terminated), 10 binary (hex digits)</string>
-        </property>
-        <item>
-         <property name="text">
-          <string>Alphanumeric</string>
-         </property>
-        </item>
-        <item>
-         <property name="text">
-          <string>Separate</string>
-         </property>
-        </item>
-        <item>
-         <property name="text">
-          <string>Binary</string>
-         </property>
-        </item>
-       </widget>
-      </item>
-     </layout>
-    </item>
-    <item row="5" column="0">
-     <widget class="QLabel" name="scheduleLabel">
-      <property name="text">
-       <string>Copies</string>
-      </property>
-     </widget>
-    </item>
-    <item row="5" column="1" colspan="3">
-     <layout class="QHBoxLayout" name="scheduleLayout">
-      <property name="spacing">
-       <number>3</number>
-      </property>
-      <item>
-       <widget class="QSpinBox" name="retransmit">
-        <property name="toolTip">
-         <string>Network mode: copies sent after the message. POCSAG 0 to 10; FLEX 0 to 15, numbered types (alphanumeric, binary, numbered short message) with message numbering, sent with the same number and R = 0</string>
-        </property>
-        <property name="minimum">
-         <number>0</number>
-        </property>
-        <property name="maximum">
-         <number>15</number>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QDoubleSpinBox" name="retransmitInterval">
-        <property name="toolTip">
-         <string>Seconds between the copies. Default: 10 s for POCSAG, 128 frames (240 s) for FLEX. FLEX is rounded up to whole frames of 1.875 s</string>
-        </property>
-        <property name="specialValueText">
-         <string>Default</string>
-        </property>
-        <property name="prefix">
-         <string>every </string>
-        </property>
-        <property name="suffix">
-         <string> s</string>
-        </property>
-        <property name="decimals">
-         <number>1</number>
-        </property>
-        <property name="minimum">
-         <double>-1.000000000000000</double>
-        </property>
-        <property name="maximum">
-         <double>3600.000000000000000</double>
-        </property>
-        <property name="value">
-         <double>-1.000000000000000</double>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QDoubleSpinBox" name="sendDelay">
-        <property name="toolTip">
-         <string>Network mode: seconds from the queueing to the first transmission. FLEX is rounded up to whole frames of 1.875 s</string>
-        </property>
-        <property name="specialValueText">
-         <string>No delay</string>
-        </property>
-        <property name="prefix">
-         <string>delay </string>
-        </property>
-        <property name="suffix">
-         <string> s</string>
-        </property>
-        <property name="decimals">
-         <number>1</number>
-        </property>
-        <property name="maximum">
-         <double>3600.000000000000000</double>
-        </property>
-       </widget>
-      </item>
-     </layout>
+    <item>
+     <widget class="PagingComposer" name="composer" native="true"/>
     </item>
    </layout>
   </widget>
@@ -1433,6 +1047,12 @@
    <extends>QTableWidget</extends>
    <header>gui/pagingmessagetable.h</header>
   </customwidget>
+  <customwidget>
+   <class>PagingComposer</class>
+   <extends>QWidget</extends>
+   <header>gui/pagingcomposer.h</header>
+   <container>1</container>
+  </customwidget>
  </customwidgets>
  <tabstops>
   <tabstop>deltaFrequency</tabstop>
@@ -1456,16 +1076,7 @@
   <tabstop>mixSwitch512</tabstop>
   <tabstop>mixSwitch1200</tabstop>
   <tabstop>mixSwitch2400</tabstop>
-  <tabstop>messageProtocol</tabstop>
-  <tabstop>address</tabstop>
-  <tabstop>capcode</tabstop>
-  <tabstop>function</tabstop>
-  <tabstop>priority</tabstop>
-  <tabstop>messageType</tabstop>
-  <tabstop>messageSpeed</tabstop>
-  <tabstop>messagePolarity</tabstop>
-  <tabstop>text</tabstop>
-  <tabstop>send</tabstop>
+  <tabstop>composer</tabstop>
   <tabstop>clear</tabstop>
   <tabstop>abort</tabstop>
   <tabstop>log</tabstop>

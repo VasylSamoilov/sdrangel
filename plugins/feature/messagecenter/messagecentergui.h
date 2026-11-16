@@ -29,6 +29,7 @@
 
 #include "feature/featuregui.h"
 #include "gui/pagingmessagetable.h"
+#include "gui/pagingcomposer.h"
 #include "util/messagequeue.h"
 #include "settings/rollupstate.h"
 
@@ -94,22 +95,7 @@ private:
     QTableWidget *m_endpointsTable;
     QTableWidget *m_queueTable;
     // The page to compose
-    QComboBox *m_transmitter;
-    QComboBox *m_protocol;
-    QLineEdit *m_address;
-    QComboBox *m_function;
-    QComboBox *m_type;
-    QLineEdit *m_text;
-    QLineEdit *m_voiceFile;
-    QComboBox *m_speed;
-    QComboBox *m_polarity;
-    // FLEX binary: B and the flags M, D, H, I of header word 2; FLEX secure: the type t1 t0
-    QSpinBox *m_blocking;
-    QCheckBox *m_mailDrop;
-    QCheckBox *m_rightToLeft;
-    QCheckBox *m_headerMessage;
-    QCheckBox *m_statusInfo;
-    QComboBox *m_secureType;
+    PagingComposer *m_composer;
     // The routes and the files
     QTableWidget *m_routesTable;
     QTableWidget *m_sinksTable;
@@ -138,7 +124,6 @@ private:
     void refreshRoutes();
     void refreshFiles();
     QString selectedId(QTableWidget *table) const;
-    MessageRecord composedPage() const;
     void editRoute(int index);
     void editFile(bool sink);
 
@@ -156,8 +141,6 @@ private slots:
     void addSource();
     void removeSource();
     void transmitterChanged();
-    void typeChanged();
-    void browseVoice();
 };
 
 #endif // INCLUDE_FEATURE_MESSAGECENTERGUI_H_

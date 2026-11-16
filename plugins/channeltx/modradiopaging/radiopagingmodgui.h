@@ -34,6 +34,7 @@
 
 #include "radiopagingmod.h"
 #include "radiopagingmodsettings.h"
+#include "gui/pagingcomposer.h"
 
 class PluginAPI;
 class DeviceUISet;
@@ -97,16 +98,12 @@ private:
     void displaySettings();
     void displayProtocolAvailability();
     void displayProtocol();
-    bool messageIsFlex() const;
-    void updateMessageTypes();
     void fillTimeZones();
     QDateTime flexTimeNow() const;
     void displayTime(bool flex);
     void displayNumbering(bool flex);
-    //! The text field of the message: the path of a sound file (with the browse button) for a voice page
-    void displayMessageType();
-
-    QAction *m_browseAction = nullptr;
+    //! The composer for the channel: its protocols, network mode, FLEX numbering, microphone
+    void displayMessage();
 
     // Live voice page: the page goes out, the microphone is taken once the alert time is over and
     // its voice is passed to the transmitter as it comes, until End or the voice length
@@ -173,13 +170,6 @@ private slots:
     void on_mixSwitch512_valueChanged(int value);
     void on_mixSwitch1200_valueChanged(int value);
     void on_mixSwitch2400_valueChanged(int value);
-    void on_messageProtocol_currentIndexChanged(int index);
-    void on_send_clicked();
-    void on_text_returnPressed();
-    void on_messageType_currentIndexChanged(int index);
-    void on_browse_triggered();
-    void on_micInput_clicked();
-    void on_voiceSource_currentIndexChanged(int index);
     void on_channelAlias_editingFinished();
     void on_voiceFiles_clicked();
     void micAudioSelect(const QPoint& p);

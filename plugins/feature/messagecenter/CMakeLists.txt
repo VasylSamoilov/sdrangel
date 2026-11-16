@@ -85,4 +85,9 @@ if(NOT SERVER_MODE)
         test/pagingmessagetabletest.cpp
     )
     target_link_libraries(pagingmessagetabletest Qt::Widgets sdrbase sdrgui)
+
+    add_executable(pagingcomposertest EXCLUDE_FROM_ALL
+        test/pagingcomposertest.cpp
+    )
+    target_link_libraries(pagingcomposertest Qt::Widgets sdrbase sdrgui)
 endif()

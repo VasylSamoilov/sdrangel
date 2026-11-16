@@ -344,71 +344,18 @@ void MessageCenterGUI::buildQueue(QWidget *container)
 
 void MessageCenterGUI::buildCompose(QWidget *container)
 {
-    QFormLayout *layout = new QFormLayout(container);
+    QVBoxLayout *layout = new QVBoxLayout(container);
     layout->setContentsMargins(2, 2, 2, 2);
 
-    m_transmitter = new QComboBox(container);
-    m_transmitter->setToolTip("The transmitter that will send the page: it claims the page when it is ready");
-    m_protocol = new QComboBox(container);
-    m_address = new QLineEdit(container);
-    m_address->setPlaceholderText("address / capcode");
-    m_function = new QComboBox(container);
-    m_function->addItems({"1 (A)", "2 (B)", "3 (C)", "4 (D)"});
-    m_function->setToolTip("POCSAG function A to D, GSC address number 1 to 4 (function A to D)");
-    m_type = new QComboBox(container);
-    m_type->addItems({"alphanumeric", "numeric", "tone", "voice", "short_message", "binary", "secure"});
-    m_text = new QLineEdit(container);
-    m_blocking = new QSpinBox(container);
-    m_blocking->setRange(1, 16);
-    m_blocking->setPrefix("B ");
-    m_blocking->setToolTip("FLEX binary: blocking length, bits of a character (1 is the default of the standard)");
-    m_mailDrop = new QCheckBox("M", container);
-    m_mailDrop->setToolTip("FLEX binary: mail drop flag");
-    m_rightToLeft = new QCheckBox("D", container);
-    m_rightToLeft->setToolTip("FLEX binary: display right to left (not with a blocking length of 1)");
-    m_headerMessage = new QCheckBox("H", container);
-    m_headerMessage->setToolTip("FLEX binary: header message, a transparent message of the same number follows");
-    m_statusInfo = new QCheckBox("I", container);
-    m_statusInfo->setToolTip("FLEX binary: the first 8 data bits name the encoding method (reserved)");
-    QHBoxLayout *binaryRow = new QHBoxLayout();
-    binaryRow->addWidget(m_blocking);
-    binaryRow->addWidget(m_mailDrop);
-    binaryRow->addWidget(m_rightToLeft);
-    binaryRow->addWidget(m_headerMessage);
-    binaryRow->addWidget(m_statusInfo);
-    m_secureType = new QComboBox(container);
-    m_secureType->addItems({"alphanumeric", "data defined separately", "binary"});
-    m_secureType->setToolTip("FLEX secure type t1 t0: 00 7-bit characters, 01 and 10 hex digits");
-    m_voiceFile = new QLineEdit(container);
-    m_voiceFile->setPlaceholderText("WAV file");
-    QPushButton *browse = new QPushButton("...", container);
-    QHBoxLayout *voiceRow = new QHBoxLayout();
-    voiceRow->addWidget(m_voiceFile);
-    voiceRow->addWidget(browse);
-    m_speed = new QComboBox(container);
-    m_speed->addItems({"Default speed", "512", "1200", "2400"});
-    m_polarity = new QComboBox(container);
-    m_polarity->addItems({"Default polarity", "Normal", "Inverted"});
-    QPushButton *post = new QPushButton("Post the page", container);
+    // The transmitters say what they can send; the page is checked by the one that takes it (its mode, numbering)
+    m_composer = new PagingComposer(container);
+    m_composer->setNetworkMode(true);
+    m_composer->setSendText("Post the page");
+    m_composer->setTransmitters(QStringList());
+    layout->addWidget(m_composer);
 
-    layout->addRow("Transmitter", m_transmitter);
-    layout->addRow("Protocol", m_protocol);
-    layout->addRow("Address", m_address);
-    layout->addRow("Function", m_function);
-    layout->addRow("Type", m_type);
-    layout->addRow("Text", m_text);
-    layout->addRow("Binary header", binaryRow);
-    layout->addRow("Secure type", m_secureType);
-    layout->addRow("Voice file", voiceRow);
-    layout->addRow("Speed", m_speed);
-    layout->addRow("Polarity", m_polarity);
-    layout->addRow(post);
-
-    connect(m_transmitter, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MessageCenterGUI::transmitterChanged);
-    connect(m_type, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MessageCenterGUI::typeChanged);
-    connect(browse, &QPushButton::clicked, this, &MessageCenterGUI::browseVoice);
-    connect(post, &QPushButton::clicked, this, &MessageCenterGUI::post);
-    typeChanged();
+    connect(m_composer, &PagingComposer::selectionChanged, this, &MessageCenterGUI::transmitterChanged);
+    connect(m_composer, &PagingComposer::sendRequested, this, &MessageCenterGUI::post);
 }
 
 void MessageCenterGUI::buildRoutes(QWidget *container)
@@ -639,7 +586,6 @@ void MessageCenterGUI::refreshQueue()
 
 void MessageCenterGUI::refreshComposeTransmitters()
 {
-    QString current = m_transmitter->currentData().toString();
     QStringList aliases;
 
     for (const MessageEndpoint& e : m_center->engine().endpoints())
@@ -649,28 +595,8 @@ void MessageCenterGUI::refreshComposeTransmitters()
         }
     }
 
-    // Only when the transmitters changed: the combo keeps its choice
-    QStringList shown;
-
-    for (int i = 0; i < m_transmitter->count(); i++) {
-        shown.append(m_transmitter->itemData(i).toString());
-    }
-
-    if (shown == aliases) {
-        return;
-    }
-
-    m_transmitter->blockSignals(true);
-    m_transmitter->clear();
-
-    for (const QString& alias : aliases) {
-        m_transmitter->addItem(alias, alias);
-    }
-
-    int index = m_transmitter->findData(current);
-    m_transmitter->setCurrentIndex(index >= 0 ? index : 0);
-    m_transmitter->blockSignals(false);
-    transmitterChanged();
+    // The composer keeps its choice when the transmitters did not change
+    m_composer->setTransmitters(aliases);
 }
 
 void MessageCenterGUI::refreshRoutes()
@@ -708,7 +634,7 @@ QString MessageCenterGUI::selectedId(QTableWidget *table) const
 
 void MessageCenterGUI::transmitterChanged()
 {
-    QString alias = m_transmitter->currentData().toString();
+    QString alias = m_composer->transmitter();
     QStringList protocols;
 
     for (const MessageEndpoint& e : m_center->engine().endpoints())
@@ -718,68 +644,28 @@ void MessageCenterGUI::transmitterChanged()
         }
     }
 
-    if (protocols.isEmpty()) {
-        protocols = QStringList({"pocsag", "flex", "gsc"});
-    }
-
-    m_protocol->clear();
-    m_protocol->addItems(protocols);
-}
-
-void MessageCenterGUI::typeChanged()
-{
-    bool voice = (m_type->currentText() == "voice");
-    bool tone = (m_type->currentText() == "tone");
-    bool binary = (m_type->currentText() == "binary");
-    m_text->setEnabled(!voice && !tone);
-    m_voiceFile->setEnabled(voice);
-
-    for (QWidget *w : QList<QWidget*>({m_blocking, m_mailDrop, m_rightToLeft, m_headerMessage, m_statusInfo})) {
-        w->setEnabled(binary);
-    }
-
-    m_secureType->setEnabled(m_type->currentText() == "secure");
-}
-
-void MessageCenterGUI::browseVoice()
-{
-    QString file = QFileDialog::getOpenFileName(this, "Sound file", m_voiceFile->text(), "WAV files (*.wav);;All files (*)");
-
-    if (!file.isEmpty()) {
-        m_voiceFile->setText(file);
-    }
-}
-
-MessageRecord MessageCenterGUI::composedPage() const
-{
-    RadioPagingPage page;
-    page.m_transmitter = m_transmitter->currentData().toString();
-    page.m_protocol = m_protocol->currentText();
-    page.m_type = m_type->currentText();
-    page.m_address = m_address->text().trimmed();
-    page.m_function = m_function->currentIndex();
-    page.m_text = m_text->isEnabled() ? m_text->text() : QString();
-    page.m_voiceFile = m_voiceFile->text().trimmed();
-    page.m_speed = (m_speed->currentIndex() > 0) ? m_speed->currentText().toInt() : 0;
-    page.m_polarity = m_polarity->currentIndex() - 1;
-    page.m_blocking = m_blocking->value();
-    page.m_mailDrop = m_mailDrop->isChecked();
-    page.m_rightToLeft = m_rightToLeft->isChecked();
-    page.m_headerMessage = m_headerMessage->isChecked();
-    page.m_statusInfo = m_statusInfo->isChecked();
-    page.m_secureType = m_secureType->currentIndex();
-    return page.toRecord();
+    // A transmitter that did not say what it sends: any
+    m_composer->setProtocols(protocols.isEmpty() ? RadioPagingPage::protocols() : protocols);
 }
 
 void MessageCenterGUI::post()
 {
-    if (m_transmitter->currentData().toString().isEmpty())
+    if (m_composer->transmitter().isEmpty())
     {
         QMessageBox::information(this, "Page", "No transmitter has announced itself.");
         return;
     }
 
-    m_center->getInputMessageQueue()->push(MessageCenter::MsgPostPage::create(composedPage()));
+    RadioPagingPage page = m_composer->page();
+    QString error = page.check();
+
+    if (!error.isEmpty())
+    {
+        QMessageBox::information(this, "Page", error);
+        return;
+    }
+
+    m_center->getInputMessageQueue()->push(MessageCenter::MsgPostPage::create(page.toRecord()));
 }
 
 void MessageCenterGUI::pageAction(int action)
