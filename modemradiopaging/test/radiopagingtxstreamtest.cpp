@@ -83,6 +83,58 @@ uint32_t word(const std::vector<uint8_t>& bits, size_t at)
     return w;
 }
 
+// Repeat and send delay of the POCSAG network: the time of each block is the time of the one before it plus its length
+void testPocsagSchedule()
+{
+    RadioPagingPocsagTxStream stream(true, 1200, false);
+    RadioPagingTxBlock block;
+    std::string error;
+    const std::vector<float> idle = RadioPagingPocsagTxStream::levels(RadioPagingPocsagTxStream::idleBatchBits(), false);
+    const std::vector<float> preamble = RadioPagingPocsagTxStream::levels(RadioPagingPocsagTxStream::preambleBits(), false);
+
+    stream.begin(0);
+    RadioPagingPocsagTxStream::Schedule schedule;
+    schedule.m_repeat = 2;
+    schedule.m_delayMs = 2000;
+    schedule.m_intervalMs = 3000;
+    bool added = stream.add(pocsag(1234, "repeated"), 1200, false, 7, error, schedule);
+    RadioPagingPocsagTxStream::Schedule tooMany;
+    tooMany.m_repeat = 11;
+    bool refused = !stream.add(pocsag(1234, "x"), 1200, false, 8, error, tooMany);
+
+    // Times (ms) of the message blocks and the ids they report
+    std::vector<int64_t> times;
+    std::vector<size_t> ids;
+    std::vector<std::vector<uint64_t>> repeatIds;
+    int64_t now = 0;
+
+    for (int i = 0; (i < 200) && (now < 20000); i++)
+    {
+        stream.next(block);
+        if ((block.m_levels != idle) && (block.m_levels != preamble))
+        {
+            times.push_back(now);
+            ids.push_back(block.m_ids.size());
+            repeatIds.push_back(block.m_repeatIds);
+        }
+        now += (int64_t) std::llround((double) block.m_levels.size() * 1000.0 / block.m_baud);
+    }
+
+    bool ok = added && refused && (times.size() == 3) && (times[0] >= 2000) && (times[1] - times[0] >= 3000)
+        && (times[2] - times[1] >= 3000) && (times[1] - times[0] < 3000 + 500) && (ids[0] == 1) && (ids[1] == 0) && (ids[2] == 0)
+        && repeatIds[0].empty() && (repeatIds[1] == std::vector<uint64_t>{7}) && (repeatIds[2] == std::vector<uint64_t>{7})
+        && (stream.pending() == 0);
+    std::string why;
+    for (size_t i = 0; i < times.size(); i++) {
+        why += " " + std::to_string(times[i]) + "/" + std::to_string(ids[i]) + "/" + std::to_string(repeatIds[i].size());
+    }
+    check(ok, "POCSAG network: first transmission after the send delay, repeats at the interval, the id reported once, "
+        "the copies as repeats (" + why + ")");
+
+    RadioPagingPocsagTxStream oneShot(false, 1200, false);
+    check(!oneShot.add(pocsag(1234, "x"), 1200, false, 9, error, schedule), "POCSAG one-shot: repeat and send delay refused");
+}
+
 void testPocsagNetwork()
 {
     RadioPagingPocsagTxStream stream(true, 1200, false);
@@ -399,6 +451,35 @@ void testFlexNetwork()
     }
     check((invertedIn % 4 == 3) && (normalIn % 4 == 1) && (invertedFrames == 1) && !mixed.inverted(),
         "FLEX network: a frame goes to the other polarity for its message, the others stay in the network polarity");
+
+    // Retransmission: the id with the first transmission, the copies as repeats, the interval in frames;
+    // the send delay from the first frame built after the message is queued
+    RadioPagingFlexTxStream repeating(true, RadioPagingFlex::Mode1600_2, false, 0);
+    repeating.begin(0);
+    repeating.next(block);
+    RadioPagingFlexEncoder::TxMessage copied = flex(123456, "COPIES");
+    copied.m_retransmit = 2;
+    copied.m_retransmitInterval = 3;
+    copied.m_sendDelay = 2;
+    bool queued = repeating.add(copied, false, 40, error);
+    std::vector<uint64_t> firstFrames, copyFrames;
+    for (int i = 0; i < 16; i++)
+    {
+        uint64_t frameIndex = repeating.currentFrame();
+        RadioPagingTxBlock s, d;
+        repeating.next(s);
+        repeating.next(d);
+        if (d.m_ids == std::vector<uint64_t>{40}) {
+            firstFrames.push_back(frameIndex);
+        }
+        if (d.m_repeatIds == std::vector<uint64_t>{40}) {
+            copyFrames.push_back(frameIndex);
+        }
+    }
+    uint64_t start = (firstFrames.size() == 1) ? firstFrames[0] : 0;
+    check(queued && (firstFrames.size() == 1) && (copyFrames.size() == 2) && (copyFrames[0] == start + 3)
+        && (copyFrames[1] == start + 6) && (repeating.pending() == 0),
+        "FLEX network retransmission: the id once, two copies 3 frames apart");
 }
 
 // A transmission cut in a frame: the ids of the frame are returned, not lost
@@ -1313,6 +1394,7 @@ int main()
     testGsc();
     testMixed();
     testPocsagNetwork();
+    testPocsagSchedule();
     testPocsagNetworkTurns();
     testPocsagOneShot();
     testFlexPlan();

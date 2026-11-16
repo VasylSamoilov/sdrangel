@@ -322,6 +322,18 @@ RadioPagingModTx:
       description: "FLEX secure type t1 t0 (STD-43A 3.10.1.4): 0 alphanumeric (7-bit characters), 1 data defined separately (hex digits, not terminated), 2 binary (hex digits)"
       type: integer
       format: int32
+    retransmit:
+      description: "Network mode only. Number of copies sent after the message: POCSAG 0 to 10; FLEX 0 to 15, numbered types (alphanumeric, binary, numbered short message) on a channel with message numbering, sent with the same message number and R = 0 (STD-43A 3.10.1.1). 0 or omitted: none"
+      type: integer
+      format: int32
+    retransmitInterval:
+      description: "Network mode only. Seconds between the copies, 0 to 3600. Negative or omitted: 10 s for POCSAG, 128 frames (240 s) for FLEX. FLEX is rounded up to whole frames of 1.875 s, at least 1"
+      type: number
+      format: float
+    sendDelay:
+      description: "Network mode only. Seconds from the queueing to the first transmission, 0 to 3600. 0 or omitted: none. FLEX is rounded up to whole frames of 1.875 s"
+      type: number
+      format: float
     text:
       description: "Numeric: 0-9, space, U, -, ], [ (GSC: 0-9 A-H J L N P R U space -). Alphanumeric: 7-bit characters (GSC: ASCII 0x20-0x5d). FLEX binary and secure types 1 and 2: hex digits, digit i the data bits 4i to 4i+3, the least significant bit sent first"
       type: string

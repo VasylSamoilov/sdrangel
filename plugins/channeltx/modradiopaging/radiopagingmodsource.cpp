@@ -360,8 +360,8 @@ void RadioPagingModSource::feed()
 
     m_pushed += block.m_levels.size();
 
-    if (!block.m_ids.empty()) {
-        m_inFlight.push_back(InFlight{m_pushed, block.m_ids});
+    if (!block.m_ids.empty() || !block.m_repeatIds.empty()) {
+        m_inFlight.push_back(InFlight{m_pushed, block.m_ids, block.m_repeatIds});
     }
 
     // The messages are on air: with this block, or the voice pages with their first one
@@ -383,13 +383,24 @@ void RadioPagingModSource::complete()
 
     while (!m_inFlight.empty() && (m_inFlight.front().m_endSymbol <= finished))
     {
-        m_status.m_sent += m_inFlight.front().m_ids.size();
-        m_status.m_lastSentId = m_inFlight.front().m_ids.back();
+        const InFlight& entry = m_inFlight.front();
+
+        if (!entry.m_ids.empty())
+        {
+            m_status.m_sent += entry.m_ids.size();
+            m_status.m_lastSentId = entry.m_ids.back();
+        }
 
         if (m_notify)
         {
-            for (uint64_t id : m_inFlight.front().m_ids) {
+            for (uint64_t id : entry.m_ids) {
                 m_notify(id, true);
+            }
+        }
+        if (m_notifyRepeated)
+        {
+            for (uint64_t id : entry.m_repeatIds) {
+                m_notifyRepeated(id);
             }
         }
 
@@ -487,7 +498,8 @@ void RadioPagingModSource::addRequest(const Request& request)
     if (m_mix)
     {
         if (request.m_protocol == RadioPagingModSettings::Pocsag) {
-            ok = m_mix->addPocsag(request.m_pocsag, request.m_pocsagBaud, request.m_pocsagInverted, request.m_id, error);
+            ok = m_mix->addPocsag(request.m_pocsag, request.m_pocsagBaud, request.m_pocsagInverted, request.m_id, error,
+                request.m_pocsagSchedule);
         } else if (request.m_protocol == RadioPagingModSettings::Flex) {
             ok = m_mix->addFlex(request.m_flex, request.m_flexInverted, request.m_id, error);
         }
@@ -504,7 +516,7 @@ void RadioPagingModSource::addRequest(const Request& request)
             }
         } else if (m_streamProtocol == RadioPagingModSettings::Pocsag) {
             ok = ((RadioPagingPocsagTxStream*) m_stream.get())->add(request.m_pocsag, request.m_pocsagBaud,
-                request.m_pocsagInverted, request.m_id, error);
+                request.m_pocsagInverted, request.m_id, error, request.m_pocsagSchedule);
         } else if (m_streamProtocol == RadioPagingModSettings::Flex) {
             ok = ((RadioPagingFlexTxStream*) m_stream.get())->add(request.m_flex, request.m_flexInverted, request.m_id, error);
         }
@@ -606,10 +618,11 @@ RadioPagingModSource::Status RadioPagingModSource::getStatus() const
     status.m_inFlight = 0;
 
     for (const InFlight& entry : m_inFlight) {
-        status.m_inFlight += (int) entry.m_ids.size();
+        status.m_inFlight += (int) (entry.m_ids.size() + entry.m_repeatIds.size());
     }
 
-    status.m_currentId = m_inFlight.empty() ? 0 : m_inFlight.front().m_ids.front();
+    status.m_currentId = m_inFlight.empty() ? 0
+        : !m_inFlight.front().m_ids.empty() ? m_inFlight.front().m_ids.front() : m_inFlight.front().m_repeatIds.front();
 
     if (m_stream && (m_streamProtocol == RadioPagingModSettings::Gsc))
     {

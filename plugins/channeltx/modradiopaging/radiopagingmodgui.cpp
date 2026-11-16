@@ -470,6 +470,7 @@ void RadioPagingModGUI::on_flexNumbering_toggled(bool checked)
     m_settings.m_flexNumbering = checked;
     applySettings(QStringList("flexNumbering"));
     displayNumbering(true);
+    displayMessageType();       // FLEX copies need the numbering
 }
 
 void RadioPagingModGUI::on_flexMaxMessageNumber_valueChanged(int value)
@@ -692,6 +693,21 @@ void RadioPagingModGUI::send()
             .arg(QString::fromStdString(text)));
     }
 
+    // Copies and send delay (network mode, checked by the modulator)
+    if (ui->retransmit->isVisible())
+    {
+        request.m_retransmit = ui->retransmit->isEnabled() ? ui->retransmit->value() : 0;
+        request.m_retransmitInterval = ui->retransmitInterval->value();
+        request.m_sendDelay = ui->sendDelay->value();
+
+        if ((request.m_retransmit > 0) || (request.m_sendDelay > 0.0))
+        {
+            log(QString("  %1 copies, interval %2, delay %3 s").arg(request.m_retransmit)
+                .arg((request.m_retransmitInterval < 0.0) ? QString("default") : QString("%1 s").arg(request.m_retransmitInterval))
+                .arg(request.m_sendDelay));
+        }
+    }
+
     m_radioPagingMod->getInputMessageQueue()->push(RadioPagingMod::MsgTx::create(request));
 }
 
@@ -747,6 +763,19 @@ void RadioPagingModGUI::displayMessageType()
         w->setVisible(binary);
     }
     ui->secureType->setVisible(secure);
+
+    // Copies and send delay: network mode (POCSAG and FLEX); FLEX copies of the numbered types on a network
+    // with message numbering (STD-43A 4.3.7)
+    bool scheduled = (m_settings.m_mode == RadioPagingModSettings::Network) && (m_settings.m_protocol != RadioPagingModSettings::Gsc);
+    bool flexNumbered = (ui->messageType->currentIndex() == 0) || (ui->messageType->currentIndex() == 3);
+    bool copies = !flexMessage || (m_settings.m_flexNumbering && flexNumbered);
+    ui->scheduleLabel->setVisible(scheduled);
+    ui->retransmit->setVisible(scheduled);
+    ui->retransmitInterval->setVisible(scheduled);
+    ui->sendDelay->setVisible(scheduled);
+    ui->retransmit->setMaximum(flexMessage ? RadioPagingFlexEncoder::m_maxRetransmit : RadioPagingPocsagTxStream::m_maxRepeat);
+    ui->retransmit->setEnabled(copies);
+    ui->retransmitInterval->setEnabled(copies && (ui->retransmit->value() > 0));
 
     ui->textLabel->setText(voice ? "File" : "Text");
     ui->text->setPlaceholderText(voice ? "WAV file" : hexText ? "Hex digits" : QString());
@@ -925,7 +954,9 @@ void RadioPagingModGUI::on_channelAlias_editingFinished()
 void RadioPagingModGUI::showTx(const MessageRecord& record, const QString& status)
 {
     const int maxRows = 100;
-    QString id = record.m_protocolData.value("tx_id").toString();
+    // A copy (retransmission) has a row of its own
+    const int copy = record.m_protocolData.value("retransmission", 0).toInt();
+    QString id = record.m_protocolData.value("tx_id").toString() + ((copy > 0) ? QString("/%1").arg(copy) : QString());
     int row = -1;
 
     for (int i = 0; i < ui->txLog->rowCount(); i++)
@@ -964,7 +995,7 @@ void RadioPagingModGUI::showTx(const MessageRecord& record, const QString& statu
     ui->txLog->item(row, 2)->setText(record.m_address);
     ui->txLog->item(row, 3)->setText(record.m_msgType);
     ui->txLog->item(row, 4)->setText(text);
-    ui->txLog->item(row, 5)->setText(status);
+    ui->txLog->item(row, 5)->setText((copy > 0) ? QString("%1 (copy %2)").arg(status).arg(copy) : status);
     ui->txLog->resizeColumnsToContents();
 }
 
@@ -1680,6 +1711,7 @@ void RadioPagingModGUI::makeUIConnections()
     QObject::connect(ui->mixSwitch2400, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_mixSwitch2400_valueChanged);
     QObject::connect(ui->messageProtocol, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_messageProtocol_currentIndexChanged);
     QObject::connect(ui->send, &QPushButton::clicked, this, &RadioPagingModGUI::on_send_clicked);
+    QObject::connect(ui->retransmit, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_messageType_currentIndexChanged);
     QObject::connect(ui->text, &QLineEdit::returnPressed, this, &RadioPagingModGUI::on_text_returnPressed);
     QObject::connect(ui->micInput, &QToolButton::clicked, this, &RadioPagingModGUI::on_micInput_clicked);
     QObject::connect(ui->voiceSource, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_voiceSource_currentIndexChanged);

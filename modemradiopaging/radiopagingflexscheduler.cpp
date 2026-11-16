@@ -388,6 +388,25 @@ RadioPagingFlexEncoder::EnqueueResult RadioPagingFlexEncoder::enqueue(const TxMe
         return result;
     }
 
+    if ((message.m_retransmit < 0) || (message.m_retransmit > m_maxRetransmit)
+        || (message.m_retransmitInterval < 1) || (message.m_retransmitInterval > m_maxScheduleFrames)
+        || (message.m_sendDelay < 0) || (message.m_sendDelay > m_maxScheduleFrames))
+    {
+        result.m_error = "Retransmissions 0 to 15, retransmission interval 1 to 1920 frames, send delay 0 to 1920 frames";
+        return result;
+    }
+
+    // A retransmission is a numbered message sent again with its number and R = 0 (STD-43A 4.3.7.6, 8.4): the pager
+    // takes it as the message it may have missed
+    const bool numbered = (pm.m_type == RadioPagingFlex::Alphanumeric) || (pm.m_type == RadioPagingFlex::Binary)
+        || ((pm.m_type == RadioPagingFlex::ShortMessage) && (pm.m_shortType == RadioPagingFlex::ShortNumbered));
+
+    if ((message.m_retransmit > 0) && (!numbered || !m_numbering.m_enabled))
+    {
+        result.m_error = "Retransmission: alphanumeric, HEX/binary and numbered short messages of a network with message numbering";
+        return result;
+    }
+
     // Alphanumeric, HEX/binary and secure messages are split into fragments of a frame each; the others are one piece
     std::vector<RadioPagingFlex::PhaseMessage> parts;
 
@@ -422,6 +441,7 @@ RadioPagingFlexEncoder::EnqueueResult RadioPagingFlexEncoder::enqueue(const TxMe
     }
 
     const uint32_t id = m_nextId++;
+    std::vector<Item> items;
 
     for (const RadioPagingFlex::PhaseMessage& part : parts)
     {
@@ -433,12 +453,29 @@ RadioPagingFlexEncoder::EnqueueResult RadioPagingFlexEncoder::enqueue(const TxMe
         item.m_fragment = part.m_fragment;
         item.m_fragments = part.m_fragments;
         item.m_signature = part.m_signature;
-        m_queue.push_back(item);
+        item.m_delay = message.m_sendDelay;
+        item.m_retransmitsLeft = message.m_retransmit;
+        items.push_back(item);
+    }
+
+    m_queue.insert(m_queue.end(), items.begin(), items.end());
+
+    if (message.m_retransmit > 0) {
+        m_templates[id] = items;
     }
 
     result.m_ok = true;
     result.m_id = id;
     return result;
+}
+
+bool RadioPagingFlexEncoder::due(const Item& item, uint64_t frameIndex)
+{
+    if (item.m_notBefore < 0) {
+        return item.m_delay == 0;   // Not seen by a frame yet: the delay starts with the first frame built
+    }
+
+    return (int64_t) frameIndex >= item.m_notBefore;
 }
 
 std::vector<uint32_t> RadioPagingFlexEncoder::unschedulable() const
@@ -474,6 +511,7 @@ bool RadioPagingFlexEncoder::remove(uint32_t id)
         }
     }
 
+    m_templates.erase(id);
     return found;
 }
 
@@ -488,7 +526,7 @@ size_t RadioPagingFlexEncoder::eligible(uint64_t frameIndex) const
 
     for (const Item& item : m_queue)
     {
-        if (frameFor(item, frame) && fragmentReady(item)) {
+        if (frameFor(item, frame) && fragmentReady(item) && due(item, frameIndex)) {
             n++;
         }
     }
@@ -511,7 +549,7 @@ bool RadioPagingFlexEncoder::mandatory(uint64_t frameIndex) const
 
     for (const Item& item : m_queue)
     {
-        if ((item.m_fragment > 0) && fragmentReady(item)) {
+        if ((item.m_fragment > 0) && fragmentReady(item) && due(item, frameIndex)) {
             return true;
         }
     }
@@ -600,6 +638,14 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
     frame.m_mode = m_mode;
     frame.m_inverted = m_inverted;
 
+    // The send delay of the messages queued since the last frame starts with this one
+    for (Item& item : m_queue)
+    {
+        if (item.m_notBefore < 0) {
+            item.m_notBefore = (int64_t) frameIndex + item.m_delay;
+        }
+    }
+
     if (m_reserved[time.m_frame])
     {
         frame.m_reserved = true;
@@ -675,7 +721,7 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
             bool isTone = (m.m_type == RadioPagingFlex::Tone);
             bool continuation = (it->m_fragment > 0);
 
-            if (!frameFor(*it, time.m_frame) || !fragmentReady(*it)) {
+            if (!frameFor(*it, time.m_frame) || !fragmentReady(*it) || !due(*it, frameIndex)) {
                 continue;
             }
             if ((pass == 0) && !continuation) {
@@ -869,11 +915,41 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
             }
         }
 
-        // A message is sent with its last fragment
+        // A message is sent with its last fragment. A message to retransmit is queued again, all its fragments,
+        // with its number and R = 0, the interval after this frame (STD-43A 4.3.7.6)
         if (it->m_fragment == it->m_fragments - 1)
         {
-            frame.m_sentIds.push_back(it->m_id);
-            frame.m_sentNumbers.push_back((uint32_t) it->m_number);
+            if (it->m_retransmission) {
+                frame.m_retransmittedIds.push_back(it->m_id);
+            }
+            else
+            {
+                frame.m_sentIds.push_back(it->m_id);
+                frame.m_sentNumbers.push_back((uint32_t) it->m_number);
+            }
+
+            auto tpl = m_templates.find(it->m_id);
+
+            if ((it->m_retransmitsLeft > 0) && (tpl != m_templates.end()))
+            {
+                for (const Item& part : tpl->second)
+                {
+                    Item copy = part;
+                    copy.m_number = it->m_number;
+                    copy.m_retrieval = false;
+                    copy.m_phase = -1;
+                    copy.m_delay = 0;
+                    copy.m_notBefore = (int64_t) frameIndex + it->m_message.m_retransmitInterval;
+                    copy.m_retransmitsLeft = it->m_retransmitsLeft - 1;
+                    copy.m_retransmission = true;
+                    m_queue.push_back(copy);
+                }
+            }
+            else
+            {
+                m_templates.erase(it->m_id);
+                frame.m_doneIds.push_back(it->m_id);
+            }
         }
         m_queue.erase(it);
     }

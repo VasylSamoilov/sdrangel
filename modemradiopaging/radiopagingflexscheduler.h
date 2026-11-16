@@ -110,7 +110,15 @@ public:
         RadioPagingFlex::ShortType m_shortType = RadioPagingFlex::ShortNumeric;    //!< Short message only
         int m_source = 0;           //!< Short message source and numbered types: source code 0-7
         RadioPagingFlex::BinaryParams m_binary;     //!< HEX/binary and secure messages only
+        //!< Retransmissions after the first transmission, 0-15 (STD-43A 4.3.7.6: a message sent again from the
+        //!< retrieval storage has its number and R = 0). Numbered messages of a network with message numbering only
+        int m_retransmit = 0;
+        int m_retransmitInterval = 128;     //!< Frames from a transmission to the next one, 1-1920
+        int m_sendDelay = 0;                //!< Frames the first transmission waits, 0-1920
     };
+
+    static const int m_maxRetransmit = 15;
+    static const int m_maxScheduleFrames = 1920;    //!< Longest retransmission interval and send delay: an hour
 
     struct EnqueueResult
     {
@@ -128,8 +136,10 @@ public:
         RadioPagingFlex::Mode m_mode = RadioPagingFlex::Mode1600_2;
         bool m_inverted = false;
         unsigned m_traffic = 0;     //!< Low traffic flags of the frame information word
-        std::vector<uint32_t> m_sentIds;                    //!< Messages sent: in one piece, or their last fragment
+        std::vector<uint32_t> m_sentIds;                    //!< Messages sent: in one piece, or their last fragment (first transmission)
         std::vector<uint32_t> m_sentNumbers;                //!< Message number of each sent id
+        std::vector<uint32_t> m_retransmittedIds;           //!< Messages sent again (retransmissions, R = 0)
+        std::vector<uint32_t> m_doneIds;                    //!< Messages with nothing more queued: sent and retransmitted
         RadioPagingFlex::FrameBytes m_bytes;
         std::vector<RadioPagingFlex::SymbolBlock> m_blocks; //!< Sync part then data part; empty if reserved
     };
@@ -216,13 +226,17 @@ public:
     //!< Queue a message. Rejected if the capcode or text is invalid, the message does not fit
     //!< in a frame, or every frame the capcode is eligible in is reserved. An alphanumeric, HEX/binary or
     //!< secure message longer than a frame is split into fragments (RadioPagingFlex::fragmentMessage) under
-    //!< the one id: the first in a frame of the capcode, the others in the frames after it (STD-43A 4.2.1)
+    //!< the one id: the first in a frame of the capcode, the others in the frames after it (STD-43A 4.2.1).
+    //!< The first transmission waits m_sendDelay frames from the first frame built after the message is queued.
+    //!< A message to retransmit (m_retransmit, refused unless it is numbered and the network numbers messages)
+    //!< is queued again with its number and R = 0, m_retransmitInterval frames after the frame of its last
+    //!< fragment, and goes in a frame of the pager again
     EnqueueResult enqueue(const TxMessage& message);
-    //!< Queued messages and fragments still to send
+    //!< Queued messages and fragments still to send, retransmissions waiting included
     size_t pending() const { return m_queue.size(); }
     //!< Ids of the queued messages that no frame can carry with the current collapse and reservations
     std::vector<uint32_t> unschedulable() const;
-    //!< Remove a queued message. False if the id is not queued
+    //!< Remove a queued message and its retransmissions. False if the id is not queued
     bool remove(uint32_t id);
     //!< Queued messages a frame of the frame index would carry if it had room (their capcode
     //!< listens to the frame, the frame is not reserved)
@@ -247,7 +261,14 @@ private:
         int m_fragments = 1;
         int m_signature = -1;   //!< Alphanumeric and HEX/binary first fragment: signature of the whole message
         int m_phase = -1;       //!< Fragments after the first: the phase of the first fragment, -1 until it is sent
+        int m_delay = 0;            //!< Frames to wait from the first frame built after it was queued
+        int64_t m_notBefore = -1;   //!< First frame index it may go in, -1 until set (with m_delay)
+        int m_retransmitsLeft = 0;  //!< Retransmissions still to come after this transmission
+        bool m_retransmission = false;  //!< A copy sent again (R = 0)
     };
+
+    //!< The item may go in the frame of the frame index (its send delay or retransmission interval is over)
+    static bool due(const Item& item, uint64_t frameIndex);
 
     bool schedulable(uint64_t capcode) const;
     //!< A fragment goes in a frame after the one of the fragment before it (no earlier fragment is queued);
@@ -274,6 +295,7 @@ private:
     uint32_t m_nextId;
     RadioPagingFlexScheduler::NumberCounter m_numbers;
     std::unordered_map<uint64_t, int> m_headerNumbers;  //!< Number of a header message, for the next message of the capcode
+    std::unordered_map<uint32_t, std::vector<Item>> m_templates;    //!< Fragments of the messages to retransmit, by id
 };
 
 #endif // MODEMRADIOPAGING_RADIOPAGINGFLEXSCHEDULER_H

@@ -27,6 +27,7 @@
 #include <QUuid>
 
 #include <algorithm>
+#include <cmath>
 
 #include "SWGChannelSettings.h"
 #include "SWGWorkspaceInfo.h"
@@ -86,6 +87,9 @@ RadioPagingMod::RadioPagingMod(DeviceAPI *deviceAPI) :
     });
     m_basebandSource->setNotifyFailed([this](quint64 id) {
         getInputMessageQueue()->push(MsgTxEvent::create(id, MsgTxEvent::Failed));
+    });
+    m_basebandSource->setNotifyRepeated([this](quint64 id) {
+        getInputMessageQueue()->push(MsgTxEvent::create(id, MsgTxEvent::Repeated));
     });
 
     applySettings(QStringList(), m_settings, true);
@@ -196,6 +200,19 @@ QString RadioPagingMod::checkRequest(const TxRequest& request, RadioPagingModSou
     sourceRequest = RadioPagingModSource::Request();
     sourceRequest.m_protocol = protocol;
 
+    // Retransmissions and send delay: a network sends them later; a one-shot transmission ends with its messages
+    const bool scheduled = (request.m_retransmit != 0) || (request.m_sendDelay != 0.0);
+    const bool network = (m_settings.m_mode == RadioPagingModSettings::Network);
+
+    if (scheduled && (!network || (protocol == RadioPagingModSettings::Gsc))) {
+        return "Retransmission and send delay need the network mode (POCSAG and FLEX)";
+    }
+    // A negative interval is the default of the protocol
+    if ((request.m_sendDelay < 0.0) || (request.m_sendDelay > 3600.0) || (request.m_retransmitInterval > 3600.0))
+    {
+        return "Send delay and retransmission interval must be 0 to 3600 s";
+    }
+
     if (protocol == RadioPagingModSettings::Pocsag)
     {
         if ((request.m_speed != 0) && !RadioPagingModSettings::isPocsagSpeed(request.m_speed)) {
@@ -208,9 +225,15 @@ QString RadioPagingMod::checkRequest(const TxRequest& request, RadioPagingModSou
         sourceRequest.m_pocsag = request.m_pocsag;
         sourceRequest.m_pocsagBaud = (request.m_speed != 0) ? request.m_speed : m_settings.m_pocsagSpeed;
         sourceRequest.m_pocsagInverted = (request.m_polarity < 0) ? m_settings.m_pocsagInverted : (request.m_polarity == 1);
-        RadioPagingPocsagTxStream trial(false, sourceRequest.m_pocsagBaud, sourceRequest.m_pocsagInverted);
+        sourceRequest.m_pocsagSchedule.m_repeat = request.m_retransmit;
+        sourceRequest.m_pocsagSchedule.m_delayMs = (int64_t) std::llround(request.m_sendDelay * 1000.0);
+        sourceRequest.m_pocsagSchedule.m_intervalMs = (request.m_retransmitInterval < 0.0) ? 10000
+            : (int64_t) std::llround(request.m_retransmitInterval * 1000.0);
+        RadioPagingPocsagTxStream trial(network, sourceRequest.m_pocsagBaud, sourceRequest.m_pocsagInverted);
 
-        if (!trial.add(sourceRequest.m_pocsag, sourceRequest.m_pocsagBaud, sourceRequest.m_pocsagInverted, 0, error)) {
+        if (!trial.add(sourceRequest.m_pocsag, sourceRequest.m_pocsagBaud, sourceRequest.m_pocsagInverted, 0, error,
+            sourceRequest.m_pocsagSchedule))
+        {
             return QString::fromStdString(error);
         }
     }
@@ -222,6 +245,12 @@ QString RadioPagingMod::checkRequest(const TxRequest& request, RadioPagingModSou
 
         sourceRequest.m_flex = request.m_flex;
         sourceRequest.m_flexInverted = (request.m_polarity < 0) ? m_settings.m_flexInverted : (request.m_polarity == 1);
+        // Seconds to frames of 1.875 s, rounded up: the message is not sent earlier than asked
+        auto frames = [](double seconds) { return (int) std::ceil(seconds * 1000.0 / RadioPagingFlex::m_frameMs - 1e-9); };
+        sourceRequest.m_flex.m_retransmit = request.m_retransmit;
+        sourceRequest.m_flex.m_retransmitInterval = (request.m_retransmitInterval < 0.0) ? 128
+            : std::max(1, frames(request.m_retransmitInterval));
+        sourceRequest.m_flex.m_sendDelay = frames(request.m_sendDelay);
         // Network: the capcode must listen to some frame of the collapse (mixed: of the frames
         // transmitted); one-shot frames are collapse 0
         bool added;
@@ -233,8 +262,9 @@ QString RadioPagingMod::checkRequest(const TxRequest& request, RadioPagingModSou
         }
         else
         {
-            RadioPagingFlexTxStream trial(m_settings.m_mode == RadioPagingModSettings::Network,
-                (RadioPagingFlex::Mode) m_settings.m_flexMode, m_settings.m_flexInverted, m_settings.m_flexCollapse);
+            RadioPagingFlexTxStream trial(network, (RadioPagingFlex::Mode) m_settings.m_flexMode, m_settings.m_flexInverted,
+                m_settings.m_flexCollapse);
+            trial.setNumbering(RadioPagingModSource::numbering(m_settings), error);
             added = trial.add(sourceRequest.m_flex, sourceRequest.m_flexInverted, 0, error);
         }
 
@@ -342,6 +372,11 @@ quint64 RadioPagingMod::transmit(const TxRequest& request, QString& error, QStri
     // The record of the message in the log of the transmitter, and for the message center once sent
     PendingTx pending;
     fillRecord(request, sourceRequest, sourceRequest.m_id, pending);
+    pending.m_retransmit = request.m_retransmit;
+    // From one copy to the next: the interval, then the wait for a frame or batch the message fits
+    pending.m_copySpanMs = m_copySlackMs + ((sourceRequest.m_protocol == RadioPagingModSettings::Pocsag)
+        ? sourceRequest.m_pocsagSchedule.m_intervalMs
+        : (qint64) sourceRequest.m_flex.m_retransmitInterval * RadioPagingFlex::m_frameMs);
     m_pending[sourceRequest.m_id] = pending;
 
     if (getMessageQueueToGUI()) {
@@ -465,6 +500,14 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
 // the message pipes
 void RadioPagingMod::txEvent(quint64 id, MsgTxEvent::Event event)
 {
+    expireRepeating(QDateTime::currentMSecsSinceEpoch());
+
+    if (event == MsgTxEvent::Repeated)
+    {
+        repeated(id);
+        return;
+    }
+
     auto it = m_pending.find(id);
 
     if (it == m_pending.end()) {
@@ -515,6 +558,64 @@ void RadioPagingMod::txEvent(quint64 id, MsgTxEvent::Event event)
 
     if (sent) {
         publishRecord(pending.m_record);
+    }
+
+    if (sent && (pending.m_retransmit > 0))
+    {
+        RepeatingTx repeating;
+        repeating.m_record = pending.m_record;
+        repeating.m_copies = pending.m_retransmit;
+        repeating.m_copySpanMs = pending.m_copySpanMs;
+        repeating.m_expiresMs = QDateTime::currentMSecsSinceEpoch() + pending.m_copySpanMs;
+        m_repeating[id] = repeating;
+    }
+}
+
+// A copy of a message sent before: a record of its own (a new id), the message as it was sent with the
+// number of the copy; a FLEX copy has R = 0 (STD-43A 3.10.1.1)
+void RadioPagingMod::repeated(quint64 id)
+{
+    auto it = m_repeating.find(id);
+
+    if (it == m_repeating.end()) {
+        return;
+    }
+
+    RepeatingTx& repeating = it->second;
+    MessageRecord record = repeating.m_record;
+
+    repeating.m_sent++;
+    repeating.m_copies--;
+    repeating.m_expiresMs = QDateTime::currentMSecsSinceEpoch() + repeating.m_copySpanMs;
+    record.m_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    record.m_timestamp = QDateTime::currentMSecsSinceEpoch();
+    record.m_protocolData.insert("retransmission", repeating.m_sent);
+    record.m_protocolData.insert("retransmission_of", repeating.m_record.m_id);
+
+    if (record.m_protocol == "flex") {
+        record.m_protocolData.insert("retrieval", false);
+    }
+
+    if (repeating.m_copies <= 0) {
+        m_repeating.erase(it);
+    }
+
+    if (getMessageQueueToGUI()) {
+        getMessageQueueToGUI()->push(MsgTxLog::create(record, "sent"));
+    }
+
+    publishRecord(record);
+}
+
+void RadioPagingMod::expireRepeating(qint64 nowMs)
+{
+    for (auto it = m_repeating.begin(); it != m_repeating.end();)
+    {
+        if (nowMs > it->second.m_expiresMs) {
+            it = m_repeating.erase(it);
+        } else {
+            ++it;
+        }
     }
 }
 
@@ -1363,6 +1464,10 @@ int RadioPagingMod::webapiActionsPost(
             request.m_gsc.m_text = (tone || (type == "voice")) ? std::string() : text;
             request.m_voiceFile = (type == "voice") ? QString::fromStdString(text) : QString();
         }
+
+        request.m_retransmit = swgTx->getRetransmit();
+        request.m_retransmitInterval = swgTx->getRetransmitInterval();
+        request.m_sendDelay = swgTx->getSendDelay();
 
         // Checked here for the reply; it is checked again when queued, after the settings
         // posted before it

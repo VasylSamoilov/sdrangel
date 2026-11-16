@@ -24,6 +24,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -48,6 +49,7 @@ struct RadioPagingTxBlock
     double m_shaping = 0.0;             //!< Gaussian cutoff of the block, Hz
     double m_deviation = 0.0;           //!< Deviation of the outer symbol, Hz; 0: the modulator's
     std::vector<uint64_t> m_ids;        //!< Messages completed by the block
+    std::vector<uint64_t> m_repeatIds;  //!< Copies completed by the block of messages sent before (retransmissions)
     std::vector<uint64_t> m_startIds;   //!< Messages that go on air with the block and complete in a later one (voice pages)
     bool m_ers = false;                 //!< FLEX emergency re-synchronization
 
@@ -98,8 +100,26 @@ public:
 
     RadioPagingPocsagTxStream(bool network, int baud, bool inverted);
 
-    //!< Queue a message at a speed and polarity. False and an error if it can not be encoded
+    //! When a message is sent (network only): the first transmission waits m_delayMs from the moment it is queued,
+    //! then it is sent m_repeat times more, m_intervalMs apart (from the batch it went in)
+    struct Schedule
+    {
+        int m_repeat = 0;               //!< 0-10
+        int64_t m_delayMs = 0;
+        int64_t m_intervalMs = 10000;
+    };
+
+    static const int m_maxRepeat = 10;
+    static const int64_t m_maxScheduleMs = 3600000;    //!< Longest delay and interval: an hour
+
+    //!< Queue a message at a speed and polarity. False and an error if it can not be encoded, or a schedule with
+    //!< repeats or a delay is given to a one-shot stream (a transmission ends with its last message)
+    bool add(const RadioPagingPocsag::TxMessage& message, int baud, bool inverted, uint64_t id, std::string& error,
+        const Schedule& schedule);
     bool add(const RadioPagingPocsag::TxMessage& message, int baud, bool inverted, uint64_t id, std::string& error);
+    //!< Time of the next block, ms since the Unix epoch: kept by next() from begin(); a mixed stream sets it before
+    //!< nextMixed()
+    void setTime(int64_t nowMs) { m_nowMs = nowMs; }
     //!< Group of the idle batches when the network starts (network only)
     void setDefaultGroup(int baud, bool inverted);
     //!< Group being sent
@@ -137,6 +157,11 @@ private:
     {
         RadioPagingPocsag::TxMessage m_message;
         uint64_t m_id;
+        int64_t m_delayMs = 0;
+        int64_t m_notBefore = -1;       //!< ms since the epoch it may be sent from, -1 until set (with m_delayMs)
+        int m_repeatsLeft = 0;
+        int64_t m_intervalMs = 0;
+        bool m_repeat = false;          //!< A copy sent again: its id was reported with the first transmission
     };
 
     bool m_network;
@@ -148,8 +173,18 @@ private:
     std::map<Group, std::deque<Item>> m_queues;
     std::deque<std::pair<Group, Item>> m_oneShot;   //!< One-shot: in arrival order
     bool m_inTransmission;
+    int64_t m_nowMs = 0;
 
     bool nextGroup(Group& group) const;
+    bool nextNetwork(RadioPagingTxBlock& block);
+    //!< The delay of the messages queued since the last block starts now
+    void startDelays();
+    //!< Items of the queue that may be sent now (their delay or interval is over); the delay of new ones starts now
+    std::vector<size_t> dueItems(std::deque<Item>& queue);
+    bool hasDue(const std::deque<Item>& queue) const;
+    //!< Take the items sent from the queue (indexes ascending), queue their repeats; the ids of first transmissions,
+    //!< and of the copies in repeatIds
+    std::vector<uint64_t> takeSent(std::deque<Item>& queue, const std::vector<size_t>& sent, std::vector<uint64_t>& repeatIds);
 };
 
 // FLEX (ARIB RCR STD-43A): one network, in one mode and polarity (2.1.3 defines one mapping
@@ -237,7 +272,8 @@ public:
 private:
     bool m_network;
     RadioPagingFlexEncoder m_encoders[2];       //!< Normal, inverted
-    std::map<uint32_t, uint64_t> m_ids[2];      //!< Encoder id to caller id
+    std::map<uint32_t, uint64_t> m_ids[2];      //!< Encoder id to caller id, until the last retransmission
+    std::set<uint32_t> m_sent[2];               //!< Encoder ids sent once, waiting for retransmissions
     bool m_inverted;                            //!< Polarity of the network
     bool m_nextInverted;                        //!< Polarity of the next transmission
     int m_collapse;                             //!< Of the frames: network collapse, 0 for one-shot
@@ -388,7 +424,8 @@ public:
     const Config& config() const { return m_config; }
 
     bool addFlex(const RadioPagingFlexEncoder::TxMessage& message, bool inverted, uint64_t id, std::string& error);
-    bool addPocsag(const RadioPagingPocsag::TxMessage& message, int baud, bool inverted, uint64_t id, std::string& error);
+    bool addPocsag(const RadioPagingPocsag::TxMessage& message, int baud, bool inverted, uint64_t id, std::string& error,
+        const RadioPagingPocsagTxStream::Schedule& schedule = RadioPagingPocsagTxStream::Schedule());
 
     bool hasWork() const override { return true; }
     void begin(int64_t epochMs) override;

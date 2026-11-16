@@ -2682,6 +2682,109 @@ void testNumbering()
     }
 }
 
+// Retransmission and send delay (STD-43A 4.3.7.6: a message sent again has its number and R = 0)
+void testRetransmission()
+{
+    auto msg = [](const std::string& text) {
+        Enc::TxMessage m;
+        m.m_capcode = 4096;
+        m.m_type = Flex::Alphanumeric;
+        m.m_text = text;
+        return m;
+    };
+
+    // Collapse 0: every frame is a frame of the pager
+    {
+        Enc enc;
+        Enc::TxMessage m = msg("again and again");
+        m.m_sendDelay = 5;
+        m.m_retransmit = 2;
+        m.m_retransmitInterval = 10;
+        Enc::EnqueueResult er = enc.enqueue(m);
+        Dec dec;
+        std::vector<std::pair<uint64_t, Dec::Message>> got;
+        int sent = 0, retransmitted = 0, done = 0;
+
+        for (uint64_t index = 100; (index < 200) && (enc.pending() > 0); index++)
+        {
+            Enc::Frame f = enc.buildFrame(index);
+            sent += (int) f.m_sentIds.size();
+            retransmitted += (int) f.m_retransmittedIds.size();
+            done += (int) f.m_doneIds.size();
+            for (const Dec::Message& r : dec.decodeFrame(toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data))) {
+                got.push_back(std::make_pair(index, r));
+            }
+        }
+
+        bool ok = er.m_ok && (got.size() == 3) && (sent == 1) && (retransmitted == 2) && (done == 1) && (enc.pending() == 0);
+        if (ok)
+        {
+            ok = (got[0].first == 105) && (got[1].first == 115) && (got[2].first == 125)
+                && got[0].second.m_retrieval && !got[1].second.m_retrieval && !got[2].second.m_retrieval
+                && (got[0].second.m_messageNumber == got[1].second.m_messageNumber) && (got[1].second.m_messageNumber == got[2].second.m_messageNumber)
+                && !got[0].second.m_duplicate && got[1].second.m_duplicate && got[2].second.m_duplicate;
+        }
+        std::string why;
+        for (const auto& g : got) {
+            why += " " + std::to_string(g.first) + ":N" + std::to_string(g.second.m_messageNumber) + "R" + std::to_string(g.second.m_retrieval)
+                + "d" + std::to_string(g.second.m_duplicate);
+        }
+        check(ok, ("retransmission: after the send delay, twice again at the interval with the number and R = 0, the id sent once ("
+            + why + ")").c_str());
+    }
+
+    // A message in fragments is sent again whole, its first fragment in a frame of the pager
+    {
+        Enc enc;
+        std::string error;
+        enc.setCollapse(2, error);
+        std::string chars;
+        for (int i = 0; i < 600; i++) {
+            chars += (char) ('a' + (i % 26));
+        }
+        Enc::TxMessage m = msg(chars);
+        m.m_retransmit = 1;
+        m.m_retransmitInterval = 6;
+        enc.enqueue(m);
+        Dec dec;
+        std::vector<Dec::Message> whole;
+        for (uint64_t index = 0; (index < 400) && (enc.pending() > 0); index++)
+        {
+            Enc::Frame f = enc.buildFrame(index);
+            for (const Dec::Message& r : dec.decodeFrame(toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data)))
+            {
+                if (r.m_complete && (r.m_text == chars)) {
+                    whole.push_back(r);
+                }
+            }
+        }
+        bool ok = (whole.size() == 2) && whole[0].m_retrieval && !whole[1].m_retrieval
+            && (whole[0].m_messageNumber == whole[1].m_messageNumber) && whole[1].m_duplicate;
+        check(ok, "retransmission: a message in fragments is sent again whole, the copy a duplicate");
+    }
+
+    // Refused: messages without numbers, a network without numbering, out of range
+    {
+        Enc enc;
+        std::string error;
+        Enc::TxMessage tone = msg("");
+        tone.m_type = Flex::Tone;
+        tone.m_retransmit = 1;
+        Enc::TxMessage many = msg("x");
+        many.m_retransmit = 16;
+        Enc::TxMessage late = msg("x");
+        late.m_sendDelay = 1921;
+        bool ok = !enc.enqueue(tone).m_ok && !enc.enqueue(many).m_ok && !enc.enqueue(late).m_ok;
+        Enc::Numbering numbering;
+        numbering.m_enabled = false;
+        enc.setNumbering(numbering, error);
+        Enc::TxMessage again = msg("x");
+        again.m_retransmit = 1;
+        ok = ok && !enc.enqueue(again).m_ok;
+        check(ok, "retransmission: refused for messages without numbers, a network without numbering and out of range");
+    }
+}
+
 void testTime()
 {
     // Fig. 3.7.2-1: date word of December 31, 1999, the 32 bits in transmission order
@@ -2841,6 +2944,7 @@ int main()
         "record address: capcode in 10 digits");
     testTime();
     testNumbering();
+    testRetransmission();
     testFragmentScheduling();
     testBinaryTx();
     testHexBits();

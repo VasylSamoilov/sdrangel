@@ -60,7 +60,8 @@ public:
         RadioPagingPocsag::TxMessage m_pocsag;
         int m_pocsagBaud = 1200;
         bool m_pocsagInverted = false;
-        RadioPagingFlexEncoder::TxMessage m_flex;
+        RadioPagingPocsagTxStream::Schedule m_pocsagSchedule;   //!< Repeats and send delay (network)
+        RadioPagingFlexEncoder::TxMessage m_flex;           //!< With its retransmissions and send delay (network)
         bool m_flexInverted = false;    //!< The network polarity, or the other one (frames given to it when free)
         RadioPagingGsc::TxMessage m_gsc;
         bool m_gscInverted = false;     //!< The polarity of the transmission the message goes in
@@ -128,6 +129,8 @@ public:
     void setNotifyTransmitted(const std::function<void(quint64 id)>& notify) { m_notifyTransmitted = notify; }
     //! Called when a message can not be transmitted at all (it does not encode, the protocol is not the channel's)
     void setNotifyFailed(const std::function<void(quint64 id)>& notify) { m_notifyFailed = notify; }
+    //! Called when a copy of a message sent before (a retransmission) was sent. A copy that is not sent is not reported
+    void setNotifyRepeated(const std::function<void(quint64 id)>& notify) { m_notifyRepeated = notify; }
     //! Voice of the live voice page being sent (taken once its alert time is over)
     void pushLive(const std::vector<float>& samples);
     //! The live voice page ends: the turn-off word follows
@@ -143,6 +146,7 @@ private:
     {
         quint64 m_endSymbol;            //!< Symbols pushed when the block was complete
         std::vector<uint64_t> m_ids;
+        std::vector<uint64_t> m_repeatIds;
     };
 
     int m_channelSampleRate;
@@ -185,6 +189,7 @@ private:
     std::function<void(quint64, bool)> m_notify;
     std::function<void(quint64)> m_notifyTransmitted;
     std::function<void(quint64)> m_notifyFailed;
+    std::function<void(quint64)> m_notifyRepeated;
     void fail(const std::vector<uint64_t>& ids);
     void drop(const std::vector<uint64_t>& ids);
     void makeStream();

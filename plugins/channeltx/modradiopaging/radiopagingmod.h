@@ -60,6 +60,12 @@ public:
         RadioPagingGscTxStream::Voice m_voice;  //!< The file loaded when the request was checked, not loaded again
         bool m_live = false;            //!< GSC voice page from the microphone: the voice comes with MsgLiveVoice, up to MsgLiveEnd
         QString m_pageId;               //!< Page of the message center: its id is the id of the record, its states are reported
+        // When the message is sent, network mode only: retransmissions (FLEX: numbered messages of a network with
+        // message numbering, again with the number and R = 0; POCSAG: repeats), seconds between them (-1: 240 s FLEX,
+        // 10 s POCSAG) and seconds before the first transmission. FLEX takes them in frames of 1.875 s, rounded up
+        int m_retransmit = 0;
+        double m_retransmitInterval = -1.0;
+        double m_sendDelay = 0.0;
     };
 
     class MsgConfigureRadioPagingMod : public Message {
@@ -138,7 +144,7 @@ public:
         MESSAGE_CLASS_DECLARATION
 
     public:
-        enum Event { Transmitted, Sent, Dropped, Failed };
+        enum Event { Transmitted, Sent, Dropped, Failed, Repeated };
 
         quint64 getId() const { return m_id; }
         Event getEvent() const { return m_event; }
@@ -231,6 +237,7 @@ public:
 
     static const int m_maxQueued = 100;     //!< Messages not sent yet before requests are refused
     static const int m_maxTextLength = 2000;    //!< Characters of a message
+    static const qint64 m_copySlackMs = 3600000;    //!< Retransmissions: longest wait of a copy past its interval (queue, frames)
 
     RadioPagingMod(DeviceAPI *deviceAPI);
     virtual ~RadioPagingMod();
@@ -335,8 +342,23 @@ private:
         bool m_isVoice = false;
         QString m_pageId;                       //!< Page of the message center, empty if none
         bool m_transmitted = false;             //!< Its blocks were pushed to the modulator
+        int m_retransmit = 0;                   //!< Copies sent after it
+        qint64 m_copySpanMs = 0;                //!< Longest time from one copy to the next
     };
     std::map<quint64, PendingTx> m_pending;
+    // Messages sent with copies to go (main thread only): the record of the copies. A copy that is not sent (the
+    // queue cleared, the transmission cut) is not reported: the entry goes when no copy can come any more
+    struct RepeatingTx
+    {
+        MessageRecord m_record;
+        int m_copies = 0;                       //!< Copies to go
+        int m_sent = 0;                         //!< Copies sent
+        qint64 m_copySpanMs = 0;
+        qint64 m_expiresMs = 0;                 //!< No copy after this time
+    };
+    std::map<quint64, RepeatingTx> m_repeating;
+    void repeated(quint64 id);
+    void expireRepeating(qint64 nowMs);
     void fillRecord(const TxRequest& request, const RadioPagingModSource::Request& sourceRequest, quint64 id, PendingTx& pending);
     void txEvent(quint64 id, MsgTxEvent::Event event);
     //! The state of a page of the message center, on the messages pipe (see MessageCenterEngine::applyEvent)

@@ -93,6 +93,25 @@ std::vector<uint8_t> RadioPagingPocsagTxStream::idleBatchBits()
 bool RadioPagingPocsagTxStream::add(const RadioPagingPocsag::TxMessage& message, int baud, bool inverted,
     uint64_t id, std::string& error)
 {
+    return add(message, baud, inverted, id, error, Schedule());
+}
+
+bool RadioPagingPocsagTxStream::add(const RadioPagingPocsag::TxMessage& message, int baud, bool inverted,
+    uint64_t id, std::string& error, const Schedule& schedule)
+{
+    if ((schedule.m_repeat < 0) || (schedule.m_repeat > m_maxRepeat) || (schedule.m_delayMs < 0) || (schedule.m_delayMs > m_maxScheduleMs)
+        || (schedule.m_intervalMs < 0) || (schedule.m_intervalMs > m_maxScheduleMs))
+    {
+        error = "Repeats 0 to 10, delay and interval 0 to 3600 s";
+        return false;
+    }
+    // A one-shot transmission ends with its last message: nothing waits for later
+    if (!m_network && ((schedule.m_repeat > 0) || (schedule.m_delayMs > 0)))
+    {
+        error = "Repeat and send delay need the network mode";
+        return false;
+    }
+
     RadioPagingPocsag::EncodeResult trial = RadioPagingPocsag::encode({ message });
 
     if (!trial.m_ok)
@@ -102,6 +121,9 @@ bool RadioPagingPocsagTxStream::add(const RadioPagingPocsag::TxMessage& message,
     }
 
     Item item{message, id};
+    item.m_delayMs = schedule.m_delayMs;
+    item.m_repeatsLeft = schedule.m_repeat;
+    item.m_intervalMs = schedule.m_intervalMs;
     Group group(baud, inverted);
 
     if (m_network) {
@@ -131,7 +153,7 @@ bool RadioPagingPocsagTxStream::hasWork() const
 
 void RadioPagingPocsagTxStream::begin(int64_t epochMs)
 {
-    (void) epochMs;
+    m_nowMs = epochMs;
     m_group = m_defaultGroup;
     m_preambleDue = true;
     m_idleBatches = 0;
@@ -159,13 +181,92 @@ std::vector<uint64_t> RadioPagingPocsagTxStream::clear()
     }
     for (const auto& q : m_queues)
     {
-        for (const Item& item : q.second) {
-            ids.push_back(item.m_id);
+        for (const Item& item : q.second)
+        {
+            // A repeat: the message was reported with its first transmission
+            if (!item.m_repeat) {
+                ids.push_back(item.m_id);
+            }
         }
     }
 
     m_oneShot.clear();
     m_queues.clear();
+    return ids;
+}
+
+std::vector<size_t> RadioPagingPocsagTxStream::dueItems(std::deque<Item>& queue)
+{
+    std::vector<size_t> due;
+
+    for (size_t i = 0; i < queue.size(); i++)
+    {
+        Item& item = queue[i];
+
+        if (item.m_notBefore < 0) {
+            item.m_notBefore = m_nowMs + item.m_delayMs;
+        }
+        if (m_nowMs >= item.m_notBefore) {
+            due.push_back(i);
+        }
+    }
+
+    return due;
+}
+
+void RadioPagingPocsagTxStream::startDelays()
+{
+    for (auto& q : m_queues)
+    {
+        for (Item& item : q.second)
+        {
+            if (item.m_notBefore < 0) {
+                item.m_notBefore = m_nowMs + item.m_delayMs;
+            }
+        }
+    }
+}
+
+bool RadioPagingPocsagTxStream::hasDue(const std::deque<Item>& queue) const
+{
+    for (const Item& item : queue)
+    {
+        if ((item.m_notBefore >= 0) && (m_nowMs >= item.m_notBefore)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+std::vector<uint64_t> RadioPagingPocsagTxStream::takeSent(std::deque<Item>& queue, const std::vector<size_t>& sent,
+    std::vector<uint64_t>& repeatIds)
+{
+    std::vector<uint64_t> ids;
+    std::vector<Item> repeats;
+
+    repeatIds.clear();
+
+    for (size_t k = sent.size(); k-- > 0;)
+    {
+        Item item = queue[sent[k]];
+        queue.erase(queue.begin() + (long) sent[k]);
+
+        if (!item.m_repeat) {
+            ids.insert(ids.begin(), item.m_id);
+        } else {
+            repeatIds.insert(repeatIds.begin(), item.m_id);
+        }
+        if (item.m_repeatsLeft > 0)
+        {
+            item.m_repeatsLeft--;
+            item.m_repeat = true;
+            item.m_notBefore = m_nowMs + item.m_intervalMs;
+            repeats.insert(repeats.begin(), item);
+        }
+    }
+
+    queue.insert(queue.end(), repeats.begin(), repeats.end());
     return ids;
 }
 
@@ -186,7 +287,7 @@ bool RadioPagingPocsagTxStream::nextGroup(Group& group) const
         Group candidate = carousel[(current + i) % carouselSize];
         auto it = m_queues.find(candidate);
 
-        if ((candidate != m_group) && (it != m_queues.end()) && !it->second.empty())
+        if ((candidate != m_group) && (it != m_queues.end()) && hasDue(it->second))
         {
             group = candidate;
             return true;
@@ -222,7 +323,20 @@ bool RadioPagingPocsagTxStream::next(RadioPagingTxBlock& block)
     }
 
     m_inTransmission = true;
+    startDelays();
 
+    bool sent = nextNetwork(block);
+
+    // The time of the next block
+    if (sent && (block.m_baud > 0.0)) {
+        m_nowMs += (int64_t) std::llround((double) block.m_levels.size() * 1000.0 / block.m_baud);
+    }
+
+    return sent;
+}
+
+bool RadioPagingPocsagTxStream::nextNetwork(RadioPagingTxBlock& block)
+{
     if (m_preambleDue)
     {
         block.m_baud = m_group.first;
@@ -234,20 +348,21 @@ bool RadioPagingPocsagTxStream::next(RadioPagingTxBlock& block)
     }
 
     std::deque<Item>& queue = m_queues[m_group];
+    std::vector<size_t> due = dueItems(queue);
     Group other;
     bool otherWaiting = nextGroup(other);
 
     // The turn of a busy group ends when another one waits
-    if (!queue.empty() && !(otherWaiting && (m_turnBlocks >= m_maxBlocksPerTurn)))
+    if (!due.empty() && !(otherWaiting && (m_turnBlocks >= m_maxBlocksPerTurn)))
     {
-        // The messages queued at this batch boundary, in their batches. They were encoded
+        // The messages due at this batch boundary, in their batches. They were encoded
         // one by one when queued; together they encode as well, checked all the same
         std::vector<RadioPagingPocsag::TxMessage> messages;
         RadioPagingPocsag::EncodeOptions options;
         options.m_preamble = false;
 
-        for (const Item& item : queue) {
-            messages.push_back(item.m_message);
+        for (size_t i : due) {
+            messages.push_back(queue[i].m_message);
         }
 
         RadioPagingPocsag::EncodeResult result = RadioPagingPocsag::encode(messages, options);
@@ -256,18 +371,11 @@ bool RadioPagingPocsagTxStream::next(RadioPagingTxBlock& block)
         {
             // Sent one by one, the first now
             messages.resize(1);
+            due.resize(1);
             result = RadioPagingPocsag::encode(messages, options);
-            block.m_ids.push_back(queue.front().m_id);
-            queue.pop_front();
-        }
-        else
-        {
-            for (const Item& item : queue) {
-                block.m_ids.push_back(item.m_id);
-            }
-            queue.clear();
         }
 
+        block.m_ids = takeSent(queue, due, block.m_repeatIds);
         block.m_baud = m_group.first;
         block.m_shaping = m_group.first;
         block.m_levels = levels(result.m_bits, m_group.second);
@@ -278,9 +386,15 @@ bool RadioPagingPocsagTxStream::next(RadioPagingTxBlock& block)
 
     // Another group: when this one is idle long enough or its turn is over; with nothing to
     // send anywhere, back to the default group
+    bool anyDue = false;
+
+    for (const auto& q : m_queues) {
+        anyDue = anyDue || hasDue(q.second);
+    }
+
     bool turnOver = otherWaiting && (m_turnBlocks >= m_maxBlocksPerTurn);
     bool idle = (m_idleBatches >= m_idleBatchesBeforeSwitch);
-    bool toDefault = idle && !otherWaiting && (m_group != m_defaultGroup) && (pending() == 0);
+    bool toDefault = idle && !otherWaiting && (m_group != m_defaultGroup) && !anyDue;
 
     if ((idle && otherWaiting) || turnOver || toDefault)
     {
@@ -311,10 +425,11 @@ bool RadioPagingPocsagTxStream::nextMixed(RadioPagingTxBlock& block, int64_t max
     const std::function<int64_t(int)>& overhead)
 {
     block = RadioPagingTxBlock();
+    startDelays();
 
     Group other;
     bool otherWaiting = nextGroup(other);
-    bool currentEmpty = m_queues[m_group].empty();
+    bool currentEmpty = !hasDue(m_queues[m_group]);
 
     // The group changes when it has nothing to send, or when its turn is over and another waits
     if (currentEmpty || (otherWaiting && (m_turnBlocks >= m_maxBlocksPerTurn)))
@@ -339,14 +454,15 @@ bool RadioPagingPocsagTxStream::nextMixed(RadioPagingTxBlock& block, int64_t max
     RadioPagingPocsag::EncodeOptions options;
     options.m_preamble = m_preambleDue;
 
-    // As many messages as fit, the first at least
+    // As many messages due as fit, the first at least
+    std::vector<size_t> due = dueItems(queue);
     std::vector<RadioPagingPocsag::TxMessage> messages;
     RadioPagingPocsag::EncodeResult best;
     size_t used = 0;
 
-    for (const Item& item : queue)
+    for (size_t i : due)
     {
-        messages.push_back(item.m_message);
+        messages.push_back(queue[i].m_message);
         RadioPagingPocsag::EncodeResult result = RadioPagingPocsag::encode(messages, options);
 
         if (!result.m_ok || (result.m_bits.size() > maxBits)) {
@@ -361,11 +477,8 @@ bool RadioPagingPocsagTxStream::nextMixed(RadioPagingTxBlock& block, int64_t max
         return false;
     }
 
-    for (size_t i = 0; i < used; i++)
-    {
-        block.m_ids.push_back(queue.front().m_id);
-        queue.pop_front();
-    }
+    due.resize(used);
+    block.m_ids = takeSent(queue, due, block.m_repeatIds);
 
     block.m_baud = m_group.first;
     block.m_shaping = m_group.first;
@@ -403,6 +516,14 @@ bool RadioPagingFlexTxStream::add(const RadioPagingFlexEncoder::TxMessage& messa
     std::string& error)
 {
     int p = inverted ? 1 : 0;
+
+    // A one-shot transmission ends with its last message: nothing waits for later frames
+    if (!m_network && ((message.m_retransmit > 0) || (message.m_sendDelay > 0)))
+    {
+        error = "Retransmission and send delay need the network mode";
+        return false;
+    }
+
     RadioPagingFlexEncoder::EnqueueResult result = m_encoders[p].enqueue(message);
 
     if (!result.m_ok)
@@ -528,11 +649,13 @@ std::vector<uint64_t> RadioPagingFlexTxStream::clear()
     {
         for (const auto& entry : m_ids[p])
         {
-            if (m_encoders[p].remove(entry.first)) {
+            // A message sent already and waiting for a retransmission is not reported again
+            if (m_encoders[p].remove(entry.first) && (m_sent[p].count(entry.first) == 0)) {
                 ids.push_back(entry.second);
             }
         }
         m_ids[p].clear();
+        m_sent[p].clear();
     }
 
     return ids;
@@ -574,15 +697,35 @@ void RadioPagingFlexTxStream::buildFrame()
     int p = ((m_encoders[other].eligible(m_frame) > 0) && !mandatory(m_frame)) ? other : network;
     RadioPagingFlexEncoder::Frame frame = m_encoders[p].buildFrame(m_frame);
     std::vector<uint64_t> ids;
+    std::vector<uint64_t> repeatIds;
 
     for (uint32_t encoderId : frame.m_sentIds)
     {
         auto it = m_ids[p].find(encoderId);
 
-        if (it != m_ids[p].end())
-        {
+        if (it != m_ids[p].end()) {
             ids.push_back(it->second);
-            m_ids[p].erase(it);
+        }
+    }
+    for (uint32_t encoderId : frame.m_retransmittedIds)
+    {
+        auto it = m_ids[p].find(encoderId);
+
+        if (it != m_ids[p].end()) {
+            repeatIds.push_back(it->second);
+        }
+    }
+
+    // A message to retransmit keeps its id until its last retransmission (clear() removes what is left of it)
+    for (uint32_t encoderId : frame.m_doneIds)
+    {
+        m_ids[p].erase(encoderId);
+        m_sent[p].erase(encoderId);
+    }
+    for (uint32_t encoderId : frame.m_sentIds)
+    {
+        if (m_ids[p].count(encoderId) > 0) {
+            m_sent[p].insert(encoderId);
         }
     }
 
@@ -595,8 +738,10 @@ void RadioPagingFlexTxStream::buildFrame()
         block.m_shaping = m_shaping;
         block.m_levels = levels(frame.m_blocks[i]);
 
-        if (i + 1 == frame.m_blocks.size()) {
+        if (i + 1 == frame.m_blocks.size())
+        {
             block.m_ids = ids;
+            block.m_repeatIds = repeatIds;
         }
 
         m_blocks.push_back(block);
@@ -1088,7 +1233,7 @@ bool RadioPagingMixTxStream::addFlex(const RadioPagingFlexEncoder::TxMessage& me
 }
 
 bool RadioPagingMixTxStream::addPocsag(const RadioPagingPocsag::TxMessage& message, int baud, bool inverted,
-    uint64_t id, std::string& error)
+    uint64_t id, std::string& error, const RadioPagingPocsagTxStream::Schedule& schedule)
 {
     RadioPagingPocsag::EncodeResult trial = RadioPagingPocsag::encode({ message });
 
@@ -1113,7 +1258,7 @@ bool RadioPagingMixTxStream::addPocsag(const RadioPagingPocsag::TxMessage& messa
         return false;
     }
 
-    return m_pocsag.add(message, baud, inverted, id, error);
+    return m_pocsag.add(message, baud, inverted, id, error, schedule);
 }
 
 void RadioPagingMixTxStream::begin(int64_t epochMs)
@@ -1329,6 +1474,9 @@ bool RadioPagingMixTxStream::nextPocsag(RadioPagingTxBlock& block)
 
     RadioPagingTxBlock data;
     auto overhead = [this, start](int baud) { return start ? switchTicks(baud) : (int64_t) 0; };
+
+    // The time of the block: the frame starting at the next boundary less the time to it
+    m_pocsag.setTime((int64_t) m_frameIdx * RadioPagingFlex::m_frameMs - (m_toBoundary * 1000) / RadioPagingTxBlock::m_tickRate);
 
     if (!m_pocsag.nextMixed(data, available, overhead)) {
         return false;

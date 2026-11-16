@@ -266,6 +266,10 @@ int MessageCenter::postToTransmitter(const MessageCenterPage& page, QString& err
             : (d.value("function").toInt() & 3));
     }
 
+    tx->setRetransmit(d.value("retransmit", 0).toInt());
+    tx->setRetransmitInterval((float) d.value("retransmit_interval", -1.0).toDouble());
+    tx->setSendDelay((float) d.value("send_delay", 0.0).toDouble());
+
     actions->setTx(tx);
     query.setRadioPagingModActions(actions);
     QStringList keys = {"tx"};
@@ -671,6 +675,17 @@ int MessageCenter::webapiActionsPost(const QStringList& featureActionsKeys, SWGS
         else if (type == "secure")
         {
             record.m_protocolData.insert("secure_type", post->getSecureType());
+        }
+
+        // Scheduling of the transmitter, checked by it (network mode, ranges, numbered FLEX types)
+        if (post->getRetransmit() != 0) {
+            record.m_protocolData.insert("retransmit", post->getRetransmit());
+        }
+        if (post->getRetransmitInterval() >= 0.0f) {
+            record.m_protocolData.insert("retransmit_interval", (double) post->getRetransmitInterval());
+        }
+        if (post->getSendDelay() != 0.0f) {
+            record.m_protocolData.insert("send_delay", (double) post->getSendDelay());
         }
         m_inputMessageQueue.push(MsgPostPage::create(record));
         return 202;

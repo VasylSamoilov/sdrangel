@@ -58,7 +58,19 @@ public:
     void setStatusInfo(qint32 value);
     qint32 getSecureType();
     void setSecureType(qint32 value);
+    qint32 getRetransmit();
+    void setRetransmit(qint32 value);
+    float getRetransmitInterval();
+    void setRetransmitInterval(float value);
+    float getSendDelay();
+    void setSendDelay(float value);
 private:
+    qint32 m_retransmit = 0;
+    bool m_retransmitIsSet = false;
+    float m_retransmitInterval = -1.0f;
+    bool m_retransmitIntervalIsSet = false;
+    float m_sendDelay = 0.0f;
+    bool m_sendDelayIsSet = false;
     qint32 m_blocking = 0;
     bool m_blockingIsSet = false;
     qint32 m_mailDrop = 0;

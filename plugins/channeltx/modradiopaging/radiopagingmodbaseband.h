@@ -113,6 +113,7 @@ public:
     void setNotify(const std::function<void(quint64, bool)>& notify) { m_source.setNotify(notify); }
     void setNotifyTransmitted(const std::function<void(quint64)>& notify) { m_source.setNotifyTransmitted(notify); }
     void setNotifyFailed(const std::function<void(quint64)>& notify) { m_source.setNotifyFailed(notify); }
+    void setNotifyRepeated(const std::function<void(quint64)>& notify) { m_source.setNotifyRepeated(notify); }
     //! Voice of the live voice page and its end, passed to the source (thread safe)
     void pushLive(const std::vector<float>& samples) { m_source.pushLive(samples); }
     void endLive() { m_source.endLive(); }
