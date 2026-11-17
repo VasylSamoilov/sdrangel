@@ -123,11 +123,6 @@ CellularNetworkTab::CellularNetworkTab(QWidget *parent) :
     m_txDeviceSet->setToolTip("The device set (T1, T2 ...) with the Cellular Tx channel; networks may share it");
     form->addRow("Transmitter device set", m_txDeviceSet);
 
-    m_stale = new QLabel("The network runs with the settings it started with: switch it off and on to apply the changes", this);
-    m_stale->setWordWrap(true);
-    m_stale->setStyleSheet("color: orange");
-    m_stale->setVisible(false);
-    layout->addWidget(m_stale);
     m_summary = new QLabel("Not running", this);
     m_summary->setWordWrap(true);
     layout->addWidget(m_summary);
@@ -243,11 +238,6 @@ void CellularNetworkTab::onChanged()
     }
 }
 
-void CellularNetworkTab::setStale(bool stale)
-{
-    m_stale->setVisible(stale);
-}
-
 void CellularNetworkTab::appendLog(const QString& line)
 {
     m_log->appendPlainText(timeStamp() + line);
@@ -255,7 +245,6 @@ void CellularNetworkTab::appendLog(const QString& line)
 
 void CellularNetworkTab::showStatus(const Cellular::MsgReportStatus& report)
 {
-    setStale(report.m_stale);
     m_summary->setText(report.m_summary);
     m_table->setRowCount(report.m_carriers.size());
     for (int row = 0; row < report.m_carriers.size(); row++)

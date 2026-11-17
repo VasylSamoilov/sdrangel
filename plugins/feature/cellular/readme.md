@@ -34,7 +34,7 @@ How far the transmitters run ahead of the receivers. The lead is part of the rou
 
 <h3>Network tab</h3>
 
-Changes of a running network are taken when it is switched off and on again; the tab says so.
+Changes of a running network are taken at once: the network starts again with them, and its calls are cleared. Renaming a network does not start it again.
 
 * Name: the name of the network.
 * On the air while the controller runs: switch a network on or off without touching the others.
