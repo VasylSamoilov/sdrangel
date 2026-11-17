@@ -135,6 +135,10 @@ bool CellularNetworkSettings::parseCarriers(const QString& text, std::vector<mod
 {
     carriers.clear();
     bool anySupervisory = false;
+    QString untoned;                    // the first traffic channel without a tone given
+    const auto isTraffic = [](modemnmt::ChannelType type) {
+        return type == modemnmt::ChannelType::Tc || type == modemnmt::ChannelType::AcTc || type == modemnmt::ChannelType::CcTc;
+    };
 
     for (const QString& item : text.split(',', Qt::SkipEmptyParts))
     {
@@ -193,12 +197,23 @@ bool CellularNetworkSettings::parseCarriers(const QString& text, std::vector<mod
                 return false;
             }
         }
+        else if (isTraffic(c.type))
+        {
+            untoned = untoned.isEmpty() ? item.trimmed() : untoned;
+        }
         carriers.push_back(c);
     }
 
     if (carriers.empty())
     {
         error = "no carriers";
+        return false;
+    }
+    // every call is supervised by a tone: the tones are given for all traffic channels (0 for
+    // none) or for none of them
+    if (anySupervisory && !untoned.isEmpty())
+    {
+        error = QString("\"%1\": give the supervisory tone of every traffic channel (1..4, 0 for none), or of none").arg(untoned);
         return false;
     }
 
@@ -210,7 +225,7 @@ bool CellularNetworkSettings::parseCarriers(const QString& text, std::vector<mod
         for (modemnmt::NmtCarrierConfig& c : carriers)
         {
             // the tone is for channels that carry calls
-            if (c.type == modemnmt::ChannelType::Tc || c.type == modemnmt::ChannelType::AcTc || c.type == modemnmt::ChannelType::CcTc) {
+            if (isTraffic(c.type)) {
                 c.supervisory = (next++ % 4) + 1;
             }
         }

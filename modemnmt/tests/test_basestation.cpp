@@ -41,6 +41,7 @@ static NmtNetworkConfig network(std::vector<int> channels)
         NmtCarrierConfig carrier;
         carrier.channel = channels[i];
         carrier.type = i == 0 ? ChannelType::CcTc : ChannelType::Tc;
+        carrier.supervisory = static_cast<int>(i % 4) + 1;     // every traffic channel has a tone
         c.carriers.push_back(carrier);
     }
     return c;
@@ -208,6 +209,14 @@ static void testPlanErrors()
     CHECK(near);
     NmtBaseStation apart(network({1, 2}));
     CHECK(apart.carriers()[1].issues.empty());
+
+    // a traffic channel without a supervisory tone: a warning, the carrier is on
+    c = network({1, 5});
+    c.carriers[1].supervisory = 0;
+    NmtBaseStation noTone(c);
+    CHECK(noTone.carriers()[1].planned && noTone.carriers()[0].issues.empty());
+    CHECK(noTone.carriers()[1].issues.size() == 1 && !noTone.carriers()[1].issues[0].error);
+    CHECK(noTone.carriers()[1].issues[0].text.find("no supervisory tone") == 0);
 }
 
 static void testBatch()

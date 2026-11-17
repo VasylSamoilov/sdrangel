@@ -50,17 +50,19 @@ public:
 
     public:
         const CellularSettings& getSettings() const { return m_settings; }
-        bool getForce() const { return m_force; }
-        // force (a PUT): the networks that run start again with these settings
-        static MsgConfigureCellular* create(const CellularSettings& settings, bool force = false) {
-            return new MsgConfigureCellular(settings, force);
+        // which running networks start again with the new settings: none (the GUI shows them
+        // as stale), the ones whose settings changed (a PATCH), all of them (a PUT)
+        enum class Restart { None, Changed, All };
+        Restart getRestart() const { return m_restart; }
+        static MsgConfigureCellular* create(const CellularSettings& settings, Restart restart = Restart::None) {
+            return new MsgConfigureCellular(settings, restart);
         }
 
     private:
         CellularSettings m_settings;
-        bool m_force;
-        MsgConfigureCellular(const CellularSettings& settings, bool force) :
-            Message(), m_settings(settings), m_force(force) { }
+        Restart m_restart;
+        MsgConfigureCellular(const CellularSettings& settings, Restart restart) :
+            Message(), m_settings(settings), m_restart(restart) { }
     };
 
     class MsgStartStop : public Message {

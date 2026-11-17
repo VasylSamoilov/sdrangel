@@ -44,7 +44,7 @@ struct CellularNetworkSettings
     int m_area;                 // traffic area Y2 within the country
     int m_areaNo;               // area number 1..4, 0 for none
     int m_msPower;              // power level of the phones 0..3
-    QString m_carriers;         // "1:cctc, 5:tc, 6:tc:2" (see parseCarriers)
+    QString m_carriers;         // "1:cctc:1, 5:tc:2, 6:tc:3" (see parseCarriers)
     bool m_compandor;
     bool m_sendCallerId;
     bool m_sendClock;

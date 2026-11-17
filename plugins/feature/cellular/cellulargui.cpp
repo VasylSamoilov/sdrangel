@@ -98,7 +98,8 @@ CellularNetworkTab::CellularNetworkTab(QWidget *parent) :
     form->addRow("Phone power", m_msPower);
     m_carriers = new QLineEdit(this);
     m_carriers->setToolTip("channel:type[:supervisory], comma separated; every channel needs its type. Types: cc (calling), "
-        "tc (traffic), cctc (both), actc, cca, ccb (NMT-900), test. Supervisory tone 1..4. Example: 1:cctc, 5:tc, 6:tc:2");
+        "tc (traffic), cctc (both), actc, cca, ccb (NMT-900), test. Supervisory tone 1..4 (0 none) on every traffic channel, "
+        "or on none for 1..4 in turn. Example: 1:cctc:1, 5:tc:2, 6:tc:3");
     form->addRow("Carriers", m_carriers);
     m_compandor = new QCheckBox("Compandor on speech", this);
     form->addRow("", m_compandor);

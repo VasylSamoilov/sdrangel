@@ -88,6 +88,13 @@ NmtBaseStation::NmtBaseStation(const NmtNetworkConfig& config) :
         {
             status.issues.push_back({true, "a supervisory tone is for traffic channels only"});
         }
+        else if (status.config.supervisory == 0 && (status.config.type == ChannelType::Tc
+            || status.config.type == ChannelType::AcTc || status.config.type == ChannelType::CcTc))
+        {
+            // every call is supervised by the tone (NMT Doc 450-1 4.1.2): without it a call that
+            // loses the phone is not cleared
+            status.issues.push_back({false, "no supervisory tone: the loss of the phone in a call is not detected"});
+        }
         for (size_t j = 0; j < i; j++)
         {
             if (config.carriers[j].channel == status.config.channel) {

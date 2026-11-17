@@ -43,7 +43,7 @@ Changes of a running network are taken when it is switched off and on again; the
 * Traffic area: the second digit of the traffic area (1 to 9, up to 15 in some countries). Phones that were registered in another area register again.
 * Area number: 1 to 4 keeps the phones of that area, none takes every phone.
 * Phone power: the power level the phones send with, 3 is the highest.
-* Carriers: the channels of the network, comma separated: `channel:type[:supervisory]`. Every channel needs its type: `cc` (calling channel), `tc` (traffic channel), `cctc` (both), `actc`, `cca`, `ccb` (NMT-900) or `test`. A traffic channel may have a supervisory tone 1 to 4. Example: `1:cctc, 5:tc, 6:tc:2`. A network needs a calling channel and as many traffic channels as calls should run at once. When no channel gives a supervisory tone, the traffic channels get the tones 1, 2, 3, 4, 1 ... in turn. A network without a calling or without a traffic channel is warned about in its log.
+* Carriers: the channels of the network, comma separated: `channel:type[:supervisory]`. Every channel needs its type: `cc` (calling channel), `tc` (traffic channel), `cctc` (both), `actc`, `cca`, `ccb` (NMT-900) or `test`. A traffic channel may have a supervisory tone 1 to 4. Example: `1:cctc:1, 5:tc:2, 6:tc:3`. A network needs a calling channel and as many traffic channels as calls should run at once. When no channel gives a supervisory tone, the traffic channels get the tones 1, 2, 3, 4, 1 ... in turn. When one channel gives a tone, every traffic channel needs its tone; 0 is no tone, which is warned about: a call that loses the phone is not cleared. A network without a calling or without a traffic channel is warned about in its log.
 * Compandor on speech, Send the number of the caller, Send the time of day: options of the network.
 * SMS centre: the number the phones send short messages to. Empty: no short messages from the phones.
 * Other numbers: what answers a call to a number that is not registered, echo or music.
@@ -55,7 +55,7 @@ A network is refused if its carriers do not fit one receiving and one transmitti
 
 <h2>Web API</h2>
 
-Settings (`GET`, `PUT`, `PATCH` on `/sdrangel/featureset/{n}/feature/{m}/settings`) and report (`GET .../report`) are documented in the web API documentation under `CellularSettings` and `CellularReport`. A `PATCH` with a `networks` list changes the networks that it names by `id` and starts or stops them as `enabled` says; fields that are not given keep their value. A `PUT` does the same and also starts the networks that run again, with the new settings.
+Settings (`GET`, `PUT`, `PATCH` on `/sdrangel/featureset/{n}/feature/{m}/settings`) and report (`GET .../report`) are documented in the web API documentation under `CellularSettings` and `CellularReport`. A `PATCH` with a `networks` list changes the networks that it names by `id` and starts or stops them as `enabled` says; fields that are not given keep their value; a network that runs starts again when its settings changed. A `PUT` does the same and also starts the networks that run again, with the new settings.
 
 <h2>Limits</h2>
 
