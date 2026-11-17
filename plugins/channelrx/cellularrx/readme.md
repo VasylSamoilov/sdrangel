@@ -2,7 +2,7 @@
 
 <h2>Introduction</h2>
 
-This plugin receives the carriers of the phones of the cellular base stations. Put one on each receiving device set that a [Cellular](../../feature/cellular/readme.md) network uses.
+This plugin receives the carriers of the phones of the cellular base stations. Put one on each receiving device set that a [Cellular](../../feature/cellular/readme.md) network uses. Only one: a network does not start on a device set with two.
 
 The plugin has no radio settings of its own. The Cellular feature gives it the carriers of all networks that use the device. For each carrier it shifts the channel to the center, filters it, demodulates the FM and hands the audio of all carriers to the feature, one block of 10 ms at a time. Its clock is the sample count of the device, which keeps all carriers and networks in step.
 

@@ -50,11 +50,17 @@ public:
 
     public:
         const CellularSettings& getSettings() const { return m_settings; }
-        static MsgConfigureCellular* create(const CellularSettings& settings) { return new MsgConfigureCellular(settings); }
+        bool getForce() const { return m_force; }
+        // force (a PUT): the networks that run start again with these settings
+        static MsgConfigureCellular* create(const CellularSettings& settings, bool force = false) {
+            return new MsgConfigureCellular(settings, force);
+        }
 
     private:
         CellularSettings m_settings;
-        explicit MsgConfigureCellular(const CellularSettings& settings) : Message(), m_settings(settings) { }
+        bool m_force;
+        MsgConfigureCellular(const CellularSettings& settings, bool force) :
+            Message(), m_settings(settings), m_force(force) { }
     };
 
     class MsgStartStop : public Message {
@@ -176,6 +182,9 @@ private:
     };
 
     CellularSettings m_settings;
+    // m_settings changes in the thread of the feature; the web API reads it in the threads of
+    // the HTTP server
+    mutable QMutex m_settingsMutex;
     QThread *m_thread;
     CellularWorker *m_worker;
     bool m_running;

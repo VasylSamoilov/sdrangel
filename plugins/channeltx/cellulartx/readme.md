@@ -2,7 +2,7 @@
 
 <h2>Introduction</h2>
 
-This plugin transmits the carriers of the cellular base stations. Put one on each transmitting device set that a [Cellular](../../feature/cellular/readme.md) network uses.
+This plugin transmits the carriers of the cellular base stations. Put one on each transmitting device set that a [Cellular](../../feature/cellular/readme.md) network uses. Only one: a network does not start on a device set with two.
 
 The plugin has no radio settings of its own. The Cellular feature gives it the carriers of all networks that use the device and the audio of each carrier. The plugin keeps a queue of audio for each carrier, modulates the FM, shifts the carriers to their place in the stream and adds them up, each at an equal share of the output. The sum stays about 1.4 dB below full scale: the channel filters overshoot a little when they band-limit the FM, and the output never clips. Set the output power with the gain of the device.
 
