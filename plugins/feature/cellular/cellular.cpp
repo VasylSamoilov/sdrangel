@@ -81,8 +81,33 @@ bool Cellular::deserialize(const QByteArray& data)
     if (m_guiMessageQueue) {
         m_guiMessageQueue->push(MsgConfigureCellular::create(m_settings));
     }
+    restartNetworks(false);
     applyNetworks();
     return ok;
+}
+
+// the networks that run start again with the settings as they are now: all of them, or the ones
+// whose settings changed (the others go on)
+void Cellular::restartNetworks(bool all)
+{
+    if (!m_running) {
+        return;
+    }
+
+    std::vector<int> restarting;
+    for (const auto& a : m_active)
+    {
+        const CellularNetworkSettings *n = m_settings.network(a.first);
+
+        if (all || (n && !a.second.settings.sameNetwork(*n))) {
+            restarting.push_back(a.first);
+        }
+    }
+    for (int id : restarting)
+    {
+        stopNetwork(id);
+        report(id, all ? "stopped: settings replaced" : "stopped: settings changed");
+    }
 }
 
 int Cellular::webapiRun(bool run, SWGSDRangel::SWGDeviceState& response, QString& errorMessage)
@@ -352,26 +377,7 @@ bool Cellular::handleMessage(const Message& cmd)
             m_settings = cfg.getSettings();
             m_settings.setRollupState(nullptr);
         }
-        if (cfg.getRestart() != MsgConfigureCellular::Restart::None && m_running)
-        {
-            // the networks that run start again with the new settings: all of them, or the ones
-            // whose settings changed
-            const bool all = cfg.getRestart() == MsgConfigureCellular::Restart::All;
-            std::vector<int> restarting;
-            for (const auto& a : m_active)
-            {
-                const CellularNetworkSettings *n = m_settings.network(a.first);
-
-                if (all || (n && !a.second.settings.sameNetwork(*n))) {
-                    restarting.push_back(a.first);
-                }
-            }
-            for (int id : restarting)
-            {
-                stopNetwork(id);
-                report(id, all ? "stopped: settings replaced" : "stopped: settings changed");
-            }
-        }
+        restartNetworks(cfg.getRestart() == MsgConfigureCellular::Restart::All);
         applyNetworks();
         return true;
     }
@@ -419,9 +425,6 @@ bool Cellular::handleMessage(const Message& cmd)
             copy->m_calls = report.m_calls;
             copy->m_summary = report.m_summary;
             copy->m_carriers = report.m_carriers;
-            auto active = m_active.find(report.m_network);
-            const CellularNetworkSettings *current = m_settings.network(report.m_network);
-            copy->m_stale = active != m_active.end() && current && !active->second.settings.sameNetwork(*current);
             getMessageQueueToGUI()->push(copy);
         }
         return true;

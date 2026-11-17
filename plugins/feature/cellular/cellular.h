@@ -50,11 +50,11 @@ public:
 
     public:
         const CellularSettings& getSettings() const { return m_settings; }
-        // which running networks start again with the new settings: none (the GUI shows them
-        // as stale), the ones whose settings changed (a PATCH), all of them (a PUT)
-        enum class Restart { None, Changed, All };
+        // which running networks start again with the new settings: the ones whose settings
+        // changed (the GUI, a PATCH), all of them (a PUT)
+        enum class Restart { Changed, All };
         Restart getRestart() const { return m_restart; }
-        static MsgConfigureCellular* create(const CellularSettings& settings, Restart restart = Restart::None) {
+        static MsgConfigureCellular* create(const CellularSettings& settings, Restart restart = Restart::Changed) {
             return new MsgConfigureCellular(settings, restart);
         }
 
@@ -131,7 +131,6 @@ public:
         };
 
         int m_network;
-        bool m_stale = false;           // the network runs with other settings than the current ones
         bool m_onAir = false;
         int m_registered = 0;
         int m_calls = 0;
@@ -199,6 +198,7 @@ private:
     void stop();
     void startNetwork(const CellularNetworkSettings& network);
     void stopNetwork(int id);
+    void restartNetworks(bool all);
     void applyNetworks();
     ChannelAPI *findChannel(int deviceSetIndex, const QString& uri, QString& error) const;
     MessageQueue *usePipe(ChannelAPI *channel);

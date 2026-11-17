@@ -50,8 +50,6 @@ public:
     void display(const CellularNetworkSettings& settings);
     void read(CellularNetworkSettings& settings) const;
     int id() const { return m_id; }
-    // the network runs with other settings than the shown ones
-    void setStale(bool stale);
     void showStatus(const Cellular::MsgReportStatus& report);
     void appendLog(const QString& line);
 
@@ -78,7 +76,6 @@ private:
     QComboBox *m_fallback;
     QSpinBox *m_rxDeviceSet;
     QSpinBox *m_txDeviceSet;
-    QLabel *m_stale;
     QLabel *m_summary;
     QTableWidget *m_table;
     QPlainTextEdit *m_log;
