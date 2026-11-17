@@ -265,8 +265,9 @@ public:
     static bool isValidAddress(uint64_t capcode);
 
     //!< A capcode as written (STD-43A Appendix A): the digits of the address, or the CAPCODE forms with letters
-    //!< [P|Q|R|S][fff][b]<letter><digits>. Only the address is sent, the rest tells how the pager is set up
-    struct CapcodeText
+    //!< [P|Q|R|S][fff][b]<letter><digits>. Only the address is sent, the rest tells how the pager is set up.
+    //!< Exported on its own: the export of the class does not cover its nested classes
+    struct MODEMRADIOPAGING_API CapcodeText
     {
         uint64_t m_capcode = 0;     //!< The address
         int m_digits = 0;           //!< Digits of the address field
