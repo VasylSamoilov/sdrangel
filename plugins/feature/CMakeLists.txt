@@ -161,6 +161,12 @@ else()
     message(STATUS "Not building freqdisplay (ENABLE_FEATURE_FREQDISPLAY=${ENABLE_FEATURE_FREQDISPLAY})")
 endif()
 
+if (ENABLE_FEATURE_CELLULAR)
+    add_subdirectory(cellular)
+else()
+    message(STATUS "Not building cellular (ENABLE_FEATURE_CELLULAR=${ENABLE_FEATURE_CELLULAR})")
+endif()
+
 if (ENABLE_FEATURE_MCPSERVER)
     add_subdirectory(mcpserver)
 else()

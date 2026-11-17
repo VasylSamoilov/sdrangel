@@ -26,6 +26,7 @@ set(MODEMNMT_LIB_SOURCES
     ../../modemcellular/callrouter.cpp
     ../../modemcellular/carrierqueue.cpp
     ../../modemcellular/carrierradio.cpp
+    ../../modemcellular/carrierwire.cpp
     ../../modemcellular/cellularsystem.cpp
     ../../modemcellular/clock.cpp
     ../../modemcellular/compandor.cpp
