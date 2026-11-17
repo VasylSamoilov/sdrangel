@@ -1311,6 +1311,12 @@ void RadioPagingFlexDecoder::reassemblyExpire()
     }
 }
 
+void RadioPagingFlexDecoder::appendGap(Reassembly& slot)
+{
+    slot.m_text += m_gapCode;
+    slot.m_charStatus += 'G';
+}
+
 void RadioPagingFlexDecoder::emitIncomplete(Reassembly& slot)
 {
     if (slot.m_fragments == 0) {
@@ -1319,7 +1325,14 @@ void RadioPagingFlexDecoder::emitIncomplete(Reassembly& slot)
 
     Message msg = slot.m_message;
 
+    // The fragments that did not come: a lost fragment of unknown length at the end (characters only: secure hex
+    // marks its lost fragments in its bits)
+    if (!slot.m_charStatus.empty()) {
+        appendGap(slot);
+    }
+
     msg.m_text = slot.m_text;
+    msg.m_charStatus = slot.m_charStatus;
     msg.m_fragmented = true;
     msg.m_fragmentCount = slot.m_fragments;
     msg.m_complete = false;

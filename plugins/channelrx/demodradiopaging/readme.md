@@ -153,7 +153,7 @@ The latest messages, newest at the bottom. The table follows new messages while 
 * Pol - N normal or I inverted polarity
 * Address - POCSAG: RIC and function letter. FLEX: capcode. GSC: cap code and function digit
 * Type - ALPHA, NUM, TONE, VOICE, or the FLEX message type (SEC, SPEC, NNUM, NSPEC, BIN, SMSG, SI)
-* Message - the text, (tone only) without content. Control characters are given as &lt;0xNN&gt;. The alternative decode of POCSAG and GSC is shown after the text, in grey
+* Message - the text, (tone only) without content. Control characters are given as &lt;0xNN&gt;. The characters are coloured by how they were received: in the colour of the text when received without errors, amber when their codeword was corrected, red on a red tint when it could not be corrected. A lost character is shown as ? (POCSAG: the characters of a codeword that could not be corrected; FLEX: those of a lost word) and a lost FLEX fragment of unknown length as &lt;...&gt;. The alternative decode of POCSAG and GSC is shown after the text, in grey
 * Fragment - FLEX: the number of a fragment as it was received, REASM n for a message reassembled from n fragments, INCOMPLETE n for a message with fragments missing
 * Info - protocol fields:
   * POCSAG: B batch, TRUNC truncated
@@ -166,8 +166,8 @@ The latest messages, newest at the bottom. The table follows new messages while 
 
 Each message is published on the "messages" pipe as a message record with the protocol, mode, speed, address, polarity, type, text, raw payload (rawData, rawBits), error counts, duplicate, the absolute frequency and the channel (title, device set and channel index, tuning). The protocol specific fields are in protocolData:
 
-* POCSAG: function, batch, truncated, and the type decision: score, alt_type, alt_text, alt_score
-* FLEX: capcode, long_address, addr_type, priority, maildrop, retrieval, cycle, frame, phase, message_number, fragmented, fragment_count, complete, is_fragment, fragment_gap, checksum, signature, kanji, word_map, words_corrected, quality; for group messages group_slot, group_tracked and group_capcodes; for short instructions instruction_type, instruction_slot and instruction_frame
+* POCSAG: function, batch, truncated, word_status (one character for each message codeword: . received, c corrected, X uncorrectable), char_status (the same for each character of the text), and the type decision: score, alt_type, alt_text, alt_score
+* FLEX: capcode, long_address, addr_type, priority, maildrop, retrieval, cycle, frame, phase, message_number, fragmented, fragment_count, complete, is_fragment, fragment_gap, checksum, signature, kanji, word_map, words_corrected, quality; for alphanumeric and secure messages char_status (one character for each character of the text: . received, c corrected, X lost) and alpha_codes and code_status (the 7-bit characters and their status, to decode them again); for group messages group_slot, group_tracked and group_capcodes; for short instructions instruction_type, instruction_slot and instruction_frame
 * GSC: function, address_number, preamble, batch, slot, non_battery_saver, truncated; for data pages checksum_errors, checksum_passed and the type decision; for voice pages voice_end (turn_off, new_transmission, timeout, signal_lost), voice_seconds and voice_file when recorded; for tone only pages interleaved
 
 All records have interpretedBy = decoder.

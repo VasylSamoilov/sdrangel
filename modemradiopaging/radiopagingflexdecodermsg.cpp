@@ -858,6 +858,7 @@ void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& 
         slot.m_signatureSum = info.m_signatureSum;
         slot.m_signatureValid = info.m_wordsOk;
         slot.m_text = msg.m_text;
+        slot.m_charStatus = msg.m_charStatus;
         slot.m_raw = info.m_raw;
         slot.m_bits = info.m_bits;
         slot.m_fragments = 1;
@@ -900,6 +901,8 @@ void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& 
 
             if (secureHex) {
                 slot.m_bits.push_back(2);
+            } else {
+                appendGap(slot);
             }
         }
 
@@ -915,6 +918,7 @@ void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& 
 
         // The hex of a secure message is made of the joined bit stream: a fragment need not end on a digit
         slot.m_text = secureHex ? hexFromBits(slot.m_bits) : (slot.m_text + msg.m_text);
+        slot.m_charStatus = secureHex ? std::string() : (slot.m_charStatus + msg.m_charStatus);
         slot.m_raw.insert(slot.m_raw.end(), info.m_raw.begin(), info.m_raw.end());
         slot.m_fragments++;
         slot.m_lastFrame = m_ctx.m_frame;
@@ -951,6 +955,7 @@ void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& 
         Message out = first;
 
         out.m_text = slot.m_text;
+        out.m_charStatus = slot.m_charStatus;
         out.m_fragment = FragmentLast;
         out.m_fragmentNumber = msg.m_fragmentNumber;
         out.m_fragmentCount = slot.m_fragments;
@@ -1107,6 +1112,7 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
     int startWord = a.m_long ? mw1 : (mw1 + 1);
 
     std::string text;
+    std::string charStatus;         // One for each character of text
     std::vector<uint8_t> chars;     // 7-bit characters of the fragment as sent, signature slot excluded
     uint32_t signature = 0;
     uint32_t sum = 0;
@@ -1123,11 +1129,13 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
                 int lost = ((w == startWord) && sigSlot) ? 2 : 3;
 
                 text.append(lost, '?');
+                charStatus.append(lost, 'X');
                 chars.insert(chars.end(), lost, 0xff);  // Neither NUL nor ETX
                 continue;
             }
 
             uint32_t dw = m_w[w].m_data;
+            const char status = (m_w[w].m_status == WordCorrected) ? 'c' : '.';
 
             for (int slot = 0; slot < 3; slot++)
             {
@@ -1146,8 +1154,10 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
                 if (ch != 0x03) {
                     sum += ch;
                 }
-                if ((ch != 0x03) && (ch != 0)) {
+                if ((ch != 0x03) && (ch != 0))
+                {
                     text += (char) ch;
+                    charStatus += status;
                 }
             }
         }
@@ -1176,6 +1186,7 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
 
     msg.m_type = secure ? TypeSecure : TypeAlphanumeric;
     msg.m_text = text;
+    msg.m_charStatus = charStatus;
     msg.m_fragment = kind;
     msg.m_fragmentNumber = hdrF;
     msg.m_messageNumber = hdrOk ? hdrN : -1;

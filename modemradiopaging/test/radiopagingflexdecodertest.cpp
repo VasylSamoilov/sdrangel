@@ -1014,6 +1014,15 @@ void testFragments()
         check(a.size() == 1 && a[0].m_isFragment && b.size() == 2 && b[0].m_isFragment && !b[1].m_isFragment, "fragments: report fragments option");
     }
     {
+        // A middle fragment lost: its place in the text is a lost fragment of unknown length
+        Dec d;
+        d.decodeFrame(rxOf("fragments", "fragment 0"));
+        std::vector<Dec::Message> out = d.decodeFrame(rxOf("fragments", "fragment 2"));
+        size_t gap = out.empty() ? std::string::npos : out[0].m_text.find(Dec::m_gapCode);
+        check((out.size() == 1) && !out[0].m_complete && (gap != std::string::npos) && (out[0].m_charStatus.size() == out[0].m_text.size())
+            && (out[0].m_charStatus[gap] == 'G'), "fragments: a lost middle fragment is marked in the text");
+    }
+    {
         // A complete message of an address with an open stream: the address may have one while it sends a fragmented
         // message (STD-43A 3.8.5 (3), 4.2.3), the stream stays open
         Dec d;
@@ -1021,7 +1030,8 @@ void testFragments()
         std::vector<Dec::Message> out = d.decodeFrame(rxOf("fragments", "complete during stream"));
         std::vector<Dec::Message> rest = d.flush();
         check(out.size() == 1 && out[0].m_complete && (out[0].m_text == "complete message") && (rest.size() == 1) && !rest[0].m_complete
-            && (rest[0].m_text == "stream start, "),
+            && (rest[0].m_text == std::string("stream start, ") + Dec::m_gapCode) && (rest[0].m_charStatus.back() == 'G')
+            && (rest[0].m_charStatus.size() == rest[0].m_text.size()),
             "fragments: a complete message of the address does not abandon an open stream");
     }
 }

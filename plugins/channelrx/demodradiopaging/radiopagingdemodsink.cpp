@@ -824,8 +824,17 @@ void RadioPagingDemodSink::sendPocsag(const RadioPagingPocsagDecoder::Message& m
     record.m_address = QString::fromStdString(RadioPagingPocsag::addressText(message.m_address, message.m_function));
     record.m_polarity = polarity(message.m_polarity == RadioPagingPocsagDecoder::Inverted);
     record.m_msgType = QString::fromStdString(interpretation.m_type);
-    if (message.m_rawBits > 0) {
-        record.m_text = escapeText(interpretation.m_text);
+    if (message.m_rawBits > 0)
+    {
+        // The characters of the codewords that could not be corrected are '?'; char_status colours the others
+        QString charStatus;
+        record.m_text = RadioPagingRecode::pocsagText(message.m_rawData, message.m_rawBits, interpretation.m_type, charset, fill,
+            message.m_wordStatus, charStatus);
+        record.m_protocolData.insert("word_status", QString::fromStdString(message.m_wordStatus));
+
+        if (!charStatus.isEmpty()) {
+            record.m_protocolData.insert("char_status", charStatus);
+        }
     }
     record.m_rawData = toByteArray(message.m_rawData);
     record.m_rawBits = message.m_rawBits;
@@ -893,14 +902,19 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
     {
         if (!message.m_text.empty() && !message.m_toneOnly)
         {
-            record.m_text = charset
-                ? escapeText(RadioPagingCharset::decode(*charset, std::vector<uint8_t>(message.m_text.begin(), message.m_text.end())))
-                : escapeText(message.m_text);
+            // Lost characters are '?', a lost fragment of unknown length is <...>; char_status colours them
+            QString charStatus;
+            record.m_text = RadioPagingRecode::decodeWithStatus(message.m_text, message.m_charStatus, charset, charStatus);
+
+            if (!charStatus.isEmpty()) {
+                record.m_protocolData.insert("char_status", charStatus);
+            }
         }
         if (charset) {
             record.m_protocolData.insert("charset", RadioPagingPage::charsetData(charset->key()));
-            // The 7-bit characters, to decode them again with another codepage
+            // The 7-bit characters and their status, to decode them again with another codepage
             record.m_protocolData.insert("alpha_codes", QString::fromLatin1(QByteArray(message.m_text.data(), (int) message.m_text.size()).toHex()));
+            record.m_protocolData.insert("code_status", QString::fromStdString(message.m_charStatus));
         }
     }
     record.m_rawData = toByteArray(message.m_rawData);

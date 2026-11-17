@@ -44,6 +44,16 @@ void setInterpretation(const Interpretation& interpretation, const QString& type
     out.m_protocolData.insert("alt_score", first ? interpretation.m_altScore : interpretation.m_score);
 }
 
+// The status of each character of the text, none when it is not known (the text is coloured as a whole)
+void setCharStatus(MessageRecord& out, const QString& charStatus)
+{
+    if (charStatus.isEmpty()) {
+        out.m_protocolData.remove("char_status");
+    } else {
+        out.m_protocolData.insert("char_status", charStatus);
+    }
+}
+
 } // namespace
 
 QStringList RadioPagingRecode::types(const MessageRecord& record)
@@ -103,6 +113,13 @@ bool RadioPagingRecode::redecode(const MessageRecord& record, const RadioPagingC
 
         setInterpretation(RadioPagingPocsag::interpret(raw, record.m_rawBits, codepage,
             record.m_protocolData.contains("fill_codes") ? fill : RadioPagingPocsag::fillMinimal()), as, out);
+
+        // The characters of the codewords that could not be corrected are '?', with the status of each character
+        QString charStatus;
+        out.m_text = pocsagText(raw, record.m_rawBits, as.toStdString(), codepage,
+            record.m_protocolData.contains("fill_codes") ? fill : RadioPagingPocsag::fillMinimal(),
+            record.m_protocolData.value("word_status").toString().toStdString(), charStatus);
+        setCharStatus(out, charStatus);
     }
     else if (record.m_protocol == "gsc")
     {
@@ -135,7 +152,10 @@ bool RadioPagingRecode::redecode(const MessageRecord& record, const RadioPagingC
         }
 
         const QByteArray codes = QByteArray::fromHex(record.m_protocolData.value("alpha_codes").toString().toLatin1());
-        out.m_text = escapeText(RadioPagingCharset::decode(*codepage, std::vector<uint8_t>(codes.begin(), codes.end())));
+        QString charStatus;
+        out.m_text = decodeWithStatus(std::string(codes.begin(), codes.end()), record.m_protocolData.value("code_status").toString().toStdString(),
+            codepage, charStatus);
+        setCharStatus(out, charStatus);
     }
 
     out.m_protocolData.insert("charset", RadioPagingPage::charsetData(codepage->key()));
@@ -164,4 +184,117 @@ QString RadioPagingRecode::escapeText(const std::string& text)
     }
 
     return QString::fromUtf8(out.c_str(), (int) out.size());
+}
+
+namespace {
+
+char worse(char a, char b)
+{
+    auto rank = [](char s) { return (s == 'X') ? 2 : (s == 'c') ? 1 : 0; };
+    return (rank(b) > rank(a)) ? b : a;
+}
+
+} // namespace
+
+QString RadioPagingRecode::decodeWithStatus(const std::string& codes, const std::string& codeStatus,
+    const RadioPagingCharset::Codepage *codepage, QString& charStatus)
+{
+    auto decode = [codepage](const std::string& run) {
+        return RadioPagingRecode::escapeText(codepage ? RadioPagingCharset::decode(*codepage, std::vector<uint8_t>(run.begin(), run.end())) : run);
+    };
+
+    charStatus.clear();
+
+    if (codeStatus.size() != codes.size()) {
+        return decode(codes);
+    }
+
+    QString text;
+    std::string run;
+    std::string runStatus;
+
+    // A run of codes received: decoded together (a codepage may join codes); its characters take the status of their
+    // code when there is one character a code, else the worst of the run
+    auto flush = [&]() {
+        if (run.empty()) {
+            return;
+        }
+
+        QString piece = decode(run);
+        char worst = '.';
+
+        for (char s : runStatus) {
+            worst = worse(worst, s);
+        }
+        for (int i = 0; i < piece.size(); i++) {
+            charStatus += QChar((piece.size() == (int) runStatus.size()) ? runStatus[(size_t) i] : worst);
+        }
+
+        text += piece;
+        run.clear();
+        runStatus.clear();
+    };
+
+    for (size_t i = 0; i < codes.size(); i++)
+    {
+        const char s = codeStatus[i];
+
+        if (s == 'X')
+        {
+            flush();
+            text += '?';
+            charStatus += 'X';
+        }
+        else if (s == 'G')
+        {
+            flush();
+            text += "<...>";
+            charStatus += "XXXXX";
+        }
+        else
+        {
+            run += codes[i];
+            runStatus += (s == 'c') ? 'c' : '.';
+        }
+    }
+
+    flush();
+    return text;
+}
+
+std::string RadioPagingRecode::pocsagCodeStatus(const std::string& wordStatus, size_t codes, int bitsPerCode)
+{
+    std::string status;
+
+    for (size_t i = 0; i < codes; i++)
+    {
+        size_t first = (i * bitsPerCode) / 20;
+        size_t last = (i * bitsPerCode + bitsPerCode - 1) / 20;
+
+        if (last >= wordStatus.size()) {
+            return std::string();
+        }
+
+        char s = wordStatus[first];
+
+        for (size_t w = first + 1; w <= last; w++) {
+            s = worse(s, wordStatus[w]);
+        }
+
+        status += s;
+    }
+
+    return status;
+}
+
+QString RadioPagingRecode::pocsagText(const std::vector<uint8_t>& raw, int rawBits, const std::string& type,
+    const RadioPagingCharset::Codepage *codepage, const std::vector<uint8_t>& fill, const std::string& wordStatus,
+    QString& charStatus)
+{
+    const bool numeric = (type == "numeric");
+    const std::string codes = numeric ? RadioPagingPocsag::decodeNumeric(raw, rawBits)
+        : RadioPagingPocsag::decodeAlphanumeric(raw, rawBits, fill);
+
+    return decodeWithStatus(codes, pocsagCodeStatus(wordStatus, codes.size(), numeric ? 4 : 7), numeric ? nullptr : codepage,
+        charStatus);
 }

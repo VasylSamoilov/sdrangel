@@ -39,6 +39,19 @@ public:
         MessageRecord& out, QString& error);
     //!< The text of a record: the codes below 0x20 and 0x7f as <0xNN>, other bytes kept (UTF-8 passes)
     static QString escapeText(const std::string& text);
+    //!< The text of codes as they were received: the codes received (status . or c) decoded with the codepage (none:
+    //!< the codes are the characters), a lost code (X) as '?', a lost fragment of unknown length (G) as <...>.
+    //!< charStatus: one for each character of the text, . received, c corrected, X lost; empty, and the codes decoded
+    //!< as one, when codeStatus is not one for each code
+    static QString decodeWithStatus(const std::string& codes, const std::string& codeStatus,
+        const RadioPagingCharset::Codepage *codepage, QString& charStatus);
+    //!< POCSAG: the status of each code of a message (bitsPerCode 7 alphanumeric, 4 numeric), the worst of the codewords
+    //!< its bits are in (wordStatus: one for each 20 bits). Empty if wordStatus does not cover the codes
+    static std::string pocsagCodeStatus(const std::string& wordStatus, size_t codes, int bitsPerCode);
+    //!< POCSAG: the text of the message bits as the type (alphanumeric, numeric) with the status of its characters
+    static QString pocsagText(const std::vector<uint8_t>& raw, int rawBits, const std::string& type,
+        const RadioPagingCharset::Codepage *codepage, const std::vector<uint8_t>& fill, const std::string& wordStatus,
+        QString& charStatus);
 };
 
 #endif // MODEMRADIOPAGING_RADIOPAGINGRECODE_H

@@ -20,6 +20,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <string>
 #include <vector>
 
 #include "export.h"
@@ -67,6 +68,8 @@ public:
         int m_function = 0;                 //!< 0-3
         std::vector<uint8_t> m_rawData;     //!< Message bits, packed 8 per byte, first bit in the MSB
         int m_rawBits = 0;                  //!< Number of message bits, a multiple of 20; 0 = tone only
+        //! One character for each message codeword (20 bits): . received, c corrected, X could not be corrected
+        std::string m_wordStatus;
         int m_errorsCorrected = 0;          //!< Bits corrected in the message's codewords
         int m_errorsUncorrectable = 0;      //!< Codewords that could not be corrected
         bool m_truncated = false;           //!< Ended by sync loss or two undecodable codewords
@@ -144,7 +147,7 @@ private:
     void decodeBatch();
     void endTransmission();
     void processCodeword(uint32_t word);
-    void appendMessageBits(uint32_t data);
+    void appendMessageBits(uint32_t data, char status);
     void finishMessage(bool truncated);
 };
 

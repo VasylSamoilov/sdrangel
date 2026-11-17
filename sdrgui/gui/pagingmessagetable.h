@@ -81,6 +81,9 @@ public:
     static void recordInfo(const MessageRecord& record, QString& plain, QString& html, QString& tip);
     //!< The text of the row of the record
     static QString recordText(const MessageRecord& record);
+    //!< The text as HTML, coloured by the status of each character (. received, c corrected, X lost); escaped only
+    //!< when the status is not one for each character
+    static QString statusHtml(const QString& text, const QString& charStatus);
     //!< The audio output of the voice files, by its name in AudioDeviceManager
     void setAudioDevice(const QString& deviceName);
     const QString& audioDevice() const;

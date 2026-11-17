@@ -220,6 +220,10 @@ public:
         bool m_hexLsbFirst = true;          //!< The first bit of a digit is its least significant bit
         bool m_payloadUnknown = false;      //!< The layout of the payload is not published
         std::string m_wordMap;              //!< One character for each message word: . clean, c corrected, X lost; fragments split by |
+        //! Alphanumeric and secure characters: one for each byte of m_text, . received, c in a word that was corrected,
+        //! X lost ('?'), G a lost fragment of unknown length (its byte in m_text is m_gapCode, not a character). Empty
+        //! otherwise
+        std::string m_charStatus;
 
         // Errors in the address, vector and message words
         int m_wordsCorrected = 0;
@@ -409,6 +413,8 @@ public:
     static const char *fragmentKindName(FragmentKind kind);
 
     static const int m_reassemblySlots = 16;
+    //!< Byte of a lost fragment of unknown length in the text of a reassembled message (SUB), status G
+    static const char m_gapCode = 0x1a;
     static const int m_reassemblyMaxLength = 4096;
     static const int m_reassemblyTimeout = 64;      //!< Frames without a fragment
     static const int m_historySize = 1024;
@@ -526,6 +532,7 @@ private:
         std::string m_text;
         std::vector<uint32_t> m_raw;
         std::vector<int8_t> m_bits;         //!< Secure hex: data bits of the fragments, 2 where fragments are lost
+        std::string m_charStatus;           //!< Of m_text: see Message::m_charStatus
         Message m_message;                  //!< Fields of the first fragment, counters of all
     };
 
@@ -654,6 +661,8 @@ private:
     void reassemblyInvalidate(uint64_t capcode, int excludeNumber);
     void reassemblyExpire();
     void emitIncomplete(Reassembly& slot);
+    //!< A lost fragment of unknown length in the characters of a reassembly: m_gapCode, status G
+    static void appendGap(Reassembly& slot);
 
     // History: as a pager, the last m_historyBacklog messages of each capcode
     //!< A stored copy of a message among the messages of the capcode: the same number, vector, phase and length,

@@ -288,6 +288,40 @@ QString PagingMessageTable::recordText(const MessageRecord& record)
     return record.m_text;
 }
 
+QString PagingMessageTable::statusHtml(const QString& text, const QString& charStatus)
+{
+    if (charStatus.size() != text.size()) {
+        return text.toHtmlEscaped();
+    }
+
+    QString html;
+    int i = 0;
+
+    while (i < text.size())
+    {
+        const QChar s = charStatus[i];
+        int j = i;
+
+        while ((j < text.size()) && (charStatus[j] == s)) {
+            j++;
+        }
+
+        const QString run = text.mid(i, j - i).toHtmlEscaped();
+
+        if (s == 'X') {
+            html += QString("<span style=\"color:#ff5252;font-weight:bold;background-color:rgba(255,82,82,0.18)\">%1</span>").arg(run);
+        } else if (s == 'c') {
+            html += QString("<span style=\"color:#ffca28\">%1</span>").arg(run);
+        } else {
+            html += run;
+        }
+
+        i = j;
+    }
+
+    return html;
+}
+
 // Chips of the protocol fields of a record, plain text and HTML
 void PagingMessageTable::recordInfo(const MessageRecord& record, QString& plain, QString& html, QString& tip)
 {
@@ -501,9 +535,10 @@ void PagingMessageTable::fillRow(int row, const MessageRecord& record, const QSt
     cell(ColAddress, record.m_address);
     cell(ColType, record.m_msgType, typeChip(record.m_msgType), record.m_msgType);
 
-    // Message, with the alternative decode in grey italics
+    // Message, with the alternative decode in grey italics. With the status of each character: received in the
+    // colour of the text, corrected amber, lost red on a red tint (shown as '?' or <...>)
     QString text = recordText(record);
-    QString messageHtml = text.toHtmlEscaped();
+    QString messageHtml = statusHtml(text, d.value("char_status").toString());
     QString messageTip = text;
     QString altText = d.value("alt_text").toString();
 

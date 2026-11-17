@@ -25,6 +25,8 @@
 #include "radiopagingpage.h"
 #include "radiopagingflex.h"
 #include "radiopagingpocsag.h"
+#include "radiopagingrecode.h"
+#include "radiopagingcharset.h"
 namespace {
 
 int passes = 0;
@@ -314,6 +316,56 @@ void testCapcodes()
     check(RadioPagingPocsag::addressDescription(1234567, 2).find("Frame 7 (address mod 8)") == 0, "POCSAG: frame of the 3 LSBs");
 }
 
+// Text with the status of each character: lost codes as '?', a lost fragment as <...>
+void testCharStatus()
+{
+    QString status;
+    QString text = RadioPagingRecode::decodeWithStatus("AB?C", ".cX.", nullptr, status);
+    check((text == "AB?C") && (status == ".cX."), "char status: received, corrected, lost");
+    text = RadioPagingRecode::decodeWithStatus(std::string("AB") + '\x1a' + "C", "..G.", nullptr, status);
+    check((text == "AB<...>C") && (status == "..XXXXX."), "char status: a lost fragment of unknown length is <...>");
+    text = RadioPagingRecode::decodeWithStatus(std::string("A") + '\x01' + "B", "...", nullptr, status);
+    check((text == "A<0x01>B") && (status == "........"), "char status: a code shown as <0xNN> keeps one status");
+    text = RadioPagingRecode::decodeWithStatus("ABC", "", nullptr, status);
+    check((text == "ABC") && status.isEmpty(), "char status: none without the status of the codes");
+
+    // POCSAG: the characters of an uncorrectable codeword are '?'. 7-bit characters, 20 bits a codeword
+    RadioPagingPocsag::TxMessage m;
+    m.m_address = 1000;
+    m.m_type = RadioPagingPocsag::Alphanumeric;
+    m.m_text = "HELLO WORLD";
+    RadioPagingPocsag::EncodeResult r = RadioPagingPocsag::encode({ m });
+    std::vector<uint8_t> raw;
+    int bits = 0;
+
+    for (size_t i = 0; i < r.m_codewords.size(); i++)
+    {
+        uint32_t w = r.m_codewords[i];
+
+        if ((w & 0x80000000u) && (w != RadioPagingPocsag::m_syncWord) && (w != RadioPagingPocsag::m_idleWord))
+        {
+            for (int b = 30; b >= 11; b--)
+            {
+                if ((bits % 8) == 0) {
+                    raw.push_back(0);
+                }
+                if ((w >> b) & 1) {
+                    raw.back() |= (uint8_t) (0x80 >> (bits % 8));
+                }
+                bits++;
+            }
+        }
+    }
+
+    const RadioPagingCharset::Codepage *ascii = RadioPagingCharset::defaultFor("pocsag");
+    text = RadioPagingRecode::pocsagText(raw, bits, "alphanumeric", ascii, RadioPagingPocsag::fillMinimal(), ".X.c", status);
+    // Codeword 1 holds bits 20-39: characters 2 (bits 14-20) to 5 (bits 35-41)
+    check(text.startsWith("HE????") && (status.left(6) == "..XXXX") && (status.size() == text.size()),
+        "POCSAG: the characters of an uncorrectable codeword are '?'");
+    text = RadioPagingRecode::pocsagText(raw, bits, "alphanumeric", ascii, RadioPagingPocsag::fillMinimal(), "....", status);
+    check(text.startsWith("HELLO WORLD") && !status.contains('X'), "POCSAG: all codewords received");
+}
+
 } // namespace
 
 int main()
@@ -321,6 +373,7 @@ int main()
     testRoundTrips();
     testLimits();
     testCapcodes();
+    testCharStatus();
     std::printf("%d passed, %d failed\n", passes, failures);
     return failures ? 1 : 0;
 }

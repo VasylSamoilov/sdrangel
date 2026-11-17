@@ -249,7 +249,7 @@ void RadioPagingPocsagDecoder::processCodeword(uint32_t word)
             if (m_uncorrectableRun >= 2) {
                 finishMessage(true);
             } else {
-                appendMessageBits(RadioPagingBCH::data(word) & 0xfffff);
+                appendMessageBits(RadioPagingBCH::data(word) & 0xfffff, 'X');
             }
         }
         return;
@@ -286,12 +286,12 @@ void RadioPagingPocsagDecoder::processCodeword(uint32_t word)
     }
     else if (m_active)
     {
-        appendMessageBits(RadioPagingBCH::data(corrected) & 0xfffff);
+        appendMessageBits(RadioPagingBCH::data(corrected) & 0xfffff, (corrections > 0) ? 'c' : '.');
         m_current.m_errorsCorrected += corrections;
     }
 }
 
-void RadioPagingPocsagDecoder::appendMessageBits(uint32_t data)
+void RadioPagingPocsagDecoder::appendMessageBits(uint32_t data, char status)
 {
     if ((int) m_currentBits.size() >= m_maxMessageBits) {
         return;
@@ -300,6 +300,8 @@ void RadioPagingPocsagDecoder::appendMessageBits(uint32_t data)
     for (int i = 19; i >= 0; i--) {
         m_currentBits.push_back((data >> i) & 1);
     }
+
+    m_current.m_wordStatus += status;
 }
 
 void RadioPagingPocsagDecoder::finishMessage(bool truncated)

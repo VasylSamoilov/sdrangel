@@ -176,6 +176,12 @@ int main(int argc, char **argv)
 
     check(tree && function && bits && address, "details: the address, protocolData and the raw payload as bits");
 
+    // Character status: corrected amber, lost red on a red tint, received as the text; no status, escaped text
+    QString statusRow = PagingMessageTable::statusHtml("AB?<", ".cXX");
+    check(statusRow.startsWith("A<span style=\"color:#ffca28\">B</span>") && statusRow.contains("#ff5252") && statusRow.contains("?&lt;</span>"),
+        "char status: corrected and lost characters coloured, lost ones in one span");
+    check(PagingMessageTable::statusHtml("A<B", "..") == "A&lt;B", "char status: a status that does not fit the text is not used");
+
     std::printf("%d passed, %d failed\n", passes, failures);
     return failures ? 1 : 0;
 }
