@@ -239,6 +239,10 @@ public:
         unsigned m_firstCycle = 0;          //!< Frame of the first fragment
         unsigned m_firstFrame = 0;
         char m_phase = 'A';
+        //!< Multiple transmission (STD-43A 3.4.2): the transmissions of the content (1 if none) and the copies of the
+        //!< subframe received, combined
+        int m_transmissions = 1;
+        int m_copies = 1;
 
         // Message header fields
         int m_messageNumber = -1;           //!< N, -1 if the message has none
@@ -438,6 +442,7 @@ private:
         int m_pol = 0;
         double m_quality = 1.0;
         int m_transmissions = 1;
+        int m_copies = 1;                   //!< Copies of the subframe combined (multiple transmission)
         int m_tdCollapse = -1;
     };
 

@@ -598,6 +598,7 @@ void RadioPagingFlexDecoder::decodeStore(SubframeStore& store)
     combineSubframes(store, combined, remaining);
     store.m_decoded = true;
     m_ctx = store.m_context;
+    m_ctx.m_copies = store.m_received;
     m_name = store.m_phase;
     std::copy(combined, combined + wordsPerFrame, m_w);
     parsePhase();
@@ -1180,6 +1181,8 @@ RadioPagingFlexDecoder::Message RadioPagingFlexDecoder::newMessage(const Address
     msg.m_firstCycle = m_ctx.m_cycle;
     msg.m_firstFrame = m_ctx.m_frame;
     msg.m_phase = m_name;
+    msg.m_transmissions = m_ctx.m_transmissions;
+    msg.m_copies = (m_ctx.m_transmissions > 1) ? m_ctx.m_copies : 1;
     msg.m_tempSlot = a.m_tempSlot;
     return msg;
 }

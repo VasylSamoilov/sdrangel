@@ -835,6 +835,13 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
     record.m_protocolData.insert("cycle", message.m_cycle);
     record.m_protocolData.insert("frame", message.m_frame);
     record.m_protocolData.insert("phase", QString(QChar(message.m_phase)));
+
+    // Multiple transmission (STD-43A 3.4.2): a subframe of the frame, its copies combined
+    if (message.m_transmissions > 1)
+    {
+        record.m_protocolData.insert("transmissions", message.m_transmissions);
+        record.m_protocolData.insert("subframe_copies", message.m_copies);
+    }
     record.m_protocolData.insert("message_number", message.m_messageNumber);
     record.m_protocolData.insert("fragmented", message.m_fragmented);
     record.m_protocolData.insert("fragment_count", message.m_fragmentCount);

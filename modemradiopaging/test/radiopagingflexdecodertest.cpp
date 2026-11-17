@@ -1236,6 +1236,14 @@ void testSubframes()
             frameOk = frameOk && (m.m_frame == 8);
         }
         check(frameOk, "subframes: the content is given the frame of its first transmission");
+        bool marked = !first.empty() && !second.empty();
+        for (const Dec::Message& m : first) {
+            marked = marked && (m.m_transmissions == 2) && (m.m_copies == 1);
+        }
+        for (const Dec::Message& m : second) {
+            marked = marked && (m.m_transmissions == 2) && (m.m_copies == 2);
+        }
+        check(marked, "subframes: a message tells it is a subframe of 2 transmissions, and the copies combined");
     }
     {
         // Words lost in each transmission are repaired by the other

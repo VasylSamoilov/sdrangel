@@ -303,6 +303,10 @@ void PagingMessageTable::recordInfo(const MessageRecord& record, QString& plain,
             add(QString("PH:%1 C%2/F%3").arg(d.value("phase").toString())
                 .arg(d.value("cycle").toInt(), 2, 10, QChar('0')).arg(d.value("frame").toInt(), 3, 10, QChar('0')));
         }
+        // A subframe of a multiple transmission: the copies combined of the transmissions
+        if (d.contains("transmissions")) {
+            add(QString("SUB %1/%2").arg(d.value("subframe_copies").toInt()).arg(d.value("transmissions").toInt()));
+        }
         // The message number as the pager shows it: N + 1 (STD-43A 3.10.1.3 N)
         if (d.contains("message_number") && (d.value("message_number").toInt() >= 0)) {
             add(QString("#%1").arg(d.value("message_number").toInt() + 1));
