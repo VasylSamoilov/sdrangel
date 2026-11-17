@@ -50,6 +50,10 @@ class MODEMCELLULAR_API CarrierRadio
 public:
     static constexpr double kAudioRate = 48000.0;
     static constexpr int kBlock = 480;              // 10 ms
+    // The transmitter sums the carriers at kTxLevel / N each. The channel filters overshoot when
+    // they band-limit the FM (up to about 9 % at the full deviation of NMT), so the sum stays about
+    // 1.4 dB below full scale and does not clip.
+    static constexpr double kTxLevel = 0.85;
 
     static bool rateSupported(double streamRate);
     // the factor from the stream rate to the audio rate, 0 if the rate is not supported
@@ -88,11 +92,12 @@ private:
     std::vector<double> m_power;
     int m_fill;                     // audio samples in the current block
     uint64_t m_samples;
+    size_t m_idle;                  // stream samples without carriers not counted yet
     BatchHandler m_handler;
 };
 
 // Transmitter: the audio of each carrier from a source, stream samples out. The carriers are
-// summed at 1/N each, so the stream never goes over full scale.
+// summed at kTxLevel / N each, so the stream never goes over full scale.
 class MODEMCELLULAR_API CarrierTransmitter
 {
 public:

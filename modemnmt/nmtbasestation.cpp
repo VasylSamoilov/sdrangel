@@ -75,10 +75,31 @@ NmtBaseStation::NmtBaseStation(const NmtNetworkConfig& config) :
             status.issues = nmtCheckCarrier(*country, status.config.channel, status.config.type == ChannelType::CcTc && config.sendClock);
             nmtChannelFrequency(*country, status.config.channel, status.frequency);
         }
+        if (config.system == System::Nmt450 && (status.config.type == ChannelType::Cca
+            || status.config.type == ChannelType::Ccb || status.config.type == ChannelType::AcTc))
+        {
+            status.issues.push_back({true, "the channel type is one of NMT-900"});
+        }
+        if (status.config.supervisory < 0 || status.config.supervisory > 4) {
+            status.issues.push_back({true, "the supervisory tone is 1..4"});
+        }
+        else if (status.config.supervisory != 0 && status.config.type != ChannelType::Tc
+            && status.config.type != ChannelType::AcTc && status.config.type != ChannelType::CcTc)
+        {
+            status.issues.push_back({true, "a supervisory tone is for traffic channels only"});
+        }
         for (size_t j = 0; j < i; j++)
         {
             if (config.carriers[j].channel == status.config.channel) {
                 status.issues.push_back({true, "channel " + std::to_string(status.config.channel) + " is given twice"});
+            }
+            else if (m_carriers[j].frequency.downlink > 0.0 && status.frequency.downlink > 0.0
+                && std::fabs(m_carriers[j].frequency.downlink - status.frequency.downlink) < kChannelSpacing)
+            {
+                // the filters of the carriers are made for 25 kHz: closer carriers hear each other
+                // a little (12.5 kHz: about -38 dB)
+                status.issues.push_back({false, "channel " + std::to_string(config.carriers[j].channel)
+                    + " is less than 25 kHz away: they hear each other a little"});
             }
         }
         status.planned = country && m_trafficArea >= 0;
@@ -86,6 +107,22 @@ NmtBaseStation::NmtBaseStation(const NmtNetworkConfig& config) :
             status.planned = status.planned && !issue.error;
         }
         m_carriers.push_back(status);
+    }
+
+    // what a network needs (warnings: the plan is still taken)
+    bool calling = false;
+    bool traffic = false;
+    for (const NmtCarrierConfig& c : config.carriers)
+    {
+        calling = calling || c.type == ChannelType::Cc || c.type == ChannelType::Cca || c.type == ChannelType::Ccb
+            || c.type == ChannelType::CcTc;
+        traffic = traffic || c.type == ChannelType::Tc || c.type == ChannelType::AcTc || c.type == ChannelType::CcTc;
+    }
+    if (!config.carriers.empty() && !calling) {
+        m_issues.push_back({false, "no calling channel (cc or cctc): the phones do not find the network"});
+    }
+    if (!config.carriers.empty() && !traffic) {
+        m_issues.push_back({false, "no traffic channel (tc or cctc): the phones cannot register or call"});
     }
 }
 

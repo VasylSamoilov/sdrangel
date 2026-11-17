@@ -58,7 +58,7 @@ void readNetwork(SimpleDeserializer& d, CellularNetworkSettings& n, quint32 firs
     d.readS32(first + 2, &n.m_area, 1);
     d.readS32(first + 3, &n.m_areaNo, 0);
     d.readS32(first + 4, &n.m_msPower, 1);
-    d.readString(first + 5, &n.m_carriers, "1:cctc, 5");
+    d.readString(first + 5, &n.m_carriers, "1:cctc, 5:tc");
     d.readBool(first + 6, &n.m_compandor, true);
     d.readBool(first + 7, &n.m_sendCallerId, false);
     d.readBool(first + 8, &n.m_sendClock, false);
@@ -87,7 +87,7 @@ void CellularNetworkSettings::resetToDefaults()
     m_area = 1;
     m_areaNo = 0;
     m_msPower = 1;
-    m_carriers = "1:cctc, 5";
+    m_carriers = "1:cctc, 5:tc";
     m_compandor = true;
     m_sendCallerId = false;
     m_sendClock = false;
@@ -134,6 +134,7 @@ bool CellularNetworkSettings::sameNetwork(const CellularNetworkSettings& o) cons
 bool CellularNetworkSettings::parseCarriers(const QString& text, std::vector<modemnmt::NmtCarrierConfig>& carriers, QString& error)
 {
     carriers.clear();
+    bool anySupervisory = false;
 
     for (const QString& item : text.split(',', Qt::SkipEmptyParts))
     {
@@ -143,7 +144,7 @@ bool CellularNetworkSettings::parseCarriers(const QString& text, std::vector<mod
 
         if (parts.isEmpty() || parts.size() > 3)
         {
-            error = QString("\"%1\": channel[:type[:supervisory]]").arg(item.trimmed());
+            error = QString("\"%1\": channel:type[:supervisory]").arg(item.trimmed());
             return false;
         }
         c.channel = parts[0].trimmed().toInt(&ok);
@@ -152,7 +153,12 @@ bool CellularNetworkSettings::parseCarriers(const QString& text, std::vector<mod
             error = QString("\"%1\": the channel is not a number").arg(item.trimmed());
             return false;
         }
-        if (parts.size() > 1)
+        if (parts.size() < 2 || parts[1].trimmed().isEmpty())
+        {
+            error = QString("\"%1\": give the type of the channel (cc, cca, ccb, tc, actc, cctc or test), e.g. %2:tc")
+                .arg(item.trimmed()).arg(c.channel);
+            return false;
+        }
         {
             const QString type = parts[1].trimmed().toLower();
 
@@ -179,6 +185,7 @@ bool CellularNetworkSettings::parseCarriers(const QString& text, std::vector<mod
         }
         if (parts.size() > 2)
         {
+            anySupervisory = true;
             c.supervisory = parts[2].trimmed().toInt(&ok);
             if (!ok || c.supervisory < 0 || c.supervisory > 4)
             {
@@ -193,6 +200,20 @@ bool CellularNetworkSettings::parseCarriers(const QString& text, std::vector<mod
     {
         error = "no carriers";
         return false;
+    }
+
+    // the supervisory tones go round 1..4 on the channels that carry calls, as in the reference,
+    // when none is given
+    if (!anySupervisory)
+    {
+        int next = 0;
+        for (modemnmt::NmtCarrierConfig& c : carriers)
+        {
+            // the tone is for channels that carry calls
+            if (c.type == modemnmt::ChannelType::Tc || c.type == modemnmt::ChannelType::AcTc || c.type == modemnmt::ChannelType::CcTc) {
+                c.supervisory = (next++ % 4) + 1;
+            }
+        }
     }
     return true;
 }

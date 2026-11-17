@@ -32,8 +32,9 @@ namespace modemcellular
 // for a received block; the transmitter reads at the rate of its own device. Both sample clocks
 // differ a little (two crystals), so the reader resamples by a ratio close to 1 that keeps the
 // queue at its target fill: the lead of the transmitter over the receiver. The lead is the part of
-// the round trip that this queue adds. An empty queue gives silence and is counted.
-// Written by one thread, read by another.
+// the round trip that this queue adds. An empty queue gives silence until it holds its lead again
+// (the delay comes back at once instead of over minutes of resampling); each time it runs empty is
+// counted. Written by one thread, read by another.
 class MODEMCELLULAR_API CarrierQueue
 {
 public:
@@ -48,7 +49,7 @@ public:
 
     size_t fill() const;
     size_t target() const { return m_target; }
-    uint64_t underruns() const;
+    uint64_t underruns() const;     // times the queue ran empty
     void reset();
 
 private:
@@ -58,6 +59,7 @@ private:
     double m_position;              // 0..1 between the first two samples
     double m_smoothed;              // fill error, smoothed
     uint64_t m_underruns;
+    bool m_priming;                 // ran empty: silence until the lead is there again
 };
 
 } // namespace modemcellular

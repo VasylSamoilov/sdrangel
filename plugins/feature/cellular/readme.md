@@ -43,7 +43,7 @@ Changes of a running network are taken when it is switched off and on again; the
 * Traffic area: the second digit of the traffic area (1 to 9, up to 15 in some countries). Phones that were registered in another area register again.
 * Area number: 1 to 4 keeps the phones of that area, none takes every phone.
 * Phone power: the power level the phones send with, 3 is the highest.
-* Carriers: the channels of the network, comma separated: `channel[:type[:supervisory]]`. The types are `cc` (calling channel), `tc` (traffic channel), `cctc` (both, the default for a small network), `actc`, `cca`, `ccb` (NMT-900) and `test`. A traffic channel may have a supervisory tone 1 to 4. Example: `1:cctc, 5, 6:tc:2`. A network needs a calling channel and as many traffic channels as calls should run at once.
+* Carriers: the channels of the network, comma separated: `channel:type[:supervisory]`. Every channel needs its type: `cc` (calling channel), `tc` (traffic channel), `cctc` (both), `actc`, `cca`, `ccb` (NMT-900) or `test`. A traffic channel may have a supervisory tone 1 to 4. Example: `1:cctc, 5:tc, 6:tc:2`. A network needs a calling channel and as many traffic channels as calls should run at once. When no channel gives a supervisory tone, the traffic channels get the tones 1, 2, 3, 4, 1 ... in turn. A network without a calling or without a traffic channel is warned about in its log.
 * Compandor on speech, Send the number of the caller, Send the time of day: options of the network.
 * SMS centre: the number the phones send short messages to. Empty: no short messages from the phones.
 * Other numbers: what answers a call to a number that is not registered, echo or music.

@@ -72,7 +72,7 @@ static void testLeadAndOrder()
     CHECK(std::fabs(q.ratio() - 1.0) <= 200e-6);
 }
 
-// An empty queue gives silence and counts one underrun per read.
+// An empty queue gives silence and counts once until it holds its lead again.
 static void testUnderrun()
 {
     CarrierQueue q(10);
@@ -82,9 +82,34 @@ static void testUnderrun()
     CHECK(out[29] == 0.0f);
     CHECK(q.underruns() == 1);
     q.read(out.data(), out.size(), 1.0);
-    CHECK(q.underruns() == 2);
+    CHECK(q.underruns() == 1);              // still the same time
     q.reset();
     CHECK(q.underruns() == 0 && q.fill() == 10);
+}
+
+// After a stall of the writer the queue waits for its whole lead before it reads on: the lead is
+// back at once, not after minutes of resampling at 200 ppm.
+static void testStall()
+{
+    const size_t target = 4800;
+    CarrierQueue q(target);
+    std::vector<float> block(kBlock, 1.0f), out(kBlock);
+
+    for (int i = 0; i < 100 * 20; i++)
+    {
+        if (i < 500 || i >= 510) {          // 100 ms without writes after 5 s
+            q.write(block.data(), block.size());
+        }
+        q.read(out.data(), out.size(), q.ratio());
+        if (i == 515) {
+            CHECK(q.underruns() == 1);
+            // the queue fills again while it is silent
+            CHECK(q.fill() >= 5 * kBlock);
+        }
+    }
+    CHECK(q.underruns() == 1);
+    std::printf("stall of 100 ms: fill %zu of %zu afterwards\n", q.fill(), target);
+    CHECK(q.fill() + kBlock >= target && q.fill() <= target + kBlock);
 }
 
 // Linear interpolation: a ratio of 0.5 doubles a ramp.
@@ -158,6 +183,7 @@ int main()
     testBatch();
     testLeadAndOrder();
     testUnderrun();
+    testStall();
     testInterpolation();
     testDrift();
 

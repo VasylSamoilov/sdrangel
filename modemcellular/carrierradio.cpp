@@ -120,7 +120,8 @@ CarrierReceiver::CarrierReceiver(double streamRate) :
     m_rate(streamRate),
     m_decimation(CarrierRadio::decimation(streamRate)),
     m_fill(0),
-    m_samples(0)
+    m_samples(0),
+    m_idle(0)
 {
 }
 
@@ -150,8 +151,11 @@ void CarrierReceiver::feed(const std::complex<float>* samples, size_t count)
 {
     if (m_carriers.empty())
     {
-        // the clock goes on without carriers
-        m_samples += count / static_cast<size_t>(m_decimation > 0 ? m_decimation : 1);
+        // the clock goes on without carriers (the remainder of the decimation is kept)
+        const size_t factor = static_cast<size_t>(m_decimation > 0 ? m_decimation : 1);
+        m_idle += count;
+        m_samples += m_idle / factor;
+        m_idle %= factor;
         return;
     }
 
@@ -248,7 +252,7 @@ void CarrierTransmitter::renderBlock()
 {
     const size_t block = static_cast<size_t>(CarrierRadio::kBlock);
     const size_t out = block * static_cast<size_t>(m_decimation);
-    const float gain = 1.0f / static_cast<float>(m_carriers.size());
+    const float gain = static_cast<float>(CarrierRadio::kTxLevel / static_cast<double>(m_carriers.size()));
     const double toPhase = 2.0 * kPi / CarrierRadio::kAudioRate;
 
     // what was taken goes

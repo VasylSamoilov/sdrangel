@@ -97,8 +97,8 @@ CellularNetworkTab::CellularNetworkTab(QWidget *parent) :
     m_msPower->setToolTip("Power level the phones send with: 3 is the highest, 0 the lowest");
     form->addRow("Phone power", m_msPower);
     m_carriers = new QLineEdit(this);
-    m_carriers->setToolTip("channel[:type[:supervisory]], comma separated. Types: cc (calling), tc (traffic), cctc (both), "
-        "actc, cca, ccb (NMT-900), test. Supervisory tone 1..4. Example: 1:cctc, 5, 6:tc:2");
+    m_carriers->setToolTip("channel:type[:supervisory], comma separated; every channel needs its type. Types: cc (calling), "
+        "tc (traffic), cctc (both), actc, cca, ccb (NMT-900), test. Supervisory tone 1..4. Example: 1:cctc, 5:tc, 6:tc:2");
     form->addRow("Carriers", m_carriers);
     m_compandor = new QCheckBox("Compandor on speech", this);
     form->addRow("", m_compandor);

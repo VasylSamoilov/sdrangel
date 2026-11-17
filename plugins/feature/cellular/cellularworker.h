@@ -24,6 +24,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 
 #include "util/message.h"
 #include "util/messagequeue.h"
@@ -120,10 +121,12 @@ private:
     void unbind(Network& network);
     bool running(const Network& network) const;
     QString conflict(const Network& network) const;
+    QStringList neighbours(const Network& network) const;
     void updateTuning(Radio& radio);
     void processBatch(Radio& radio);
     void reportStatus(const Network& network);
     void sendTo(ChannelAPI *channel, const std::vector<uint8_t>& wire);
+    void sendAudio(ChannelAPI *channel, const std::vector<uint8_t>& wire);
     void log(int network, const QString& text);
 
     MessageQueue m_inputMessageQueue;

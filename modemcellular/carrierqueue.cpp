@@ -37,7 +37,8 @@ CarrierQueue::CarrierQueue(size_t target) :
     m_target(target),
     m_position(0.0),
     m_smoothed(0.0),
-    m_underruns(0)
+    m_underruns(0),
+    m_priming(false)
 {
     reset();
 }
@@ -50,6 +51,7 @@ void CarrierQueue::reset()
     m_position = 0.0;
     m_smoothed = 0.0;
     m_underruns = 0;
+    m_priming = false;
 }
 
 void CarrierQueue::write(const float* samples, size_t count)
@@ -62,14 +64,25 @@ void CarrierQueue::write(const float* samples, size_t count)
 void CarrierQueue::read(float* samples, size_t count, double ratio)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    bool empty = false;
+    const size_t primed = std::max<size_t>(m_target, 2);
 
     for (size_t i = 0; i < count; i++)
     {
+        if (m_priming)
+        {
+            // after running empty: silence until the lead is there again
+            if (m_queue.size() < primed)
+            {
+                samples[i] = 0.0f;
+                continue;
+            }
+            m_priming = false;
+        }
         if (m_queue.size() < 2)
         {
             samples[i] = 0.0f;
-            empty = true;
+            m_priming = true;
+            m_underruns++;
             continue;
         }
         // linear interpolation between the first two samples
@@ -80,9 +93,6 @@ void CarrierQueue::read(float* samples, size_t count, double ratio)
             m_queue.pop_front();
             m_position -= 1.0;
         }
-    }
-    if (empty) {
-        m_underruns++;
     }
 }
 

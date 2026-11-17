@@ -24,6 +24,7 @@
 #include <vector>
 
 #include <QMutex>
+#include <QThread>
 #include <QTimer>
 
 #include "channel/channelapi.h"
@@ -36,13 +37,16 @@
 #include "cellulartxsettings.h"
 
 class DeviceAPI;
+class ObjectPipe;
+class CellularTxAudio;
 
 // The transmitter of the cellular base stations: one per transmitting device, all the carriers of
-// the networks whose downlinks are in the span of the device. The carriers and the audio come from
-// the controller (the Cellular feature) through the input queue. Each carrier has a queue that
-// holds the lead of the transmitter over the receiver and follows the drift between both devices
-// (CarrierQueue); the span of the stream and the state of the queues go to the controller through
-// the "cellular" message pipe.
+// the networks whose downlinks are in the span of the device. The carriers come from the controller
+// (the Cellular feature) through the input queue; the audio comes through the "cellulartx" message
+// pipe from the controller to the channel, drained in the thread of the channel. Each carrier has
+// a queue that holds the lead of the transmitter over the receiver and follows the drift between
+// both devices (CarrierQueue); the span of the stream and the state of the queues go to the
+// controller through the "cellular" message pipe.
 class CellularTx : public BasebandSampleSource, public ChannelAPI
 {
 public:
@@ -87,6 +91,8 @@ public:
 
     Status status() const;
     qint64 getDeviceCenterFrequency() const { return m_centerFrequency; }
+    // audio of the controller into the queues (thread of the audio, see CellularTxAudio)
+    void writeBatch(const modemcellular::CarrierBatch& batch);
 
     static const char * const m_channelIdURI;
     static const char * const m_channelId;
@@ -96,6 +102,10 @@ private:
     CellularTxSettings m_settings;
     int m_basebandSampleRate;
     qint64 m_centerFrequency;
+    QThread m_thread;
+    CellularTxAudio *m_audio;
+    ObjectPipe *m_audioPipe;                    // from the controller, registered by us
+    const QObject *m_audioProducer;
 
     mutable QMutex m_mutex;
     std::unique_ptr<modemcellular::CarrierTransmitter> m_transmitter;
@@ -114,7 +124,8 @@ private:
     bool handleMessage(const Message& cmd) override;
     void makeTransmitter();
     void setCarriers(const std::vector<modemcellular::CarrierTuning>& carriers, uint32_t lead);
-    void writeBatch(const modemcellular::CarrierBatch& batch);
+    void useAudioPipe(const QObject *producer);
+    void dropAudioPipe();
     void sendToController(const std::vector<uint8_t>& wire);
     void sendSpan();
     void sendStatus();

@@ -15,6 +15,7 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.          //
 ///////////////////////////////////////////////////////////////////////////////////
 
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <cstdio>
@@ -191,12 +192,63 @@ static void testNoCarriers()
     CHECK(out[50] == std::complex<float>(0.0f, 0.0f));
 }
 
+// The sum of the carriers stays below full scale with its headroom, whatever the number of
+// carriers (a 16 bit device takes 1.0 as +32768: one too many).
+static void testLevel()
+{
+    for (size_t carriers : {1u, 2u, 4u, 8u})
+    {
+        CarrierTransmitter tx(960000.0);
+        std::vector<CarrierTuning> t;
+        for (size_t i = 0; i < carriers; i++) {
+            t.push_back({static_cast<int>(i + 1), -100000.0 + 25000.0 * static_cast<double>(i), 9000.0, 25000.0});
+        }
+        tx.setCarriers(t);
+        uint64_t at = 0;
+        tx.setAudioSource([&](size_t index, float* a, size_t n) {
+            // full deviation, a different tone on each carrier
+            for (size_t i = 0; i < n; i++) {
+                a[i] = static_cast<float>(4700.0 * std::sin(2.0 * kPi * (700.0 + 300.0 * index) * static_cast<double>(at + i) / 48000.0));
+            }
+            if (index + 1 == carriers) {
+                at += n;
+            }
+        });
+        std::vector<std::complex<float>> s(96000);
+        double peak = 0.0;
+        for (int b = 0; b < 5; b++)
+        {
+            tx.pull(s.data(), s.size());
+            for (const std::complex<float>& v : s) {
+                peak = std::max(peak, static_cast<double>(std::max(std::fabs(v.real()), std::fabs(v.imag()))));
+            }
+        }
+        std::printf("%zu carriers: peak %.4f of full scale\n", carriers, peak);
+        CHECK(peak < 0.96);
+        CHECK(peak > 0.8 / static_cast<double>(carriers));
+    }
+}
+
+// Without carriers the clock keeps the remainder of the decimation.
+static void testIdleClock()
+{
+    CarrierReceiver rx(960000.0);
+    std::vector<std::complex<float>> s(7001);
+
+    for (int i = 0; i < 1000; i++) {
+        rx.feed(s.data(), s.size());
+    }
+    CHECK(rx.samples() == 7001000 / 20);
+}
+
 int main()
 {
     testRates();
     testFilters();
     testLoopback();
     testNoCarriers();
+    testLevel();
+    testIdleClock();
 
     if (g_failures == 0) {
         std::printf("all carrier radio tests passed\n");

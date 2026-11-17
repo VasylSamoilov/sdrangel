@@ -173,6 +173,41 @@ static void testPlanErrors()
     NmtBaseStation hu(c);
     CHECK(std::fabs(hu.carriers()[0].frequency.deviationFactor - 0.8) < 1e-9);
     CHECK(hu.bind({{1, 457.3e6, 1e6}}, {{2, 467.3e6, 1e6}}));
+
+    // what a network needs: a calling channel and a traffic channel (warnings)
+    c = network({5, 6});
+    c.carriers[0].type = ChannelType::Tc;
+    NmtBaseStation noCalling(c);
+    CHECK(noCalling.issues().size() == 1 && !noCalling.issues()[0].error);
+    CHECK(noCalling.issues()[0].text.find("no calling channel") == 0);
+    CHECK(noCalling.bind({kRx}, {kTx}));
+    c.carriers[0].type = ChannelType::Cc;
+    c.carriers[1].type = ChannelType::Cc;
+    NmtBaseStation noTraffic(c);
+    CHECK(noTraffic.issues().size() == 1 && noTraffic.issues()[0].text.find("no traffic channel") == 0);
+
+    // a type of NMT-900 on NMT-450, or a supervisory tone on a calling channel: the carrier is off
+    c = network({1, 5});
+    c.carriers[1].type = ChannelType::AcTc;
+    NmtBaseStation wrongType(c);
+    CHECK(!wrongType.carriers()[1].planned && hasIssue(wrongType.carriers()[1].issues, true));
+    c = network({1, 5});
+    c.carriers[0].type = ChannelType::Cc;
+    c.carriers[0].supervisory = 1;
+    c.carriers[1].supervisory = 2;
+    NmtBaseStation toneOnCc(c);
+    CHECK(!toneOnCc.carriers()[0].planned && toneOnCc.carriers()[1].planned);
+
+    // an interleaved channel 12.5 kHz from another: a warning
+    NmtBaseStation interleaved(network({1, 201}));
+    CHECK(interleaved.carriers()[1].planned);
+    bool near = false;
+    for (const NmtPlanIssue& issue : interleaved.carriers()[1].issues) {
+        near = near || issue.text.find("less than 25 kHz") != std::string::npos;
+    }
+    CHECK(near);
+    NmtBaseStation apart(network({1, 2}));
+    CHECK(apart.carriers()[1].issues.empty());
 }
 
 static void testBatch()

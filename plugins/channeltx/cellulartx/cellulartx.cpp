@@ -22,10 +22,12 @@
 #include "dsp/dspcommands.h"
 #include "maincore.h"
 #include "pipes/messagepipes.h"
+#include "pipes/objectpipe.h"
 
 #include "carrierwire.h"
 
 #include "cellulartx.h"
+#include "cellulartxaudio.h"
 
 const char * const CellularTx::m_channelIdURI = "sdrangel.channeltx.cellulartx";
 const char * const CellularTx::m_channelId = "CellularTx";
@@ -44,6 +46,9 @@ CellularTx::CellularTx(DeviceAPI *deviceAPI) :
     m_deviceAPI(deviceAPI),
     m_basebandSampleRate(0),
     m_centerFrequency(0),
+    m_audio(nullptr),
+    m_audioPipe(nullptr),
+    m_audioProducer(nullptr),
     m_lead(0),
     m_batches(0),
     m_resets(0),
@@ -53,6 +58,10 @@ CellularTx::CellularTx(DeviceAPI *deviceAPI) :
     m_statusCount(0)
 {
     setObjectName(m_channelId);
+    m_thread.setObjectName("CellularTx");
+    m_audio = new CellularTxAudio(this);
+    m_audio->moveToThread(&m_thread);
+    m_thread.start();
 
     m_deviceAPI->addChannelSource(this);
     m_deviceAPI->addChannelSourceAPI(this);
@@ -64,8 +73,47 @@ CellularTx::CellularTx(DeviceAPI *deviceAPI) :
 CellularTx::~CellularTx()
 {
     m_statusTimer.stop();
+    dropAudioPipe();
+    m_thread.quit();
+    m_thread.wait();
+    delete m_audio;
     m_deviceAPI->removeChannelSourceAPI(this);
     m_deviceAPI->removeChannelSource(this, true);
+}
+
+// The pipe of the audio from the controller (the producer of the carriers we got) to us. We
+// register it, as a consumer does; the controller looks it up by its consumer.
+void CellularTx::useAudioPipe(const QObject *producer)
+{
+    if (!producer || (producer == m_audioProducer && m_audioPipe)) {
+        return;
+    }
+    dropAudioPipe();
+    m_audioPipe = MainCore::instance()->getMessagePipes().registerProducerToConsumer(producer, this, "cellulartx");
+    m_audioProducer = producer;
+    QObject::connect(m_audioPipe, &ObjectPipe::toBeDeleted, this, [this](int reason, QObject *object) {
+        (void) reason;
+        // the controller goes away: so does the pipe
+        if (object == m_audioProducer)
+        {
+            m_audio->setQueue(nullptr);
+            m_audioPipe = nullptr;
+            m_audioProducer = nullptr;
+        }
+    });
+    m_audio->setQueue(qobject_cast<MessageQueue*>(m_audioPipe->m_element));
+}
+
+void CellularTx::dropAudioPipe()
+{
+    if (!m_audioPipe) {
+        return;
+    }
+    m_audio->setQueue(nullptr);
+    QObject::disconnect(m_audioPipe, &ObjectPipe::toBeDeleted, this, nullptr);
+    MainCore::instance()->getMessagePipes().unregisterProducerToConsumer(m_audioProducer, this, "cellulartx");
+    m_audioPipe = nullptr;
+    m_audioProducer = nullptr;
 }
 
 void CellularTx::setDeviceAPI(DeviceAPI *deviceAPI)
@@ -228,15 +276,6 @@ bool CellularTx::handleMessage(const Message& cmd)
 
         switch (modemcellular::wireKind(data, size))
         {
-        case modemcellular::WireKind::Batch:
-        {
-            modemcellular::CarrierBatch batch;
-
-            if (modemcellular::decodeBatch(data, size, batch)) {
-                writeBatch(batch);
-            }
-            return true;
-        }
         case modemcellular::WireKind::SpanRequest:
             sendSpan();
             return true;
@@ -244,12 +283,15 @@ bool CellularTx::handleMessage(const Message& cmd)
         {
             modemcellular::WireTuning tuning;
 
-            if (modemcellular::decodeTuning(data, size, tuning)) {
+            if (modemcellular::decodeTuning(data, size, tuning))
+            {
                 setCarriers(tuning.carriers, tuning.lead);
+                useAudioPipe(packet.getPipeSource());
             }
             return true;
         }
         case modemcellular::WireKind::None:
+        case modemcellular::WireKind::Batch:
         case modemcellular::WireKind::Span:
         case modemcellular::WireKind::TxStatus:
             break;
