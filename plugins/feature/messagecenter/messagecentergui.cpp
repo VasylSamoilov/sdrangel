@@ -322,7 +322,7 @@ void MessageCenterGUI::buildLog(QWidget *container)
     m_logTable->setDefaultColumns({PagingMessageTable::ColTime, PagingMessageTable::ColDirection, PagingMessageTable::ColChannel,
         PagingMessageTable::ColProtocol, PagingMessageTable::ColAddress, PagingMessageTable::ColType, PagingMessageTable::ColMessage,
         PagingMessageTable::ColInfo});
-    m_logTable->setToolTip("The messages the routes put in the log. Double-click a voice message to play it. Right click the header to choose the columns");
+    m_logTable->setToolTip("The messages the routes put in the log. Double-click a voice message to play it.\nRight click the header to choose the columns");
     layout->addWidget(m_logFilter);
     layout->addWidget(m_logTable);
 
@@ -467,13 +467,13 @@ void MessageCenterGUI::buildOptions(QWidget *container)
     m_silentTime->setSuffix(" s");
     m_silentTime->setToolTip("A channel that does not announce itself for this time is offline");
     m_historyEnabled = new QCheckBox("Keep", container);
-    m_historyEnabled->setToolTip(QString("Keep the log in the history file, so that it is there again when the message center "
+    m_historyEnabled->setToolTip(QString("Keep the log in the history file,\nso that it is there again when the message center "
         "starts:\n%1\nOne message center keeps the history").arg(MessageCenter::historyFilePath()));
     m_historyMaxMB = new QSpinBox(container);
     m_historyMaxMB->setRange(1, 10000);
     m_historyMaxMB->setSuffix(" MB");
-    m_historyMaxMB->setToolTip("Size limit of the history file: over it the file is written again with the newest messages "
-        "of the log, up to half the limit");
+    m_historyMaxMB->setToolTip("Size limit of the history file:\n"
+        "over it the file is written again with the newest messages of the log, up to half the limit");
     QWidget *history = new QWidget(container);
     QHBoxLayout *historyLayout = new QHBoxLayout(history);
     historyLayout->setContentsMargins(0, 0, 0, 0);

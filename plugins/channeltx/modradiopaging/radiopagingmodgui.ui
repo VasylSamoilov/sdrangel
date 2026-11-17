@@ -185,7 +185,7 @@
       <item>
        <widget class="QLineEdit" name="channelAlias">
         <property name="toolTip">
-         <string>Name of this transmitter, in the records of the messages it sends (channel alias) and in the names of the files of the voice sent. Empty: the frequency of the channel in Hz</string>
+         <string>Name of this transmitter, in the records of the messages it sends (channel alias)&#10;and in the names of the files of the voice sent. Empty: the frequency of the channel in Hz</string>
         </property>
         <property name="placeholderText">
          <string>frequency</string>
@@ -280,7 +280,7 @@
          </size>
         </property>
         <property name="toolTip">
-         <string>Codepage of the alphanumeric messages of the protocol, for the pages that have none: the glyphs of the pager for the codes sent</string>
+         <string>Codepage of the alphanumeric messages of the protocol, for the pages that have none:&#10;the glyphs of the pager for the codes sent</string>
         </property>
        </widget>
       </item>
@@ -459,7 +459,7 @@
     <item row="3" column="0" colspan="2">
      <widget class="QCheckBox" name="mixPocsag">
       <property name="toolTip">
-       <string>Mixing with POCSAG (STD-43A Chapter 7): POCSAG messages go in the time between FLEX frames, with the POCSAG settings. Frames 0 to 3 of the cycle are always FLEX. Network mode</string>
+       <string>Mixing with POCSAG (STD-43A Chapter 7): POCSAG messages go in the time between FLEX frames,&#10;with the POCSAG settings. Frames 0 to 3 of the cycle are always FLEX. Network mode</string>
       </property>
       <property name="text">
        <string>Mix POCSAG</string>
@@ -561,7 +561,7 @@
     <item row="5" column="1">
      <widget class="QSpinBox" name="mixFrames">
       <property name="toolTip">
-       <string>Collapse: the first 2^collapse frames of each minute are FLEX (STD-43A 7.1.1). A number of frames: that many frames a minute are FLEX, with system collapse 5; capcodes of the other frames are refused (7.1.2)</string>
+       <string>Collapse: the first 2^collapse frames of each minute are FLEX (STD-43A 7.1.1).&#10;A number of frames: that many frames a minute are FLEX, with system collapse 5;&#10;capcodes of the other frames are refused (7.1.2)</string>
       </property>
       <property name="specialValueText">
        <string>collapse</string>
@@ -616,7 +616,7 @@
     <item row="6" column="3">
      <widget class="QSpinBox" name="mixSwitch2400">
       <property name="toolTip">
-       <string>750 bps 1,0 pattern before 2400 bps POCSAG after FLEX. Not in the standard: 100 ms, extrapolated from 512 and 1200</string>
+       <string>750 bps 1,0 pattern before 2400 bps POCSAG after FLEX.&#10;Not in the standard: 100 ms, extrapolated from 512 and 1200</string>
       </property>
       <property name="suffix">
        <string> ms</string>
@@ -639,7 +639,7 @@
     <item row="2" column="1">
      <widget class="QSpinBox" name="collapse">
       <property name="toolTip">
-       <string>FLEX collapse: the re-synchronization lasts at least 2^collapse frames; network: pagers listen to one frame in 2^collapse</string>
+       <string>FLEX collapse: the re-synchronization lasts at least 2^collapse frames;&#10;network: pagers listen to one frame in 2^collapse</string>
       </property>
       <property name="minimum">
        <number>0</number>
@@ -678,7 +678,7 @@
     <item row="7" column="0" colspan="4">
      <widget class="QCheckBox" name="roaming">
       <property name="toolTip">
-       <string>FLEX roaming: send the system ID words (STD-43A 3.7.2, 6.1.1): the first in every frame, the second in frames 0 to 3. Frames 0 to 3 are always sent</string>
+       <string>FLEX roaming: send the system ID words (STD-43A 3.7.2, 6.1.1):&#10;the first in every frame, the second in frames 0 to 3. Frames 0 to 3 are always sent</string>
       </property>
       <property name="text">
        <string>Roaming</string>
@@ -743,7 +743,7 @@
     <item row="9" column="0">
      <widget class="QCheckBox" name="flexTime">
       <property name="toolTip">
-       <string>FLEX date and time: send the date, the time and the time zone in block information words 001, 010 and 101 (STD-43A 3.7.2). They fill the block information words left free in every frame (after the system ID words of roaming) and take turns when they do not all fit</string>
+       <string>FLEX date and time: send the date, the time and the time zone in block information words 001, 010 and 101&#10;(STD-43A 3.7.2). They fill the block information words left free in every frame&#10;(after the system ID words of roaming) and take turns when they do not all fit</string>
       </property>
       <property name="text">
        <string>Time</string>
@@ -753,7 +753,7 @@
     <item row="9" column="1">
      <widget class="QComboBox" name="flexTimeReference">
       <property name="toolTip">
-       <string>Time sent: of frame 0 of the cycle (STD-43A 3.7.2, the pager adds 1.875 s for each frame), or of the frame that carries it (pagers that show the time as received)</string>
+       <string>Time sent: of frame 0 of the cycle (STD-43A 3.7.2, the pager adds 1.875 s for each frame),&#10;or of the frame that carries it (pagers that show the time as received)</string>
       </property>
       <item>
        <property name="text">
@@ -770,7 +770,7 @@
     <item row="9" column="2">
      <widget class="QCheckBox" name="flexTimeDaylightSaving">
       <property name="toolTip">
-       <string>The time is daylight saving time: one hour ahead of the standard time of the zone; the time zone word has L0 = 0</string>
+       <string>The time is daylight saving time: one hour ahead of the standard time of the zone;&#10;the time zone word has L0 = 0</string>
       </property>
       <property name="text">
        <string>DST</string>
@@ -780,7 +780,7 @@
     <item row="9" column="3">
      <widget class="QCheckBox" name="flexTimeSendZone">
       <property name="toolTip">
-       <string>Send the time zone word (block information word 101, A = 0101): the zone, the daylight saving flag and the seconds in 1/64 minute steps</string>
+       <string>Send the time zone word (block information word 101, A = 0101):&#10;the zone, the daylight saving flag and the seconds in 1/64 minute steps</string>
       </property>
       <property name="text">
        <string>Zone word</string>
@@ -817,7 +817,7 @@
     <item row="11" column="0" colspan="2">
      <widget class="QCheckBox" name="flexTimeEquivalentYear">
       <property name="toolTip">
-       <string>Retro year: a year after 2025 (the year field counts 1994-2025) is sent as the latest year of that period with the same calendar (leap year and weekday of January 1), so a pager shows the right weekday and day of the year. Unchecked: the year modulo 32</string>
+       <string>Retro year: a year after 2025 (the year field counts 1994-2025) is sent as the latest year of that period&#10;with the same calendar (leap year and weekday of January 1), so a pager shows the right weekday&#10;and day of the year. Unchecked: the year modulo 32</string>
       </property>
       <property name="text">
        <string>Retro year</string>
@@ -827,7 +827,7 @@
     <item row="11" column="2" colspan="2">
      <widget class="QSpinBox" name="flexTimeExtendedSeconds">
       <property name="toolTip">
-       <string>Extra seconds: the extended second S5-S3 of the time zone word (STD-43A 3.7.2), 0 to 7 steps of 1/64 minute (0.9375 s) added to the 7.5 s steps of the time word. Corrects the time a pager shows when the frames are not aligned to the second. Sent with the zone word</string>
+       <string>Extra seconds: the extended second S5-S3 of the time zone word (STD-43A 3.7.2), 0 to 7 steps of 1/64 minute&#10;(0.9375 s) added to the 7.5 s steps of the time word.&#10;Corrects the time a pager shows when the frames are not aligned to the second. Sent with the zone word</string>
       </property>
       <property name="prefix">
        <string>+</string>
@@ -843,7 +843,7 @@
     <item row="12" column="0" colspan="2">
      <widget class="QCheckBox" name="flexNumbering">
       <property name="toolTip">
-       <string>FLEX message numbering of the network (STD-43A 8.4, optional): the alphanumeric, HEX/binary and numbered short messages of each address are numbered from 0 with R = 1. Unchecked: N = 0 and R = 0 (a message in fragments takes a number apart from the other messages of the address in progress), numbered short messages are refused</string>
+       <string>FLEX message numbering of the network (STD-43A 8.4, optional): the alphanumeric, HEX/binary and numbered&#10;short messages of each address are numbered from 0 with R = 1.&#10;Unchecked: N = 0 and R = 0 (a message in fragments takes a number apart from the other messages of the&#10;address in progress), numbered short messages are refused</string>
       </property>
       <property name="text">
        <string>Message numbers</string>
@@ -853,7 +853,7 @@
     <item row="12" column="2" colspan="2">
      <widget class="QSpinBox" name="flexMaxMessageNumber">
       <property name="toolTip">
-       <string>Largest message number of the network (the pagers are set to it): after it the numbers of an address start from 0 again</string>
+       <string>Largest message number of the network (the pagers are set to it):&#10;after it the numbers of an address start from 0 again</string>
       </property>
       <property name="prefix">
        <string>Max N </string>
@@ -869,7 +869,7 @@
     <item row="13" column="0" colspan="2">
      <widget class="QToolButton" name="flexEventFlags">
       <property name="toolTip">
-       <string>FLEX System Event Notification (STD-43A 3.8.2.4): the events announced to the pagers, to take place within the next 4 cycles</string>
+       <string>FLEX System Event Notification (STD-43A 3.8.2.4):&#10;the events announced to the pagers, to take place within the next 4 cycles</string>
       </property>
       <property name="text">
        <string>Events</string>
@@ -882,7 +882,7 @@
     <item row="13" column="2">
      <widget class="QSpinBox" name="flexEventFrames">
       <property name="toolTip">
-       <string>Frames of the System Event Notification: it goes in every phase of each frame, for one cycle (128 frames) at least, up to the 4 cycles of the notice (512)</string>
+       <string>Frames of the System Event Notification: it goes in every phase of each frame,&#10;for one cycle (128 frames) at least, up to the 4 cycles of the notice (512)</string>
       </property>
       <property name="suffix">
        <string> fr</string>
@@ -901,7 +901,7 @@
     <item row="13" column="3">
      <widget class="QPushButton" name="flexEventSend">
       <property name="toolTip">
-       <string>Start the System Event Notification of the events checked (FLEX network mode); while it is sent, the frames left, and a click stops it</string>
+       <string>Start the System Event Notification of the events checked (FLEX network mode);&#10;while it is sent, the frames left, and a click stops it</string>
       </property>
       <property name="text">
        <string>Notify</string>
@@ -1027,7 +1027,7 @@
     <item>
      <widget class="PagingMessageTable" name="txLog">
       <property name="toolTip">
-       <string>The last messages transmitted: queued, sent or dropped. Double-click a voice message to play the voice recorded. Right click the header to choose the columns</string>
+       <string>The last messages transmitted: queued, sent or dropped. Double-click a voice message to play the voice recorded.&#10;Right click the header to choose the columns</string>
       </property>
      </widget>
     </item>

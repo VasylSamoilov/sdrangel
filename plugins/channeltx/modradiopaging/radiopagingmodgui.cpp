@@ -573,8 +573,8 @@ void RadioPagingModGUI::updateSystemEvent(const RadioPagingModSource::Status& st
     else
     {
         ui->flexEventSend->setText(tr("Notify"));
-        ui->flexEventSend->setToolTip(tr("Start the System Event Notification of the events checked (FLEX network mode): it goes in "
-            "every phase of each frame for the frames set"));
+        ui->flexEventSend->setToolTip(tr("Start the System Event Notification of the events checked (FLEX network mode):\n"
+            "it goes in every phase of each frame for the frames set"));
     }
 }
 
@@ -918,7 +918,7 @@ void RadioPagingModGUI::on_voiceFiles_clicked()
     days->setValue(m_settings.m_gscVoiceKeepDays);
     days->setSpecialValueText("Keep all");
     days->setSuffix(" days");
-    days->setToolTip("Files older than this are deleted, a few at a time, when a new file of the voice sent is written. "
+    days->setToolTip("Files older than this are deleted, a few at a time, when a new file of the voice sent is written.\n"
         "Keep all: no file is deleted for its age");
     minimum->setRange(0, 100000);
     minimum->setValue(m_settings.m_gscVoiceKeepMin);
@@ -1201,8 +1201,9 @@ void RadioPagingModGUI::displayProtocol()
     {
         ui->speed->addItems(QStringList({"Auto", "Single", "Batch", "Non battery saver"}));
         ui->speedLabel->setText("Mode");
-        ui->speed->setToolTip("GSC transmissions. Auto: a batch of the messages of the same preamble value, a message "
-            "alone after its own preamble. Single: one message per transmission. Batch: a batch even for one message. "
+        ui->speed->setToolTip("GSC transmissions.\n"
+            "Auto: a batch of the messages of the same preamble value, a message alone after its own preamble.\n"
+            "Single: one message per transmission. Batch: a batch even for one message.\n"
             "Non battery saver: all queued messages of a polarity after one 1100 pattern");
         ui->speed->setCurrentIndex(m_settings.m_gscMode);
         ui->polarity->setCurrentIndex(m_settings.m_gscInverted ? 1 : 0);
@@ -1218,8 +1219,8 @@ void RadioPagingModGUI::displayProtocol()
         ui->speed->setToolTip("FLEX mode (bit rate / levels) of the network: every frame is sent in it");
         ui->speed->setCurrentIndex(m_settings.m_flexMode);
         ui->polarity->setCurrentIndex(m_settings.m_flexInverted ? 1 : 0);
-        ui->polarity->setToolTip("Polarity of the network. Normal: symbol 3 is the highest frequency. Messages of the "
-            "other polarity are sent in the frames the network has nothing mandatory in");
+        ui->polarity->setToolTip("Polarity of the network. Normal: symbol 3 is the highest frequency.\n"
+            "Messages of the other polarity are sent in the frames the network has nothing mandatory in");
     }
     else
     {
@@ -1264,9 +1265,9 @@ void RadioPagingModGUI::displayProtocol()
     ui->collapseLabel->setVisible(flex);
     ui->collapse->setVisible(flex);
     ui->collapse->setToolTip(network
-        ? "FLEX collapse: pagers listen to one frame in 2^collapse; a message waits for a frame of its capcode. "
+        ? "FLEX collapse: pagers listen to one frame in 2^collapse; a message waits for a frame of its capcode.\n"
           "The re-synchronization at the start of the network lasts at least 2^collapse frames"
-        : "FLEX collapse of the pagers to reach: the re-synchronization lasts at least 2^collapse frames. "
+        : "FLEX collapse of the pagers to reach: the re-synchronization lasts at least 2^collapse frames.\n"
           "The frames after it are sent with collapse 0: the message goes in the first frame");
     // Mixing with POCSAG: a FLEX network option
     bool mixOptions = flex && network;
