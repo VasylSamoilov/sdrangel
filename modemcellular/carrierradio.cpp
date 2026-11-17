@@ -78,6 +78,12 @@ struct Oscillator
     void normalise() { phasor /= std::abs(phasor); }
 };
 
+// a carrier that stays as it was: same id, same place, same filters
+bool sameTuning(const CarrierTuning& a, const CarrierTuning& b)
+{
+    return a.id == b.id && a.offset == b.offset && a.passband == b.passband && a.spacing == b.spacing;
+}
+
 } // namespace
 
 bool CarrierRadio::rateSupported(double streamRate)
@@ -129,22 +135,73 @@ CarrierReceiver::~CarrierReceiver() = default;
 
 void CarrierReceiver::setCarriers(const std::vector<CarrierTuning>& carriers)
 {
-    m_tuning = carriers;
-    m_carriers.clear();
-    if (m_decimation > 0)
+    // the carriers that stay keep their filters, their FM state and their part of the block in
+    // progress: a change of the others does not touch them
+    std::vector<std::unique_ptr<Carrier>> kept(carriers.size());
+    std::vector<int> ids;
+    std::vector<int> from(carriers.size(), -1);
+
+    for (size_t i = 0; i < carriers.size(); i++)
     {
-        for (const CarrierTuning& t : carriers) {
-            m_carriers.push_back(std::make_unique<Carrier>(t, m_rate, m_decimation));
+        for (size_t j = 0; j < m_tuning.size() && j < m_carriers.size(); j++)
+        {
+            if (m_carriers[j] && sameTuning(m_tuning[j], carriers[i]))
+            {
+                kept[i] = std::move(m_carriers[j]);
+                from[i] = static_cast<int>(j);
+                break;
+            }
+        }
+        ids.push_back(carriers[i].id);
+    }
+    // new carriers decimate in step with the kept ones
+    const Carrier *pace = nullptr;
+    for (const std::unique_ptr<Carrier>& c : kept)
+    {
+        if (c) {
+            pace = c.get();
+        }
+    }
+    for (size_t i = 0; i < carriers.size(); i++)
+    {
+        if (kept[i] || m_decimation <= 0) {
+            continue;
+        }
+        kept[i] = std::make_unique<Carrier>(carriers[i], m_rate, m_decimation);
+        if (pace)
+        {
+            kept[i]->stage1.setPhase(pace->stage1.phase());
+            kept[i]->stage2.setPhase(pace->stage2.phase());
         }
     }
 
-    std::vector<int> ids;
-    for (const CarrierTuning& t : carriers) {
-        ids.push_back(t.id);
+    const bool running = pace != nullptr;
+    if (!running)
+    {
+        // the block in progress ends: its samples count on the clock
+        m_samples += static_cast<uint64_t>(m_fill);
+        m_fill = 0;
     }
-    m_fill = 0;
-    m_batch.reset(m_samples, CarrierRadio::kBlock, ids);
-    m_power.assign(ids.size(), 0.0);
+    CarrierBatch batch;
+    batch.reset(running ? m_batch.sample : m_samples, CarrierRadio::kBlock, ids);
+    std::vector<double> power(ids.size(), 0.0);
+    for (size_t i = 0; i < carriers.size(); i++)
+    {
+        if (from[i] < 0 || m_fill <= 0) {
+            continue;
+        }
+        const float *old = m_batch.carrier(static_cast<size_t>(from[i]));
+        std::copy(old, old + m_fill, batch.carrier(i));
+        power[i] = m_power[static_cast<size_t>(from[i])];
+    }
+
+    m_tuning = carriers;
+    m_carriers = std::move(kept);
+    m_batch = std::move(batch);
+    m_power = std::move(power);
+    if (m_carriers.empty() || m_decimation <= 0) {
+        m_carriers.clear();
+    }
 }
 
 void CarrierReceiver::feed(const std::complex<float>* samples, size_t count)
@@ -225,6 +282,9 @@ struct CarrierTransmitter::Carrier
     FirInterpolator stage1;
     FirInterpolator stage2;
     double phase = 0.0;
+    // keying: a carrier comes up and goes down over one block, not at once (a step would splatter
+    // over the whole stream, also into the neighbouring carriers)
+    enum class Ramp { Up, On, Down } ramp = Ramp::Up;
 };
 
 CarrierTransmitter::CarrierTransmitter(double streamRate) :
@@ -238,13 +298,38 @@ CarrierTransmitter::~CarrierTransmitter() = default;
 
 void CarrierTransmitter::setCarriers(const std::vector<CarrierTuning>& carriers)
 {
-    m_tuning = carriers;
-    m_carriers.clear();
-    if (m_decimation > 0)
+    // the carriers that stay keep their filters and their FM phase
+    std::vector<std::unique_ptr<Carrier>> kept(carriers.size());
+
+    for (size_t i = 0; i < carriers.size(); i++)
     {
-        for (const CarrierTuning& t : carriers) {
-            m_carriers.push_back(std::make_unique<Carrier>(t, m_rate, m_decimation));
+        for (size_t j = 0; j < m_tuning.size() && j < m_carriers.size(); j++)
+        {
+            if (m_carriers[j] && sameTuning(m_tuning[j], carriers[i]))
+            {
+                kept[i] = std::move(m_carriers[j]);
+                break;
+            }
         }
+        if (!kept[i] && m_decimation > 0) {
+            kept[i] = std::make_unique<Carrier>(carriers[i], m_rate, m_decimation);
+        }
+    }
+    // the ones that go are sent down over the next block
+    for (std::unique_ptr<Carrier>& gone : m_carriers)
+    {
+        if (gone)
+        {
+            gone->ramp = Carrier::Ramp::Down;
+            m_fading.push_back(std::move(gone));
+        }
+    }
+    m_tuning = carriers;
+    m_carriers = std::move(kept);
+    if (m_decimation <= 0)
+    {
+        m_carriers.clear();
+        m_fading.clear();
     }
 }
 
@@ -252,7 +337,20 @@ void CarrierTransmitter::renderBlock()
 {
     const size_t block = static_cast<size_t>(CarrierRadio::kBlock);
     const size_t out = block * static_cast<size_t>(m_decimation);
-    const float gain = static_cast<float>(CarrierRadio::kTxLevel / static_cast<double>(m_carriers.size()));
+    // the carriers that go down still count: the sum stays below full scale
+    const size_t carriers = m_carriers.size() + m_fading.size();
+    // Each carrier has the share weight / sum of the weights: on 1, coming up r, going down 1 - r
+    // (r a raised cosine over the block). The sum of the shares is kTxLevel at every sample (below
+    // full scale), and no level steps: a step of the envelope of a carrier would splatter.
+    size_t on = 0;
+    size_t up = 0;
+    size_t down = 0;
+    for (const std::unique_ptr<Carrier>& c : m_carriers)
+    {
+        on += c->ramp == Carrier::Ramp::On ? 1 : 0;
+        up += c->ramp == Carrier::Ramp::Up ? 1 : 0;
+    }
+    down = m_fading.size();
     const double toPhase = 2.0 * kPi / CarrierRadio::kAudioRate;
 
     // what was taken goes
@@ -263,12 +361,14 @@ void CarrierTransmitter::renderBlock()
 
     m_audio.resize(block);
     m_base.resize(block);
-    for (size_t index = 0; index < m_carriers.size(); index++)
+    for (size_t index = 0; index < carriers; index++)
     {
-        Carrier& c = *m_carriers[index];
+        const bool active = index < m_carriers.size();
+        Carrier& c = active ? *m_carriers[index] : *m_fading[index - m_carriers.size()];
 
+        // a carrier that goes down is not modulated any more
         std::fill(m_audio.begin(), m_audio.end(), 0.0f);
-        if (m_source) {
+        if (active && m_source) {
             m_source(index, m_audio.data(), block);
         }
         for (size_t i = 0; i < block; i++)
@@ -280,16 +380,26 @@ void CarrierTransmitter::renderBlock()
         c.stage1.process(m_base.data(), block, m_mid);
         m_up.clear();
         c.stage2.process(m_mid.data(), m_mid.size(), m_up);
-        for (size_t i = 0; i < out && i < m_up.size(); i++) {
-            m_pending[start + i] += m_up[i] * c.nco.next() * gain;
+        for (size_t i = 0; i < out && i < m_up.size(); i++)
+        {
+            const double t = static_cast<double>(i) / static_cast<double>(out);
+            const double rise = 0.5 - 0.5 * std::cos(kPi * t);
+            const double weights = static_cast<double>(on) + static_cast<double>(up) * rise + static_cast<double>(down) * (1.0 - rise);
+            const double weight = c.ramp == Carrier::Ramp::On ? 1.0 : (c.ramp == Carrier::Ramp::Up ? rise : 1.0 - rise);
+            const float level = weights > 0.0 ? static_cast<float>(CarrierRadio::kTxLevel * weight / weights) : 0.0f;
+            m_pending[start + i] += m_up[i] * c.nco.next() * level;
         }
         c.nco.normalise();
+        if (c.ramp == Carrier::Ramp::Up) {
+            c.ramp = Carrier::Ramp::On;
+        }
     }
+    m_fading.clear();
 }
 
 void CarrierTransmitter::pull(std::complex<float>* samples, size_t count)
 {
-    if (m_carriers.empty())
+    if (m_carriers.empty() && m_fading.empty() && m_taken >= m_pending.size())
     {
         std::fill(samples, samples + count, std::complex<float>(0.0f, 0.0f));
         return;
@@ -298,7 +408,13 @@ void CarrierTransmitter::pull(std::complex<float>* samples, size_t count)
 
     while (done < count)
     {
-        if (m_taken >= m_pending.size()) {
+        if (m_taken >= m_pending.size())
+        {
+            if (m_carriers.empty() && m_fading.empty())
+            {
+                std::fill(samples + done, samples + count, std::complex<float>(0.0f, 0.0f));
+                return;
+            }
             renderBlock();
         }
         const size_t n = std::min(count - done, m_pending.size() - m_taken);

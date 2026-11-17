@@ -42,6 +42,9 @@ public:
     // Appends the output samples of count input samples to out.
     void process(const std::complex<float>* in, size_t count, std::vector<std::complex<float>>& out);
     int factor() const { return m_factor; }
+    // the position within the factor: decimators that run in step have the same phase
+    int phase() const { return m_phase; }
+    void setPhase(int phase) { m_phase = phase % m_factor; }
     void reset();
 
 private:

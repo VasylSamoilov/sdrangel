@@ -82,10 +82,18 @@ CellularTx::~CellularTx()
 }
 
 // The pipe of the audio from the controller (the producer of the carriers we got) to us. We
-// register it, as a consumer does; the controller looks it up by its consumer.
-void CellularTx::useAudioPipe(const QObject *producer)
+// register it, as a consumer does; the controller looks it up by its consumer. The packet may have
+// waited in our queue while the controller stopped or went away: we register only with a
+// controller that still has its pipe from us (it releases them when it stops; it goes away in our
+// thread, the thread of the input messages). No carriers, no audio.
+void CellularTx::useAudioPipe(const QObject *producer, bool carriers)
 {
-    if (!producer || (producer == m_audioProducer && m_audioPipe)) {
+    if (!carriers || !controllerAlive(producer))
+    {
+        dropAudioPipe();
+        return;
+    }
+    if (producer == m_audioProducer && m_audioPipe) {
         return;
     }
     dropAudioPipe();
@@ -102,6 +110,23 @@ void CellularTx::useAudioPipe(const QObject *producer)
         }
     });
     m_audio->setQueue(qobject_cast<MessageQueue*>(m_audioPipe->m_element));
+}
+
+bool CellularTx::controllerAlive(const QObject *producer)
+{
+    if (!producer) {
+        return false;
+    }
+    QList<ObjectPipe*> pipes;
+    MainCore::instance()->getMessagePipes().getMessagePipes(this, "cellular", pipes);
+
+    for (const ObjectPipe *pipe : pipes)
+    {
+        if (pipe->m_consumer == producer) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void CellularTx::dropAudioPipe()
@@ -194,12 +219,25 @@ void CellularTx::setCarriers(const std::vector<modemcellular::CarrierTuning>& ca
 {
     QMutexLocker mutexLocker(&m_mutex);
 
+    // the carriers that stay keep their queue (their audio and their lead)
+    std::vector<std::unique_ptr<modemcellular::CarrierQueue>> queues(carriers.size());
+    for (size_t i = 0; i < carriers.size(); i++)
+    {
+        for (size_t j = 0; j < m_carriers.size() && j < m_queues.size(); j++)
+        {
+            if (m_queues[j] && lead == m_lead && m_carriers[j].id == carriers[i].id)
+            {
+                queues[i] = std::move(m_queues[j]);
+                break;
+            }
+        }
+        if (!queues[i]) {
+            queues[i] = std::make_unique<modemcellular::CarrierQueue>(lead);
+        }
+    }
     m_carriers = carriers;
     m_lead = lead;
-    m_queues.clear();
-    for (size_t i = 0; i < carriers.size(); i++) {
-        m_queues.push_back(std::make_unique<modemcellular::CarrierQueue>(lead));
-    }
+    m_queues = std::move(queues);
     if (m_transmitter) {
         m_transmitter->setCarriers(carriers);
     }
@@ -286,7 +324,7 @@ bool CellularTx::handleMessage(const Message& cmd)
             if (modemcellular::decodeTuning(data, size, tuning))
             {
                 setCarriers(tuning.carriers, tuning.lead);
-                useAudioPipe(packet.getPipeSource());
+                useAudioPipe(packet.getPipeSource(), !tuning.carriers.empty());
             }
             return true;
         }

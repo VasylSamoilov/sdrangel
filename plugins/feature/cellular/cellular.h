@@ -69,6 +69,27 @@ public:
         explicit MsgStartStop(bool startStop) : Message(), m_startStop(startStop) { }
     };
 
+    // from the worker: a packet for a radio channel, delivered by the feature in its thread (the
+    // thread that removes channels) and only to a channel that is still there
+    class MsgToRadio : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        ChannelAPI *getChannel() const { return m_channel; }
+        const QObject *getSource() const { return m_source; }
+        const QByteArray& getPacket() const { return m_packet; }
+        static MsgToRadio* create(ChannelAPI *channel, const QObject *source, const QByteArray& packet) {
+            return new MsgToRadio(channel, source, packet);
+        }
+
+    private:
+        ChannelAPI *m_channel;
+        const QObject *m_source;
+        QByteArray m_packet;
+        MsgToRadio(ChannelAPI *channel, const QObject *source, const QByteArray& packet) :
+            Message(), m_channel(channel), m_source(source), m_packet(packet) { }
+    };
+
     // a line for the event log of a network (0: the controller)
     class MsgReportLog : public Message {
         MESSAGE_CLASS_DECLARATION

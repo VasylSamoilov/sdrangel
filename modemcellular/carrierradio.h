@@ -124,6 +124,7 @@ private:
     int m_decimation;
     std::vector<CarrierTuning> m_tuning;
     std::vector<std::unique_ptr<Carrier>> m_carriers;
+    std::vector<std::unique_ptr<Carrier>> m_fading;     // removed, going down over the next block
     std::vector<std::complex<float>> m_pending;     // rendered stream samples not taken yet
     size_t m_taken;
     std::vector<float> m_audio;

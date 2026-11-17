@@ -39,6 +39,7 @@
 
 MESSAGE_CLASS_DEFINITION(Cellular::MsgConfigureCellular, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgStartStop, Message)
+MESSAGE_CLASS_DEFINITION(Cellular::MsgToRadio, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgReportLog, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgReportStatus, Message)
 
@@ -153,7 +154,7 @@ void Cellular::start()
     }
     m_thread = new QThread();
     m_thread->setObjectName("Cellular");
-    m_worker = new CellularWorker(getInputMessageQueue(),
+    m_worker = new CellularWorker(getInputMessageQueue(), this,
         static_cast<uint32_t>(m_settings.m_leadMs * modemnmt::NmtBaseStation::kAudioRate / 1000.0));
     m_worker->moveToThread(m_thread);
     m_thread->start();
@@ -294,10 +295,26 @@ void Cellular::handlePipeToBeDeleted(int reason, QObject *object)
     if (reason != 0 || !m_running) {
         return;
     }
+    ChannelAPI *gone = nullptr;
+    for (const auto& p : m_pipes)
+    {
+        if (p.first == object) {
+            gone = p.first;
+        }
+    }
+    if (!gone) {
+        return;
+    }
+    // the channel is half destroyed: the worker must not send to it any more, and its pipe is
+    // gone with it (nothing to unregister)
+    QMetaObject::invokeMethod(m_worker, "radioGone", Qt::BlockingQueuedConnection,
+        Q_ARG(qulonglong, static_cast<qulonglong>(reinterpret_cast<quintptr>(gone))));
+    m_pipes.erase(gone);
+
     std::vector<int> stopping;
     for (const auto& a : m_active)
     {
-        if (a.second.rx == object || a.second.tx == object) {
+        if (a.second.rx == gone || a.second.tx == gone) {
             stopping.push_back(a.first);
         }
     }
@@ -323,6 +340,16 @@ bool Cellular::handleMessage(const Message& cmd)
             start();
         } else {
             stop();
+        }
+        return true;
+    }
+    else if (MsgToRadio::match(cmd))
+    {
+        // only to a radio that is in use: a channel that was removed is no longer in m_pipes
+        const MsgToRadio& msg = static_cast<const MsgToRadio&>(cmd);
+
+        if (m_pipes.find(msg.getChannel()) != m_pipes.end()) {
+            msg.getChannel()->getInputMessageQueue()->push(MainCore::MsgPacket::create(msg.getSource(), msg.getPacket()));
         }
         return true;
     }

@@ -241,6 +241,109 @@ static void testIdleClock()
     CHECK(rx.samples() == 7001000 / 20);
 }
 
+// A carrier that stays is not touched by a change of the others: the receiver hands out exactly
+// the same audio for it, the blocks go on, and the transmitter sends it on without a click.
+static void testChangeOthers()
+{
+    const double rate = 960000.0;
+    const CarrierTuning a = {1, 100000.0, 9000.0, 25000.0};
+    const CarrierTuning b = {2, 150000.0, 9000.0, 25000.0};
+    const CarrierTuning c = {3, -200000.0, 9000.0, 25000.0};
+    uint64_t at = 0;
+    auto audio = [&](size_t index, float* s, size_t n) {
+        for (size_t i = 0; i < n; i++) {
+            s[i] = static_cast<float>(3000.0 * std::sin(2.0 * kPi * (1000.0 + 500.0 * index) * static_cast<double>(at + i) / 48000.0));
+        }
+    };
+
+    // the stream: all three carriers
+    CarrierTransmitter source(rate);
+    source.setCarriers({a, b, c});
+    source.setAudioSource([&](size_t index, float* s, size_t n) { audio(index, s, n); if (index == 2) at += n; });
+    std::vector<std::complex<float>> stream(960000);
+    source.pull(stream.data(), stream.size());
+
+    // a receiver that keeps a and b, and one that changes b for c after 0.3 s (in the middle of a block)
+    CarrierReceiver steady(rate), changing(rate);
+    std::vector<float> heardSteady, heardChanging;
+    std::vector<uint64_t> starts;
+    steady.setCarriers({a, b});
+    changing.setCarriers({a, b});
+    steady.setBatchHandler([&](const CarrierBatch& batch) { heardSteady.insert(heardSteady.end(), batch.carrier(0), batch.carrier(0) + batch.length); });
+    changing.setBatchHandler([&](const CarrierBatch& batch) {
+        const int i = batch.find(1);
+        CHECK(i >= 0);
+        heardChanging.insert(heardChanging.end(), batch.carrier(static_cast<size_t>(i)), batch.carrier(static_cast<size_t>(i)) + batch.length);
+        starts.push_back(batch.sample);
+    });
+    const size_t cut = 288000 + 7001;
+    steady.feed(stream.data(), stream.size());
+    changing.feed(stream.data(), cut);
+    changing.setCarriers({c, a});
+    changing.feed(stream.data() + cut, stream.size() - cut);
+
+    CHECK(heardSteady.size() == heardChanging.size());
+    double diff = 0.0;
+    for (size_t i = 0; i < heardSteady.size() && i < heardChanging.size(); i++) {
+        diff = std::max(diff, static_cast<double>(std::fabs(heardSteady[i] - heardChanging[i])));
+    }
+    CHECK(diff == 0.0);
+    for (size_t i = 1; i < starts.size(); i++) {
+        CHECK(starts[i] == starts[i - 1] + CarrierRadio::kBlock);
+    }
+
+    // the transmitter: a stays while b goes and c comes; a received as from a transmitter without
+    // the change
+    auto run = [&](bool change) {
+        CarrierTransmitter tx(rate);
+        uint64_t t = 0;
+        tx.setCarriers({a, b});
+        tx.setAudioSource([&](size_t index, float* out, size_t n) {
+            for (size_t i = 0; i < n; i++) {
+                out[i] = static_cast<float>(3000.0 * std::sin(2.0 * kPi * (1000.0 + 500.0 * index) * static_cast<double>(t + i) / 48000.0));
+            }
+            if (index == 1) {
+                t += n;
+            }
+        });
+        CarrierReceiver rx(rate);
+        rx.setCarriers({a});
+        std::vector<float> heard;
+        rx.setBatchHandler([&](const CarrierBatch& batch) { heard.insert(heard.end(), batch.carrier(0), batch.carrier(0) + batch.length); });
+        std::vector<std::complex<float>> s(9600);
+        for (int i = 0; i < 100; i++)
+        {
+            if (change && i == 50) {
+                tx.setCarriers({a, c});
+            }
+            tx.pull(s.data(), s.size());
+            rx.feed(s.data(), s.size());
+        }
+        return heard;
+    };
+    const std::vector<float> plain = run(false);
+    const std::vector<float> changed = run(true);
+    double worst = 0.0;
+    size_t worstAt = 0;
+    for (size_t i = 0; i < plain.size() && i < changed.size(); i++)
+    {
+        const double d = std::fabs(plain[i] - changed[i]);
+        if (d > worst)
+        {
+            worst = d;
+            worstAt = i;
+        }
+    }
+    size_t differing = 0;
+    for (size_t i = 0; i < plain.size() && i < changed.size(); i++) {
+        differing += std::fabs(plain[i] - changed[i]) > 1.0 ? 1 : 0;
+    }
+    std::printf("change of the others: receiver difference %.1f Hz, transmitter difference %.1f Hz at sample %zu of %zu, %zu samples over 1 Hz (change at %d)\n",
+        diff, worst, worstAt, plain.size(), differing, 50 * 480);
+    CHECK(plain.size() == changed.size());
+    CHECK(worst < 30.0);
+}
+
 int main()
 {
     testRates();
@@ -249,6 +352,7 @@ int main()
     testNoCarriers();
     testLevel();
     testIdleClock();
+    testChangeOthers();
 
     if (g_failures == 0) {
         std::printf("all carrier radio tests passed\n");

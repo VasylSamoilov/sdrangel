@@ -111,9 +111,11 @@ QString issueText(const modemnmt::NmtPlanIssue& issue)
 
 } // namespace
 
-CellularWorker::CellularWorker(MessageQueue *reports, uint32_t lead) :
+CellularWorker::CellularWorker(MessageQueue *reports, const QObject *producer, uint32_t lead) :
     m_reports(reports),
-    m_lead(lead)
+    m_producer(producer),
+    m_lead(lead),
+    m_direct(false)
 {
     connect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
 }
@@ -156,7 +158,26 @@ void CellularWorker::sendTo(ChannelAPI *channel, const std::vector<uint8_t>& wir
         return;
     }
     const QByteArray bytes(reinterpret_cast<const char*>(wire.data()), static_cast<int>(wire.size()));
-    channel->getInputMessageQueue()->push(MainCore::MsgPacket::create(this, bytes));
+
+    if (m_direct)
+    {
+        // a blocking call of the feature: the channels cannot go away meanwhile
+        channel->getInputMessageQueue()->push(MainCore::MsgPacket::create(m_producer, bytes));
+    }
+    else if (m_reports)
+    {
+        // the feature hands it on in its thread, if the channel is still there
+        m_reports->push(Cellular::MsgToRadio::create(channel, m_producer, bytes));
+    }
+}
+
+void CellularWorker::radioGone(qulonglong channel)
+{
+    auto it = m_radios.find(reinterpret_cast<ChannelAPI*>(static_cast<quintptr>(channel)));
+
+    if (it != m_radios.end()) {
+        it->second->channel = nullptr;      // nothing goes to it any more
+    }
 }
 
 bool CellularWorker::running(const Network& network) const
@@ -344,7 +365,9 @@ void CellularWorker::addNetwork(const MsgAddNetwork& add)
 
 void CellularWorker::removeNetwork(int id)
 {
+    m_direct = true;
     remove(id, true);
+    m_direct = false;
 }
 
 void CellularWorker::remove(int id, bool retryOthers)
@@ -384,10 +407,12 @@ void CellularWorker::remove(int id, bool retryOthers)
 
 void CellularWorker::removeAll()
 {
+    m_direct = true;
     while (!m_networks.empty()) {
         remove(m_networks.front()->id, false);
     }
     dropUnusedRadios();
+    m_direct = false;
 }
 
 // takes the network off the air (the radios are told by the caller)
@@ -614,12 +639,13 @@ void CellularWorker::processBatch(Radio& radio)
     }
 }
 
-// the audio for a transmitter goes through the pipe it registered from us to it (drained in its
-// own thread); before it registered (its carriers are on the way) there is nothing to send
+// the audio for a transmitter goes through the pipe it registered from the controller to it
+// (drained in its own thread); before it registered (its carriers are on the way) there is
+// nothing to send
 void CellularWorker::sendAudio(ChannelAPI *channel, const std::vector<uint8_t>& wire)
 {
     QList<ObjectPipe*> pipes;
-    MainCore::instance()->getMessagePipes().getMessagePipes(this, "cellulartx", pipes);
+    MainCore::instance()->getMessagePipes().getMessagePipes(m_producer, "cellulartx", pipes);
 
     for (ObjectPipe *pipe : pipes)
     {
@@ -627,7 +653,7 @@ void CellularWorker::sendAudio(ChannelAPI *channel, const std::vector<uint8_t>& 
 
         if (pipe->m_consumer == channel && queue)
         {
-            queue->push(MainCore::MsgPacket::create(this,
+            queue->push(MainCore::MsgPacket::create(m_producer,
                 QByteArray(reinterpret_cast<const char*>(wire.data()), static_cast<int>(wire.size()))));
             return;
         }
