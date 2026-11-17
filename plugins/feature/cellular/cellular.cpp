@@ -352,17 +352,24 @@ bool Cellular::handleMessage(const Message& cmd)
             m_settings = cfg.getSettings();
             m_settings.setRollupState(nullptr);
         }
-        if (cfg.getForce() && m_running)
+        if (cfg.getRestart() != MsgConfigureCellular::Restart::None && m_running)
         {
-            // all settings apply again: the networks that run start again
-            std::vector<int> running;
-            for (const auto& a : m_active) {
-                running.push_back(a.first);
+            // the networks that run start again with the new settings: all of them, or the ones
+            // whose settings changed
+            const bool all = cfg.getRestart() == MsgConfigureCellular::Restart::All;
+            std::vector<int> restarting;
+            for (const auto& a : m_active)
+            {
+                const CellularNetworkSettings *n = m_settings.network(a.first);
+
+                if (all || (n && !a.second.settings.sameNetwork(*n))) {
+                    restarting.push_back(a.first);
+                }
             }
-            for (int id : running)
+            for (int id : restarting)
             {
                 stopNetwork(id);
-                report(id, "stopped: settings replaced");
+                report(id, all ? "stopped: settings replaced" : "stopped: settings changed");
             }
         }
         applyNetworks();
@@ -446,8 +453,10 @@ int Cellular::webapiSettingsPutPatch(bool force, const QStringList& featureSetti
     }
     webapiUpdateFeatureSettings(settings, featureSettingsKeys, response);
 
-    // the networks that are switched on start, the others stop; a PUT starts the running ones again
-    getInputMessageQueue()->push(MsgConfigureCellular::create(settings, force));
+    // the networks that are switched on start, the others stop; a PATCH starts the running ones
+    // whose settings changed again, a PUT all running ones
+    getInputMessageQueue()->push(MsgConfigureCellular::create(settings,
+        force ? MsgConfigureCellular::Restart::All : MsgConfigureCellular::Restart::Changed));
     if (m_guiMessageQueue) {
         m_guiMessageQueue->push(MsgConfigureCellular::create(settings));
     }
