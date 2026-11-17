@@ -74,8 +74,8 @@ int main()
         found = found && (Cs::find(c.m_protocol, c.key()) == &c) && c.m_table && c.m_label;
     }
 
-    check((Cs::codepages("pocsag").size() == 26) && (Cs::codepages("flex").size() == 15) && (Cs::codepages("gsc").size() == 1)
-        && (keys.size() == Cs::codepages().size()) && found, "42 codepages, keys unique in each protocol, each found by its key");
+    check((Cs::codepages("pocsag").size() == 27) && (Cs::codepages("flex").size() == 17) && (Cs::codepages("gsc").size() == 1)
+        && (keys.size() == Cs::codepages().size()) && found, "45 codepages, keys unique in each protocol, each found by its key");
     const Cs::Key ascii0{"generic", "generic", "ascii"};
     check((Cs::defaultFor("pocsag")->key() == ascii0) && (Cs::defaultFor("flex")->key() == ascii0)
         && (Cs::defaultFor("gsc")->key() == ascii0) && (Cs::defaultFor("ermes") == nullptr),
@@ -266,6 +266,21 @@ int main()
         && (out.m_text == QString::fromUtf8("\xD0\xB0\xD0\xB1")), "decode again: FLEX characters with the Cyrillic codepage");
     rx.m_direction = MessageRecord::DirectionTX;
     check(RadioPagingRecode::types(rx).isEmpty(), "decode again: not a transmitted message");
+
+    // ROT-13: the letters turned by 13 places both ways, <0xNN> kept; Kanji: Shift-JIS byte pairs, not sent
+    const Cs::Codepage *rot = find("pocsag", "generic", "generic", "ascii-rot13");
+    check(rot && (encode(rot, "Hello, World<0x04>") == std::vector<uint8_t>({'U', 'r', 'y', 'y', 'b', ',', ' ', 'J', 'b', 'e', 'y', 'q', 0x04}))
+        && (Cs::decode(*rot, {'U', 'r', 'y', 'y', 'b', 0x03}) == "Hello<0x03>"), "ROT-13: encoded and decoded, a code given as <0xNN> kept");
+    const Cs::Codepage *kanjiCp = find("flex", "generic", "generic", "kanji");
+    check(kanjiCp && (Cs::decode(*kanjiCp, {0x93, 0xFA, 0x96, 0x7B}) == "\xE6\x97\xA5\xE6\x9C\xAC"), "Kanji: the Shift-JIS byte pairs as text");
+    std::vector<uint8_t> none;
+    check(!Cs::encode(*kanjiCp, "x", none, &error) && (error.find("Kanji") != std::string::npos), "Kanji: not sent");
+    MessageRecord kanjiRx = flexRx;
+    kanjiRx.m_protocolData.insert("kanji", true);
+    kanjiRx.m_protocolData.insert("alpha_codes", QString("93fa967b"));
+    check(RadioPagingRecode::redecode(kanjiRx, kanjiCp->key(), QString(), out, recodeError) && (out.m_text == QString::fromUtf8("\xE6\x97\xA5\xE6\x9C\xAC"))
+        && !RadioPagingRecode::redecode(kanjiRx, Cs::defaultFor("flex")->key(), QString(), out, recodeError),
+        "decode again: 16-bit characters with Kanji only");
 
     std::printf("%d passed, %d failed\n", passes, failures);
     return failures ? 1 : 0;

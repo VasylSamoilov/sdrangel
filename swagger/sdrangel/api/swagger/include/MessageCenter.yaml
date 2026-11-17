@@ -158,3 +158,18 @@ MessageCenterActions:
     clearSent:
       description: "1: the pages that were sent are forgotten"
       type: integer
+    redecode:
+      $ref: "http://swgserver:8081/api/swagger/include/MessageCenter.yaml#/MessageCenterRedecode"
+
+MessageCenterRedecode:
+  description: "A received message of the log decoded again: POCSAG and GSC from their message bits, with another codepage or as the other type; FLEX alphanumeric from its characters, with another codepage. The record of the log is replaced"
+  properties:
+    id:
+      description: "Id of the record"
+      type: string
+    charset:
+      description: "Codepage of the protocol of the record. Omitted: the codepage of the record"
+      $ref: "http://swgserver:8081/api/swagger/include/RadioPagingCharset.yaml#/RadioPagingCharset"
+    type:
+      description: "alphanumeric or numeric (POCSAG and GSC). Omitted: the type of the record"
+      type: string

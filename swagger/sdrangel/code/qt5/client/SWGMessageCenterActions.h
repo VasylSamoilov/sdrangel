@@ -6,6 +6,7 @@
 #include <QString>
 #include "SWGObject.h"
 #include "SWGMessageCenterPost.h"
+#include "SWGMessageCenterRedecode.h"
 #include "export.h"
 
 namespace SWGSDRangel {
@@ -29,7 +30,11 @@ public:
     void setCancel(QString* value);
     qint32 getClearSent();
     void setClearSent(qint32 value);
+    SWGMessageCenterRedecode* getRedecode();
+    void setRedecode(SWGMessageCenterRedecode* value);
 private:
+    SWGMessageCenterRedecode* m_redecode = nullptr;
+    bool m_redecodeIsSet = false;
     SWGMessageCenterPost* m_post = nullptr;
     bool m_postIsSet = false;
     QString* m_requeue = nullptr;

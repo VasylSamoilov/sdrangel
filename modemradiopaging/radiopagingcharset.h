@@ -57,6 +57,8 @@ public:
         bool (*m_encode)(const std::string& text, std::string& out, std::string& error, std::string& warning);
         //!< The text of the user of a text received
         std::string (*m_decode)(const std::string& text);
+        //!< The decoder takes the codes as they are, bytes, not the glyphs of the table (FLEX Kanji: Shift-JIS byte pairs)
+        bool m_bytes = false;
     };
 
     //!< A codepage within its protocol. No vendor: none chosen (the default of the user of the key)

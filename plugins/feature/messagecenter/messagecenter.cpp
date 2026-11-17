@@ -32,6 +32,7 @@
 #include "SWGFeatureSettings.h"
 #include "SWGMessageCenterActions.h"
 #include "SWGMessageCenterPost.h"
+#include "SWGMessageCenterRedecode.h"
 #include "SWGMessageCenterReport.h"
 #include "SWGMessageCenterSettings.h"
 #include "SWGRadioPagingModActions.h"
@@ -40,6 +41,7 @@
 #include "channel/channelapi.h"
 #include "maincore.h"
 #include "radiopagingpage.h"
+#include "radiopagingrecode.h"
 
 #include "messagecenter.h"
 
@@ -600,12 +602,35 @@ int MessageCenter::webapiActionsPost(const QStringList& featureActionsKeys, SWGS
     }
 
     int actions = (featureActionsKeys.contains("post") ? 1 : 0) + (featureActionsKeys.contains("requeue") ? 1 : 0)
-        + (featureActionsKeys.contains("cancel") ? 1 : 0) + (featureActionsKeys.contains("clearSent") ? 1 : 0);
+        + (featureActionsKeys.contains("cancel") ? 1 : 0) + (featureActionsKeys.contains("clearSent") ? 1 : 0)
+        + (featureActionsKeys.contains("redecode") ? 1 : 0);
 
     if (actions != 1)
     {
-        errorMessage = "One action expected: post, requeue, cancel or clearSent";
+        errorMessage = "One action expected: post, requeue, cancel, clearSent or redecode";
         return 400;
+    }
+
+    // A received message of the log decoded again: checked here, the log changes in the thread of the feature
+    if (featureActionsKeys.contains("redecode"))
+    {
+        SWGSDRangel::SWGMessageCenterRedecode *redecode = swg->getRedecode();
+        const QString id = (redecode && redecode->getId()) ? *redecode->getId() : QString();
+        const QString type = (redecode && redecode->getType()) ? redecode->getType()->toLower() : QString();
+        const MessageRecord *record = m_engine.find(id);
+        MessageRecord out;
+
+        if (!record)
+        {
+            errorMessage = QString("No record %1 in the log").arg(id);
+            return 404;
+        }
+        if (!RadioPagingRecode::redecode(*record, RadioPagingPage::charsetKey(redecode->getCharset()), type, out, errorMessage)) {
+            return 400;
+        }
+
+        m_inputMessageQueue.push(MsgRedecoded::create(out));
+        return 202;
     }
 
     if (featureActionsKeys.contains("post"))

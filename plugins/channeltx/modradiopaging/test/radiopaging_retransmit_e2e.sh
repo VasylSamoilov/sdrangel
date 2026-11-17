@@ -168,6 +168,18 @@ rawData() { records "$1" "$2" | head -1 | grep -o "\"rawData\":\"[^\"]*\""; }
 check "POCSAG: received in the German codepage, the bits as sent" '[[ "$(records rx 1100005)" == *"$GRUSSE"* && -n "$(rawData tx 1100005)" && "$(rawData tx 1100005)" == "$(rawData rx 1100005)" ]]'
 check "FLEX: received in the Cyrillic codepage" '[[ "$(records rx 1100006)" == *"$DOBRYI"* && "$(records rx 1100006)" == *"$CYRILLIC_REC"* ]]'
 check "the received records keep what decodes them again: POCSAG fill codes, FLEX characters" '[[ "$(records rx 1100005)" == *"\"fill_codes\":[0,3,4]"* && "$(records rx 1100006)" == *"\"alpha_codes\":\""* ]]'
+# Decoding again (message center WebAPI): the record of the log is replaced
+redecode() { curl_code POST /featureset/feature/0/actions "{\"featureType\":\"MessageCenter\",\"MessageCenterActions\":{\"redecode\":$1}}"; }
+RXID=$(records rx 1100005 | head -1 | grep -o "\"id\":\"[^\"]*\"" | head -1 | cut -d\" -f4)
+ASCII='{"vendor":"generic","model":"generic","codepage":"ascii"}'
+check "decode again: an unknown record is not found" '[ "$(redecode "{\"id\":\"none\"}")" = 404 ]'
+check "decode again: a codepage of another protocol is refused" '[ "$(redecode "{\"id\":\"$RXID\",\"charset\":$CYRILLIC}")" = 400 ]'
+check "decode again: POCSAG with the ASCII codepage" '[ "$(redecode "{\"id\":\"$RXID\",\"charset\":$ASCII}")" = 202 ]'
+sleep 1
+check "decode again: the record has the ASCII text and codepage" '[[ "$(records rx 1100005 | grep "\"id\":\"$RXID\"")" == *"\"text\":\"Gr}~e\""* && "$(records rx 1100005 | grep "\"id\":\"$RXID\"")" == *"\"redecoded\":true"* ]]'
+check "decode again: POCSAG as numeric" '[ "$(redecode "{\"id\":\"$RXID\",\"type\":\"numeric\"}")" = 202 ]'
+sleep 1
+check "decode again: the record is numeric, alphanumeric the other candidate" '[[ "$(records rx 1100005 | grep "\"id\":\"$RXID\"")" == *"\"msgType\":\"numeric\""* && "$(records rx 1100005 | grep "\"id\":\"$RXID\"")" == *"\"alt_type\":\"alphanumeric\""* ]]'
 # How the FLEX messages went is reported when they are in their frame: message number, R, fragments
 check "FLEX: the records sent have the message number, R and the fragments" '[[ "$(records tx 1100002 | grep -c "\"message_number\":0")" = 3 && "$(records tx 1100002 | grep -v "retransmission" | grep "\"retrieval\":true" | grep -c "\"fragment_count\":1")" = 1 ]]'
 

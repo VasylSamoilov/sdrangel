@@ -305,6 +305,7 @@
 #include "SWGPERTesterReport.h"
 #include "SWGMessageCenterActions.h"
 #include "SWGMessageCenterPost.h"
+#include "SWGMessageCenterRedecode.h"
 #include "SWGMessageCenterReport.h"
 #include "SWGMessageCenterSettings.h"
 #include "SWGPERTesterSettings.h"
@@ -1924,6 +1925,11 @@ namespace SWGSDRangel {
     }
     if(QString("SWGMessageCenterActions").compare(type) == 0) {
       SWGMessageCenterActions *obj = new SWGMessageCenterActions();
+      obj->init();
+      return obj;
+    }
+    if(QString("SWGMessageCenterRedecode").compare(type) == 0) {
+      SWGMessageCenterRedecode *obj = new SWGMessageCenterRedecode();
       obj->init();
       return obj;
     }

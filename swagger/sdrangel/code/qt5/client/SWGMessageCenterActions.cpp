@@ -11,6 +11,7 @@ void SWGMessageCenterActions::cleanup()
     delete m_post; m_post = nullptr;
     delete m_requeue; m_requeue = nullptr;
     delete m_cancel; m_cancel = nullptr;
+    delete m_redecode; m_redecode = nullptr;
 }
 void SWGMessageCenterActions::init()
 {
@@ -19,6 +20,7 @@ void SWGMessageCenterActions::init()
     m_requeue = new QString(); m_requeueIsSet = false;
     m_cancel = new QString(); m_cancelIsSet = false;
     m_clearSent = 0; m_clearSentIsSet = false;
+    m_redecode = new SWGMessageCenterRedecode(); m_redecodeIsSet = false;
 }
 SWGMessageCenterActions* SWGMessageCenterActions::fromJson(QString& json)
 {
@@ -30,6 +32,7 @@ void SWGMessageCenterActions::fromJsonObject(QJsonObject& json)
     if (json.contains("requeue")) { ::SWGSDRangel::setValue(&m_requeue,json["requeue"],"QString","QString"); m_requeueIsSet = true; }
     if (json.contains("cancel")) { ::SWGSDRangel::setValue(&m_cancel,json["cancel"],"QString","QString"); m_cancelIsSet = true; }
     if (json.contains("clearSent")) { ::SWGSDRangel::setValue(&m_clearSent,json["clearSent"],"qint32",""); m_clearSentIsSet = true; }
+    if (json.contains("redecode")) { ::SWGSDRangel::setValue(&m_redecode,json["redecode"],"SWGMessageCenterRedecode","SWGMessageCenterRedecode"); m_redecodeIsSet = true; }
 }
 QString SWGMessageCenterActions::asJson()
 {
@@ -42,11 +45,12 @@ QJsonObject* SWGMessageCenterActions::asJsonObject()
     if (m_requeue && (m_requeueIsSet || !m_requeue->isEmpty())) { toJsonValue(QString("requeue"),m_requeue,object,QString("QString")); }
     if (m_cancel && (m_cancelIsSet || !m_cancel->isEmpty())) { toJsonValue(QString("cancel"),m_cancel,object,QString("QString")); }
     if (m_clearSentIsSet) { object->insert("clearSent",QJsonValue(m_clearSent)); }
+    if (m_redecode && (m_redecodeIsSet || m_redecode->isSet())) { toJsonValue(QString("redecode"),m_redecode,object,QString("SWGMessageCenterRedecode")); }
     return object;
 }
 bool SWGMessageCenterActions::isSet()
 {
-    return (m_post && m_post->isSet()) || m_requeueIsSet || m_cancelIsSet || m_clearSentIsSet;
+    return (m_post && m_post->isSet()) || m_requeueIsSet || m_cancelIsSet || m_clearSentIsSet || m_redecodeIsSet;
 }
 SWGMessageCenterPost* SWGMessageCenterActions::getPost() { return m_post; }
 void SWGMessageCenterActions::setPost(SWGMessageCenterPost* value) { if (m_post != value) { delete m_post; m_post = value; } m_postIsSet = true; }
@@ -56,4 +60,6 @@ QString* SWGMessageCenterActions::getCancel() { return m_cancel; }
 void SWGMessageCenterActions::setCancel(QString* value) { if (m_cancel != value) { delete m_cancel; m_cancel = value; } m_cancelIsSet = true; }
 qint32 SWGMessageCenterActions::getClearSent() { return m_clearSent; }
 void SWGMessageCenterActions::setClearSent(qint32 value) { m_clearSent = value; m_clearSentIsSet = true; }
+SWGMessageCenterRedecode* SWGMessageCenterActions::getRedecode() { return m_redecode; }
+void SWGMessageCenterActions::setRedecode(SWGMessageCenterRedecode* value) { if (m_redecode != value) { delete m_redecode; m_redecode = value; } m_redecodeIsSet = true; }
 }

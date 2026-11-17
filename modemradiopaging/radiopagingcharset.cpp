@@ -111,6 +111,7 @@ const std::vector<RadioPagingCharset::Codepage>& RadioPagingCharset::codepages()
         {"pocsag", "swissphone", "de506", "ascii", "Swissphone DE506 - ASCII", &pocsagAscii},
         {"pocsag", "swissphone", "de506", "cyrillic", "Swissphone DE506 - Cyrillic", &pocsagSwissphoneDe506Cyrillic},
         {"pocsag", "partner", "generic", "cyrillic", "Partner - Cyrillic", &pocsagSwissphoneDe506Cyrillic},
+        {"pocsag", "generic", "generic", "ascii-rot13", "Generic - ASCII, ROT-13", &pocsagAscii, &rot13},
         // FLEX
         {"flex", "generic", "generic", "ascii", "Generic - ASCII", &pocsagAscii},
         {"flex", "motorola", "linguist", "cyrillic", "Motorola Linguist - Cyrillic", &flexLinguistCyrillic},
@@ -127,6 +128,8 @@ const std::vector<RadioPagingCharset::Codepage>& RadioPagingCharset::codepages()
         {"flex", "motorola", "linguist", "latin3", "Motorola Linguist - Latin-3 (ISO 8859-3)", &flexLinguistLatin3},
         {"flex", "motorola", "linguist", "latin4", "Motorola Linguist - Latin-4 (ISO 8859-4)", &flexLinguistLatin4},
         {"flex", "timex", "beepwear-pro", "alarm", "Timex BeepwearPRO - Alarm command (key=value)", &pocsagAscii, &beepwearProAlarm},
+        {"flex", "generic", "generic", "ascii-rot13", "Generic - ASCII, ROT-13", &pocsagAscii, &rot13},
+        {"flex", "generic", "generic", "kanji", "Generic - Kanji (Shift-JIS, 16-bit characters)", &pocsagAscii, &kanji},
         // GSC
         {"gsc", "generic", "generic", "ascii", "Generic - ASCII (Table VII)", &gscAscii},
     };
@@ -174,6 +177,10 @@ const RadioPagingCharset::Codepage *RadioPagingCharset::defaultFor(const std::st
 std::string RadioPagingCharset::decode(const Codepage& codepage, const std::vector<uint8_t>& codes)
 {
     std::string text;
+
+    if (codepage.m_transcoder && codepage.m_transcoder->m_bytes) {
+        return codepage.m_transcoder->m_decode(std::string(codes.begin(), codes.end()));
+    }
 
     for (uint8_t code : codes)
     {

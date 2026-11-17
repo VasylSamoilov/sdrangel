@@ -601,11 +601,14 @@ void PagingComposer::display()
     // A special format (key=value command of a pager): its hint
     const RadioPagingCharset::Codepage *codepage = m_charset->isVisibleTo(this) ? textCodepage() : nullptr;
 
-    if (codepage && codepage->m_transcoder)
-    {
-        m_text->setPlaceholderText(tr("key=value ..."));
+    if (codepage && codepage->m_transcoder) {
         m_text->setToolTip(QString::fromUtf8(codepage->m_transcoder->m_hint));
     }
+
+    // A codepage of 16-bit characters has no table of codes
+    const RadioPagingCharset::Codepage *tableCodepage = textCodepage();
+    m_codepageTable->setVisible(m_codepageTable->isVisibleTo(this) && tableCodepage
+        && !(tableCodepage->m_transcoder && tableCodepage->m_transcoder->m_bytes));
 }
 
 void PagingComposer::setDefaultCodepage(const QString& protocol, const RadioPagingCharset::Key& key)

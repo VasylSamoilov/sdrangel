@@ -421,6 +421,10 @@ void RadioPagingDemodSink::applySettings(const QStringList& settingsKeys, const 
     if (settingsKeys.contains("flexMaxMessageNumber") || force) {
         m_flex.setMaxMessageNumber(m_settings.m_flexMaxMessageNumber);
     }
+    // The Kanji codepage: the decoder takes the alphanumeric characters as 16 bits
+    if (settingsKeys.contains("flexCharset") || force) {
+        m_flex.setKanji(isKanji(codepage(m_settings.m_flexCharset, "flex")));
+    }
 
     // A protocol switched off starts from scratch when it is switched on again
     if (settingsKeys.contains("pocsagEnabled") && !m_settings.m_pocsagEnabled)
@@ -838,10 +842,16 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
     record.m_polarity = polarity(message.m_inverted);
     record.m_msgType = QString::fromStdString(message.m_typeName);
     // A short message with every digit a space is the tone only payload: no text. The characters of an alphanumeric
-    // message (secure type 00 too, not Kanji) are the codes of the codepage
-    const bool characters = ((message.m_type == RadioPagingFlexDecoder::TypeAlphanumeric)
-        || ((message.m_type == RadioPagingFlexDecoder::TypeSecure) && (message.m_secureType == 0))) && !message.m_kanji;
+    // message (secure type 00 too) are the codes of the codepage; Kanji: 16-bit characters, the Kanji codepage
+    const bool characters = (message.m_type == RadioPagingFlexDecoder::TypeAlphanumeric)
+        || ((message.m_type == RadioPagingFlexDecoder::TypeSecure) && (message.m_secureType == 0));
     const RadioPagingCharset::Codepage *charset = characters ? codepage(m_settings.m_flexCharset, "flex") : nullptr;
+
+    // The decoder took the message as Kanji or not when it came, the setting may have changed since
+    if (charset && (message.m_kanji != isKanji(charset))) {
+        charset = message.m_kanji ? RadioPagingCharset::find("flex", RadioPagingCharset::Key{"generic", "generic", "kanji"})
+            : RadioPagingCharset::defaultFor("flex");
+    }
 
     if (!message.m_text.empty() && !message.m_toneOnly)
     {
@@ -1112,6 +1122,11 @@ const RadioPagingCharset::Codepage *RadioPagingDemodSink::codepage(const RadioPa
 {
     const RadioPagingCharset::Codepage *codepage = RadioPagingCharset::find(protocol, key);
     return codepage ? codepage : RadioPagingCharset::defaultFor(protocol);
+}
+
+bool RadioPagingDemodSink::isKanji(const RadioPagingCharset::Codepage *codepage)
+{
+    return codepage && codepage->m_transcoder && codepage->m_transcoder->m_bytes;
 }
 
 QString RadioPagingDemodSink::escapeText(const std::string& text)

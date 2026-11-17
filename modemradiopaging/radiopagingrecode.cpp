@@ -106,6 +106,16 @@ bool RadioPagingRecode::redecode(const MessageRecord& record, const RadioPagingC
     }
     else
     {
+        // The characters are 16-bit (Kanji) or 7-bit: the codepage of the same kind
+        const bool kanji = record.m_protocolData.value("kanji").toBool();
+        const bool wide = codepage->m_transcoder && codepage->m_transcoder->m_bytes;
+
+        if (kanji != wide)
+        {
+            error = kanji ? QString("The message has 16-bit characters: Kanji only") : QString("The message has 7-bit characters: not Kanji");
+            return false;
+        }
+
         const QByteArray codes = QByteArray::fromHex(record.m_protocolData.value("alpha_codes").toString().toLatin1());
         out.m_text = escapeText(RadioPagingCharset::decode(*codepage, std::vector<uint8_t>(codes.begin(), codes.end())));
     }
