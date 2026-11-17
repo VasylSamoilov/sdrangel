@@ -357,6 +357,8 @@ public:
     DspMode dspMode() const { return m_dspMode; }
     // Whether the supervisory tone of the phone is heard (during a call).
     bool supervisoryDetected() const { return m_superDetector.detected(); }
+    // Blocks of speech the deviation limiter scaled down.
+    uint64_t speechLimited() const { return m_limiter.limited(); }
 
     // The call ended on the far end: releases the phone. False if the phone is not in a state
     // that can be released.
@@ -477,6 +479,8 @@ private:
     SupervisoryTone m_superTone;
     RxAudioChain m_rxAudio;
     TxAudioSource m_txAudio;
+    SpeechLimiter m_limiter;
+    std::vector<float> m_speech;
     int m_rxMute;                   // samples of received audio still to be muted
     bool m_alarmRunning;            // the supervisory tone was lost and the alarm timer runs
     int m_callerIdCount;            // 0: no number while ringing, 1: before the first ring, 2: after

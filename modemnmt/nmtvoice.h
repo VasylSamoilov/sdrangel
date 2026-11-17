@@ -19,11 +19,13 @@
 #ifndef MODEMNMT_NMTVOICE_H_
 #define MODEMNMT_NMTVOICE_H_
 
+#include <cstdint>
 #include <functional>
 #include <utility>
 #include <vector>
 
 #include "biquad.h"
+#include "emphasis.h"
 #include "export.h"
 
 namespace modemnmt
@@ -42,6 +44,35 @@ constexpr double kSupervisoryNoiseHz = 3895.0;
 // Deviation of the supervisory tone: 0.3 kHz at 4015 Hz, which after pre-emphasis equals this
 // fraction of the speech deviation (3 kHz at 1 kHz).
 constexpr double kTxPeakSupervisory = 300.0 / 4015.0 * 1000.0 / 3000.0;
+// The largest deviation of the transmitter (4.7 kHz), the speech deviation (3 kHz at 1 kHz) and
+// the deviation of the supervisory tone on air
+constexpr double kMaxDeviation = 4700.0;
+constexpr double kSpeechDeviationHz = 3000.0;
+constexpr double kSupervisoryDeviation = 300.0;
+
+// Deviation limiter of the speech towards the radio, as the AMPS transmitter of the reference
+// does it (TIA/EIA-553 2.1.3.1.3): the peak of each block after the pre-emphasis of the
+// transmitter is measured, and a block that would go beyond the largest deviation, less the room
+// of the supervisory tone, is scaled down as a whole (no clipping). The samples are at the speech
+// level (1.0 = 3 kHz deviation at 1 kHz) before the pre-emphasis.
+class MODEMNMT_API SpeechLimiter
+{
+public:
+    // supervisory: the tone is sent with the speech and needs its room
+    SpeechLimiter(double sampleRate, bool supervisory);
+
+    void process(float* samples, int length);
+    // the largest peak after the pre-emphasis, in speech level
+    double limit() const { return m_limit; }
+    // blocks that were scaled down so far
+    uint64_t limited() const { return m_limited; }
+
+private:
+    Emphasis m_emphasis;            // the pre-emphasis of the transmitter, to measure the peak
+    double m_limit;
+    uint64_t m_limited;
+    std::vector<float> m_probe;
+};
 
 // Detects one of the supervisory tones. The input is cut into windows of 1/15 s (the Goertzel
 // filter is 30 Hz wide at that length, so the neighbouring tones are blocked); a window counts

@@ -232,6 +232,43 @@ void RxAudioChain::process(const float* samples, int length, int muted)
     }
 }
 
+SpeechLimiter::SpeechLimiter(double sampleRate, bool supervisory) :
+    m_emphasis(sampleRate),
+    m_limit((kMaxDeviation - (supervisory ? kSupervisoryDeviation : 0.0)) / kSpeechDeviationHz),
+    m_limited(0)
+{
+}
+
+void SpeechLimiter::process(float* samples, int length)
+{
+    if (length <= 0) {
+        return;
+    }
+
+    // the peak after the pre-emphasis, with the state of the filter as it is
+    m_probe.assign(samples, samples + length);
+    Emphasis probe = m_emphasis;
+    probe.pre(m_probe.data(), length);
+    double peak = 0.0;
+    for (float v : m_probe) {
+        peak = std::max(peak, static_cast<double>(std::fabs(v)));
+    }
+
+    if (peak > m_limit)
+    {
+        const float scale = static_cast<float>(m_limit / peak);
+
+        for (int i = 0; i < length; i++) {
+            samples[i] *= scale;
+        }
+        m_limited++;
+    }
+
+    // the filter goes on with what is sent
+    m_probe.assign(samples, samples + length);
+    m_emphasis.pre(m_probe.data(), length);
+}
+
 TxAudioSource::TxAudioSource(double sampleRate) :
     m_step(kCallRate / sampleRate),
     m_lowpass(ButterworthFilter::Type::Lowpass, 3600.0, sampleRate, 8),
