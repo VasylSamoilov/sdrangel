@@ -62,6 +62,7 @@ public:
         // FLEX: the network of the last frame
         RadioPagingFlexDecoder::FrameReport m_flexFrame;
         RadioPagingFlexDecoder::NetworkTime m_flexTime;
+        RadioPagingBerWindow m_flexPhaseBer[4];     //!< Of each phase A to D, of the recent frames
         std::vector<RadioPagingFlexDecoder::GroupSlot> m_flexGroups;
         int m_flexReassemblies;
         // GSC: the last page received

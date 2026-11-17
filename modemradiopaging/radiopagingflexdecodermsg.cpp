@@ -379,7 +379,7 @@ RadioPagingFlexDecoder::Check RadioPagingFlexDecoder::combineChecks(Check a, Che
 
 // Walk the address field. Each address has a vector in the vector field in the same order (one word for
 // a short address, two for a long address). Addresses at the end of the address field that have no
-// valid vector are tone only
+// valid vector (tone only addresses) are not decoded
 void RadioPagingFlexDecoder::walkAddresses(unsigned addressStart, unsigned vectorStart, unsigned priorityWords)
 {
     BiwState& biw = pol().m_biw;
@@ -435,6 +435,13 @@ void RadioPagingFlexDecoder::walkAddresses(unsigned addressStart, unsigned vecto
         uint32_t aw = m_w[addrIdx].m_data;
         AddressClass cls = classify(aw);
 
+        // Not an address (all zeros, all ones): no message, it keeps its vector slot
+        if (cls == ClassUnknown)
+        {
+            vecCount++;
+            continue;
+        }
+
         a.m_word = aw;
         a.m_type = addressType(cls);
         a.m_long = isLongClass(cls);
@@ -470,18 +477,11 @@ void RadioPagingFlexDecoder::walkAddresses(unsigned addressStart, unsigned vecto
             a.m_capcode = (uint64_t) aw - shortOffset;
         }
 
-        // No valid vector left: tone only address
-        if ((vecCount >= validVectors) || (j >= vectorBound))
-        {
-            if (a.m_capcode == 1) {
-                continue;
-            }
-
-            Message msg = newMessage(a);
-
-            msg.m_type = TypeTone;
-            countWords(msg, a.m_index, a.m_index + (a.m_long ? 1 : 0));
-            emitMessage(msg);
+        // No valid vector left: a tone only address at the end of the address field. The standard allows it (an
+        // address limited to tone only operation needs no vector), but the words that end an address field of noise
+        // or of a damaged frame look the same, and pagers take tone only as a short message with the tone only
+        // payload (Short Message / Tone Only vector, every digit a space). Such an address is not decoded
+        if ((vecCount >= validVectors) || (j >= vectorBound)) {
             continue;
         }
 
@@ -792,6 +792,13 @@ void RadioPagingFlexDecoder::decodeShortMessage(Message& proto, const AddressCon
 
         proto.m_text = digits;
         proto.m_toneOnly = (digits.find_first_not_of(' ') == std::string::npos);
+
+        // The tone only payload: a tone only page (Short Message / Tone Only vector, STD-43A Table 3.9.2-1)
+        if (proto.m_toneOnly)
+        {
+            proto.m_type = TypeTone;
+            proto.m_text.clear();
+        }
     }
     else if (t == 1)
     {

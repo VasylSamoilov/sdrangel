@@ -170,6 +170,10 @@ RadioPagingFlexReceiver::Status RadioPagingFlexReceiver::getStatus() const
     status.m_dc = inFrame ? m_dataDemod.getDC() : m_syncDemod.getDC();
     // BER and frame report of the last frame; network state of its polarity
     status.m_ber = m_decoder.status().m_ber;
+
+    for (int p = 0; p < 4; p++) {
+        status.m_phaseBer[p] = m_decoder.status().m_phaseBer[p];
+    }
     status.m_frameReport = m_decoder.lastFrame();
     status.m_networkTime = m_decoder.networkTime(m_inverted);
     status.m_groups = m_decoder.groups(m_inverted);

@@ -368,6 +368,10 @@ void RadioPagingFlexDecoder::decodePhase(const RxPhase& phase)
         {
             bool uncorrectable = (m_w[i].m_status != WordClean) && (m_w[i].m_status != WordCorrected);
             m_status.m_ber.add(m_w[i].m_bits, 32, uncorrectable);
+
+            if ((m_name >= 'A') && (m_name <= 'D')) {
+                m_status.m_phaseBer[m_name - 'A'].add(m_w[i].m_bits, 32, uncorrectable);
+            }
         }
 
         switch (m_w[i].m_status)

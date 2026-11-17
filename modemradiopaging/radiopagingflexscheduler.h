@@ -360,6 +360,8 @@ private:
     //!< fragment or an unfragmented message, any frame for the fragments after the first (STD-43A 4.2.1)
     bool frameFor(const Item& item, uint32_t frame) const;
     static RadioPagingFlex::PhaseMessage phaseMessage(const Item& item);
+    //!< A tone only message as a short message with the tone only payload
+    static void toneOnly(RadioPagingFlex::PhaseMessage& pm);
     //!< Message number and R of the item and of its other fragments (see Numbering)
     void assignNumber(Item& item);
     //!< The lowest number no message of the capcode in progress (numbered, still queued) has, apart from avoid

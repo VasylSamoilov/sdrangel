@@ -537,6 +537,9 @@ RadioPagingDemodGUI::RadioPagingDemodGUI(PluginAPI* pluginAPI, DeviceUISet *devi
         label->setWordWrap(false);
         label->setFixedWidth(statusWidth(label));
     }
+    // FLEX has the network of the last frame on two more lines: always three lines high
+    ui->flexStatus->setFixedHeight(flexStatusHeight(ui->flexStatus));
+    ui->flexStatus->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     m_pocsagToolTip = ui->pocsagStatus->toolTip();
     m_gscToolTip = ui->gscStatus->toolTip();
     m_statusClock.start();
@@ -715,6 +718,10 @@ void RadioPagingDemodGUI::updateStatus()
         ui->flexStatus->setText(statusLine(status, 1, status.m_flexSync || flexHeld, "SYNC",
             status.m_flexMode + " " + polarityHtml(status.m_flexInverted)));
     }
+
+    if (status.m_enabled[1]) {
+        ui->flexStatus->setText(ui->flexStatus->text() + "<br>" + flexNetworkLines(status));
+    }
     ui->gscStatus->setText(statusLine(status, 2, status.m_gscSync, status.m_gscVoice ? "VOICE" : "SYNC",
         polarityHtml(status.m_gscInverted)));
 
@@ -819,10 +826,13 @@ QStringList RadioPagingDemodGUI::flexDetails(const RadioPagingDemodSink::Status&
 QString RadioPagingDemodGUI::flexToolTip(const RadioPagingDemodSink::Status& status)
 {
     QString tip = tr("FLEX state: SYNC or HUNT, mode and polarity of the frame,\n"
-        "quality (100% minus the bit error rate: green no errors, yellow errors corrected,\n"
+        "BER the bit error rate of the recent codewords (green no errors, yellow errors corrected,\n"
         "red errors that could not be corrected, grey after the reception),\n"
         "%1f the carrier frequency offset (DC offset of the discriminator; the levels of sync 1 are kept through\n"
         "4-level frames) and messages received.\n"
+        "Line 2: cycle and frame, collapse cN, R roaming, xN repeated frame, network date, time and zone.\n"
+        "Line 3: BER of each phase of a frame of several phases; LID local id, CZ coverage zone,\n"
+        "CC country code, TMF traffic management flags.\n"
         "Between the frames of a transmission SYNC stays shown until the sync of the next frame is due\n"
         "(1.875 s after the start of the last one).\n"
         "ERS: emergency re-synchronization being received (no mode or polarity), with its length so far;\n"
@@ -869,8 +879,8 @@ QString RadioPagingDemodGUI::offsetHtml(float offset, bool live)
     return live ? text : QString("<span style=\"color:#888888\">%1</span>").arg(text);
 }
 
-// Quality is 100% minus the bit error rate. Green: no bit errors, yellow: errors the code
-// corrected, light red: errors the code could not correct. Grey once the reception ended
+// Bit error rate of the reception. Green: no bit errors, yellow: errors the code corrected, light red: errors the
+// code could not correct. Grey once the reception ended
 QString RadioPagingDemodGUI::qualityHtml(const RadioPagingBerWindow& ber, bool live)
 {
     if (!ber.valid()) {
@@ -879,7 +889,7 @@ QString RadioPagingDemodGUI::qualityHtml(const RadioPagingBerWindow& ber, bool l
 
     QString colour = !live ? "#888888" : (ber.m_uncorrectable > 0) ? "#ff6644" : (ber.m_errorBits > 0) ? "#ffcc44" : "#44cc44";
 
-    return QString("<span style=\"color:%1\">Q %2%</span>").arg(colour).arg(100.0 * (1.0 - ber.ber()), 0, 'f', 1);
+    return QString("<span style=\"color:%1\">BER %2%</span>").arg(colour).arg(100.0 * ber.ber(), 0, 'f', 2);
 }
 
 namespace {
@@ -887,10 +897,12 @@ namespace {
 // The fields of a status line, in characters of the fixed-pitch font
 const int statusStateWidth = 5;     // VOICE
 const int statusDetailWidth = 16;   // 512N 1200I 2400N
-const int statusQualityWidth = 8;   // Q 100.0%
+const int statusQualityWidth = 10;  // BER 12.50%
 const int statusOffsetWidth = 12;   // Df -12500 Hz
 const int statusMessagesWidth = 8;  // (123456)
 const int statusSpacing = 1;
+const int statusNetworkWidth = 57;  // FLEX line 3: 4 phases A0.12%, LID 511 CZ 31, CC 1023 TMF 15
+const int statusFlexLines = 3;
 
 // The text of a field padded to its width (characters beyond it are cut)
 QString statusField(const QString& html, int width)
@@ -935,12 +947,92 @@ QString RadioPagingDemodGUI::statusLine(const RadioPagingDemodSink::Status& stat
     return text + QString("(%1)").arg(status.m_messages[protocol]);
 }
 
+// FLEX: two more lines of fixed fields, the network of the last frame. Line 2: cycle and frame, collapse, roaming
+// bit and repeats of the frame, the network date, time and time zone (block information words). Line 3: the bit
+// error rate of each phase of a frame of several phases, the system ID (local id, coverage zone, country code,
+// traffic management flags). A field not received yet is blank; grey once the reception ended
+QString RadioPagingDemodGUI::flexNetworkLines(const RadioPagingDemodSink::Status& status)
+{
+    const RadioPagingFlexDecoder::FrameReport& frame = status.m_flexFrame;
+    const RadioPagingFlexDecoder::NetworkTime& t = status.m_flexTime;
+    const bool live = status.m_berLive[1];
+    auto grey = [live](const QString& text) {
+        return (live || text.isEmpty()) ? text : QString("<span style=\"color:#888888\">%1</span>").arg(text);
+    };
+
+    QString cycleFrame, flags, date, time, zone;
+
+    if (frame.m_fiwValid)
+    {
+        cycleFrame = QString("C%1/F%2").arg(frame.m_cycle, 2, 10, QChar('0')).arg(frame.m_frame, 3, 10, QChar('0'));
+        flags = frame.m_blocks.empty() ? QString() : QString("c%1").arg(frame.m_blocks.front().m_collapse);
+        flags += frame.m_roaming ? " R" : "";
+        flags += frame.m_repeat ? QString(" x%1").arg(frame.m_transmissions) : QString();
+    }
+    if (t.m_dateValid) {
+        date = QString("%1-%2-%3").arg(t.m_year).arg(t.m_month, 2, 10, QChar('0')).arg(t.m_day, 2, 10, QChar('0'));
+    }
+    if (t.m_timeValid)
+    {
+        time = QString("%1:%2:%3").arg(t.m_currentHour, 2, 10, QChar('0')).arg(t.m_currentMinute, 2, 10, QChar('0'))
+            .arg((int) t.m_currentSecond, 2, 10, QChar('0'));
+    }
+    if (t.m_zoneValid)
+    {
+        // L0 = 0: daylight saving time (STD-43A 3.7.2)
+        int minutes = t.m_zoneMinutes;
+        zone = t.m_zoneDefined
+            ? QString("UTC%1%2:%3").arg(minutes < 0 ? "-" : "+").arg(std::abs(minutes) / 60, 2, 10, QChar('0'))
+                .arg(std::abs(minutes) % 60, 2, 10, QChar('0'))
+            : QString("zone %1").arg(t.m_zone);
+        zone += (t.m_dst == 0) ? " DST" : "";
+    }
+
+    QString line2 = statusField(grey(cycleFrame), 8) + statusField(grey(flags), 8) + statusField(grey(date), 10)
+        + statusField(grey(time), 8) + grey(zone);
+
+    // The phases of the last frame: only for a frame of several phases (one phase: the BER of line 1)
+    QString phases;
+    int phaseFields = 0;
+
+    if (frame.m_blocks.size() > 1)
+    {
+        for (const auto& block : frame.m_blocks)
+        {
+            const RadioPagingBerWindow& ber = status.m_flexPhaseBer[(block.m_phase - 'A') & 3];
+
+            if (ber.valid())
+            {
+                QString colour = !live ? "#888888" : (ber.m_uncorrectable > 0) ? "#ff6644" : (ber.m_errorBits > 0) ? "#ffcc44" : "#44cc44";
+                phases += statusField(QString("<span style=\"color:%1\">%2%3%</span>").arg(colour).arg(block.m_phase)
+                    .arg(100.0 * ber.ber(), 0, 'f', 2), 6);
+                phaseFields++;
+            }
+        }
+    }
+    for (; phaseFields < 4; phaseFields++) {
+        phases += statusField(QString(), 6);
+    }
+
+    QString ssid1 = t.m_ssid1Valid ? QString("LID %1 CZ %2").arg(t.m_localId).arg(t.m_coverageZone) : QString();
+    QString ssid2 = t.m_ssid2Valid ? QString("CC %1 TMF %2").arg(t.m_country).arg(t.m_tmf) : QString();
+    QString line3 = phases + statusField(grey(ssid1), 13) + grey(ssid2);
+
+    return line2 + "<br>" + line3;
+}
+
 // The width of the longest status line in the font of the label
 int RadioPagingDemodGUI::statusWidth(const QLabel *label)
 {
     int chars = statusStateWidth + statusDetailWidth + statusQualityWidth + statusOffsetWidth + statusMessagesWidth
         + 4 * statusSpacing;
+    chars = std::max(chars, statusNetworkWidth);
     return label->fontMetrics().horizontalAdvance(QString(chars, QChar('0'))) + 2 * label->margin() + 4;
+}
+
+int RadioPagingDemodGUI::flexStatusHeight(const QLabel *label)
+{
+    return statusFlexLines * label->fontMetrics().lineSpacing() + 2 * label->margin() + 4;
 }
 
 void RadioPagingDemodGUI::makeUIConnections()

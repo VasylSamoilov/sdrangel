@@ -30,7 +30,7 @@ The preamble is 576 bits of reversals. The address codeword goes in the frame of
 <h3>FLEX</h3>
 
 * Addresses: short and long capcodes. The capcode field also takes the forms of STD-43A Appendix A, `[P|Q|R|S][fff][b]<letter><address>` (for example `3E005237593`): only the address is sent, the composer shows the address type of Table A-1 and what the letters say about the pager.
-* Messages: alphanumeric, numeric, special numeric, numbered numeric, tone, short message, HEX/binary (blocking length, mail drop, display direction, header message, status information) and secure messages; priority addresses.
+* Messages: alphanumeric, numeric, special numeric, numbered numeric, tone, short message, HEX/binary (blocking length, mail drop, display direction, header message, status information) and secure messages; priority addresses. A tone only page is a short message with the tone only payload (every digit a space): pagers do not take an address without a vector, which the standard also allows for tone only.
 * A message longer than a frame is sent in fragments over several frames.
 * Group messages: up to 5461 pagers. Each pager gets a short instruction with a temporary address and the frame of the group message, then the message goes to that address in that frame (STD-43A 5.2).
 * Network mode:

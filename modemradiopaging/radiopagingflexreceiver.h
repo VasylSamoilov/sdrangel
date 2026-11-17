@@ -74,6 +74,7 @@ public:
         uint32_t m_frameInfoFailures;   //!< Sync 1 found but the frame information word failed
         float m_quality;                //!< Of the last frame, 0-1
         RadioPagingBerWindow m_ber;     //!< Of the recent frames of the polarity of the last frame
+        RadioPagingBerWindow m_phaseBer[4];     //!< The same for each phase A to D
         // Network of the polarity of the last frame
         RadioPagingFlexDecoder::FrameReport m_frameReport;
         RadioPagingFlexDecoder::NetworkTime m_networkTime;

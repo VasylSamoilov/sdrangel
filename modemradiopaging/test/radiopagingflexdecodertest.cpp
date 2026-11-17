@@ -317,8 +317,18 @@ void testReferenceFrames()
         // The reference lists have no retransmissions: duplicates are output, marked, and left out here
         out.erase(std::remove_if(out.begin(), out.end(), [](const Dec::Message& m) { return m.m_duplicate; }), out.end());
 
-        // Messages sent
-        bool ok = (out.size() == (size_t) f.m_nexp);
+        // Messages sent. The reference transmitter sends a tone only page as an address without a vector, which
+        // the decoder does not decode: left out of the messages expected
+        std::vector<const Exp*> expected;
+
+        for (int e = 0; e < f.m_nexp; e++)
+        {
+            if (std::string(f.m_exp[e].m_type) != "tone") {
+                expected.push_back(&f.m_exp[e]);
+            }
+        }
+
+        bool ok = (out.size() == expected.size());
         // Incomplete messages are not reported by the reference receiver
         std::vector<Dec::Message> outComplete;
 
@@ -330,13 +340,13 @@ void testReferenceFrames()
         }
         std::vector<bool> used(out.size(), false);
 
-        for (int e = 0; e < f.m_nexp; e++)
+        for (size_t e = 0; e < expected.size(); e++)
         {
             bool found = false;
 
             for (size_t k = 0; k < out.size(); k++)
             {
-                if (!used[k] && matches(out[k], f.m_exp[e]))
+                if (!used[k] && matches(out[k], *expected[e]))
                 {
                     used[k] = true;
                     found = true;
@@ -345,7 +355,7 @@ void testReferenceFrames()
             }
 
             if (!found) {
-                std::printf("   no match for expected message %d\n", e);
+                std::printf("   no match for expected message %zu\n", e);
             }
 
             ok = ok && found;
@@ -354,12 +364,12 @@ void testReferenceFrames()
         if (ok) {
             expectOk++;
         } else {
-            std::printf("FAIL: sent messages %s / %s: expected %d got %zu\n", f.m_scenario, f.m_name, f.m_nexp, out.size());
+            std::printf("FAIL: sent messages %s / %s: expected %zu got %zu\n", f.m_scenario, f.m_name, expected.size(), out.size());
 
-            for (int e = 0; e < f.m_nexp; e++)
+            for (const Exp *e : expected)
             {
-                std::printf("   expected %llu/%s/n=%d/c=%d/f=%d/%s\n", f.m_exp[e].m_cap, f.m_exp[e].m_type, f.m_exp[e].m_number,
-                    f.m_exp[e].m_complete, f.m_exp[e].m_frags, f.m_exp[e].m_text);
+                std::printf("   expected %llu/%s/n=%d/c=%d/f=%d/%s\n", e->m_cap, e->m_type, e->m_number,
+                    e->m_complete, e->m_frags, e->m_text);
             }
             for (const Dec::Message& m : out) {
                 std::printf("   got      %s\n", describe(m).c_str());
@@ -390,6 +400,10 @@ void testReferenceFrames()
             std::string rec = f.m_ref[r];
 
             if ((rec.find("|") != std::string::npos) && (rec.find(" HEX|") != std::string::npos) && (std::string(f.m_scenario) == "fragments")) {
+                continue;
+            }
+            // A tone only address without a vector is not decoded
+            if (rec.find(" TON|") != std::string::npos) {
                 continue;
             }
 
@@ -661,6 +675,22 @@ void testRoundTrip()
                 std::snprintf(buf, sizeof(buf), "round trip %s %s collapse %d: %zu messages", Flex::modeName(modes[m]),
                     inv ? "inverted" : "normal", collapse, sent.size());
                 check(a == b, buf);
+
+                // The bit error rate of each phase of the mode, clean frames: no errors
+                const int phases = (modes[m] == Flex::Mode1600_2) ? 1 : (modes[m] == Flex::Mode6400_4) ? 4 : 2;
+                bool phaseBer = true;
+
+                for (int p = 0; p < 4; p++)
+                {
+                    const RadioPagingBerWindow& ber = dec.status().m_phaseBer[p];
+                    // The phases of a 2 phase mode are A and C (STD-43A 3.4)
+                    bool used = (phases == 4) || ((phases == 2) && ((p == 0) || (p == 2))) || ((phases == 1) && (p == 0));
+                    phaseBer = phaseBer && (ber.valid() == used) && (ber.m_errorBits == 0);
+                }
+
+                std::snprintf(buf, sizeof(buf), "phase BER %s %s collapse %d: the phases of the mode, no errors", Flex::modeName(modes[m]),
+                    inv ? "inverted" : "normal", collapse);
+                check(phaseBer, buf);
             }
         }
     }
@@ -1360,6 +1390,11 @@ void testMisc()
     out = d.decodeFrame(toRxFrame((Flex::Mode) f->m_mode, false, fromHex(f->m_sync), fromHex(f->m_data)));
     check(out.empty(), "reserved short address ignored");
 
+    // A tone only address without a vector, as noise or the end of a damaged address field gives, is not decoded
+    f = findFrame("types", "tone");
+    out = d.decodeFrame(toRxFrame((Flex::Mode) f->m_mode, false, fromHex(f->m_sync), fromHex(f->m_data)));
+    check(out.empty(), "tone only address without a vector: no message");
+
     f = findFrame("mixed", "mixed priority");
     out = d.decodeFrame(toRxFrame((Flex::Mode) f->m_mode, false, fromHex(f->m_sync), fromHex(f->m_data)));
 
@@ -1367,7 +1402,8 @@ void testMisc()
     for (const Dec::Message& m : out) {
         priority += m.m_priority ? 1 : 0;
     }
-    check(out.size() == 6 && priority == 2 && d.lastFrame().m_blocks[0].m_priorityWords == 2 && d.lastFrame().m_blocks[0].m_collapse == 2,
+    // Six addresses, two of them tone only addresses without a vector (not decoded)
+    check(out.size() == 4 && priority == 2 && d.lastFrame().m_blocks[0].m_priorityWords == 2 && d.lastFrame().m_blocks[0].m_collapse == 2,
         "priority addresses flagged, collapse from the block information word");
 
     f = findFrame("mode 6400/4", "inverted");
@@ -1585,8 +1621,9 @@ void testShortMessage()
             if (ok)
             {
                 const Dec::Message& r = out[0];
-                ok = (r.m_capcode == c.m_capcode) && (r.m_type == Dec::TypeShortMessage) && (r.m_shortType == 0)
-                    && (r.m_toneOnly == c.m_toneOnly) && (r.m_text == c.m_digits);
+                // The tone only payload is a tone only page
+                ok = (r.m_capcode == c.m_capcode) && (r.m_type == (c.m_toneOnly ? Dec::TypeTone : Dec::TypeShortMessage))
+                    && (r.m_shortType == 0) && (r.m_toneOnly == c.m_toneOnly) && (r.m_text == (c.m_toneOnly ? std::string() : c.m_digits));
             }
 
             char buf[128];

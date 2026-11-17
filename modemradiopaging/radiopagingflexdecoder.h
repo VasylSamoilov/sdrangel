@@ -329,6 +329,7 @@ public:
         uint32_t m_incomplete = 0;
         uint32_t m_invalidVectors = 0;
         RadioPagingBerWindow m_ber;             //!< Of the frames received recently
+        RadioPagingBerWindow m_phaseBer[4];     //!< The same for each phase A to D
     };
 
     //! Network time and identification, from the block information words. A value is valid

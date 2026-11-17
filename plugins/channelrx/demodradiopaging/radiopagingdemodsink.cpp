@@ -742,6 +742,10 @@ void RadioPagingDemodSink::updateStatus()
     }
     status.m_flexFrame = flex.m_frameReport;
     status.m_flexTime = flex.m_networkTime;
+
+    for (int p = 0; p < 4; p++) {
+        status.m_flexPhaseBer[p] = flex.m_phaseBer[p];
+    }
     status.m_flexGroups = flex.m_groups;
     status.m_flexReassemblies = flex.m_reassemblies;
     status.m_pocsagBatches = m_lastPocsagBatches;

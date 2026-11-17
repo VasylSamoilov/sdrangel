@@ -313,7 +313,7 @@ RadioPagingModTx:
       description: "pocsag, flex or gsc: the protocol of the message. Omitted: the protocol of the channel. A FLEX channel in network mode with mixing also takes pocsag messages"
       type: string
     type:
-      description: "tone, numeric or alphanumeric. GSC also voice: text is the path of a WAV file, sent after a 2 s alert, cut at gscVoiceSeconds. FLEX also short_message (STD-43A 3.9.2, see shortType), special_numeric, numbered_numeric and numbered_special_numeric (3.9.6, numbered ones with message numbering), binary (HEX/binary message, 3.10.1.2) and secure (3.10.1.4, see secureType); FLEX tone is the address alone (3.8.1)"
+      description: "tone, numeric or alphanumeric. GSC also voice: text is the path of a WAV file, sent after a 2 s alert, cut at gscVoiceSeconds. FLEX also short_message (STD-43A 3.9.2, see shortType), special_numeric, numbered_numeric and numbered_special_numeric (3.9.6, numbered ones with message numbering), binary (HEX/binary message, 3.10.1.2) and secure (3.10.1.4, see secureType); FLEX tone is a short message with the tone only payload, every digit a space (3.9.2)"
       type: string
     shortType:
       description: "FLEX short_message type (STD-43A Table 3.9.2-1): 0 numeric, text up to 3 numeric characters (8 for a long address), an empty text is the tone only payload; 1 source code; 2 source code and the message number of the address, with the retrieval flag"

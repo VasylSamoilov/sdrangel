@@ -100,6 +100,9 @@ private:
     static QString statusLine(const RadioPagingDemodSink::Status& status, int protocol, bool sync,
         const QString& state, const QString& detail);
     static int statusWidth(const QLabel *label);
+    //!< FLEX: the lines of the network of the last frame, and the height of the status with them
+    static QString flexNetworkLines(const RadioPagingDemodSink::Status& status);
+    static int flexStatusHeight(const QLabel *label);
     static QString polarityHtml(bool inverted);
     static QStringList flexDetails(const RadioPagingDemodSink::Status& status);
     static QString flexToolTip(const RadioPagingDemodSink::Status& status);

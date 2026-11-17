@@ -55,7 +55,7 @@ The fill at the end of an alphanumeric message (the last character, and the one 
 
 A demodulator at 1600 baud, 2 levels, hunts for sync 1 all the time, in both polarities. Sync 1 is accepted with at most 8 bit errors over its 80 bits, or when its two copies of the mode code agree (up to 2 bit errors in one and 3 in the other). The frame is then received at the rate and number of levels of its mode, its blocks are deinterleaved and its phases (A to D) decoded. Blocks received with a carrier much weaker than during sync 1 are marked erased. The emergency re-synchronization is detected and its length measured.
 
-The address is the capcode in 10 digits. Short, long and temporary addresses, and the message types alphanumeric, secure, numeric, special numeric, numbered numeric, binary, tone, short message and short instruction are decoded. Priority, maildrop and retrieval are flags of the message.
+The address is the capcode in 10 digits. Short, long and temporary addresses, and the message types alphanumeric, secure, numeric, special numeric, numbered numeric, binary, short message and short instruction are decoded. A short message with the tone only payload (every digit a space) is a tone only page. An address without a vector at the end of the address field (a tone only address, allowed by the standard) is not decoded: noise and damaged frames end their address field the same way. Priority, maildrop and retrieval are flags of the message.
 
 * Long messages are sent in fragments over several frames. Each fragment is output as it is received, then the reassembled message; a message with lost fragments is output as incomplete.
 * Message numbers: the messages with R = 1 of an address are checked for skipped numbers, up to the largest message number of the network (Max N).
@@ -81,9 +81,9 @@ The alphanumeric messages of each protocol are shown with the glyphs of a pager 
 
 Nothing is dropped. A POCSAG or GSC page received again within 60 s on the same network (speed and polarity) with the same address, function, type and content is output again, tagged duplicate. FLEX retransmissions are tagged as above. Duplicates are greyed in the table and have duplicate set in their record.
 
-<h3>Reception quality</h3>
+<h3>Bit error rate</h3>
 
-The quality is 100% minus the bit error rate, over a window that decays by half every 64 codewords. A codeword that could not be corrected counts as 3 bit errors.
+The bit error rate (BER) is the bits the code corrected over the bits received, over a window that decays by half every 64 codewords. A codeword that could not be corrected counts as 3 bit errors. FLEX gives it also for each phase.
 
 <h2>Interface</h2>
 
@@ -123,9 +123,9 @@ One row per protocol:
 * POCSAG: Fill - the rule for the fill at the end of alphanumeric messages. Right click edits the list of the custom codes.
 * FLEX: Max N - largest message number of the network (as the pagers are set), 0 to 63, default 63.
 * GSC: voice timeout, voice audio, recording, voice files and volume (see below).
-* Status - one line of fixed fields: HUNT (grey) while not synchronised, else SYNC (green); what is received with its polarity (NORM or INV); the quality Q of the reception; the carrier frequency offset &Delta;f; the number of messages in brackets. Q is green without bit errors, yellow when errors were corrected, red when there were errors the code could not correct; Q and &Delta;f are grey once the reception ended (the last values are kept). The tooltip explains the fields and gives the details of the last reception.
+* Status - one line of fixed fields: HUNT (grey) while not synchronised, else SYNC (green); what is received with its polarity (NORM or INV); the bit error rate BER of the recent codewords; the carrier frequency offset &Delta;f; the number of messages in brackets. BER is green without bit errors, yellow when errors were corrected, red when there were errors the code could not correct; BER and &Delta;f are grey once the reception ended (the last values are kept). FLEX has two more lines (below). The tooltip explains the fields and gives the details of the last reception.
   * POCSAG: the speeds being received with their polarity. Tooltip: the batches of the transmission.
-  * FLEX: the mode and polarity of the frame, or ERS with its length during an emergency re-synchronization. Between the frames of a transmission SYNC stays shown until the sync of the next frame is due (1.875 s after the start of the last one). Tooltip: cycle and frame, collapse, roaming and repeat; the network date, time and zone and its identification; the group slots in use as Gs[members]&gt;Ffff (target frame) out of 16, the members of each group, and the messages being reassembled.
+  * FLEX: the mode and polarity of the frame, or ERS with its length during an emergency re-synchronization. Between the frames of a transmission SYNC stays shown until the sync of the next frame is due (1.875 s after the start of the last one). Line 2: cycle and frame (Cxx/Fxxx), collapse (cN), R when the roaming bit is set, xN for a frame repeated N times, the network date, time and time zone (DST in daylight saving time). Line 3: the BER of each phase of a frame of several phases, the system ID: LID local id, CZ coverage zone, CC country code, TMF traffic management flags. A field not received yet is blank. Tooltip: the same, the group slots in use as Gs[members]&gt;Ffff (target frame) out of 16, the members of each group, and the messages being reassembled.
   * GSC: VOICE during a voice page. Tooltip: the last page, preamble and batch or non battery saver, and slot.
 * Codepage - the codepage of the alphanumeric messages of the protocol (shown when the protocol has more than one).
 

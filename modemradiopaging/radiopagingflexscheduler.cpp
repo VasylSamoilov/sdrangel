@@ -327,7 +327,21 @@ RadioPagingFlex::PhaseMessage RadioPagingFlexEncoder::phaseMessage(const Item& i
     pm.m_fragment = item.m_fragment;
     pm.m_fragments = item.m_fragments;
     pm.m_signature = item.m_signature;
+    toneOnly(pm);
     return pm;
+}
+
+// Tone only is sent as a Short Message / Tone Only vector with the tone only payload: numeric, every digit a space
+// (STD-43A Table 3.9.2-1). An address without a vector, which the standard also allows for tone only, is not sent:
+// pagers do not take it
+void RadioPagingFlexEncoder::toneOnly(RadioPagingFlex::PhaseMessage& pm)
+{
+    if (pm.m_type == RadioPagingFlex::Tone)
+    {
+        pm.m_type = RadioPagingFlex::ShortMessage;
+        pm.m_shortType = RadioPagingFlex::ShortNumeric;
+        pm.m_text.clear();
+    }
 }
 
 bool RadioPagingFlexEncoder::fragmentReady(const Item& item) const
@@ -412,6 +426,7 @@ RadioPagingFlexEncoder::EnqueueResult RadioPagingFlexEncoder::enqueue(const TxMe
     pm.m_binary = message.m_binary;
     pm.m_instruction = message.m_instruction;
     pm.m_numericFormat = message.m_numericFormat;
+    toneOnly(pm);
 
     // The numbered short message and the numbered numeric format tell that the network numbers the messages (STD-43A
     // 3.9.2, 3.10.1.1.2, 8.4)
