@@ -88,7 +88,7 @@ MessageCenterPost:
       description: "FLEX: priority address (1 for yes)"
       type: integer
     type:
-      description: "alphanumeric, numeric, tone, voice (GSC), short_message (FLEX, see shortType), binary (FLEX HEX/binary, text of hex digits) or secure (FLEX, see secureType)"
+      description: "alphanumeric, numeric, tone, voice (GSC), short_message (FLEX, see shortType), special_numeric, numbered_numeric, numbered_special_numeric (FLEX numeric vectors 100 and 111), binary (FLEX HEX/binary, text of hex digits) or secure (FLEX, see secureType)"
       type: string
     shortType:
       description: "FLEX short_message type (STD-43A Table 3.9.2-1): 0 numeric, text up to 3 digits (8 for a long address), no text is the tone only payload; 1 source code; 2 source code and message number"

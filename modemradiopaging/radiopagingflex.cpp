@@ -33,6 +33,7 @@ const int RadioPagingFlex::m_syncBaud;
 const int RadioPagingFlex::m_maxCollapse;
 const int RadioPagingFlex::m_maxAlphaChars;
 const int RadioPagingFlex::m_maxNumericChars;
+const int RadioPagingFlex::m_maxNumberedNumericChars;
 const int RadioPagingFlex::m_maxPriorityWords;
 const uint64_t RadioPagingFlex::m_shortMin;
 const uint64_t RadioPagingFlex::m_shortMax;
@@ -40,6 +41,8 @@ const uint64_t RadioPagingFlex::m_longMin;
 const uint64_t RadioPagingFlex::m_longMax;
 const unsigned RadioPagingFlex::m_vectorTone;
 const unsigned RadioPagingFlex::m_vectorNumeric;
+const unsigned RadioPagingFlex::m_vectorSpecialNumeric;
+const unsigned RadioPagingFlex::m_vectorNumberedNumeric;
 const unsigned RadioPagingFlex::m_vectorAlpha;
 const unsigned RadioPagingFlex::m_vectorBinary;
 const int RadioPagingFlex::m_maxFragments;
@@ -54,6 +57,13 @@ const uint32_t idleOnes = 0xffffffffu;
 const uint32_t idleZeros = 0x00000000u;
 const int maxNumericWords = 8;
 const int numericOverheadBits = 2;
+const int numberedOverheadBits = 10;
+
+int numericOverhead(RadioPagingFlex::NumericFormat format)
+{
+    return ((format == RadioPagingFlex::NumericNumbered) || (format == RadioPagingFlex::NumericNumberedSpecial))
+        ? numberedOverheadBits : numericOverheadBits;
+}
 const uint32_t alphaEtx = 0x03;
 const int biwWords = 1;
 
@@ -194,10 +204,23 @@ std::vector<uint32_t> alphaBody(const std::string& text, int number, bool retrie
 }
 
 // Message body words of a numeric message and the 6-bit checksum
-std::vector<uint32_t> numericBody(const std::string& text, uint32_t& kBits)
+// Message words of a numeric message: the digits 4 bits each from bit 2 of the first word (STD-43A 3.10.1.1); the
+// numbered format has N5-N0 in bits 2-7, R in bit 8 and S in bit 9 and the digits from bit 10 (3.10.1.1.2). K
+// covers every bit of the message words: 4 bits in the vector (kBits), 2 in bits 0-1 of the first word
+std::vector<uint32_t> numericBody(const std::string& text, uint32_t& kBits, RadioPagingFlex::NumericFormat format = RadioPagingFlex::NumericStandard,
+    int number = 0, bool retrieval = false)
 {
     std::vector<uint32_t> msg(maxNumericWords, 0);
-    int bit = numericOverheadBits;
+    const int overhead = numericOverhead(format);
+    const bool numbered = (overhead == numberedOverheadBits);
+    int bit = overhead;
+
+    if (numbered)
+    {
+        msg[0] |= ((uint32_t) number & 0x3f) << 2;
+        msg[0] |= (retrieval ? 1u : 0u) << 8;
+        msg[0] |= (format == RadioPagingFlex::NumericNumberedSpecial ? 1u : 0u) << 9;
+    }
 
     for (char c : text)
     {
@@ -366,10 +389,13 @@ int estimateBody(const RadioPagingFlex::PhaseMessage& message)
     }
     case RadioPagingFlex::Numeric:
     {
-        if ((len == 0) || (len > (size_t) RadioPagingFlex::m_maxNumericChars)) {
+        const size_t most = (numericOverhead(message.m_numericFormat) == numberedOverheadBits)
+            ? (size_t) RadioPagingFlex::m_maxNumberedNumericChars : (size_t) RadioPagingFlex::m_maxNumericChars;
+
+        if ((len == 0) || (len > most)) {
             return -1;
         }
-        int words = ((int) len * 4 + numericOverheadBits + 20) / 21;
+        int words = ((int) len * 4 + numericOverhead(message.m_numericFormat) + 20) / 21;
         return std::max(1, std::min(words, maxNumericWords));
     }
     case RadioPagingFlex::ShortMessage:
@@ -955,11 +981,11 @@ bool RadioPagingFlex::fragmentMessage(const PhaseMessage& message, std::vector<P
     return true;
 }
 
-uint32_t RadioPagingFlex::numericVector(unsigned start, unsigned words, unsigned kBits)
+uint32_t RadioPagingFlex::numericVector(unsigned start, unsigned words, unsigned kBits, unsigned vectorType)
 {
     // The length field holds the number of words minus 1
     unsigned length = (words > 0) ? words - 1 : 0;
-    uint32_t data = (m_vectorNumeric << 4) | ((start & 0x7f) << 7) | ((length & 0x7) << 14) | ((kBits & 0xf) << 17);
+    uint32_t data = (vectorType << 4) | ((start & 0x7f) << 7) | ((length & 0x7) << 14) | ((kBits & 0xf) << 17);
     return encodeWord(addChecksum(data));
 }
 
@@ -1489,10 +1515,13 @@ RadioPagingFlex::PhaseResult RadioPagingFlex::buildPhase(const PhaseParams& para
         else
         {
             uint32_t kBits = 0;
-            body = numericBody(m.m_text, kBits);
+            body = numericBody(m.m_text, kBits, m.m_numericFormat, m.m_number, m.m_retrieval);
             // A one word numeric message of a long address is in the second vector word
             unsigned start = (in.m_long && (in.m_bodyWords == 1)) ? vecCursor + 1 : msgCursor;
-            vector = numericVector(start, (unsigned) body.size(), kBits);
+            const unsigned type = (m.m_numericFormat == NumericSpecial) ? m_vectorSpecialNumeric
+                : ((m.m_numericFormat == NumericNumbered) || (m.m_numericFormat == NumericNumberedSpecial)) ? m_vectorNumberedNumeric
+                : m_vectorNumeric;
+            vector = numericVector(start, (unsigned) body.size(), kBits, type);
         }
 
         for (uint32_t& w : body) {

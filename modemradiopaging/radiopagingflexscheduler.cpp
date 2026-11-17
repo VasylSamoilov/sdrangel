@@ -251,6 +251,7 @@ void RadioPagingFlexEncoder::assignNumber(Item& item)
         return;
     }
     const bool numbered = (m.m_type == RadioPagingFlex::Alphanumeric) || (m.m_type == RadioPagingFlex::Binary)
+        || ((m.m_type == RadioPagingFlex::Numeric) && RadioPagingFlex::isNumberedFormat(m.m_numericFormat))
         || ((m.m_type == RadioPagingFlex::ShortMessage) && (m.m_shortType == RadioPagingFlex::ShortNumbered));
     int number = 0;
     bool retrieval = false;
@@ -322,6 +323,7 @@ RadioPagingFlex::PhaseMessage RadioPagingFlexEncoder::phaseMessage(const Item& i
     pm.m_source = m.m_source;
     pm.m_binary = m.m_binary;
     pm.m_instruction = m.m_instruction;
+    pm.m_numericFormat = m.m_numericFormat;
     pm.m_fragment = item.m_fragment;
     pm.m_fragments = item.m_fragments;
     pm.m_signature = item.m_signature;
@@ -409,11 +411,14 @@ RadioPagingFlexEncoder::EnqueueResult RadioPagingFlexEncoder::enqueue(const TxMe
     pm.m_source = message.m_source;
     pm.m_binary = message.m_binary;
     pm.m_instruction = message.m_instruction;
+    pm.m_numericFormat = message.m_numericFormat;
 
-    // The numbered short message tells that the network numbers the messages (STD-43A 3.9.2, 8.4)
-    if ((pm.m_type == RadioPagingFlex::ShortMessage) && (pm.m_shortType == RadioPagingFlex::ShortNumbered) && !m_numbering.m_enabled)
+    // The numbered short message and the numbered numeric format tell that the network numbers the messages (STD-43A
+    // 3.9.2, 3.10.1.1.2, 8.4)
+    if ((((pm.m_type == RadioPagingFlex::ShortMessage) && (pm.m_shortType == RadioPagingFlex::ShortNumbered))
+        || ((pm.m_type == RadioPagingFlex::Numeric) && RadioPagingFlex::isNumberedFormat(pm.m_numericFormat))) && !m_numbering.m_enabled)
     {
-        result.m_error = "Numbered short message: the network has no message numbering";
+        result.m_error = "Numbered short message and numbered numeric: the network has no message numbering";
         return result;
     }
 
@@ -428,11 +433,12 @@ RadioPagingFlexEncoder::EnqueueResult RadioPagingFlexEncoder::enqueue(const TxMe
     // A retransmission is a numbered message sent again with its number and R = 0 (STD-43A 4.3.7.6, 8.4): the pager
     // takes it as the message it may have missed
     const bool numbered = (pm.m_type == RadioPagingFlex::Alphanumeric) || (pm.m_type == RadioPagingFlex::Binary)
+        || ((pm.m_type == RadioPagingFlex::Numeric) && RadioPagingFlex::isNumberedFormat(pm.m_numericFormat))
         || ((pm.m_type == RadioPagingFlex::ShortMessage) && (pm.m_shortType == RadioPagingFlex::ShortNumbered));
 
     if ((message.m_retransmit > 0) && (!numbered || !m_numbering.m_enabled))
     {
-        result.m_error = "Retransmission: alphanumeric, HEX/binary and numbered short messages of a network with message numbering";
+        result.m_error = "Retransmission: alphanumeric, HEX/binary, numbered numeric and numbered short messages of a network with message numbering";
         return result;
     }
 
@@ -519,6 +525,11 @@ RadioPagingFlexEncoder::EnqueueResult RadioPagingFlexEncoder::enqueueGroup(const
     if (message.m_retransmit != 0)
     {
         result.m_error = "A group message is not sent again";
+        return result;
+    }
+    if ((message.m_type == RadioPagingFlex::Numeric) && RadioPagingFlex::isNumberedFormat(message.m_numericFormat))
+    {
+        result.m_error = "A group message has no message number";
         return result;
     }
     if (message.m_frame >= 0)

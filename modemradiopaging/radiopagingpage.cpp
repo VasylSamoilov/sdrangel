@@ -34,14 +34,16 @@ const QStringList& RadioPagingPage::protocols()
 
 const QStringList& RadioPagingPage::types()
 {
-    static const QStringList list = {"alphanumeric", "numeric", "tone", "voice", "short_message", "binary", "secure"};
+    static const QStringList list = {"alphanumeric", "numeric", "special_numeric", "numbered_numeric", "numbered_special_numeric", "tone",
+        "voice", "short_message", "binary", "secure"};
     return list;
 }
 
 QStringList RadioPagingPage::types(const QString& protocol)
 {
     if (protocol == "flex") {
-        return {"alphanumeric", "numeric", "tone", "short_message", "binary", "secure"};
+        return {"alphanumeric", "numeric", "special_numeric", "numbered_numeric", "numbered_special_numeric", "tone", "short_message",
+            "binary", "secure"};
     } else if (protocol == "gsc") {
         return {"alphanumeric", "numeric", "tone", "voice"};
     } else {

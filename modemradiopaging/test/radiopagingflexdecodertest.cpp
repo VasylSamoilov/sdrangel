@@ -2684,6 +2684,103 @@ void testNumbering()
 }
 
 // Retransmission and send delay (STD-43A 4.3.7.6: a message sent again has its number and R = 0)
+// The numeric formats (STD-43A 3.10.1.1): standard, special, numbered, numbered special
+void testNumericFormats()
+{
+    const std::vector<std::pair<Flex::NumericFormat, std::pair<int, const char *>>> cases = {
+        {Flex::NumericStandard, {(int) Dec::TypeNumeric, "standard"}},
+        {Flex::NumericSpecial, {(int) Dec::TypeSpecialNumeric, "special"}},
+        {Flex::NumericNumbered, {(int) Dec::TypeNumberedNumeric, "numbered"}},
+        {Flex::NumericNumberedSpecial, {(int) Dec::TypeNumberedSpecialNumeric, "numbered special"}}
+    };
+
+    for (uint64_t capcode : {(uint64_t) 4096, (uint64_t) 2101249})      // A short and a long address
+    {
+        for (const auto& c : cases)
+        {
+            for (const char *text : {"1", "12345", "98765-4321 UU[]", "123456789012345678901234567890123456789"})
+            {
+                Enc enc;
+                Enc::TxMessage m;
+                m.m_capcode = capcode;
+                m.m_type = Flex::Numeric;
+                m.m_numericFormat = c.first;
+                m.m_text = text;
+                Enc::EnqueueResult er = enc.enqueue(m);
+                Dec dec;
+                std::vector<Dec::Message> got;
+
+                for (uint64_t index = 100; (index < 140) && (enc.pending() > 0); index++)
+                {
+                    Enc::Frame f = enc.buildFrame(index);
+                    for (const Dec::Message& r : dec.decodeFrame(toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data))) {
+                        got.push_back(r);
+                    }
+                }
+
+                const bool numbered = Flex::isNumberedFormat(c.first);
+                // The numbered format holds 39 digits at most
+                const bool fits = !(numbered && (std::string(text).size() > 39));
+                bool ok = (er.m_ok == fits);
+
+                if (fits)
+                {
+                    std::string shown = got.empty() ? std::string() : got[0].m_text;
+
+                    // The unused digit positions of the last word are spaces
+                    while (!shown.empty() && (shown.back() == ' ')) {
+                        shown.pop_back();
+                    }
+
+                    ok = ok && (got.size() == 1) && ((int) got[0].m_type == c.second.first) && (shown == text)
+                        && (got[0].m_checksum == Dec::CheckOk) && (got[0].m_capcode == capcode)
+                        && (numbered ? (got[0].m_retrieval && (got[0].m_messageNumber == 0)) : (got[0].m_messageNumber < 0))
+                        && (got[0].m_special == ((c.first == Flex::NumericNumberedSpecial) || (c.first == Flex::NumericSpecial)));
+                }
+
+                check(ok, (std::string("numeric ") + c.second.second + " format, " + std::to_string(std::string(text).size()) + " digits, "
+                    + ((capcode > 2000000) ? "long" : "short") + " address: sent and decoded").c_str());
+            }
+        }
+    }
+
+    // Numbered numeric needs the numbering of the network; its numbers follow the sequence of the address; copies are numbered
+    {
+        Enc off;
+        Enc::Numbering n;
+        n.m_enabled = false;
+        std::string error;
+        off.setNumbering(n, error);
+        Enc::TxMessage m;
+        m.m_capcode = 4096;
+        m.m_type = Flex::Numeric;
+        m.m_numericFormat = Flex::NumericNumbered;
+        m.m_text = "1";
+        bool refused = !off.enqueue(m).m_ok;
+
+        Enc enc;
+        Dec dec;
+        std::vector<int> numbers;
+        m.m_text = "2";
+        enc.enqueue(m);
+        m.m_text = "3";
+        m.m_retransmit = 1;
+        m.m_retransmitInterval = 5;
+        Enc::EnqueueResult copy = enc.enqueue(m);
+
+        for (uint64_t index = 100; (index < 130) && (enc.pending() > 0); index++)
+        {
+            Enc::Frame f = enc.buildFrame(index);
+            for (const Dec::Message& r : dec.decodeFrame(toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data))) {
+                numbers.push_back(r.m_messageNumber * 10 + (r.m_retrieval ? 1 : 0));
+            }
+        }
+
+        check(refused && copy.m_ok && (numbers == std::vector<int>({1, 11, 10})),
+            "numbered numeric: refused without numbering; numbers 0 and 1 with R = 1, the copy of 1 with R = 0");
+    }
+}
+
 // M of an alphanumeric message: in the first fragment only (STD-43A 3.10.1.3)
 void testAlphaMailDrop()
 {
@@ -3177,6 +3274,7 @@ int main()
     testRetransmission();
     testGroupTx();
     testAlphaMailDrop();
+    testNumericFormats();
     testFragmentScheduling();
     testBinaryTx();
     testHexBits();

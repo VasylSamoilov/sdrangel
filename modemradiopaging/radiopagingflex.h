@@ -66,6 +66,14 @@ public:
         ShortInstruction    //!< Short instruction vector (001, STD-43A 3.9.6), all the data in the vector, see InstructionParams
     };
 
+    //! Formats of a numeric message (STD-43A 3.10.1.1): the vector tells the format; the characters are the same
+    enum NumericFormat {
+        NumericStandard,        //!< V = 011
+        NumericSpecial,         //!< V = 100: the pager may display it as its ID-ROM says
+        NumericNumbered,        //!< V = 111, S = 0: with a message number N and the retrieval flag R (8.4)
+        NumericNumberedSpecial  //!< V = 111, S = 1
+    };
+
     //! Short instruction vector (STD-43A 3.9.6, Table 3.9.6-1): the instruction i2 i1 i0 in bits 7-9 and the data d0-d10
     //! in bits 10-20
     struct InstructionParams
@@ -125,6 +133,8 @@ public:
     //!< signature slot: 251 with a short address, 248 with a long one
     static int maxAlphaChars(uint64_t capcode) { return 3 * (maxMessageWords(capcode) - 1) - 1; }
     static const int m_maxNumericChars = 41;
+    static const int m_maxNumberedNumericChars = 39;    //!< The numbered format has 10 overhead bits in the first word (STD-43A 3.10.1.1.2)
+    static bool isNumberedFormat(NumericFormat format) { return (format == NumericNumbered) || (format == NumericNumberedSpecial); }
     static const int m_maxPriorityWords = 15;   //!< Priority address words of a phase
     static const uint64_t m_shortMin = 1;
     static const uint64_t m_shortMax = 1933312;
@@ -144,6 +154,7 @@ public:
         int m_source = 0;           //!< Short message source and numbered types: source code S2-S0, 0-7
         BinaryParams m_binary;      //!< HEX/binary and secure messages only
         InstructionParams m_instruction;    //!< Short instruction only
+        NumericFormat m_numericFormat = NumericStandard;    //!< Numeric only; the numbered formats use m_number and m_retrieval
         int m_fragment = 0;         //!< Alphanumeric, HEX/binary and secure: fragment index, 0 the first (fragmentMessage)
         int m_fragments = 1;        //!< Alphanumeric, HEX/binary and secure: fragments of the message
         int m_signature = -1;       //!< Alphanumeric and HEX/binary first fragment: signature of the whole message, -1 of the text
@@ -269,7 +280,7 @@ public:
     static bool longAddressCapcode(uint32_t data1, uint32_t data2, uint64_t& capcode);
 
     static uint32_t alphaVector(unsigned start, unsigned words);
-    static uint32_t numericVector(unsigned start, unsigned words, unsigned kBits);
+    static uint32_t numericVector(unsigned start, unsigned words, unsigned kBits, unsigned vectorType = m_vectorNumeric);
     //!< Short message vector (STD-43A Fig. 3.9.2-1, Table 3.9.2-1): t1 t0 in bits 7-8, d0-d11 in bits 9-20.
     //!< Numeric: digits a to c in d0-d11, d to h in d12-d31 of the second word of a long address (d32 = 0),
     //!< unused digits are spaces (HEX C). Source: S2-S0 in d0-d2. Numbered: S2-S0 in d0-d2, N5-N0 in d3-d8,
@@ -281,6 +292,8 @@ public:
     static const int m_maxShortDigitsLong = 8;
     static const unsigned m_vectorTone = 2;
     static const unsigned m_vectorNumeric = 3;
+    static const unsigned m_vectorSpecialNumeric = 4;
+    static const unsigned m_vectorNumberedNumeric = 7;
     static const unsigned m_vectorAlpha = 5;
     static const unsigned m_vectorBinary = 6;
     static const unsigned m_vectorSecure = 0;

@@ -183,6 +183,10 @@ int main(int argc, char **argv)
     select(composer, "FLEX");
     select(composer, "Numeric");
     check(!retransmit->isEnabled() && (composer.page().m_retransmit == 0), "FLEX numeric: no copies");
+    select(composer, "Numbered numeric");
+    check(retransmit->isEnabled() && (composer.page().m_type == "numbered_numeric"), "FLEX numbered numeric: copies");
+    select(composer, "Special numeric");
+    check(!retransmit->isEnabled() && (composer.page().m_type == "special_numeric"), "FLEX special numeric: no copies");
     select(composer, "Alphanumeric");
     check(retransmit->isEnabled() && (retransmit->maximum() == 15), "FLEX alphanumeric: up to 15 copies");
     composer.setFlexNumbering(false);

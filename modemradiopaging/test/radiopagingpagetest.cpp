@@ -218,6 +218,18 @@ void testLimits()
     check(p.check().isEmpty() && (p.toRecord().m_msgType == "alphanumeric"), "no type is alphanumeric, the largest POCSAG address");
     p = page("pocsag", "tone", "1");
     check(p.toRecord().m_text.isNull(), "a tone page has no text");
+
+    // FLEX numeric formats
+    const char *formats[] = {"special_numeric", "numbered_numeric", "numbered_special_numeric"};
+
+    for (const char *format : formats)
+    {
+        p = page("flex", format, "1000");
+        p.m_text = "123";
+        check(p.check().isEmpty() && (p.toRecord().m_msgType == format), (std::string("FLEX ") + format).c_str());
+        p = page("pocsag", format, "1000");
+        check(!p.check().isEmpty(), (std::string("POCSAG refuses ") + format).c_str());
+    }
 }
 
 } // namespace

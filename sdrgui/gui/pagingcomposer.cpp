@@ -43,7 +43,10 @@ QString typeLabel(const QString& type)
         return "Short message";
     }
 
-    return type.left(1).toUpper() + type.mid(1);
+    // special_numeric: Special numeric
+    QString label = type;
+    label.replace('_', ' ');
+    return label.left(1).toUpper() + label.mid(1);
 }
 
 const int pocsagSpeeds[3] = {512, 1200, 2400};
@@ -437,7 +440,8 @@ void PagingComposer::display()
     // Copies and send delay: network mode (POCSAG and FLEX); FLEX copies of the numbered types on a network
     // with message numbering (STD-43A 4.3.7)
     const bool scheduled = m_network && !gsc;
-    const bool flexNumbered = (type == "alphanumeric") || binary || (shortMessage && (m_shortType->currentIndex() == 2));
+    const bool flexNumbered = (type == "alphanumeric") || binary || (type == "numbered_numeric") || (type == "numbered_special_numeric")
+        || (shortMessage && (m_shortType->currentIndex() == 2));
     const bool copies = (!flex || (m_flexNumbering && flexNumbered)) && m_group->text().trimmed().isEmpty();
     m_scheduleLabel->setVisible(scheduled);
     m_retransmit->setVisible(scheduled);

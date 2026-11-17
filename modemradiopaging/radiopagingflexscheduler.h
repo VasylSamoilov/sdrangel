@@ -112,6 +112,8 @@ public:
         int m_source = 0;           //!< Short message source and numbered types: source code 0-7
         RadioPagingFlex::BinaryParams m_binary;     //!< HEX/binary and secure messages only
         RadioPagingFlex::InstructionParams m_instruction;   //!< Short instruction only
+        //!< Numeric format (STD-43A 3.10.1.1): standard, special, numbered (a network with message numbering only) or both
+        RadioPagingFlex::NumericFormat m_numericFormat = RadioPagingFlex::NumericStandard;
         //!< Frame 0-127 the message goes in, -1: a frame of the capcode (its collapse). Messages to a temporary address
         //!< go in the frame their short instructions told
         int m_frame = -1;

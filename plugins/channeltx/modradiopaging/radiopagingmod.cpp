@@ -204,7 +204,11 @@ RadioPagingMod::TxRequest RadioPagingMod::requestFromPage(const RadioPagingPage&
         request.m_flex.m_capcode = (uint64_t) page.m_address.toULongLong();
         request.m_flex.m_type = tone ? RadioPagingFlex::Tone : (type == "short_message") ? RadioPagingFlex::ShortMessage
             : (type == "binary") ? RadioPagingFlex::Binary : (type == "secure") ? RadioPagingFlex::Secure
-            : (type == "numeric") ? RadioPagingFlex::Numeric : RadioPagingFlex::Alphanumeric;
+            : (type == "numeric") || (type == "special_numeric") || (type == "numbered_numeric") || (type == "numbered_special_numeric")
+            ? RadioPagingFlex::Numeric : RadioPagingFlex::Alphanumeric;
+        request.m_flex.m_numericFormat = (type == "special_numeric") ? RadioPagingFlex::NumericSpecial
+            : (type == "numbered_numeric") ? RadioPagingFlex::NumericNumbered
+            : (type == "numbered_special_numeric") ? RadioPagingFlex::NumericNumberedSpecial : RadioPagingFlex::NumericStandard;
         request.m_flex.m_text = text;
         request.m_flex.m_priority = page.m_priority;
 
@@ -537,7 +541,11 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
         // FLEX names as the decoder: tone is the address alone; a short message without digits has the tone only payload
         record.m_msgType = (m.m_type == RadioPagingFlex::Tone) ? "tone" : (m.m_type == RadioPagingFlex::ShortMessage) ? "short_message"
             : (m.m_type == RadioPagingFlex::Binary) ? "binary" : (m.m_type == RadioPagingFlex::Secure) ? "secure"
-            : (m.m_type == RadioPagingFlex::Numeric) ? "numeric" : "alphanumeric";
+            : (m.m_type == RadioPagingFlex::Numeric)
+            ? ((m.m_numericFormat == RadioPagingFlex::NumericSpecial) ? "special_numeric"
+                : (m.m_numericFormat == RadioPagingFlex::NumericNumbered) ? "numbered_numeric"
+                : (m.m_numericFormat == RadioPagingFlex::NumericNumberedSpecial) ? "numbered_special_numeric" : "numeric")
+            : "alphanumeric";
         record.m_text = (m.m_type == RadioPagingFlex::Tone) ? QString() : QString::fromStdString(m.m_text);
 
         if (m.m_type == RadioPagingFlex::ShortMessage)

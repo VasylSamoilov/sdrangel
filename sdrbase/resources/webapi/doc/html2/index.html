@@ -15502,7 +15502,7 @@ margin-bottom: 20px;
     },
     "type" : {
       "type" : "string",
-      "description" : "alphanumeric, numeric, tone, voice (GSC), short_message (FLEX, see shortType), binary (FLEX HEX/binary, text of hex digits) or secure (FLEX, see secureType)"
+      "description" : "alphanumeric, numeric, tone, voice (GSC), short_message (FLEX, see shortType), special_numeric, numbered_numeric, numbered_special_numeric (FLEX numeric vectors 100 and 111), binary (FLEX HEX/binary, text of hex digits) or secure (FLEX, see secureType)"
     },
     "shortType" : {
       "type" : "integer",
@@ -19459,7 +19459,7 @@ margin-bottom: 20px;
     },
     "type" : {
       "type" : "string",
-      "description" : "tone, numeric or alphanumeric. GSC also voice: text is the path of a WAV file, sent after a 2 s alert, cut at gscVoiceSeconds. FLEX also short_message (STD-43A 3.9.2, see shortType), binary (HEX/binary message, 3.10.1.2) and secure (3.10.1.4, see secureType); FLEX tone is the address alone (3.8.1)"
+      "description" : "tone, numeric or alphanumeric. GSC also voice: text is the path of a WAV file, sent after a 2 s alert, cut at gscVoiceSeconds. FLEX also short_message (STD-43A 3.9.2, see shortType), special_numeric, numbered_numeric and numbered_special_numeric (3.9.6, numbered ones with message numbering), binary (HEX/binary message, 3.10.1.2) and secure (3.10.1.4, see secureType); FLEX tone is the address alone (3.8.1)"
     },
     "shortType" : {
       "type" : "integer",
