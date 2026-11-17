@@ -18,6 +18,17 @@ set(modemradiopaging_SOURCES
     radiopagingtxstream.cpp
     radiopagingwav.cpp
     radiopagingvoiceprocessor.cpp
+    radiopagingcharset.cpp
+    charsets/pocsagascii.cpp
+    charsets/pocsagasciiuppercase.cpp
+    charsets/pocsaglatin.cpp
+    charsets/pocsagmotorolaadvisorcyrillic.cpp
+    charsets/pocsaglinguistlatincyrillic.cpp
+    charsets/pocsagnec21alatincyrillic.cpp
+    charsets/pocsagcyrillic.cpp
+    charsets/flexlinguistlatin.cpp
+    charsets/flexlinguistscripts.cpp
+    charsets/gscascii.cpp
     radiopagingvoicestore.cpp
     radiopagingpage.cpp
 )
@@ -41,6 +52,10 @@ set(modemradiopaging_HEADERS
     radiopagingtxstream.h
     radiopagingwav.h
     radiopagingvoiceprocessor.h
+    radiopagingcharset.h
+    charsets/radiopagingcharsettables.h
+    charsets/radiopagingcharsetbuild.h
+    charsets/radiopagingcyrillic.h
     radiopagingvoicestore.h
     radiopagingpage.h
 )
@@ -64,8 +79,8 @@ target_link_libraries(modemradiopaging
 install(TARGETS modemradiopaging DESTINATION ${INSTALL_LIB_DIR})
 
 # Self tests of the codecs and the demodulator, not built by default:
-#   cmake --build <build dir> --target radiopagingtest radiopaginggsctest radiopagingflextest radiopagingflexdecodertest radiopagingflexreceivertest radiopagingfskmodtest radiopagingtxstreamtest radiopagingpagetest radiopagingvoiceprocessortest
-foreach(radiopaging_test radiopagingtest radiopaginggsctest radiopagingflextest radiopagingflexdecodertest radiopagingflexreceivertest radiopagingfskmodtest radiopagingtxstreamtest radiopagingpagetest radiopagingvoiceprocessortest)
+#   cmake --build <build dir> --target radiopagingtest radiopaginggsctest radiopagingflextest radiopagingflexdecodertest radiopagingflexreceivertest radiopagingfskmodtest radiopagingtxstreamtest radiopagingpagetest radiopagingvoiceprocessortest radiopagingcharsettest
+foreach(radiopaging_test radiopagingtest radiopaginggsctest radiopagingflextest radiopagingflexdecodertest radiopagingflexreceivertest radiopagingfskmodtest radiopagingtxstreamtest radiopagingpagetest radiopagingvoiceprocessortest radiopagingcharsettest)
     add_executable(${radiopaging_test} EXCLUDE_FROM_ALL test/${radiopaging_test}.cpp)
     target_link_libraries(${radiopaging_test} modemradiopaging)
     target_include_directories(${radiopaging_test} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test)
