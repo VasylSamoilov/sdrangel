@@ -313,6 +313,10 @@ void MessageCenterGUI::buildLog(QWidget *container)
         m_settings.m_voicePlaybackDeviceName = deviceName;
         applySettings(QStringList("voicePlaybackDeviceName"));
     });
+    // A message decoded again replaces its record in the log
+    connect(m_logTable, &PagingMessageTable::recordRedecoded, this, [this](const MessageRecord& record) {
+        m_center->getInputMessageQueue()->push(MessageCenter::MsgRedecoded::create(record));
+    });
 }
 
 void MessageCenterGUI::buildEndpoints(QWidget *container)

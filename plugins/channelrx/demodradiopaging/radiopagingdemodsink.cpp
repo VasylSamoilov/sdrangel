@@ -34,6 +34,7 @@
 #include "radiopagingflex.h"
 #include "radiopaginggsc.h"
 #include "radiopagingpage.h"
+#include "radiopagingrecode.h"
 
 #include "radiopagingvoicestore.h"
 #include "radiopagingdemodsink.h"
@@ -784,7 +785,8 @@ void RadioPagingDemodSink::sendPocsag(const RadioPagingPocsagDecoder::Message& m
 {
     MessageRecord record;
     const RadioPagingCharset::Codepage *charset = codepage(m_settings.m_pocsagCharset, "pocsag");
-    RadioPagingPocsag::Interpretation interpretation = RadioPagingPocsag::interpret(message.m_rawData, message.m_rawBits, charset);
+    const std::vector<uint8_t> fill = m_settings.pocsagFillCodes(*charset);
+    RadioPagingPocsag::Interpretation interpretation = RadioPagingPocsag::interpret(message.m_rawData, message.m_rawBits, charset, fill);
 
     record.m_protocol = "pocsag";
     record.m_mode = QString::number(baud);
@@ -808,9 +810,17 @@ void RadioPagingDemodSink::sendPocsag(const RadioPagingPocsagDecoder::Message& m
     record.m_protocolData.insert("alt_type", QString::fromStdString(interpretation.m_altType));
     record.m_protocolData.insert("alt_text", escapeText(interpretation.m_altText));
     record.m_protocolData.insert("alt_score", interpretation.m_altScore);
-    // The codepage of the alphanumeric text (the type or the other candidate)
-    if (message.m_rawBits > 0) {
+    // The codepage of the alphanumeric text (the type or the other candidate) and its fill codes, to decode it again
+    if (message.m_rawBits > 0)
+    {
+        QVariantList fillCodes;
+
+        for (uint8_t code : fill) {
+            fillCodes.append((int) code);
+        }
+
         record.m_protocolData.insert("charset", RadioPagingPage::charsetData(charset->key()));
+        record.m_protocolData.insert("fill_codes", fillCodes);
     }
     record.m_duplicate = message.m_duplicate ? MessageRecord::DuplicateDup : MessageRecord::DuplicateNone;
 
@@ -841,6 +851,8 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
     }
     if (charset) {
         record.m_protocolData.insert("charset", RadioPagingPage::charsetData(charset->key()));
+        // The 7-bit characters, to decode them again with another codepage
+        record.m_protocolData.insert("alpha_codes", QString::fromLatin1(QByteArray(message.m_text.data(), (int) message.m_text.size()).toHex()));
     }
     record.m_rawData = toByteArray(message.m_rawData);
     record.m_rawBits = message.m_rawBits;
@@ -1104,25 +1116,7 @@ const RadioPagingCharset::Codepage *RadioPagingDemodSink::codepage(const RadioPa
 
 QString RadioPagingDemodSink::escapeText(const std::string& text)
 {
-    std::string out;
-
-    for (char c : text)
-    {
-        unsigned char u = (unsigned char) c;
-
-        if ((u < 0x20) || (u == 0x7f))
-        {
-            char buf[8];
-            std::snprintf(buf, sizeof(buf), "<0x%02X>", u);
-            out += buf;
-        }
-        else
-        {
-            out.push_back(c);
-        }
-    }
-
-    return QString::fromUtf8(out.c_str(), (int) out.size());
+    return RadioPagingRecode::escapeText(text);
 }
 
 QByteArray RadioPagingDemodSink::toByteArray(const std::vector<uint8_t>& data)

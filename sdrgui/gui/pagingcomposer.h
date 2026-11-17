@@ -22,8 +22,12 @@
 #include <QStringList>
 #include <QWidget>
 
+#include <map>
+
 #include "export.h"
 #include "radiopagingpage.h"
+
+class PagingCodepageTable;
 
 class QCheckBox;
 class QComboBox;
@@ -73,6 +77,9 @@ public:
     static void selectCodepage(QComboBox *combo, const RadioPagingCharset::Key& key);
     //!< The codepage chosen in a combo of fillCodepages, none for Default
     static RadioPagingCharset::Key codepageKey(const QComboBox *combo);
+    //!< The codepage the Default entry stands for in a protocol (the one of the channel); the default of the
+    //!< protocol if not set
+    void setDefaultCodepage(const QString& protocol, const RadioPagingCharset::Key& key);
 
 signals:
     void sendRequested();
@@ -96,6 +103,9 @@ private:
     QLabel *m_textLabel;
     QLineEdit *m_text;
     QComboBox *m_charset;               //!< Alphanumeric: the codepage of the text
+    QToolButton *m_codepageTable;       //!< The table of the codepage, to insert a character
+    PagingCodepageTable *m_table;
+    std::map<QString, RadioPagingCharset::Key> m_defaultCodepages;  //!< The codepage of Default, by protocol
     QToolButton *m_browse;
     QComboBox *m_voiceSource;
     QToolButton *m_micInput;
@@ -128,6 +138,8 @@ private:
     void fillFunctions();
     void display();
     void browse();
+    //!< The codepage of the text: the one chosen, else the one of Default
+    const RadioPagingCharset::Codepage *textCodepage() const;
 };
 
 #endif // SDRGUI_GUI_PAGINGCOMPOSER_H_

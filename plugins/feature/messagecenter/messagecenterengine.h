@@ -185,6 +185,8 @@ public:
     //!< The log records a filter selects, the newest last
     std::vector<MessageRecord> select(const MessageCenterFilter& filter) const;
     const MessageRecord *find(const QString& id) const;
+    //!< A record of the log decoded again (another codepage or type): it replaces the one of its id. False if none
+    bool replace(const MessageRecord& record);
     void clearLog() { m_log.clear(); }
 
     // Endpoints

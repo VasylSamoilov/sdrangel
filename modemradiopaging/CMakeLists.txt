@@ -19,6 +19,7 @@ set(modemradiopaging_SOURCES
     radiopagingwav.cpp
     radiopagingvoiceprocessor.cpp
     radiopagingcharset.cpp
+    radiopagingrecode.cpp
     charsets/pocsagascii.cpp
     charsets/pocsagasciiuppercase.cpp
     charsets/pocsaglatin.cpp
@@ -54,6 +55,7 @@ set(modemradiopaging_HEADERS
     radiopagingwav.h
     radiopagingvoiceprocessor.h
     radiopagingcharset.h
+    radiopagingrecode.h
     charsets/radiopagingcharsettables.h
     charsets/radiopagingcharsetbuild.h
     charsets/radiopagingcyrillic.h

@@ -499,6 +499,21 @@ void MessageCenterEngine::store(const MessageRecord& record)
     }
 }
 
+bool MessageCenterEngine::replace(const MessageRecord& record)
+{
+    for (auto it = m_log.rbegin(); it != m_log.rend(); ++it)
+    {
+        if (it->m_id == record.m_id)
+        {
+            *it = record;
+            m_logged++;
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void MessageCenterEngine::deliver(const MessageRecord& record, const QString& sinkName, qint64 now)
 {
     if (sinkName == "log")

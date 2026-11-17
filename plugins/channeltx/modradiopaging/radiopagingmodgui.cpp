@@ -1168,6 +1168,10 @@ void RadioPagingModGUI::displayProtocol()
     PagingComposer::fillCodepages(ui->charset, protocolNames[(int) m_settings.m_protocol], false);
     PagingComposer::selectCodepage(ui->charset, m_settings.charset(m_settings.m_protocol));
     ui->charset->setVisible(RadioPagingCharset::codepages(protocolNames[(int) m_settings.m_protocol]).size() > 1);
+    // The codepages Default stands for in the composer
+    ui->composer->setDefaultCodepage("pocsag", m_settings.m_pocsagCharset);
+    ui->composer->setDefaultCodepage("flex", m_settings.m_flexCharset);
+    ui->composer->setDefaultCodepage("gsc", m_settings.m_gscCharset);
 
     ui->speed->clear();
 
@@ -1474,6 +1478,8 @@ void RadioPagingModGUI::makeUIConnections()
         }
 
         applySettings(QStringList(keys[(int) m_settings.m_protocol]));
+        const char *protocols[3] = {"pocsag", "flex", "gsc"};
+        ui->composer->setDefaultCodepage(protocols[(int) m_settings.m_protocol], key);
     });
     QObject::connect(ui->deviation, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_deviation_valueChanged);
     QObject::connect(ui->gain, &QDial::valueChanged, this, &RadioPagingModGUI::on_gain_valueChanged);
@@ -1503,6 +1509,7 @@ void RadioPagingModGUI::makeUIConnections()
     QObject::connect(ui->mixCharset, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
         m_settings.m_pocsagCharset = PagingComposer::codepageKey(ui->mixCharset);
         applySettings(QStringList("pocsagCharset"));
+        ui->composer->setDefaultCodepage("pocsag", m_settings.m_pocsagCharset);
     });
     QObject::connect(ui->mixDeviation, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_mixDeviation_valueChanged);
     QObject::connect(ui->mixFrames, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_mixFrames_valueChanged);

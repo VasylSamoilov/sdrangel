@@ -30,6 +30,13 @@ RadioPagingDemodSettings:
       description: "FLEX largest message number of the network, 0 to 63 (default 63): the messages with R = 1 of each address are checked for skipped numbers (missed_numbers of the record), after it the sequence starts from 0 again"
       type: integer
       format: int32
+    pocsagFill:
+      description: "POCSAG fill at the end of an alphanumeric message, the last character and the one before if it is the same code: 0 NUL (default), 1 NUL, ETX and EOT, 2 the codes without a glyph in the codepage, 3 the codes of pocsagFillCodes"
+      type: integer
+      format: int32
+    pocsagFillCodes:
+      description: "pocsagFill 3: hex codes 00 to 7F separated by spaces or commas (default 00 03 04)"
+      type: string
     gscEnabled:
       description: "Decode GSC (1 for yes, 0 for no)"
       type: integer

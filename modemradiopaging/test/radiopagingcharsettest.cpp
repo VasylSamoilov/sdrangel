@@ -23,6 +23,8 @@
 #include "radiopagingcharset.h"
 #include "radiopaginggsc.h"
 #include "radiopagingpocsag.h"
+#include "radiopagingrecode.h"
+#include "radiopagingpage.h"
 
 namespace {
 
@@ -165,6 +167,26 @@ int main()
     check(RadioPagingPocsag::interpret(pack(bits), (int) bits.size()).m_text == std::string(codes.begin(), codes.end()),
         "POCSAG: without a codepage the text is the 7-bit characters");
 
+    // POCSAG fill: the last character and the one before if it is the same code (the characters of the message bits
+    // as received, no padding)
+    auto alphaText = [&](const std::string& text, const std::vector<uint8_t>& fill) {
+        std::vector<uint8_t> b;
+        for (char c : text) {
+            for (int i = 0; i < 7; i++) {
+                b.push_back(((unsigned char) c >> i) & 1);
+            }
+        }
+        return RadioPagingPocsag::decodeAlphanumeric(pack(b), (int) b.size(), fill);
+    };
+    check((alphaText("AB\x03", RadioPagingPocsag::fillMinimal()) == "AB\x03") && (alphaText("AB\x03", RadioPagingPocsag::fillConservative()) == "AB"),
+        "POCSAG fill: ETX kept as NUL fill only, dropped as conservative fill");
+    check(alphaText(std::string("AB\x04\x04", 4), RadioPagingPocsag::fillConservative()) == "AB",
+        "POCSAG fill: two characters of the same fill code dropped");
+    check(alphaText(std::string("A\x04\x04\x04", 4), RadioPagingPocsag::fillConservative()) == std::string("A\x04", 2),
+        "POCSAG fill: no more than two characters dropped");
+    check(alphaText(std::string("A\x03\x04", 3), RadioPagingPocsag::fillConservative()) == std::string("A\x03", 2),
+        "POCSAG fill: the one before only if it is the same code");
+
     RadioPagingGsc::TxMessage gscMessage;
     gscMessage.m_type = RadioPagingGsc::Alphanumeric;
     codes = encode(&gsc, "@HI[]_");
@@ -209,6 +231,41 @@ int main()
     check(received("///A1107000000WAKE UP18") == "error=checksum raw=///A1107000000WAKE UP18", "BeepwearPRO alarm: a bad checksum is a bad message");
     check((received("///B12345") == "error=unknown_command raw=///B12345") && (received("HELLO") == "HELLO"),
         "BeepwearPRO: another command is unknown, a message without /// is shown as it is");
+
+    // A received record decoded again: POCSAG with another codepage and as numeric, FLEX from its characters
+    MessageRecord rx;
+    rx.m_direction = MessageRecord::DirectionRX;
+    rx.m_protocol = "pocsag";
+    rx.m_msgType = "alphanumeric";
+    codes = encode(&german, grusse);
+    pocsag.m_text.assign(codes.begin(), codes.end());
+    bits.clear();
+    RadioPagingPocsag::messageBits(pocsag, RadioPagingPocsag::EncodeOptions(), bits, error);
+    const std::vector<uint8_t> packed = pack(bits);
+    rx.m_rawData = QByteArray((const char *) packed.data(), (int) packed.size());
+    rx.m_rawBits = (int) bits.size();
+    rx.m_text = "Gr}~e";
+    rx.m_protocolData.insert("charset", RadioPagingPage::charsetData(ascii.key()));
+    MessageRecord out;
+    QString recodeError;
+    check(RadioPagingRecode::redecode(rx, german.key(), QString(), out, recodeError) && (out.m_text == QString::fromUtf8(grusse.c_str()))
+        && (RadioPagingPage::charsetKey(out.m_protocolData.value("charset")) == german.key()) && out.m_protocolData.value("redecoded").toBool(),
+        "decode again: POCSAG with the German codepage, recorded");
+    check(RadioPagingRecode::redecode(rx, Cs::Key(), "numeric", out, recodeError) && (out.m_msgType == "numeric")
+        && (out.m_protocolData.value("alt_type").toString() == "alphanumeric") && (out.m_text != rx.m_text),
+        "decode again: POCSAG as numeric, alphanumeric the other candidate");
+    check(!RadioPagingRecode::redecode(rx, find("flex", "motorola", "linguist", "cyrillic")->key(), QString(), out, recodeError),
+        "decode again: a codepage of another protocol is refused");
+    MessageRecord flexRx;
+    flexRx.m_direction = MessageRecord::DirectionRX;
+    flexRx.m_protocol = "flex";
+    flexRx.m_msgType = "alphanumeric";
+    flexRx.m_protocolData.insert("alpha_codes", QString("4142"));
+    check((RadioPagingRecode::types(flexRx) == QStringList({"alphanumeric"}))
+        && RadioPagingRecode::redecode(flexRx, find("flex", "motorola", "linguist", "cyrillic")->key(), QString(), out, recodeError)
+        && (out.m_text == QString::fromUtf8("\xD0\xB0\xD0\xB1")), "decode again: FLEX characters with the Cyrillic codepage");
+    rx.m_direction = MessageRecord::DirectionTX;
+    check(RadioPagingRecode::types(rx).isEmpty(), "decode again: not a transmitted message");
 
     std::printf("%d passed, %d failed\n", passes, failures);
     return failures ? 1 : 0;

@@ -41,6 +41,7 @@ set(sdrgui_SOURCES
     gui/messagedialog.cpp
     gui/pagingmessagetable.cpp
     gui/pagingcomposer.cpp
+    gui/pagingcodepagetable.cpp
     gui/pagingvoiceplayer.cpp
     gui/dialpopup.cpp
     gui/dmsspinbox.cpp
@@ -199,6 +200,7 @@ set(sdrgui_HEADERS
     gui/messagedialog.h
     gui/pagingmessagetable.h
     gui/pagingcomposer.h
+    gui/pagingcodepagetable.h
     gui/pagingvoiceplayer.h
     gui/dialpopup.h
     gui/dmsspinbox.h

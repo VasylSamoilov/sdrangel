@@ -402,6 +402,20 @@ int RadioPagingDemod::webapiSettingsPutPatch(
         }
     }
 
+    std::vector<uint8_t> fillCodes;
+
+    if (channelSettingsKeys.contains("pocsagFill")
+        && ((settings.m_pocsagFill < RadioPagingDemodSettings::FillMinimal) || (settings.m_pocsagFill > RadioPagingDemodSettings::FillCustom)))
+    {
+        errorMessage = "pocsagFill must be 0 (NUL), 1 (NUL, ETX, EOT), 2 (codes without a glyph) or 3 (pocsagFillCodes)";
+        return 400;
+    }
+    if (channelSettingsKeys.contains("pocsagFillCodes") && !RadioPagingDemodSettings::parseFillCodes(settings.m_pocsagFillCodes, fillCodes))
+    {
+        errorMessage = "pocsagFillCodes must be hex codes 00 to 7F separated by spaces or commas";
+        return 400;
+    }
+
     MsgConfigureRadioPagingDemod *msg = MsgConfigureRadioPagingDemod::create(channelSettingsKeys, settings, force);
     m_inputMessageQueue.push(msg);
 
@@ -447,6 +461,12 @@ void RadioPagingDemod::webapiUpdateChannelSettings(
     }
     if (channelSettingsKeys.contains("flexMaxMessageNumber")) {
         settings.m_flexMaxMessageNumber = std::max(0, std::min(63, model->getFlexMaxMessageNumber()));
+    }
+    if (channelSettingsKeys.contains("pocsagFill")) {
+        settings.m_pocsagFill = model->getPocsagFill();
+    }
+    if (channelSettingsKeys.contains("pocsagFillCodes") && model->getPocsagFillCodes()) {
+        settings.m_pocsagFillCodes = *model->getPocsagFillCodes();
     }
     if (channelSettingsKeys.contains("gscEnabled")) {
         settings.m_gscEnabled = model->getGscEnabled() != 0;
@@ -543,6 +563,8 @@ void RadioPagingDemod::webapiFormatChannelSettings(SWGSDRangel::SWGChannelSettin
     model->setFlexEnabled(settings.m_flexEnabled ? 1 : 0);
     model->setFlexDeviation(settings.m_flexDeviation);
     model->setFlexMaxMessageNumber(settings.m_flexMaxMessageNumber);
+    model->setPocsagFill(settings.m_pocsagFill);
+    model->setPocsagFillCodes(new QString(settings.m_pocsagFillCodes));
     model->setGscEnabled(settings.m_gscEnabled ? 1 : 0);
     model->setGscDeviation(settings.m_gscDeviation);
     model->setGscVoiceTimeout(settings.m_gscVoiceTimeout);
@@ -686,6 +708,12 @@ void RadioPagingDemod::webapiFormatChannelSettings(
     }
     if (channelSettingsKeys.contains("flexMaxMessageNumber") || force) {
         model->setFlexMaxMessageNumber(settings.m_flexMaxMessageNumber);
+    }
+    if (channelSettingsKeys.contains("pocsagFill") || force) {
+        model->setPocsagFill(settings.m_pocsagFill);
+    }
+    if (channelSettingsKeys.contains("pocsagFillCodes") || force) {
+        model->setPocsagFillCodes(new QString(settings.m_pocsagFillCodes));
     }
     if (channelSettingsKeys.contains("gscEnabled") || force) {
         model->setGscEnabled(settings.m_gscEnabled ? 1 : 0);

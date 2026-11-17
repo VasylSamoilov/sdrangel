@@ -19,10 +19,13 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QDateTime>
+#include <QDebug>
 #include <QFileInfo>
 #include <QHeaderView>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QMap>
+#include <QMenu>
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPainter>
@@ -35,6 +38,8 @@
 #include "dsp/dspengine.h"
 #include "gui/audioselectdialog.h"
 #include "gui/dialogpositioner.h"
+#include "radiopagingpage.h"
+#include "radiopagingrecode.h"
 #include "pagingvoiceplayer.h"
 #include "pagingmessagetable.h"
 
@@ -776,6 +781,61 @@ void PagingMessageTable::showRowMenu(const QPoint& pos)
 
     QPoint global = viewport()->mapToGlobal(pos);
     connect(menu.addAction(tr("Audio output...")), &QAction::triggered, this, [this, global]() { selectAudioDevice(global); });
+
+    // A received message decoded again: as the other type, with another codepage of its protocol
+    MessageRecord record;
+    const QJsonObject json = QJsonDocument::fromJson(item(row, ColTime)->data(jsonRole).toString().toUtf8()).object();
+
+    if (MessageRecord::fromJson(json, record) && !RadioPagingRecode::types(record).isEmpty())
+    {
+        QMenu *decode = menu.addMenu(tr("Decode as"));
+        const QString state = item(row, ColState) ? item(row, ColState)->text() : QString();
+        auto redecode = [this, record, state](const RadioPagingCharset::Key& key, const QString& type) {
+            MessageRecord out;
+            QString error;
+
+            if (!RadioPagingRecode::redecode(record, key, type, out, error))
+            {
+                qWarning() << "PagingMessageTable: decode again:" << error;
+                return;
+            }
+
+            int r = findRow(out.m_id);
+
+            if (r >= 0) {
+                fillRow(r, out, state);
+            }
+
+            emit recordRedecoded(out);
+        };
+
+        for (const QString& type : RadioPagingRecode::types(record))
+        {
+            QAction *action = decode->addAction(type == "numeric" ? tr("Numeric") : tr("Alphanumeric"));
+            action->setCheckable(true);
+            action->setChecked(type == record.m_msgType);
+            connect(action, &QAction::triggered, this, [redecode, type]() { redecode(RadioPagingCharset::Key(), type); });
+        }
+
+        decode->addSeparator();
+        const RadioPagingCharset::Key current = RadioPagingPage::charsetKey(record.m_protocolData.value("charset"));
+        QMap<QString, QMenu*> vendors;
+
+        for (const RadioPagingCharset::Codepage *codepage : RadioPagingCharset::codepages(record.m_protocol.toStdString()))
+        {
+            const QString vendor = QString::fromUtf8(codepage->m_vendor);
+
+            if (!vendors.contains(vendor)) {
+                vendors[vendor] = decode->addMenu(vendor);
+            }
+
+            QAction *action = vendors[vendor]->addAction(QString::fromUtf8(codepage->m_label));
+            const RadioPagingCharset::Key key = codepage->key();
+            action->setCheckable(true);
+            action->setChecked(key == current);
+            connect(action, &QAction::triggered, this, [redecode, key]() { redecode(key, QString()); });
+        }
+    }
 
     menu.exec(global);
 }

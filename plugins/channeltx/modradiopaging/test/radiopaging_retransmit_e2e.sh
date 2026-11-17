@@ -148,6 +148,8 @@ done
 curl_code PATCH /deviceset/2/channel/0/settings '{"channelType":"RadioPagingDemod","direction":0,"RadioPagingDemodSettings":{"pocsagEnabled":0,"flexEnabled":1,"gscEnabled":0,"flexDeviation":4800,"channelAlias":"rf","flexCharset":{"vendor":"motorola","model":"linguist","codepage":"cyrillic"}}}' > /dev/null
 curl_code PATCH /deviceset/3/channel/0/settings '{"channelType":"RadioPagingDemod","direction":0,"RadioPagingDemodSettings":{"pocsagEnabled":1,"flexEnabled":0,"gscEnabled":0,"pocsagDeviation":4500,"channelAlias":"rp","pocsagCharset":{"vendor":"generic","model":"generic","codepage":"latin-german"}}}' > /dev/null
 check "the codepage setting of a receiver must be one of the protocol" '[ "$(curl_code PATCH /deviceset/3/channel/0/settings "{\"channelType\":\"RadioPagingDemod\",\"direction\":0,\"RadioPagingDemodSettings\":{\"gscCharset\":$CYRILLIC}}")" = 400 ]'
+check "the POCSAG fill codes must be hex codes 00 to 7F" '[ "$(curl_code PATCH /deviceset/3/channel/0/settings "{\"channelType\":\"RadioPagingDemod\",\"direction\":0,\"RadioPagingDemodSettings\":{\"pocsagFillCodes\":\"00 80\"}}")" = 400 ]'
+curl_code PATCH /deviceset/3/channel/0/settings '{"channelType":"RadioPagingDemod","direction":0,"RadioPagingDemodSettings":{"pocsagFill":1}}' > /dev/null
 curl_code POST /deviceset/2/device/run > /dev/null
 curl_code POST /deviceset/3/device/run > /dev/null
 
@@ -165,6 +167,7 @@ check "FLEX: the System Event Notification is received in frames, its flags" '[ 
 rawData() { records "$1" "$2" | head -1 | grep -o "\"rawData\":\"[^\"]*\""; }
 check "POCSAG: received in the German codepage, the bits as sent" '[[ "$(records rx 1100005)" == *"$GRUSSE"* && -n "$(rawData tx 1100005)" && "$(rawData tx 1100005)" == "$(rawData rx 1100005)" ]]'
 check "FLEX: received in the Cyrillic codepage" '[[ "$(records rx 1100006)" == *"$DOBRYI"* && "$(records rx 1100006)" == *"$CYRILLIC_REC"* ]]'
+check "the received records keep what decodes them again: POCSAG fill codes, FLEX characters" '[[ "$(records rx 1100005)" == *"\"fill_codes\":[0,3,4]"* && "$(records rx 1100006)" == *"\"alpha_codes\":\""* ]]'
 # How the FLEX messages went is reported when they are in their frame: message number, R, fragments
 check "FLEX: the records sent have the message number, R and the fragments" '[[ "$(records tx 1100002 | grep -c "\"message_number\":0")" = 3 && "$(records tx 1100002 | grep -v "retransmission" | grep "\"retrieval\":true" | grep -c "\"fragment_count\":1")" = 1 ]]'
 

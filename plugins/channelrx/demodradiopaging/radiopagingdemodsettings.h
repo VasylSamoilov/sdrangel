@@ -58,6 +58,16 @@ struct RadioPagingDemodSettings
     RadioPagingCharset::Key m_flexCharset;
     RadioPagingCharset::Key m_gscCharset;
 
+    //!< POCSAG: what the fill at the end of an alphanumeric message is (1 or 2 characters of the same code)
+    enum PocsagFill {
+        FillMinimal,                            //!< NUL
+        FillConservative,                       //!< NUL, ETX, EOT
+        FillCodepage,                           //!< The codes without a glyph in the codepage
+        FillCustom                              //!< The codes of m_pocsagFillCodes
+    };
+    int m_pocsagFill;                           //!< PocsagFill
+    QString m_pocsagFillCodes;                  //!< FillCustom: hex codes separated by spaces or commas, e.g. "00 03 04"
+
     quint32 m_rgbColor;
     QString m_title;
     Serializable *m_channelMarker;
@@ -101,6 +111,10 @@ struct RadioPagingDemodSettings
     QString effectiveChannelAlias(qint64 frequency) const;
     //!< The default codepage of a protocol (pocsag, flex, gsc): generic ASCII
     static RadioPagingCharset::Key defaultCharset(const char *protocol);
+    //!< The POCSAG fill codes of the setting, the codepage the one of the messages
+    std::vector<uint8_t> pocsagFillCodes(const RadioPagingCharset::Codepage& codepage) const;
+    //!< The codes of a list of hex codes (00 to 7F, separated by spaces or commas); false if one is not
+    static bool parseFillCodes(const QString& text, std::vector<uint8_t>& codes);
 };
 
 #endif // INCLUDE_RADIOPAGINGDEMODSETTINGS_H

@@ -258,7 +258,7 @@ std::string RadioPagingPocsag::decodeNumeric(const std::vector<uint8_t>& packed,
     return text;
 }
 
-std::string RadioPagingPocsag::decodeAlphanumeric(const std::vector<uint8_t>& packed, int nbBits)
+std::string RadioPagingPocsag::decodeAlphanumeric(const std::vector<uint8_t>& packed, int nbBits, const std::vector<uint8_t>& fill)
 {
     std::string text;
 
@@ -271,9 +271,18 @@ std::string RadioPagingPocsag::decodeAlphanumeric(const std::vector<uint8_t>& pa
         text.push_back((char) v);
     }
 
-    // Trailing NUL characters are padding
-    while (!text.empty() && (text.back() == 0)) {
+    // The fill of the last codeword: its last character if its code is a fill code, the one before too if it is the
+    // same code (20 bits leave room for 2 characters after the last one of the message)
+    auto isFill = [&](char c) { return std::find(fill.begin(), fill.end(), (uint8_t) c) != fill.end(); };
+
+    if (!text.empty() && isFill(text.back()))
+    {
+        const char code = text.back();
         text.pop_back();
+
+        if (!text.empty() && (text.back() == code)) {
+            text.pop_back();
+        }
     }
 
     return text;
@@ -325,7 +334,7 @@ int RadioPagingPocsag::scoreAlphanumeric(const std::string& text)
 }
 
 RadioPagingPocsag::Interpretation RadioPagingPocsag::interpret(const std::vector<uint8_t>& packed, int nbBits,
-    const RadioPagingCharset::Codepage *codepage)
+    const RadioPagingCharset::Codepage *codepage, const std::vector<uint8_t>& fill)
 {
     Interpretation result;
 
@@ -335,7 +344,7 @@ RadioPagingPocsag::Interpretation RadioPagingPocsag::interpret(const std::vector
         return result;
     }
 
-    std::string alpha = decodeAlphanumeric(packed, nbBits);
+    std::string alpha = decodeAlphanumeric(packed, nbBits, fill);
     std::string numeric = decodeNumeric(packed, nbBits);
     int alphaScore = scoreAlphanumeric(alpha);
     int numericScore = scoreNumeric(numeric);

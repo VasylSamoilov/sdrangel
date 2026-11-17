@@ -16,6 +16,7 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include <QColor>
+#include <QRegularExpression>
 #include <QStandardPaths>
 
 #include <algorithm>
@@ -26,6 +27,7 @@
 #include "audio/audiodevicemanager.h"
 #include "radiopagingvoicestore.h"
 #include "radiopagingcharset.h"
+#include "radiopagingpocsag.h"
 #include "radiopagingdemodsettings.h"
 
 const int RadioPagingDemodSettings::m_nbPocsagSpeeds;
@@ -64,6 +66,55 @@ RadioPagingCharset::Key RadioPagingDemodSettings::defaultCharset(const char *pro
 {
     const RadioPagingCharset::Codepage *codepage = RadioPagingCharset::defaultFor(protocol);
     return codepage ? codepage->key() : RadioPagingCharset::Key();
+}
+
+std::vector<uint8_t> RadioPagingDemodSettings::pocsagFillCodes(const RadioPagingCharset::Codepage& codepage) const
+{
+    std::vector<uint8_t> codes;
+
+    switch (m_pocsagFill)
+    {
+    case FillConservative:
+        return RadioPagingPocsag::fillConservative();
+    case FillCodepage:
+        for (int code = 0; code < codepage.codes(); code++)
+        {
+            if (!codepage.glyph(code)) {
+                codes.push_back((uint8_t) code);
+            }
+        }
+        return codes;
+    case FillCustom:
+        parseFillCodes(m_pocsagFillCodes, codes);
+        return codes;
+    default:
+        return RadioPagingPocsag::fillMinimal();
+    }
+}
+
+bool RadioPagingDemodSettings::parseFillCodes(const QString& text, std::vector<uint8_t>& codes)
+{
+    codes.clear();
+
+    for (const QString& token : text.split(QRegularExpression("[,;\\s]+"), Qt::SkipEmptyParts))
+    {
+        bool ok;
+        QString hex = token;
+
+        if (hex.startsWith("0x", Qt::CaseInsensitive)) {
+            hex = hex.mid(2);
+        }
+
+        uint value = hex.toUInt(&ok, 16);
+
+        if (!ok || (value > 0x7f) || (hex.size() > 2)) {
+            return false;
+        }
+
+        codes.push_back((uint8_t) value);
+    }
+
+    return true;
 }
 
 namespace {
@@ -122,6 +173,8 @@ void RadioPagingDemodSettings::resetToDefaults()
     m_pocsagCharset = defaultCharset("pocsag");
     m_flexCharset = defaultCharset("flex");
     m_gscCharset = defaultCharset("gsc");
+    m_pocsagFill = FillMinimal;
+    m_pocsagFillCodes = "00 03 04";
 
     m_rgbColor = QColor(255, 170, 0).rgb();
     m_title = "Radio Paging Demodulator";
@@ -184,6 +237,8 @@ QByteArray RadioPagingDemodSettings::serialize() const
     writeCharset(s, 38, m_pocsagCharset);
     writeCharset(s, 41, m_flexCharset);
     writeCharset(s, 44, m_gscCharset);
+    s.writeS32(47, m_pocsagFill);
+    s.writeString(48, m_pocsagFillCodes);
 
     return s.final();
 }
@@ -260,6 +315,9 @@ bool RadioPagingDemodSettings::deserialize(const QByteArray& data)
         m_pocsagCharset = readCharset(d, 38, "pocsag");
         m_flexCharset = readCharset(d, 41, "flex");
         m_gscCharset = readCharset(d, 44, "gsc");
+        d.readS32(47, &m_pocsagFill, FillMinimal);
+        m_pocsagFill = std::max((int) FillMinimal, std::min((int) FillCustom, m_pocsagFill));
+        d.readString(48, &m_pocsagFillCodes, "00 03 04");
         m_gscVoiceKeepDays = std::max(0, std::min(3650, m_gscVoiceKeepDays));
         m_gscVoiceKeepMin = std::max(0, std::min(100000, m_gscVoiceKeepMin));
 
@@ -336,6 +394,12 @@ void RadioPagingDemodSettings::applySettings(const QStringList& settingsKeys, co
     }
     if (settingsKeys.contains("gscCharset")) {
         m_gscCharset = settings.m_gscCharset;
+    }
+    if (settingsKeys.contains("pocsagFill")) {
+        m_pocsagFill = settings.m_pocsagFill;
+    }
+    if (settingsKeys.contains("pocsagFillCodes")) {
+        m_pocsagFillCodes = settings.m_pocsagFillCodes;
     }
     if (settingsKeys.contains("rgbColor")) {
         m_rgbColor = settings.m_rgbColor;
@@ -438,6 +502,12 @@ QString RadioPagingDemodSettings::getDebugString(const QStringList& settingsKeys
     }
     if (settingsKeys.contains("gscCharset") || force) {
         ostr << " m_gscCharset: " << charsetText(m_gscCharset);
+    }
+    if (settingsKeys.contains("pocsagFill") || force) {
+        ostr << " m_pocsagFill: " << m_pocsagFill;
+    }
+    if (settingsKeys.contains("pocsagFillCodes") || force) {
+        ostr << " m_pocsagFillCodes: " << m_pocsagFillCodes.toStdString();
     }
     if (settingsKeys.contains("rgbColor") || force) {
         ostr << " m_rgbColor: " << m_rgbColor;

@@ -9,6 +9,7 @@ SWGRadioPagingDemodSettings::~SWGRadioPagingDemodSettings() { cleanup(); }
 void SWGRadioPagingDemodSettings::cleanup()
 {
     delete m_audioDeviceName; m_audioDeviceName = nullptr;
+    delete m_pocsagFillCodes; m_pocsagFillCodes = nullptr;
     delete m_pocsagCharset; m_pocsagCharset = nullptr;
     delete m_flexCharset; m_flexCharset = nullptr;
     delete m_gscCharset; m_gscCharset = nullptr;
@@ -29,6 +30,8 @@ void SWGRadioPagingDemodSettings::init()
     m_flexEnabled = 0; m_flexEnabledIsSet = false;
     m_flexDeviation = 0; m_flexDeviationIsSet = false;
     m_flexMaxMessageNumber = 0; m_flexMaxMessageNumberIsSet = false;
+    m_pocsagFill = 0; m_pocsagFillIsSet = false;
+    m_pocsagFillCodes = new QString(); m_pocsagFillCodesIsSet = false;
     m_gscEnabled = 0; m_gscEnabledIsSet = false;
     m_gscDeviation = 0; m_gscDeviationIsSet = false;
     m_gscVoiceTimeout = 0; m_gscVoiceTimeoutIsSet = false;
@@ -67,6 +70,8 @@ void SWGRadioPagingDemodSettings::fromJsonObject(QJsonObject& json)
     if (json.contains("flexEnabled")) { ::SWGSDRangel::setValue(&m_flexEnabled,json["flexEnabled"],"qint32",""); m_flexEnabledIsSet = true; }
     if (json.contains("flexDeviation")) { ::SWGSDRangel::setValue(&m_flexDeviation,json["flexDeviation"],"float",""); m_flexDeviationIsSet = true; }
     if (json.contains("flexMaxMessageNumber")) { ::SWGSDRangel::setValue(&m_flexMaxMessageNumber,json["flexMaxMessageNumber"],"qint32",""); m_flexMaxMessageNumberIsSet = true; }
+    if (json.contains("pocsagFill")) { ::SWGSDRangel::setValue(&m_pocsagFill,json["pocsagFill"],"qint32",""); m_pocsagFillIsSet = true; }
+    if (json.contains("pocsagFillCodes")) { ::SWGSDRangel::setValue(&m_pocsagFillCodes,json["pocsagFillCodes"],"QString","QString"); m_pocsagFillCodesIsSet = true; }
     if (json.contains("gscEnabled")) { ::SWGSDRangel::setValue(&m_gscEnabled,json["gscEnabled"],"qint32",""); m_gscEnabledIsSet = true; }
     if (json.contains("gscDeviation")) { ::SWGSDRangel::setValue(&m_gscDeviation,json["gscDeviation"],"float",""); m_gscDeviationIsSet = true; }
     if (json.contains("gscVoiceTimeout")) { ::SWGSDRangel::setValue(&m_gscVoiceTimeout,json["gscVoiceTimeout"],"qint32",""); m_gscVoiceTimeoutIsSet = true; }
@@ -106,6 +111,8 @@ QJsonObject* SWGRadioPagingDemodSettings::asJsonObject()
     if (m_flexEnabledIsSet) { object->insert("flexEnabled",QJsonValue(m_flexEnabled)); }
     if (m_flexDeviationIsSet) { object->insert("flexDeviation",QJsonValue(m_flexDeviation)); }
     if (m_flexMaxMessageNumberIsSet) { object->insert("flexMaxMessageNumber",QJsonValue(m_flexMaxMessageNumber)); }
+    if (m_pocsagFillIsSet) { object->insert("pocsagFill",QJsonValue(m_pocsagFill)); }
+    if (m_pocsagFillCodes && (m_pocsagFillCodesIsSet || !m_pocsagFillCodes->isEmpty())) { toJsonValue(QString("pocsagFillCodes"),m_pocsagFillCodes,object,QString("QString")); }
     if (m_gscEnabledIsSet) { object->insert("gscEnabled",QJsonValue(m_gscEnabled)); }
     if (m_gscDeviationIsSet) { object->insert("gscDeviation",QJsonValue(m_gscDeviation)); }
     if (m_gscVoiceTimeoutIsSet) { object->insert("gscVoiceTimeout",QJsonValue(m_gscVoiceTimeout)); }
@@ -134,7 +141,7 @@ QJsonObject* SWGRadioPagingDemodSettings::asJsonObject()
 }
 bool SWGRadioPagingDemodSettings::isSet()
 {
-    return m_gscVoiceKeepDaysIsSet || m_gscVoiceKeepMinIsSet || m_channelAliasIsSet || m_gscVoiceRecordIsSet || m_gscVoiceDirectoryIsSet || m_inputFrequencyOffsetIsSet || m_rfBandwidthIsSet || m_pocsagEnabledIsSet || m_pocsagDeviationIsSet || m_flexEnabledIsSet || m_flexDeviationIsSet || m_flexMaxMessageNumberIsSet || m_gscEnabledIsSet || m_gscDeviationIsSet || m_gscVoiceTimeoutIsSet || m_gscAudioIsSet || m_volumeIsSet || m_audioDeviceNameIsSet || m_pocsagCharsetIsSet || m_flexCharsetIsSet || m_gscCharsetIsSet || m_rgbColorIsSet || m_titleIsSet || m_streamIndexIsSet || m_useReverseAPIIsSet || m_reverseAPIAddressIsSet || m_reverseAPIPortIsSet || m_reverseAPIDeviceIndexIsSet || m_reverseAPIChannelIndexIsSet || m_channelMarkerIsSet || m_rollupStateIsSet;
+    return m_gscVoiceKeepDaysIsSet || m_gscVoiceKeepMinIsSet || m_channelAliasIsSet || m_gscVoiceRecordIsSet || m_gscVoiceDirectoryIsSet || m_inputFrequencyOffsetIsSet || m_rfBandwidthIsSet || m_pocsagEnabledIsSet || m_pocsagDeviationIsSet || m_flexEnabledIsSet || m_flexDeviationIsSet || m_flexMaxMessageNumberIsSet || m_pocsagFillIsSet || m_pocsagFillCodesIsSet || m_gscEnabledIsSet || m_gscDeviationIsSet || m_gscVoiceTimeoutIsSet || m_gscAudioIsSet || m_volumeIsSet || m_audioDeviceNameIsSet || m_pocsagCharsetIsSet || m_flexCharsetIsSet || m_gscCharsetIsSet || m_rgbColorIsSet || m_titleIsSet || m_streamIndexIsSet || m_useReverseAPIIsSet || m_reverseAPIAddressIsSet || m_reverseAPIPortIsSet || m_reverseAPIDeviceIndexIsSet || m_reverseAPIChannelIndexIsSet || m_channelMarkerIsSet || m_rollupStateIsSet;
 }
 qint64 SWGRadioPagingDemodSettings::getInputFrequencyOffset() { return m_inputFrequencyOffset; }
 void SWGRadioPagingDemodSettings::setInputFrequencyOffset(qint64 value) { m_inputFrequencyOffset = value; m_inputFrequencyOffsetIsSet = true; }
@@ -150,6 +157,10 @@ float SWGRadioPagingDemodSettings::getFlexDeviation() { return m_flexDeviation; 
 void SWGRadioPagingDemodSettings::setFlexDeviation(float value) { m_flexDeviation = value; m_flexDeviationIsSet = true; }
 qint32 SWGRadioPagingDemodSettings::getFlexMaxMessageNumber() { return m_flexMaxMessageNumber; }
 void SWGRadioPagingDemodSettings::setFlexMaxMessageNumber(qint32 value) { m_flexMaxMessageNumber = value; m_flexMaxMessageNumberIsSet = true; }
+qint32 SWGRadioPagingDemodSettings::getPocsagFill() { return m_pocsagFill; }
+void SWGRadioPagingDemodSettings::setPocsagFill(qint32 value) { m_pocsagFill = value; m_pocsagFillIsSet = true; }
+QString* SWGRadioPagingDemodSettings::getPocsagFillCodes() { return m_pocsagFillCodes; }
+void SWGRadioPagingDemodSettings::setPocsagFillCodes(QString* value) { if (m_pocsagFillCodes != value) { delete m_pocsagFillCodes; m_pocsagFillCodes = value; } m_pocsagFillCodesIsSet = true; }
 qint32 SWGRadioPagingDemodSettings::getGscEnabled() { return m_gscEnabled; }
 void SWGRadioPagingDemodSettings::setGscEnabled(qint32 value) { m_gscEnabled = value; m_gscEnabledIsSet = true; }
 float SWGRadioPagingDemodSettings::getGscDeviation() { return m_gscDeviation; }

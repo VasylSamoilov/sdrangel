@@ -162,6 +162,15 @@ void testLogAndRoutes()
     check((engine.log().size() == 2) && !engine.find("2") && engine.find("3") && (csvLines.size() == 3) && (jsonLines.size() == 2),
         "Engine: routes send a record to their sinks, a route can stop the others");
 
+    // A record decoded again replaces the one of its id in the log, and the log tells it changed
+    MessageRecord again = *engine.find("3");
+    again.m_text = "DECODED AGAIN";
+    const int loggedBefore = engine.logged();
+    check(engine.replace(again) && (engine.find("3")->m_text == "DECODED AGAIN") && (engine.logged() > loggedBefore)
+        && (engine.log().size() == 2), "Engine: a record decoded again replaces its record");
+    again.m_id = "none";
+    check(!engine.replace(again) && (engine.log().size() == 2), "Engine: a record decoded again without its record is not added");
+
     // A voice message is updated by a record of the same id; a source file gives the lines written to it
     MessageRecord voice = rx("v1", "gsc", "100123", "", "A", 600);
     voice.m_msgType = "voice";

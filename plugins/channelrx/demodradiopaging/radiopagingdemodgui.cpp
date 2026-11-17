@@ -23,6 +23,7 @@
 #include <QFileInfo>
 #include <QUrl>
 #include <QFormLayout>
+#include <QInputDialog>
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
@@ -489,6 +490,28 @@ RadioPagingDemodGUI::RadioPagingDemodGUI(PluginAPI* pluginAPI, DeviceUISet *devi
     connect(audioRightClickEnabler, SIGNAL(rightClick(const QPoint &)), this, SLOT(audioSelect(const QPoint &)));
     CRightClickEnabler *recordRightClickEnabler = new CRightClickEnabler(ui->gscVoiceRecord);
     connect(recordRightClickEnabler, SIGNAL(rightClick(const QPoint &)), this, SLOT(voiceDirectorySelect(const QPoint &)));
+    // The list of the custom POCSAG fill codes
+    CRightClickEnabler *fillRightClickEnabler = new CRightClickEnabler(ui->pocsagFill);
+    connect(fillRightClickEnabler, &CRightClickEnabler::rightClick, this, [this](const QPoint&) {
+        bool ok;
+        QString codes = QInputDialog::getText(this, tr("POCSAG fill codes"),
+            tr("Hex codes 00 to 7F, separated by spaces or commas"), QLineEdit::Normal, m_settings.m_pocsagFillCodes, &ok);
+        std::vector<uint8_t> parsed;
+
+        if (!ok) {
+            return;
+        }
+        if (!RadioPagingDemodSettings::parseFillCodes(codes, parsed))
+        {
+            QMessageBox::warning(this, tr("POCSAG fill codes"), tr("%1 is not a list of hex codes 00 to 7F").arg(codes));
+            return;
+        }
+
+        m_settings.m_pocsagFillCodes = codes.trimmed();
+        m_settings.m_pocsagFill = RadioPagingDemodSettings::FillCustom;
+        displaySettings();
+        applySettings(QStringList({"pocsagFill", "pocsagFillCodes"}));
+    });
 
     PagingComposer::fillCodepages(ui->pocsagCharset, "pocsag", false);
     PagingComposer::fillCodepages(ui->flexCharset, "flex", false);
@@ -546,6 +569,9 @@ void RadioPagingDemodGUI::displaySettings()
     ui->flexDeviation->setValue(m_settings.m_flexDeviation);
     ui->flexMaxMessageNumber->setValue(m_settings.m_flexMaxMessageNumber);
     PagingComposer::selectCodepage(ui->pocsagCharset, m_settings.m_pocsagCharset);
+    ui->pocsagFill->setCurrentIndex(m_settings.m_pocsagFill);
+    ui->pocsagFill->setItemData(RadioPagingDemodSettings::FillCustom,
+        tr("Custom fill codes: %1 (right-click to edit)").arg(m_settings.m_pocsagFillCodes), Qt::ToolTipRole);
     PagingComposer::selectCodepage(ui->flexCharset, m_settings.m_flexCharset);
     PagingComposer::selectCodepage(ui->gscCharset, m_settings.m_gscCharset);
     ui->pocsagEnabled->setChecked(m_settings.m_pocsagEnabled);
@@ -816,6 +842,10 @@ void RadioPagingDemodGUI::makeUIConnections()
     QObject::connect(ui->pocsagDeviation, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingDemodGUI::on_pocsagDeviation_valueChanged);
     QObject::connect(ui->flexDeviation, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingDemodGUI::on_flexDeviation_valueChanged);
     QObject::connect(ui->flexMaxMessageNumber, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingDemodGUI::on_flexMaxMessageNumber_valueChanged);
+    QObject::connect(ui->pocsagFill, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
+        m_settings.m_pocsagFill = index;
+        applySettings(QStringList("pocsagFill"));
+    });
     QObject::connect(ui->pocsagCharset, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
         m_settings.m_pocsagCharset = PagingComposer::codepageKey(ui->pocsagCharset);
         applySettings(QStringList("pocsagCharset"));

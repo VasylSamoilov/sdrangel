@@ -98,12 +98,19 @@ public:
     //!< Message bits as stored in a decoded message: packed 8 per byte, first bit in the
     //!< most significant bit of byte 0
     static std::string decodeNumeric(const std::vector<uint8_t>& packed, int nbBits);
-    static std::string decodeAlphanumeric(const std::vector<uint8_t>& packed, int nbBits);
+    //!< The 7-bit characters, without the fill of the last codeword: the last character if its code is one of fill,
+    //!< and the one before if it is the same code
+    static std::string decodeAlphanumeric(const std::vector<uint8_t>& packed, int nbBits, const std::vector<uint8_t>& fill = fillMinimal());
     static int scoreNumeric(const std::string& text);
     static int scoreAlphanumeric(const std::string& text);
     //!< Decide between numeric and alphanumeric by content. No bits means tone only. The alphanumeric text is the
     //!< glyphs of the codepage (RadioPagingCharset::decode), the 7-bit characters themselves without one
-    static Interpretation interpret(const std::vector<uint8_t>& packed, int nbBits, const RadioPagingCharset::Codepage *codepage = nullptr);
+    static Interpretation interpret(const std::vector<uint8_t>& packed, int nbBits, const RadioPagingCharset::Codepage *codepage = nullptr,
+        const std::vector<uint8_t>& fill = fillMinimal());
+
+    //!< Fill codes at the end of an alphanumeric message: NUL (the fill of the encoder); NUL, ETX and EOT
+    static std::vector<uint8_t> fillMinimal() { return {0x00}; }
+    static std::vector<uint8_t> fillConservative() { return {0x00, 0x03, 0x04}; }
 
     //!< Replace characters below 0x20 and 0x7f by <0xNN>
     static std::string escapeControl(const std::string& text);

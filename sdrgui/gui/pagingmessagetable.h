@@ -92,6 +92,8 @@ signals:
     void columnsChanged();
     //!< The user chose another audio output for the voice files
     void audioDeviceChanged(const QString& deviceName);
+    //!< The user decoded a received message again (another codepage or type): its row shows it
+    void recordRedecoded(const MessageRecord& record);
 
 protected:
     void mousePressEvent(QMouseEvent *event) override;

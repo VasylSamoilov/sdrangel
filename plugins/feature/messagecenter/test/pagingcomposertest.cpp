@@ -24,7 +24,10 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QSpinBox>
+#include <QToolButton>
 #include <cstdio>
+
+#include "gui/pagingcodepagetable.h"
 
 #include "gui/pagingcomposer.h"
 
@@ -233,6 +236,33 @@ int main(int argc, char **argv)
     // The protocols the transmitter sends
     composer.setProtocols({"pocsag"});
     check((composer.protocol() == "pocsag") && !comboWith(composer, "FLEX"), "a single protocol: no selector");
+
+    // Codepage: the combo of the protocol, the page takes it; the table inserts a character in the text
+    select(composer, "Alphanumeric");
+    select(composer, "  Generic - German");
+    RadioPagingPage german = composer.page();
+    check((german.m_charset == RadioPagingCharset::Key{"generic", "generic", "latin-german"}) && german.check().isEmpty(),
+        "the page has the codepage chosen");
+    PagingCodepageTable *table = composer.findChild<PagingCodepageTable*>();
+    QToolButton *tableButton = nullptr;
+
+    for (QToolButton *button : composer.findChildren<QToolButton*>())
+    {
+        if (button->text() == "Table") {
+            tableButton = button;
+        }
+    }
+
+    check(table && tableButton && tableButton->isVisibleTo(&composer), "alphanumeric: the codepage table button");
+    textEdit(composer)->setText("Gr");
+    textEdit(composer)->setCursorPosition(2);
+    emit table->codeSelected(PagingCodepageTable::codeText(*RadioPagingCharset::find("pocsag", german.m_charset), 0x7d));
+    emit table->codeSelected(PagingCodepageTable::codeText(*RadioPagingCharset::find("pocsag", german.m_charset), 0x03));
+    check(textEdit(composer)->text() == QString::fromUtf8("Gr\xC3\xBC<0x03>"), "the table inserts the glyph, <0xNN> for a code without one");
+    composer.setDefaultCodepage("pocsag", RadioPagingCharset::Key{"generic", "generic", "latin-german"});
+    QComboBox *charsetCombo = comboWith(composer, "  Generic - German");
+    charsetCombo->setCurrentIndex(0);
+    check(composer.page().m_charset.empty(), "Default: no codepage in the page, the one of the channel");
 
     std::printf("%d passed, %d failed\n", passes, failures);
     return failures ? 1 : 0;

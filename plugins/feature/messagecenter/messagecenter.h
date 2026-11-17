@@ -115,6 +115,23 @@ public:
         MsgPageAction(const QString& id, Action action) : Message(), m_id(id), m_action(action) { }
     };
 
+    //! A record of the log decoded again in the GUI (another codepage or type)
+    class MsgRedecoded : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        const MessageRecord& getRecord() const { return m_record; }
+
+        static MsgRedecoded* create(const MessageRecord& record) {
+            return new MsgRedecoded(record);
+        }
+
+    private:
+        MessageRecord m_record;
+
+        MsgRedecoded(const MessageRecord& record) : Message(), m_record(record) { }
+    };
+
     //! To the GUI: the log, the endpoints or the queue changed
     class MsgUpdated : public Message {
         MESSAGE_CLASS_DECLARATION
