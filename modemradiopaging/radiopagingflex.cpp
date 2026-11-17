@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 
@@ -663,6 +664,277 @@ std::string RadioPagingFlex::addressText(uint64_t capcode)
     char digits[24];
     std::snprintf(digits, sizeof(digits), "%010llu", (unsigned long long) capcode);
     return digits;
+}
+
+// STD-43A Appendix A 4: A-D, E-H and I-L are single, any and all phase pagers of the standard rule that subtract
+// 0-3; U-X single phase pagers of phase 0-3, Y any phase and Z all phase pagers without the rule
+int RadioPagingFlex::CapcodeText::phaseType() const
+{
+    if ((m_letter >= 'A') && (m_letter <= 'L')) {
+        return (m_letter - 'A') / 4;
+    }
+
+    return (m_letter >= 'U') && (m_letter <= 'X') ? 0 : (m_letter == 'Y') ? 1 : (m_letter == 'Z') ? 2 : -1;
+}
+
+int RadioPagingFlex::CapcodeText::subtract() const
+{
+    return ((m_letter >= 'A') && (m_letter <= 'L')) ? (m_letter - 'A') % 4 : 0;
+}
+
+int RadioPagingFlex::CapcodeText::phase() const
+{
+    return ((m_letter >= 'U') && (m_letter <= 'X')) ? m_letter - 'U' : -1;
+}
+
+// Appendix A 1: with A-L and no b the pager collapse is 4
+int RadioPagingFlex::CapcodeText::pagerCollapse() const
+{
+    if (m_collapse >= 0) {
+        return m_collapse;
+    }
+
+    return ((m_letter >= 'A') && (m_letter <= 'L')) ? 4 : -1;
+}
+
+// Appendix A 1 forms: digits; [b]A-L digits; [fff b]U-Z digits; each optionally after the 2nd alpha character
+// P, Q, R or S (Extended CAPCODE)
+bool RadioPagingFlex::parseCapcode(const std::string& text, CapcodeText& capcode, std::string& error)
+{
+    std::string s;
+
+    for (char c : text)
+    {
+        if (c != ' ') {
+            s += (char) std::toupper((unsigned char) c);
+        }
+    }
+
+    capcode = CapcodeText();
+    size_t i = 0;
+
+    if (!s.empty() && ((s[0] == 'P') || (s[0] == 'Q') || (s[0] == 'R') || (s[0] == 'S')))
+    {
+        capcode.m_roaming = s[0];
+        i = 1;
+    }
+
+    size_t prefixStart = i;
+    while ((i < s.size()) && std::isdigit((unsigned char) s[i])) {
+        i++;
+    }
+
+    std::string prefix = s.substr(prefixStart, i - prefixStart);
+    std::string digits;
+
+    if (i == s.size())
+    {
+        // Digits only: the address (a 2nd alpha character needs the letter)
+        if (capcode.m_roaming)
+        {
+            error = "The 2nd alpha character P, Q, R or S comes before the letter of the capcode";
+            return false;
+        }
+
+        digits = prefix;
+    }
+    else
+    {
+        char letter = s[i++];
+
+        if (!(((letter >= 'A') && (letter <= 'L')) || ((letter >= 'U') && (letter <= 'Z'))))
+        {
+            error = std::string("Capcode letter ") + letter + " is not A to L or U to Z";
+            return false;
+        }
+
+        capcode.m_letter = letter;
+        digits = s.substr(i);
+
+        for (char c : digits)
+        {
+            if (!std::isdigit((unsigned char) c))
+            {
+                error = "Only digits follow the letter of the capcode";
+                return false;
+            }
+        }
+
+        if (prefix.size() == 1)
+        {
+            capcode.m_collapse = prefix[0] - '0';
+        }
+        else if (prefix.size() == 4)
+        {
+            if (letter < 'U')
+            {
+                error = "The frame fff comes with the letters U to Z only (A to L: the frame is in the address)";
+                return false;
+            }
+
+            capcode.m_frame = std::stoi(prefix.substr(0, 3));
+            capcode.m_collapse = prefix[3] - '0';
+        }
+        else if (!prefix.empty())
+        {
+            error = "Before the letter: the collapse b (1 digit) or the frame and collapse fffb (4 digits)";
+            return false;
+        }
+
+        if (capcode.m_frame > 127)
+        {
+            error = "Frame fff must be 000 to 127";
+            return false;
+        }
+        if (capcode.m_collapse > 7)
+        {
+            error = "Collapse b must be 0 to 7";
+            return false;
+        }
+    }
+
+    if (digits.empty() || (digits.size() > 10))
+    {
+        error = "The address has 1 to 10 digits";
+        return false;
+    }
+
+    capcode.m_digits = (int) digits.size();
+    capcode.m_capcode = std::stoull(digits);
+    return true;
+}
+
+// Table A-1; the operator messaging addresses of Table 3.8.2.4-1, the temporary addresses of 3.8.2.3
+std::string RadioPagingFlex::capcodeType(uint64_t capcode)
+{
+    static const char *operatorMessaging[16] = {
+        "system message for all pagers", "system message for all pagers in the home area", "system message for all roaming pagers",
+        "system message for all SSID pagers", "time related message for all pagers", "reserved", "reserved", "reserved", "reserved",
+        "reserved", "reserved", "reserved", "reserved", "reserved", "SSID change instruction", "system event notification"
+    };
+    struct Range { uint64_t m_last; const char *m_name; };
+    static const Range ranges[] = {
+        {0ULL, "Unused"},
+        {1933312ULL, "Short address"},
+        {1998848ULL, "Illegal"},
+        {2009087ULL, "Reserved for future use"},
+        {2025471ULL, "Information service address"},
+        {2029567ULL, "Network address"},
+        {2029583ULL, "Temporary address"},
+        {2029599ULL, "Operator messaging address"},
+        {2031614ULL, "Reserved for future use"},
+        {2101248ULL, "Unused"},
+        {102101250ULL, "Long address 1-2 (uncoordinated)"},
+        {402101250ULL, "Long address 1-2 (by country)"},
+        {1075843072ULL, "Long address 1-2 (global)"},
+        {2149584896ULL, "Long address 1-3 (global)"},
+        {3223326720ULL, "Long address 1-4 (global)"},
+        {3923326750ULL, "Long address 2-3 (by country)"},
+        {4280000000ULL, "Long address 2-3 (reserved)"},
+        {4285000000ULL, "Information service, long address 2-3 (global)"},
+        {4290000000ULL, "Information service, long address 2-3 (by country)"},
+        {4291000000ULL, "Information service, long address 2-3 (per country for world wide use)"},
+        {4297068542ULL, "Information service, long address 2-3 (reserved)"}
+    };
+
+    for (const Range& range : ranges)
+    {
+        if (capcode > range.m_last) {
+            continue;
+        }
+
+        std::string name = range.m_name;
+
+        if (isTemporaryAddress(capcode)) {
+            name += " " + std::to_string(capcode - m_temporaryBase);
+        } else if ((capcode >= m_temporaryBase + m_temporaryCount) && (capcode <= m_systemEventAddress)) {
+            name += std::string(": ") + operatorMessaging[capcode - m_temporaryBase - m_temporaryCount];
+        } else if ((capcode > 4290000000ULL) && (capcode <= 4291000000ULL)) {
+            name += ", country code " + std::to_string((capcode - 4290000001ULL) / 1000);   // 1000 addresses a country (Note 3)
+        }
+
+        return name;
+    }
+
+    return "Reserved for future use (not defined)";
+}
+
+std::string RadioPagingFlex::capcodeDescription(const std::string& text)
+{
+    static const char *phaseTypes[3] = {"single phase", "any phase", "all phase"};
+    // Appendix A 1: Frame Offset capable and TMF following of the 2nd alpha character
+    static const char *roaming[4] = {
+        "no roaming functions (no Frame Offset, no TMF)", "follows the TMF, no Frame Offset",
+        "follows the Frame Offset of BIW 101, no TMF", "follows the Frame Offset of BIW 101 and the TMF"
+    };
+    CapcodeText c;
+    std::string error;
+
+    if (!parseCapcode(text, c, error)) {
+        return error;
+    }
+
+    std::string description = capcodeType(c.m_capcode) + " " + std::to_string(c.m_capcode);
+    const bool sendable = isValidAddress(c.m_capcode) || isTemporaryAddress(c.m_capcode) || (c.m_capcode == m_systemEventAddress);
+
+    if (!sendable) {
+        description += ", not sent by the encoder";
+    }
+    if (c.m_letter)
+    {
+        description += std::string(". ") + c.m_letter + ": " + phaseTypes[c.phaseType()] + " pager";
+
+        if (c.phase() >= 0) {
+            description += std::string(", phase ") + (char) ('A' + c.phase());
+        }
+        if (c.subtract() > 0) {
+            description += ", address " + std::to_string(c.subtract() + 1) + " of the pager (subtract " + std::to_string(c.subtract()) + ")";
+        }
+        if (c.m_letter >= 'U') {
+            description += ", no standard rule";
+        }
+    }
+    if (c.m_roaming) {
+        description += std::string(". ") + c.m_roaming + ": " + roaming[c.m_roaming - 'P'];
+    }
+    if (c.m_frame >= 0)
+    {
+        char frame[8];
+        std::snprintf(frame, sizeof(frame), "%03d", c.m_frame);
+        description += std::string(". Frame ") + frame + " of the pager";
+    }
+    if (c.pagerCollapse() >= 0)
+    {
+        int m = c.pagerCollapse();
+        char seconds[16];
+        std::snprintf(seconds, sizeof(seconds), "%g", (1 << m) * 1.875);
+        description += ". Pager collapse " + std::to_string(m) + ((c.m_collapse < 0) ? " (no b)" : "") + ": every "
+            + std::to_string(1 << m) + " frames (" + seconds + " s); the smaller of it and the system collapse applies, "
+            "the system collapse with multiple transmission (STD-43A 3.1.2)";
+    }
+
+    // The standard rule on the address less the subtraction; the encoder applies it on the address
+    uint64_t ruled = c.m_capcode - std::min<uint64_t>(c.m_capcode, (uint64_t) c.subtract());
+    char rule[64];
+    std::snprintf(rule, sizeof(rule), "frame %03u, phase %c", (unsigned) ((ruled / 16) % 128), (char) ('A' + (ruled / 4) % 4));
+    char sent[64];
+    std::snprintf(sent, sizeof(sent), "frame %03u, phase %c", (unsigned) ((c.m_capcode / 16) % 128), (char) ('A' + (c.m_capcode / 4) % 4));
+
+    if ((c.m_letter >= 'A') && (c.m_letter <= 'L')) {
+        description += std::string(".\nStandard rule: ") + rule;
+    }
+    if (sendable)
+    {
+        description += std::string(".\nSent: the address only, in ") + sent + " of 4 (standard rule on the address)";
+
+        if ((c.m_frame >= 0) && ((unsigned) c.m_frame != (unsigned) ((c.m_capcode / 16) % 128))) {
+            description += ", not in the frame of the pager";
+        } else if (std::string(rule) != std::string(sent) && (c.m_letter >= 'A') && (c.m_letter <= 'L')) {
+            description += ", not in the frame and phase of the standard rule";
+        }
+    }
+
+    return description + ".";
 }
 
 bool RadioPagingFlex::isShortAddress(uint64_t capcode)

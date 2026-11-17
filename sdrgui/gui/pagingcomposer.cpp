@@ -30,9 +30,12 @@
 #include <QStandardItemModel>
 #include <QToolButton>
 
+#include <algorithm>
 #include "radiopagingcharset.h"
+#include "radiopagingflex.h"
 #include "radiopagingflexscheduler.h"
 #include "radiopaginggsc.h"
+#include "radiopagingpocsag.h"
 #include "radiopagingtxstream.h"
 #include "pagingcodepagetable.h"
 #include "pagingcomposer.h"
@@ -72,21 +75,21 @@ PagingComposer::PagingComposer(QWidget *parent) :
 
     m_addressLabel = new QLabel(tr("Address"), this);
     m_address = new QLineEdit(this);
-    m_address->setValidator(new QRegularExpressionValidator(QRegularExpression("[0-9]{0,10}"), m_address));
+    m_digitsValidator = new QRegularExpressionValidator(QRegularExpression("[0-9]{0,10}"), m_address);
+    m_flexValidator = new QRegularExpressionValidator(QRegularExpression("[PQRSpqrs]?[0-9]{0,4}[A-La-lU-Zu-z]?[0-9]{0,10}"), m_address);
+    m_address->setValidator(m_digitsValidator);
     m_function = new QComboBox(this);
     m_capCode = new QLabel(this);
     m_capCode->setWordWrap(true);
-    m_capCode->setToolTip(tr("GSC cap code: index I, group G1 G0, address A2 A1 A0 and the suffix F. The preamble is (I + G0) mod 10, "
-        "word 1 comes from G1 G0, word 2 from A2 A1 A0. The suffix gives the function: 1-4 and 5-8 are A-D, 9 and 0 are A and B. "
-        "Without a suffix the function is the one selected"));
     m_priority = new QCheckBox(tr("Priority"), this);
     m_priority->setToolTip(tr("FLEX priority address"));
     m_groupLabel = new QLabel(tr("Group"), this);
     m_group = new QLineEdit(this);
     m_group->setPlaceholderText(tr("capcodes separated by commas"));
-    m_group->setToolTip(tr("FLEX group message (STD-43A 5.2): the capcodes of 2 to 5461 pagers, separated by commas. The address above is "
-        "not used. Each pager gets a short instruction with a temporary address and a frame, then the message goes to that address in "
-        "that frame. Numeric, alphanumeric, tone and short messages; no copies"));
+    m_group->setToolTip(tr("FLEX group message (STD-43A 5.2): the capcodes of 2 to 5461 pagers, separated by commas\n"
+        "(digits or the forms with letters of the capcode field; only the address is used).\n"
+        "The capcode above is not used. Each pager gets a short instruction with a temporary address and a frame,\n"
+        "then the message goes to that address in that frame. Numeric, alphanumeric, tone and short messages; no copies"));
 
     m_type = new QComboBox(this);
     m_polarity = new QComboBox(this);
@@ -106,8 +109,8 @@ PagingComposer::PagingComposer(QWidget *parent) :
     m_text = new QLineEdit(this);
     m_charset = new QComboBox(this);
     m_charset->setMaximumWidth(160);
-    m_charset->setToolTip(tr("Codepage of the text: the pager shows the glyphs of the codes. Default is the codepage set for the "
-        "channel. A character without a code in it is refused; <0xNN> sends the code NN"));
+    m_charset->setToolTip(tr("Codepage of the text: the pager shows the glyphs of the codes. Default is the codepage set for the channel.\n"
+        "A character without a code in it is refused; <0xNN> sends the code NN"));
     m_codepageTable = new QToolButton(this);
     m_codepageTable->setText(tr("Table"));
     m_codepageTable->setToolTip(tr("The table of the codepage of the text: click a character to insert it"));
@@ -120,8 +123,8 @@ PagingComposer::PagingComposer(QWidget *parent) :
 
     m_voiceSource = new QComboBox(this);
     m_voiceSource->addItems({tr("File"), tr("Microphone")});
-    m_voiceSource->setToolTip(tr("Voice of the page: a sound file, or the microphone. The microphone is taken 2 s after the page "
-        "(the alert time) until End or the voice length"));
+    m_voiceSource->setToolTip(tr("Voice of the page: a sound file, or the microphone.\n"
+        "The microphone is taken 2 s after the page (the alert time) until End or the voice length"));
     m_micInput = new QToolButton(this);
     m_micInput->setText(tr("Audio input..."));
     m_micInput->setToolTip(tr("Select the audio input of the microphone"));
@@ -129,8 +132,8 @@ PagingComposer::PagingComposer(QWidget *parent) :
     m_shortLabel = new QLabel(tr("Short"), this);
     m_shortType = new QComboBox(this);
     m_shortType->addItems({tr("Numeric"), tr("Source"), tr("Numbered")});
-    m_shortType->setToolTip(tr("FLEX short message (STD-43A Table 3.9.2-1): digits of the vector, a source code, or a source code and a "
-        "message number"));
+    m_shortType->setToolTip(tr("FLEX short message (STD-43A Table 3.9.2-1):\n"
+        "digits of the vector, a source code, or a source code and a message number"));
     m_source = new QSpinBox(this);
     m_source->setRange(0, 7);
     m_source->setPrefix(tr("source "));
@@ -140,8 +143,8 @@ PagingComposer::PagingComposer(QWidget *parent) :
     m_blocking = new QSpinBox(this);
     m_blocking->setRange(1, 16);
     m_blocking->setPrefix("B ");
-    m_blocking->setToolTip(tr("FLEX binary: blocking length B, bits of a character (1 is the default of the standard); the bits of the "
-        "text (4 a hex digit) are a multiple of it"));
+    m_blocking->setToolTip(tr("FLEX binary: blocking length B, bits of a character (1 is the default of the standard);\n"
+        "the bits of the text (4 a hex digit) are a multiple of it"));
     m_mailDrop = new QCheckBox("M", this);
     m_mailDrop->setToolTip(tr("FLEX binary: mail drop flag M, the message can be handled separately from ordinary messages"));
     m_rightToLeft = new QCheckBox("D", this);
@@ -149,18 +152,19 @@ PagingComposer::PagingComposer(QWidget *parent) :
     m_headerMessage = new QCheckBox("H", this);
     m_headerMessage->setToolTip(tr("FLEX binary: header message flag H, a transparent message of the same number follows"));
     m_statusInfo = new QCheckBox("I", this);
-    m_statusInfo->setToolTip(tr("FLEX binary: status information field enabler I, the first 8 data bits name the encoding method "
-        "(reserved)"));
+    m_statusInfo->setToolTip(tr("FLEX binary: status information field enabler I,\n"
+        "the first 8 data bits name the encoding method (reserved)"));
     m_secureType = new QComboBox(this);
     m_secureType->addItems({tr("Alphanumeric"), tr("Separate"), tr("Binary")});
-    m_secureType->setToolTip(tr("FLEX secure message type t1 t0: 00 alphanumeric (7-bit characters), 01 data defined separately "
-        "(hex digits, not terminated), 10 binary (hex digits)"));
+    m_secureType->setToolTip(tr("FLEX secure message type t1 t0: 00 alphanumeric (7-bit characters),\n"
+        "01 data defined separately (hex digits, not terminated), 10 binary (hex digits)"));
 
     m_scheduleLabel = new QLabel(tr("Copies"), this);
     m_retransmit = new QSpinBox(this);
     m_retransmit->setRange(0, RadioPagingFlexEncoder::m_maxRetransmit);
-    m_retransmit->setToolTip(tr("Network mode: copies sent after the message. POCSAG 0 to 10; FLEX 0 to 15, numbered types "
-        "(alphanumeric, binary, numbered short message) with message numbering, sent with the same number and R = 0"));
+    m_retransmit->setToolTip(tr("Network mode: copies sent after the message. POCSAG 0 to 10;\n"
+        "FLEX 0 to 15, numbered types (alphanumeric, binary, numbered short message) with message numbering,\n"
+        "sent with the same number and R = 0"));
     m_retransmitInterval = new QDoubleSpinBox(this);
     m_retransmitInterval->setDecimals(1);
     m_retransmitInterval->setRange(-1.0, RadioPagingPage::m_maxScheduleSeconds);
@@ -168,16 +172,16 @@ PagingComposer::PagingComposer(QWidget *parent) :
     m_retransmitInterval->setSpecialValueText(tr("Default"));
     m_retransmitInterval->setPrefix(tr("every "));
     m_retransmitInterval->setSuffix(" s");
-    m_retransmitInterval->setToolTip(tr("Seconds between the copies. Default: 10 s for POCSAG, 128 frames (240 s) for FLEX. FLEX is "
-        "rounded up to whole frames of 1.875 s"));
+    m_retransmitInterval->setToolTip(tr("Seconds between the copies. Default: 10 s for POCSAG, 128 frames (240 s) for FLEX.\n"
+        "FLEX is rounded up to whole frames of 1.875 s"));
     m_sendDelay = new QDoubleSpinBox(this);
     m_sendDelay->setDecimals(1);
     m_sendDelay->setRange(0.0, RadioPagingPage::m_maxScheduleSeconds);
     m_sendDelay->setSpecialValueText(tr("No delay"));
     m_sendDelay->setPrefix(tr("delay "));
     m_sendDelay->setSuffix(" s");
-    m_sendDelay->setToolTip(tr("Network mode: seconds from the queueing to the first transmission. FLEX is rounded up to whole frames "
-        "of 1.875 s"));
+    m_sendDelay->setToolTip(tr("Network mode: seconds from the queueing to the first transmission.\n"
+        "FLEX is rounded up to whole frames of 1.875 s"));
 
     QHBoxLayout *shortRow = new QHBoxLayout();
     shortRow->addWidget(m_shortType);
@@ -253,6 +257,7 @@ PagingComposer::PagingComposer(QWidget *parent) :
     connect(m_type, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() { display(); emit selectionChanged(); });
     connect(m_voiceSource, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() { display(); emit selectionChanged(); });
     connect(m_shortType, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &PagingComposer::display);
+    connect(m_function, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &PagingComposer::display);
     connect(m_secureType, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &PagingComposer::display);
     connect(m_charset, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &PagingComposer::display);
     connect(m_codepageTable, &QToolButton::clicked, this, [this]() {
@@ -508,17 +513,53 @@ void PagingComposer::display()
     const bool hexText = binary || (secure && (m_secureType->currentIndex() != 0));
 
     m_addressLabel->setText(flex ? tr("Capcode") : tr("Address"));
-    m_address->setPlaceholderText(pocsag ? tr("0 to 2097151") : flex ? tr("capcode") : tr("5 to 7 digits"));
-    m_address->setToolTip(gsc ? tr("GSC cap code: 6 digits (index, group, 3 address digits), 5 digits (index 0) or 7 digits "
-        "(the 6 digits and the suffix, that gives the function)")
-        : flex ? tr("FLEX capcode: short 1 to 1933312, long 2101249 to 4297068542") : tr("POCSAG address 0 to 2097151"));
+    m_address->setPlaceholderText(pocsag ? tr("0 to 2097151") : flex ? tr("capcode, e.g. 1234567 or 3E005237593") : tr("5 to 7 digits"));
+    m_address->setToolTip(gsc ? tr("GSC cap code: 6 digits (index, group, 3 address digits),\n"
+            "5 digits (index 0) or 7 digits (the 6 digits and the suffix, that gives the function)")
+        : flex ? tr("FLEX capcode (STD-43A Appendix A): the address, or a form with letters that also tells\n"
+            "how the pager is set up: [P|Q|R|S][fff][b]<letter><address>.\n"
+            "Only the address is sent; the line below tells what the rest means.\n"
+            "Address: short 1 to 1933312, long 2101249 to 4297068542 (Table A-1).\n"
+            "Letter: A-D single phase, E-H any phase, I-L all phase pager of the standard rule, the 1st to 4th\n"
+            "address of the pager (subtract 0-3 before the rule); U-X single phase pager of phase A-D,\n"
+            "Y any phase, Z all phase pager without the rule.\n"
+            "b: pager collapse 0-7 (A-L without b: 4). fff: frame 000-127 of the pager (with U-Z).\n"
+            "P, Q, R, S: roaming capability (Frame Offset, TMF).\n"
+            "Example: 3E005237593 is collapse 3, any phase pager, long address 5237593")
+        : tr("POCSAG address 0 to 2097151 (the 21-bit identity, ITU-R M.584-2 2.4)"));
+    m_address->setValidator(flex ? m_flexValidator : m_digitsValidator);
     m_function->setVisible(!flex);
 
-    // GSC: the digits of the cap code; a suffix digit sets the function
+    // What the address is: GSC the digits of the cap code (a suffix digit sets the function), FLEX the capcode
+    // form, POCSAG the frame and function
     const QString capCode = m_address->text().trimmed();
     const bool suffix = gsc && (capCode.size() == 7);
-    m_capCode->setVisible(gsc && !capCode.isEmpty());
-    m_capCode->setText(gsc ? QString::fromStdString(RadioPagingGsc::capCodeText(capCode.toStdString())) : QString());
+    m_capCode->setVisible(!capCode.isEmpty());
+
+    if (gsc)
+    {
+        m_capCode->setText(QString::fromStdString(RadioPagingGsc::capCodeText(capCode.toStdString())));
+        m_capCode->setToolTip(tr("GSC cap code: index I, group G1 G0, address A2 A1 A0 and the suffix F.\n"
+            "The preamble is (I + G0) mod 10, word 1 comes from G1 G0, word 2 from A2 A1 A0.\n"
+            "The suffix gives the function: 1-4 and 5-8 are A-D, 9 and 0 are A and B.\n"
+            "Without a suffix the function is the one selected"));
+    }
+    else if (flex)
+    {
+        m_capCode->setText(QString::fromStdString(RadioPagingFlex::capcodeDescription(capCode.toStdString())));
+        m_capCode->setToolTip(tr("FLEX capcode: the address type (STD-43A Table A-1) and what the letters tell.\n"
+            "The pager frame is set in the pager (ID-ROM); the letters A-L say it follows the standard rule:\n"
+            "phase = (address / 4) mod 4, frame = (address / 16) mod 128 (Appendix A 3).\n"
+            "The encoder sends the address in the frame and phase of the standard rule on the address"));
+    }
+    else
+    {
+        m_capCode->setText(QString::fromStdString(RadioPagingPocsag::addressDescription(
+            (uint32_t) std::min<qulonglong>(capCode.toULongLong(), 0xffffffffULL), m_function->currentIndex())));
+        m_capCode->setToolTip(tr("POCSAG (ITU-R M.584-2): a batch is the sync codeword and 8 frames of 2 codewords.\n"
+            "A pager examines the frame of the 3 LSBs of its identity only (1.2).\n"
+            "One identity is 4 addresses, the functions A-D of bits 20-21 (1.3.2)"));
+    }
     m_function->setEnabled(!suffix);
 
     if (suffix && (m_function->count() == 4)) {
@@ -584,13 +625,13 @@ void PagingComposer::display()
 
     m_text->setPlaceholderText(voice ? tr("WAV file") : hexText ? tr("Hex digits") : shortMessage ? tr("Digits") : QString());
     m_text->setToolTip(voice
-        ? tr("Path of a WAV file (8 to 32 bit PCM or float, up to 76.8 kHz). Sent after an alert of 2 s, cut at the voice length. "
-             "Enter to send")
+        ? tr("Path of a WAV file (8 to 32 bit PCM or float, up to 76.8 kHz).\n"
+             "Sent after an alert of 2 s, cut at the voice length. Enter to send")
         : hexText
-        ? tr("Hex digits: digit i holds the data bits 4i to 4i+3, its least significant bit sent first. Binary: the bits are a "
-             "multiple of B. Enter to send")
-        : tr("Message text. Numeric: 0-9, space, U, -, ], [. Alphanumeric: the characters of the codepage, <0xNN> for any code. "
-             "Enter to send"));
+        ? tr("Hex digits: digit i holds the data bits 4i to 4i+3, its least significant bit sent first.\n"
+             "Binary: the bits are a multiple of B. Enter to send")
+        : tr("Message text. Numeric: 0-9, space, U, -, ], [.\n"
+             "Alphanumeric: the characters of the codepage, <0xNN> for any code. Enter to send"));
 
     if (!m_sendText.isEmpty()) {
         m_send->setText(m_sendText);

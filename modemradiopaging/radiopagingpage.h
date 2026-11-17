@@ -76,8 +76,11 @@ struct MODEMRADIOPAGING_API RadioPagingPage
 
     //!< Empty if the page can be queued, else why not
     QString check() const;
-    //!< The capcodes of m_groupMembers
+    //!< The capcodes of m_groupMembers (digits or the capcode forms of STD-43A Appendix A: their addresses)
     QList<qulonglong> groupMembers(bool *ok = nullptr) const;
+    //!< FLEX: the address of the capcode in m_address, digits or a capcode form of STD-43A Appendix A (only the
+    //!< address is sent). False and why if it is not one
+    bool flexCapcode(qulonglong& capcode, QString *error = nullptr) const;
     //!< GSC: the 6 digit address of the cap code in m_address and the function 0-3, of its suffix digit for 7
     //!< digits, else m_function. False if the cap code is not one
     bool gscAddress(QString& address, int& function) const;

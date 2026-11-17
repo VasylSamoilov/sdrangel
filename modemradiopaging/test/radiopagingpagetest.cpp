@@ -23,7 +23,8 @@
 #include "SWGRadioPagingModTx.h"
 
 #include "radiopagingpage.h"
-
+#include "radiopagingflex.h"
+#include "radiopagingpocsag.h"
 namespace {
 
 int passes = 0;
@@ -260,12 +261,66 @@ void testLimits()
     check(p.check().isEmpty() && !p.toRecord().m_protocolData.contains("charset"), "no codepage: the one of the transmitter, no key");
 }
 
+// FLEX capcodes as written (STD-43A Appendix A): only the address is used
+void testCapcodes()
+{
+    RadioPagingFlex::CapcodeText c;
+    std::string error;
+
+    check(RadioPagingFlex::parseCapcode("3E005237593", c, error) && (c.m_capcode == 5237593) && (c.m_letter == 'E')
+        && (c.pagerCollapse() == 3) && (c.phaseType() == 1) && (c.subtract() == 0) && (c.m_frame == -1) && (c.m_digits == 9),
+        "3E005237593: collapse 3, any phase, long address 5237593");
+    check(RadioPagingFlex::parseCapcode("R0073U0123456", c, error) && (c.m_roaming == 'R') && (c.m_frame == 7)
+        && (c.pagerCollapse() == 3) && (c.phase() == 0) && (c.m_capcode == 123456), "RfffbU: roaming R, frame 007, collapse 3, phase A");
+    check(RadioPagingFlex::parseCapcode("c1234567", c, error) && (c.m_letter == 'C') && (c.subtract() == 2) && (c.pagerCollapse() == 4)
+        && (c.phaseType() == 0), "C: single phase, subtract 2, collapse 4 without b (lower case accepted)");
+    check(RadioPagingFlex::parseCapcode("1234567", c, error) && !c.m_letter && (c.pagerCollapse() == -1), "digits only: the address");
+    check(!RadioPagingFlex::parseCapcode("0073A1234567", c, error), "fff with A-L is refused (the frame is in the address)");
+    check(!RadioPagingFlex::parseCapcode("8A1234567", c, error), "collapse 8 is refused");
+    check(!RadioPagingFlex::parseCapcode("1283U1234567", c, error), "frame 128 is refused");
+    check(!RadioPagingFlex::parseCapcode("M1234567", c, error), "letter M is refused");
+    check(!RadioPagingFlex::parseCapcode("R1234567", c, error), "a 2nd alpha character needs the letter");
+    check(!RadioPagingFlex::parseCapcode("12345678901", c, error), "11 digits are refused");
+
+    check(RadioPagingFlex::capcodeType(1020927) == "Short address", "Table A-1: short address");
+    check(RadioPagingFlex::capcodeType(2029573) == "Temporary address 5", "Table A-1: temporary address 5");
+    check(RadioPagingFlex::capcodeType(2029599) == "Operator messaging address: system event notification",
+        "Table 3.8.2.4-1: system event notification");
+    check(RadioPagingFlex::capcodeType(2025472) == "Network address", "Table A-1: network address");
+    check(RadioPagingFlex::capcodeType(4290440001ULL) == "Information service, long address 2-3 (per country for world wide use), country code 440",
+        "Table A-1 Note 3: country code 440");
+    check(RadioPagingFlex::capcodeType(4297068543ULL) == "Reserved for future use (not defined)", "Table A-1: above the last address");
+
+    std::string d = RadioPagingFlex::capcodeDescription("3E005237593");
+    check((d.find("Long address 1-2") != std::string::npos) && (d.find("frame 053, phase C") != std::string::npos),
+        "description: long address 1-2, sent in frame 053 phase C");
+    d = RadioPagingFlex::capcodeDescription("2025472");
+    check(d.find("not sent by the encoder") != std::string::npos, "description: a network address is not sent");
+    d = RadioPagingFlex::capcodeDescription("B1020928");
+    check((d.find("Standard rule: frame 063, phase D") != std::string::npos)
+        && (d.find("not in the frame and phase of the standard rule") != std::string::npos),
+        "description: B1020928 has the rule of 1020927 (frame 063, phase D), the encoder sends in frame 064");
+
+    RadioPagingPage p = page("flex", "alphanumeric", "3E005237593");
+    qulonglong capcode = 0;
+    check(p.check().isEmpty() && p.flexCapcode(capcode) && (capcode == 5237593)
+        && (p.toRecord().m_protocolData.value("capcode").toULongLong() == 5237593), "a FLEX page sends the address of the capcode form");
+    p.m_address = "9E1234567";
+    check(!p.check().isEmpty(), "a FLEX page refuses a capcode form that is not one");
+    p = page("flex", "alphanumeric", "1");
+    p.m_groupMembers = "3E005237593, A1020927";
+    check(p.check().isEmpty() && (p.groupMembers() == QList<qulonglong>({5237593, 1020927})), "group members in the capcode forms");
+
+    check(RadioPagingPocsag::addressDescription(1234567, 2).find("Frame 7 (address mod 8)") == 0, "POCSAG: frame of the 3 LSBs");
+}
+
 } // namespace
 
 int main()
 {
     testRoundTrips();
     testLimits();
+    testCapcodes();
     std::printf("%d passed, %d failed\n", passes, failures);
     return failures ? 1 : 0;
 }

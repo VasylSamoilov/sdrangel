@@ -297,7 +297,9 @@ RadioPagingMod::TxRequest RadioPagingMod::requestFromPage(const RadioPagingPage&
     else if (page.m_protocol == "flex")
     {
         request.m_protocol = (int) RadioPagingModSettings::Flex;
-        request.m_flex.m_capcode = (uint64_t) page.m_address.toULongLong();
+        qulonglong capcode = 0;
+        page.flexCapcode(capcode);
+        request.m_flex.m_capcode = (uint64_t) capcode;
         request.m_flex.m_type = tone ? RadioPagingFlex::Tone : (type == "short_message") ? RadioPagingFlex::ShortMessage
             : (type == "binary") ? RadioPagingFlex::Binary : (type == "secure") ? RadioPagingFlex::Secure
             : (type == "numeric") || (type == "special_numeric") || (type == "numbered_numeric") || (type == "numbered_special_numeric")

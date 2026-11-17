@@ -117,7 +117,9 @@ public:
     //!< Address of the message records: 7 digits and the function letter A-D (address 1234567 function 2:
     //!< "1234567C"), the same in RX, TX and the message center
     static std::string addressText(uint32_t address, int function);
-
+    //!< What an address tells (ITU-R M.584-2): the frame of the batch its address codeword goes in (the 3 LSBs,
+    //!< 1.2), the function (one identity is 4 addresses, 1.3.2) and the rule for the other addresses of the pager
+    static std::string addressDescription(uint32_t address, int function);
     static const char m_numericChars[17];   //!< Index = 4-bit value
 };
 

@@ -383,6 +383,20 @@ std::string RadioPagingPocsag::addressText(uint32_t address, int function)
     return text;
 }
 
+std::string RadioPagingPocsag::addressDescription(uint32_t address, int function)
+{
+    if (address > m_maxAddress) {
+        return "POCSAG address must be 0 to 2097151";
+    }
+
+    char text[320];
+    std::snprintf(text, sizeof(text), "Frame %u (address mod 8): the address codeword goes in frame %u of the batch, "
+        "function %c (bits 20-21). The pager examines its frame only: its other addresses are the functions A-D of "
+        "this identity, or other identities with the same address mod 8.",
+        (unsigned) (address & 7), (unsigned) (address & 7), 'A' + (function & 3));
+    return text;
+}
+
 std::string RadioPagingPocsag::escapeControl(const std::string& text)
 {
     std::string out;

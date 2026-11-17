@@ -37,6 +37,7 @@ class QLineEdit;
 class QPushButton;
 class QSpinBox;
 class QToolButton;
+class QValidator;
 
 // The fields of a message to page (POCSAG, FLEX or GSC), as the paging modulator and the message center
 // send it. The user of the composer says what can be composed (setProtocols, setNetworkMode,
@@ -94,7 +95,9 @@ private:
     QLabel *m_protocolLabel;
     QLabel *m_addressLabel;
     QLineEdit *m_address;
-    QLabel *m_capCode;                  //!< GSC: what the digits of the cap code are
+    QLabel *m_capCode;                  //!< What the address is: GSC cap code, FLEX capcode, POCSAG frame and function
+    QValidator *m_digitsValidator;      //!< POCSAG and GSC: digits
+    QValidator *m_flexValidator;        //!< FLEX: digits or the capcode forms with letters (STD-43A Appendix A)
     QLabel *m_groupLabel;
     QLineEdit *m_group;
     QComboBox *m_function;

@@ -263,6 +263,33 @@ public:
     static bool isShortAddress(uint64_t capcode);
     static bool isLongAddress(uint64_t capcode);
     static bool isValidAddress(uint64_t capcode);
+
+    //!< A capcode as written (STD-43A Appendix A): the digits of the address, or the CAPCODE forms with letters
+    //!< [P|Q|R|S][fff][b]<letter><digits>. Only the address is sent, the rest tells how the pager is set up
+    struct CapcodeText
+    {
+        uint64_t m_capcode = 0;     //!< The address
+        int m_digits = 0;           //!< Digits of the address field
+        char m_letter = 0;          //!< A-L (standard rule), U-Z (no rule), 0 none
+        char m_roaming = 0;         //!< 2nd alpha character P, Q, R or S, 0 none
+        int m_frame = -1;           //!< fff: frame 0-127 of the pager, -1 none
+        int m_collapse = -1;        //!< b: pager collapse 0-7, -1 none
+        //!< Single (0), any (1) or all (2) phase pager, -1 not told (no letter)
+        int phaseType() const;
+        //!< A-L: subtracted from the address before the standard rule (the 1st to 4th address of a pager)
+        int subtract() const;
+        //!< U-X: phase 0-3 of the pager, else -1
+        int phase() const;
+        //!< The pager collapse: b, or 4 for A-L without b, -1 not told
+        int pagerCollapse() const;
+    };
+    //!< False and the reason if the text is not a capcode form (the address range is not checked)
+    static bool parseCapcode(const std::string& text, CapcodeText& capcode, std::string& error);
+    //!< The address type of a capcode (Table A-1, operator messaging addresses Table 3.8.2.4-1)
+    static std::string capcodeType(uint64_t capcode);
+    //!< What a capcode as written tells: address type, pager phase, frame and collapse, and the frame and phase
+    //!< of the standard rule (Appendix A 3): phase = (address / 4) mod 4, frame = (address / 16) mod 128
+    static std::string capcodeDescription(const std::string& text);
     //!< Temporary addresses and the System Event Notification address, as capcodes (the address word less 0x8000, as
     //!< the short addresses): a message to one of them is the group message of a short instruction or the
     //!< notification (STD-43A 3.8.2.3, 3.8.2.4)

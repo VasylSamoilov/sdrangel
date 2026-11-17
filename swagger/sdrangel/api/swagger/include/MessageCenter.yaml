@@ -85,7 +85,7 @@ MessageCenterPost:
       description: "pocsag, flex or gsc"
       type: string
     address:
-      description: "POCSAG: the address. FLEX: the capcode. GSC: the cap code, up to 6 digits zero padded (index, group, 3 address digits; 5 digits: index 0) or 7 digits with the suffix digit, that gives the function (1-4 and 5-8: A-D, 9 and 0: A and B) over function"
+      description: "POCSAG: the address. FLEX: the capcode, digits or a form with letters of STD-43A Appendix A ([P|Q|R|S][fff][b]<letter><address>, e.g. 3E005237593); only the address is sent. GSC: the cap code, up to 6 digits zero padded (index, group, 3 address digits; 5 digits: index 0) or 7 digits with the suffix digit, that gives the function (1-4 and 5-8: A-D, 9 and 0: A and B) over function"
       type: string
     function:
       description: "POCSAG function 0 to 3 (A to D). GSC function 0 to 3 (A to D), the address number 1 to 4"
@@ -121,7 +121,7 @@ MessageCenterPost:
       description: "FLEX secure type t1 t0 (STD-43A 3.10.1.4): 0 alphanumeric, 1 data defined separately (hex digits), 2 binary (hex digits)"
       type: integer
     groupMembers:
-      description: "FLEX group message (STD-43A 5.2): the capcodes of the pagers, 2 to 5461, separated by commas. The address is not used. The transmitter sends a short instruction to each pager, then the message to a temporary address"
+      description: "FLEX group message (STD-43A 5.2): the capcodes of the pagers, 2 to 5461, separated by commas (digits or the forms with letters of STD-43A Appendix A, only the address is used). The address is not used. The transmitter sends a short instruction to each pager, then the message to a temporary address"
       type: string
     retransmit:
       description: "Transmitter in network mode: copies sent after the message (POCSAG 0 to 10; FLEX 0 to 15, numbered types with message numbering, same number and R = 0). The page is sent with its first transmission"

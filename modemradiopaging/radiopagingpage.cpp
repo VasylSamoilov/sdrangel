@@ -61,11 +61,12 @@ QList<qulonglong> RadioPagingPage::groupMembers(bool *ok) const
 
     for (const QString& token : m_groupMembers.split(QRegularExpression("[,;\\s]+"), Qt::SkipEmptyParts))
     {
-        bool parsed = false;
-        qulonglong capcode = token.toULongLong(&parsed);
+        RadioPagingFlex::CapcodeText capcode;
+        std::string error;
+        bool parsed = RadioPagingFlex::parseCapcode(token.toStdString(), capcode, error);
 
         all = all && parsed;
-        members.append(capcode);
+        members.append(capcode.m_capcode);
     }
 
     if (ok) {
@@ -73,6 +74,21 @@ QList<qulonglong> RadioPagingPage::groupMembers(bool *ok) const
     }
 
     return members;
+}
+
+bool RadioPagingPage::flexCapcode(qulonglong& capcode, QString *error) const
+{
+    RadioPagingFlex::CapcodeText text;
+    std::string reason;
+    bool ok = RadioPagingFlex::parseCapcode(m_address.toStdString(), text, reason);
+
+    capcode = ok ? text.m_capcode : 0;
+
+    if (!ok && error) {
+        *error = QString::fromStdString(reason);
+    }
+
+    return ok;
 }
 
 QString RadioPagingPage::check() const
@@ -93,7 +109,7 @@ QString RadioPagingPage::check() const
         QList<qulonglong> members = groupMembers(&ok);
 
         if (!ok || (members.size() < 2) || (members.size() > RadioPagingFlexEncoder::m_maxGroupMembers)) {
-            return QString("A group has 2 to %1 pagers: capcodes of digits separated by commas").arg(RadioPagingFlexEncoder::m_maxGroupMembers);
+            return QString("A group has 2 to %1 pagers: capcodes separated by commas").arg(RadioPagingFlexEncoder::m_maxGroupMembers);
         }
         for (qulonglong capcode : members)
         {
@@ -103,6 +119,21 @@ QString RadioPagingPage::check() const
         }
         if ((type != "alphanumeric") && (type != "numeric") && (type != "tone") && (type != "short_message")) {
             return "A group message is alphanumeric, numeric, tone or a short message";
+        }
+
+        digits = true;
+    }
+    else if (m_protocol == "flex")
+    {
+        // FLEX: digits or a capcode form with letters
+        qulonglong capcode;
+        QString error;
+
+        if (!flexCapcode(capcode, &error)) {
+            return QString("FLEX capcode: %1").arg(error);
+        }
+        if (capcode == 0) {
+            return "FLEX capcode must be 1 to 1933312 or 2101249 to 4297068542";
         }
 
         digits = true;
@@ -118,9 +149,6 @@ QString RadioPagingPage::check() const
     }
     if ((m_protocol == "pocsag") && (m_address.toULongLong() > RadioPagingPocsag::m_maxAddress)) {
         return "POCSAG address must be 0 to 2097151";
-    }
-    if ((m_protocol == "flex") && !group && (m_address.toULongLong() == 0)) {
-        return "FLEX capcode must be 1 to 1933312 or 2101249 to 4297068542";
     }
     if (m_protocol == "gsc")
     {
@@ -215,7 +243,8 @@ MessageRecord RadioPagingPage::toRecord() const
     }
     else
     {
-        qulonglong capcode = m_address.toULongLong();
+        qulonglong capcode = 0;
+        flexCapcode(capcode);
         const QList<qulonglong> members = groupMembers();
 
         if (!m_groupMembers.trimmed().isEmpty())
@@ -363,7 +392,9 @@ void RadioPagingPage::toTx(SWGSDRangel::SWGRadioPagingModTx& tx) const
     }
     else if (m_protocol == "flex")
     {
-        tx.setCapcode(m_address.toLongLong());
+        qulonglong capcode = 0;
+        flexCapcode(capcode);
+        tx.setCapcode((qint64) capcode);
         tx.setPriority(m_priority ? 1 : 0);
         tx.setGroupMembers(new QString(m_groupMembers));
 
