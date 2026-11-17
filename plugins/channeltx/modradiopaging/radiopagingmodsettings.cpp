@@ -23,6 +23,7 @@
 #include "util/simpleserializer.h"
 #include "settings/serializable.h"
 #include "audio/audiodevicemanager.h"
+#include "radiopagingcharset.h"
 #include "radiopagingflex.h"
 #include "radiopaginggsc.h"
 #include "radiopagingvoicestore.h"
@@ -38,6 +39,45 @@ QString RadioPagingModSettings::effectiveChannelAlias(qint64 frequency) const
     QString alias = m_channelAlias.trimmed();
     return alias.isEmpty() ? QString::number(frequency) : alias;
 }
+
+const RadioPagingCharset::Key& RadioPagingModSettings::charset(Protocol protocol) const
+{
+    return (protocol == Pocsag) ? m_pocsagCharset : (protocol == Flex) ? m_flexCharset : m_gscCharset;
+}
+
+RadioPagingCharset::Key RadioPagingModSettings::defaultCharset(const char *protocol)
+{
+    const RadioPagingCharset::Codepage *codepage = RadioPagingCharset::defaultFor(protocol);
+    return codepage ? codepage->key() : RadioPagingCharset::Key();
+}
+
+namespace {
+
+// A codepage of the protocol (its key as in the registry), else its default
+void validCharset(RadioPagingCharset::Key& key, const char *protocol)
+{
+    const RadioPagingCharset::Codepage *codepage = RadioPagingCharset::find(protocol, key);
+    key = codepage ? codepage->key() : RadioPagingModSettings::defaultCharset(protocol);
+}
+
+void writeCharset(SimpleSerializer& s, int tag, const RadioPagingCharset::Key& key)
+{
+    s.writeString(tag, QString::fromStdString(key.m_vendor));
+    s.writeString(tag + 1, QString::fromStdString(key.m_model));
+    s.writeString(tag + 2, QString::fromStdString(key.m_codepage));
+}
+
+RadioPagingCharset::Key readCharset(SimpleDeserializer& d, int tag, const char *protocol)
+{
+    const RadioPagingCharset::Key def = RadioPagingModSettings::defaultCharset(protocol);
+    QString vendor, model, codepage;
+    d.readString(tag, &vendor, QString::fromStdString(def.m_vendor));
+    d.readString(tag + 1, &model, QString::fromStdString(def.m_model));
+    d.readString(tag + 2, &codepage, QString::fromStdString(def.m_codepage));
+    return RadioPagingCharset::Key{vendor.toStdString(), model.toStdString(), codepage.toStdString()};
+}
+
+} // namespace
 
 const int RadioPagingModSettings::m_nbPocsagSpeeds;
 const int RadioPagingModSettings::m_pocsagSpeeds[m_nbPocsagSpeeds] = { 512, 1200, 2400 };
@@ -106,10 +146,16 @@ void RadioPagingModSettings::resetToDefaults()
     m_hidden = false;
     m_messageColumns.clear();
     m_voicePlaybackDeviceName = AudioDeviceManager::m_defaultDeviceName;
+    m_pocsagCharset = defaultCharset("pocsag");
+    m_flexCharset = defaultCharset("flex");
+    m_gscCharset = defaultCharset("gsc");
 }
 
 void RadioPagingModSettings::validate()
 {
+    validCharset(m_pocsagCharset, "pocsag");
+    validCharset(m_flexCharset, "flex");
+    validCharset(m_gscCharset, "gsc");
     // The ranges of the GUI
     m_rampUpMs = std::max(0.0f, std::min(100.0f, m_rampUpMs));
     m_rampDownMs = std::max(0.0f, std::min(100.0f, m_rampDownMs));
@@ -264,6 +310,9 @@ QByteArray RadioPagingModSettings::serialize() const
     s.writeS32(60, m_flexMaxMessageNumber);
     s.writeBlob(61, m_messageColumns);
     s.writeString(62, m_voicePlaybackDeviceName);
+    writeCharset(s, 63, m_pocsagCharset);
+    writeCharset(s, 66, m_flexCharset);
+    writeCharset(s, 69, m_gscCharset);
 
     return s.final();
 }
@@ -370,6 +419,9 @@ bool RadioPagingModSettings::deserialize(const QByteArray& data)
         d.readS32(60, &m_flexMaxMessageNumber, 63);
         d.readBlob(61, &m_messageColumns);
         d.readString(62, &m_voicePlaybackDeviceName, AudioDeviceManager::m_defaultDeviceName);
+        m_pocsagCharset = readCharset(d, 63, "pocsag");
+        m_flexCharset = readCharset(d, 66, "flex");
+        m_gscCharset = readCharset(d, 69, "gsc");
         m_gscVoiceKeepDays = std::max(0, std::min(3650, m_gscVoiceKeepDays));
         m_gscVoiceKeepMin = std::max(0, std::min(100000, m_gscVoiceKeepMin));
 
@@ -547,6 +599,15 @@ void RadioPagingModSettings::applySettings(const QStringList& settingsKeys, cons
     }
     if (settingsKeys.contains("voicePlaybackDeviceName")) {
         m_voicePlaybackDeviceName = settings.m_voicePlaybackDeviceName;
+    }
+    if (settingsKeys.contains("pocsagCharset")) {
+        m_pocsagCharset = settings.m_pocsagCharset;
+    }
+    if (settingsKeys.contains("flexCharset")) {
+        m_flexCharset = settings.m_flexCharset;
+    }
+    if (settingsKeys.contains("gscCharset")) {
+        m_gscCharset = settings.m_gscCharset;
     }
 }
 

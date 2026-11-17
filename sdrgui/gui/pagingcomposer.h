@@ -65,6 +65,14 @@ public:
     RadioPagingPage page() const;
     //!< The page in a line of text, for the log of the user
     QString summary() const;
+    //!< The codepages of a protocol in a combo box, grouped by vendor (a header for each that cannot be chosen): the label
+    //!< shown, the vendor, model and codepage as the data. With defaultEntry, a first entry Default of no codepage (the
+    //!< one set for the channel)
+    static void fillCodepages(QComboBox *combo, const QString& protocol, bool defaultEntry);
+    //!< Selects the codepage of the key in a combo of fillCodepages, else the first entry that can be chosen
+    static void selectCodepage(QComboBox *combo, const RadioPagingCharset::Key& key);
+    //!< The codepage chosen in a combo of fillCodepages, none for Default
+    static RadioPagingCharset::Key codepageKey(const QComboBox *combo);
 
 signals:
     void sendRequested();
@@ -87,6 +95,7 @@ private:
     QComboBox *m_type;
     QLabel *m_textLabel;
     QLineEdit *m_text;
+    QComboBox *m_charset;               //!< Alphanumeric: the codepage of the text
     QToolButton *m_browse;
     QComboBox *m_voiceSource;
     QToolButton *m_micInput;

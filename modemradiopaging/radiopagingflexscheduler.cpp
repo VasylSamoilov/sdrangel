@@ -1251,7 +1251,12 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
 
     // Phases
     std::vector<std::vector<uint32_t>> phaseWords(phases);
-    std::vector<std::pair<std::list<Item>::iterator, int>> sent;   // Item and the phase it went in
+    struct Sent
+    {
+        std::list<Item>::iterator m_item;
+        int m_phase;                    //!< The phase it went in
+    };
+    std::vector<Sent> sent;
 
     for (int p = 0; p < phases; p++)
     {
@@ -1291,7 +1296,7 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
                 for (size_t j = first; j < messages.size(); j++)
                 {
                     if (result.m_packed[j]) {
-                        sent.push_back(std::make_pair(candidates[p][j - first].m_item, p));
+                        sent.push_back(Sent{candidates[p][j - first].m_item, p});
                     }
                 }
             }
@@ -1302,9 +1307,9 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
         }
     }
 
-    for (const auto& s : sent)
+    for (const Sent& s : sent)
     {
-        auto it = s.first;
+        auto it = s.m_item;
 
         // The short instructions of a group go once; the group message is sent with its last phase
         if (it->m_group >= 0)
@@ -1325,6 +1330,7 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
                     const uint32_t id = m_groups[key].m_id;
                     frame.m_sentIds.push_back(id);
                     frame.m_sentNumbers.push_back(0);
+                    frame.m_sentStatus.push_back(SentStatus());
                     frame.m_doneIds.push_back(id);
                     endGroup(key);
                 }
@@ -1339,7 +1345,7 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
             for (Item& other : m_queue)
             {
                 if ((other.m_id == it->m_id) && (other.m_fragment > it->m_fragment)) {
-                    other.m_phase = s.second;
+                    other.m_phase = s.m_phase;
                 }
             }
         }
@@ -1348,13 +1354,21 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
         // with its number and R = 0, the interval after this frame (STD-43A 4.3.7.6)
         if (it->m_fragment == it->m_fragments - 1)
         {
-            if (it->m_retransmission) {
+            SentStatus status;
+            status.m_number = it->m_number;
+            status.m_fragments = it->m_fragments;
+            status.m_retrieval = it->m_retrieval;
+
+            if (it->m_retransmission)
+            {
                 frame.m_retransmittedIds.push_back(it->m_id);
+                frame.m_retransmittedStatus.push_back(status);
             }
             else
             {
                 frame.m_sentIds.push_back(it->m_id);
                 frame.m_sentNumbers.push_back((uint32_t) it->m_number);
+                frame.m_sentStatus.push_back(status);
             }
 
             auto tpl = m_templates.find(it->m_id);

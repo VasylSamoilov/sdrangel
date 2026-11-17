@@ -70,6 +70,15 @@ RadioPagingDemodSettings:
       format: float
     audioDeviceName:
       type: string
+    pocsagCharset:
+      description: "Codepage of the POCSAG alphanumeric messages (default generic, generic, ascii)"
+      $ref: "/doc/swagger/include/RadioPagingCharset.yaml#/RadioPagingCharset"
+    flexCharset:
+      description: "Codepage of the FLEX alphanumeric messages"
+      $ref: "/doc/swagger/include/RadioPagingCharset.yaml#/RadioPagingCharset"
+    gscCharset:
+      description: "Codepage of the GSC alphanumeric messages"
+      $ref: "/doc/swagger/include/RadioPagingCharset.yaml#/RadioPagingCharset"
     rgbColor:
       type: integer
       format: int32

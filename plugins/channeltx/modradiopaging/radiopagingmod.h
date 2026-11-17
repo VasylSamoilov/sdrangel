@@ -67,6 +67,9 @@ public:
         int m_retransmit = 0;
         double m_retransmitInterval = -1.0;
         double m_sendDelay = 0.0;
+        //!< Alphanumeric (FLEX secure type 0 too): the codepage of the text in the protocol, none for the one of the
+        //!< channel. The text is UTF-8, encoded to the codes of the codepage when the request is checked
+        RadioPagingCharset::Key m_charset;
     };
 
     //! The request of a page checked with RadioPagingPage::check() (the channel and the encoder check the rest)
@@ -162,6 +165,28 @@ public:
         Event m_event;
 
         MsgTxEvent(quint64 id, Event event) : Message(), m_id(id), m_event(event) { }
+    };
+
+    //! FLEX: how a message or a copy (repeat) went: its message number, fragments and R flag
+    class MsgTxStatus : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        quint64 getId() const { return m_id; }
+        bool getRepeat() const { return m_repeat; }
+        const RadioPagingFlexEncoder::SentStatus& getStatus() const { return m_status; }
+
+        static MsgTxStatus* create(quint64 id, bool repeat, const RadioPagingFlexEncoder::SentStatus& status) {
+            return new MsgTxStatus(id, repeat, status);
+        }
+
+    private:
+        quint64 m_id;
+        bool m_repeat;
+        RadioPagingFlexEncoder::SentStatus m_status;
+
+        MsgTxStatus(quint64 id, bool repeat, const RadioPagingFlexEncoder::SentStatus& status) :
+            Message(), m_id(id), m_repeat(repeat), m_status(status) { }
     };
 
     //! To the GUI: a message of the log of the messages transmitted, as it was queued, sent or dropped
@@ -362,6 +387,8 @@ private:
         int m_sent = 0;                         //!< Copies sent
         qint64 m_copySpanMs = 0;
         qint64 m_expiresMs = 0;                 //!< No copy after this time
+        RadioPagingFlexEncoder::SentStatus m_status;    //!< FLEX: how the next copy went (R = 0)
+        bool m_hasStatus = false;
     };
     std::map<quint64, RepeatingTx> m_repeating;
     void repeated(quint64 id);
@@ -383,6 +410,8 @@ private:
     //! Checks of a request against the channel (protocol, speed or mode, polarity, message,
     //! queue) and its source request; an error, empty if it can be sent
     QString checkRequest(const TxRequest& request, RadioPagingModSource::Request& sourceRequest, QString *warning = nullptr);
+    //!< The codepage of an alphanumeric message, nullptr if the one of the request is not a codepage of the protocol
+    const RadioPagingCharset::Codepage *requestCodepage(const TxRequest& request, RadioPagingModSettings::Protocol protocol) const;
     int outstanding() const;
     void sendSampleRateToDemodAnalyzer();
     void webapiFormatChannelReport(SWGSDRangel::SWGChannelReport& response);

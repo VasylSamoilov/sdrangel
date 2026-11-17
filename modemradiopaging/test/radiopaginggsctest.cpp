@@ -660,11 +660,11 @@ void testInterpretation()
 
     check(G::escapeControl(std::string("A\r") + "B") == "A<0x0D>B", "Control characters are escaped");
 
-    // Characters outside Table VII are not sent as the spare code
-    G::EncodeResult underscore = G::encode({ tx("100123", 1, G::Alphanumeric, "A_B") });
+    // Encoding and decoding take the same Table VII: _ is 0x3F, a character outside the set is sent as space
+    G::EncodeResult underscore = G::encode({ tx("100123", 1, G::Alphanumeric, "A_B~C") });
     Decoded du = decode(underscore.m_bits, D::Normal, false, 0, 1);
-    check(!du.m_messages.empty() && (G::decodeAlphanumeric(du.m_messages[0].m_rawData, du.m_messages[0].m_rawBits) == "A B"),
-        "Alphanumeric: a character outside the set is sent as space, not as the spare code");
+    check(!du.m_messages.empty() && (G::decodeAlphanumeric(du.m_messages[0].m_rawData, du.m_messages[0].m_rawBits) == "A_B C"),
+        "Alphanumeric: _ is its Table VII code, a character outside the set is sent as space");
 }
 
 void testStreaming()
@@ -921,7 +921,7 @@ void testCharacterSets()
     p = packValues({ 0xf, 0x0, 0xf, 0x5, 0xf, 0xe, 0xf, 0xf }, 4, n);
     check(G::decodeNumeric(p, n) == "A R<0x0F>", "Numeric shifted set: A, space, R and the spare as <0x0F>");
     p = packValues({ 0x21, 0x3c, 0x3f, 0x3e, 0x22, 0x3e, 0x3e }, 6, n);
-    check(G::decodeAlphanumeric(p, n) == "A\r<0x3F>B", "Alphanumeric: upper case letters, CR/LF, spare as <0x3F>, Null/EOM gives no character");
+    check(G::decodeAlphanumeric(p, n) == "A\r_B", "Alphanumeric: the Table VII glyphs (0x3F _), Null/EOM gives no character");
 
     std::vector<G::TxMessage> sent = { tx("100123", 1, G::Numeric, ("12" + bar + "34").c_str()) };
     check(allMatch(decode(G::encode(sent).m_bits, D::Normal, false, 0, 1), sent), "Numeric triple bar in UTF-8 round trip");

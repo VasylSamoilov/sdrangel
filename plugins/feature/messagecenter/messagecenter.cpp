@@ -636,6 +636,7 @@ int MessageCenter::webapiActionsPost(const QStringList& featureActionsKeys, SWGS
         page.m_retransmit = post->getRetransmit();
         page.m_retransmitInterval = post->getRetransmitInterval();
         page.m_sendDelay = post->getSendDelay();
+        page.m_charset = RadioPagingPage::charsetKey(post->getCharset());
 
         if (page.m_transmitter.isEmpty())
         {

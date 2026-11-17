@@ -363,6 +363,16 @@ void RadioPagingModSource::feed()
     if (!block.m_failedIds.empty()) {
         fail(block.m_failedIds);
     }
+    // FLEX: how the messages went, ahead of their sent or repeated notification
+    if (m_notifyStatus)
+    {
+        for (size_t i = 0; (i < block.m_ids.size()) && (i < block.m_status.size()); i++) {
+            m_notifyStatus(block.m_ids[i], false, block.m_status[i]);
+        }
+        for (size_t i = 0; (i < block.m_repeatIds.size()) && (i < block.m_repeatStatus.size()); i++) {
+            m_notifyStatus(block.m_repeatIds[i], true, block.m_repeatStatus[i]);
+        }
+    }
     if (!block.m_ids.empty() || !block.m_repeatIds.empty()) {
         m_inFlight.push_back(InFlight{m_pushed, block.m_ids, block.m_repeatIds});
     }

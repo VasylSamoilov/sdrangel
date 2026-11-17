@@ -37,6 +37,7 @@
 #include "radiopagingpocsagreceiver.h"
 #include "radiopagingflexreceiver.h"
 #include "radiopaginggscreceiver.h"
+#include "radiopagingcharset.h"
 
 #include "radiopagingdemodsettings.h"
 
@@ -262,6 +263,8 @@ private:
     static QString checkName(int check);
     //!< Characters below 0x20 and 0x7f as <0xNN>, other bytes kept (UTF-8 passes)
     static QString escapeText(const std::string& text);
+    //!< The codepage of the key in the protocol, else the default of the protocol
+    static const RadioPagingCharset::Codepage *codepage(const RadioPagingCharset::Key& key, const char *protocol);
     static QByteArray toByteArray(const std::vector<uint8_t>& data);
 };
 

@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "export.h"
+#include "radiopagingcharset.h"
 
 // Sequential Golay paging format: codes, encoder and message interpretation.
 //
@@ -119,7 +120,11 @@ public:
         std::string m_address;      //!< 6 digits: index, group, 3 address digits
         int m_addressNumber = 1;    //!< 1-4 (function A-D)
         MessageType m_type = Alphanumeric;
-        std::string m_text;         //!< Numeric: 0-9 A-H J L N P R U space - and the triple bar (UTF-8 U+2261, also = or *)  Alphanumeric: ASCII 0x20-0x5d, letters of either case, @ [ ] sent as \ { }, others as space
+        //!< Numeric: 0-9 A-H J L N P R U space - and the triple bar (UTF-8 U+2261, also = or *). Alphanumeric: the ASCII
+        //!< of Table VII (the default codepage: letters of either case, \ { } LF taken as @ [ ] CR), others as space; or
+        //!< the 6-bit codes of a codepage (m_codes)
+        std::string m_text;
+        bool m_codes = false;       //!< Alphanumeric: m_text is the 6-bit codes (RadioPagingCharset::encode), not ASCII
     };
 
     struct EncodeOptions
@@ -204,15 +209,19 @@ public:
     //!< Build the transmission for the messages in the given order
     static EncodeResult encode(const std::vector<TxMessage>& messages, const EncodeOptions& options);
     static EncodeResult encode(const std::vector<TxMessage>& messages);
+    //!< The message bits of a data page (numeric or alphanumeric), padded with Null to whole blocks: 48 a block, in
+    //!< the order of the bits of a decoded message. False and an error if a character is not allowed
+    static bool messageBits(const TxMessage& message, std::vector<uint8_t>& bits, std::string& error);
 
     //!< Message bits as stored in a decoded message: packed 8 per byte, first bit in the
-    //!< most significant bit of byte 0
+    //!< most significant bit of byte 0. Alphanumeric: the glyphs of the codepage (RadioPagingCharset::decode), the default
+    //!< one (Table VII) without one; Null is padding and gives no character
     static std::string decodeNumeric(const std::vector<uint8_t>& packed, int nbBits);
-    static std::string decodeAlphanumeric(const std::vector<uint8_t>& packed, int nbBits);
+    static std::string decodeAlphanumeric(const std::vector<uint8_t>& packed, int nbBits, const RadioPagingCharset::Codepage *codepage = nullptr);
     static int scoreNumeric(const std::vector<uint8_t>& packed, int nbBits);
     static int scoreAlphanumeric(const std::vector<uint8_t>& packed, int nbBits);
     //!< Decide between numeric and alphanumeric by content. No bits means tone only
-    static Interpretation interpret(const std::vector<uint8_t>& packed, int nbBits);
+    static Interpretation interpret(const std::vector<uint8_t>& packed, int nbBits, const RadioPagingCharset::Codepage *codepage = nullptr);
 
     //!< Replace characters below 0x20 and 0x7f by <0xNN>
     static std::string escapeControl(const std::string& text);

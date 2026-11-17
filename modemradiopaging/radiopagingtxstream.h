@@ -51,6 +51,10 @@ struct RadioPagingTxBlock
     double m_deviation = 0.0;           //!< Deviation of the outer symbol, Hz; 0: the modulator's
     std::vector<uint64_t> m_ids;        //!< Messages completed by the block
     std::vector<uint64_t> m_repeatIds;  //!< Copies completed by the block of messages sent before (retransmissions)
+    //!< FLEX: how each message of m_ids and of m_repeatIds went (message number, fragments, R); empty for the other
+    //!< protocols
+    std::vector<RadioPagingFlexEncoder::SentStatus> m_status;
+    std::vector<RadioPagingFlexEncoder::SentStatus> m_repeatStatus;
     std::vector<uint64_t> m_failedIds;  //!< Messages dropped before they were sent (a group message that missed its frame)
     std::vector<uint64_t> m_startIds;   //!< Messages that go on air with the block and complete in a later one (voice pages)
     bool m_ers = false;                 //!< FLEX emergency re-synchronization

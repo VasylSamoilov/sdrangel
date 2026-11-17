@@ -37,6 +37,7 @@
 #include "SWGRadioPagingModReport.h"
 #include "SWGRadioPagingModActions.h"
 #include "SWGRadioPagingModTx.h"
+#include "SWGRadioPagingCharset.h"
 
 #include "dsp/dspcommands.h"
 #include "device/deviceapi.h"
@@ -55,10 +56,90 @@ MESSAGE_CLASS_DEFINITION(RadioPagingMod::MsgConfigureRadioPagingMod, Message)
 MESSAGE_CLASS_DEFINITION(RadioPagingMod::MsgTx, Message)
 MESSAGE_CLASS_DEFINITION(RadioPagingMod::MsgReportTx, Message)
 MESSAGE_CLASS_DEFINITION(RadioPagingMod::MsgTxEvent, Message)
+MESSAGE_CLASS_DEFINITION(RadioPagingMod::MsgTxStatus, Message)
 MESSAGE_CLASS_DEFINITION(RadioPagingMod::MsgTxLog, Message)
 MESSAGE_CLASS_DEFINITION(RadioPagingMod::MsgLiveVoice, Message)
 MESSAGE_CLASS_DEFINITION(RadioPagingMod::MsgLiveEnd, Message)
 MESSAGE_CLASS_DEFINITION(RadioPagingMod::MsgClear, Message)
+
+namespace {
+
+// The text (UTF-8) as the codes of the codepage. Empty, else the error; a warning of a special format (a text cut)
+std::string encodeText(const RadioPagingCharset::Codepage *codepage, std::string& text, QString *warning)
+{
+    std::vector<uint8_t> codes;
+    std::string error;
+    std::string changed;
+
+    if (!codepage) {
+        return "The codepage is not one of the protocol";
+    }
+    if (!RadioPagingCharset::encode(*codepage, text, codes, &error, &changed)) {
+        return error;
+    }
+    if (!changed.empty())
+    {
+        qWarning() << "RadioPagingMod::checkRequest:" << QString::fromStdString(changed);
+
+        if (warning) {
+            *warning = QString::fromStdString(changed);
+        }
+    }
+
+    text.assign(codes.begin(), codes.end());
+    return std::string();
+}
+
+// A FLEX message of characters: alphanumeric, secure of type 00 (STD-43A 3.10.1.4)
+bool isAlphanumeric(const RadioPagingFlexEncoder::TxMessage& m)
+{
+    return (m.m_type == RadioPagingFlex::Alphanumeric)
+        || ((m.m_type == RadioPagingFlex::Secure) && (m.m_binary.m_secureType == RadioPagingFlex::SecureAlphanumeric));
+}
+
+// Bits, one an element, packed 8 a byte, the first in the most significant bit of byte 0 (the raw data of the records)
+QByteArray packBits(const std::vector<uint8_t>& bits)
+{
+    QByteArray data((int) (bits.size() + 7) / 8, 0);
+
+    for (size_t i = 0; i < bits.size(); i++)
+    {
+        if (bits[i]) {
+            data[(int) (i >> 3)] = (char) (data[(int) (i >> 3)] | (0x80 >> (i & 7)));
+        }
+    }
+
+    return data;
+}
+
+// FLEX: how a message went, in the keys of the decoder record: message number (none for a group message), fragments,
+// R (STD-43A 3.10.1)
+void setStatus(MessageRecord& record, const RadioPagingFlexEncoder::SentStatus& status)
+{
+    if (status.m_number >= 0)
+    {
+        record.m_protocolData.insert("message_number", status.m_number);
+        record.m_protocolData.insert("retrieval", status.m_retrieval);
+    }
+
+    record.m_protocolData.insert("fragment_count", status.m_fragments);
+    record.m_protocolData.insert("fragmented", status.m_fragments > 1);
+}
+
+} // namespace
+
+// The codepage of the page, else the one of the channel for the protocol (else the default of the protocol)
+const RadioPagingCharset::Codepage *RadioPagingMod::requestCodepage(const TxRequest& request, RadioPagingModSettings::Protocol protocol) const
+{
+    const char *protocolName = (protocol == RadioPagingModSettings::Pocsag) ? "pocsag" : (protocol == RadioPagingModSettings::Flex) ? "flex" : "gsc";
+
+    if (!request.m_charset.empty()) {
+        return RadioPagingCharset::find(protocolName, request.m_charset);
+    }
+
+    const RadioPagingCharset::Codepage *codepage = RadioPagingCharset::find(protocolName, m_settings.charset(protocol));
+    return codepage ? codepage : RadioPagingCharset::defaultFor(protocolName);
+}
 
 const char* const RadioPagingMod::m_channelIdURI = "sdrangel.channeltx.modradiopaging";
 const char* const RadioPagingMod::m_channelId = "RadioPagingMod";
@@ -90,6 +171,9 @@ RadioPagingMod::RadioPagingMod(DeviceAPI *deviceAPI) :
     });
     m_basebandSource->setNotifyRepeated([this](quint64 id) {
         getInputMessageQueue()->push(MsgTxEvent::create(id, MsgTxEvent::Repeated));
+    });
+    m_basebandSource->setNotifyStatus([this](quint64 id, bool repeat, const RadioPagingFlexEncoder::SentStatus& status) {
+        getInputMessageQueue()->push(MsgTxStatus::create(id, repeat, status));
     });
 
     applySettings(QStringList(), m_settings, true);
@@ -187,6 +271,7 @@ RadioPagingMod::TxRequest RadioPagingMod::requestFromPage(const RadioPagingPage&
     request.m_retransmit = page.m_retransmit;
     request.m_retransmitInterval = page.m_retransmitInterval;
     request.m_sendDelay = page.m_sendDelay;
+    request.m_charset = page.m_charset;
 
     if (page.m_protocol == "pocsag")
     {
@@ -304,11 +389,21 @@ QString RadioPagingMod::checkRequest(const TxRequest& request, RadioPagingModSou
         if ((request.m_speed != 0) && !RadioPagingModSettings::isPocsagSpeed(request.m_speed)) {
             return QString("POCSAG speed %1 baud is not 512, 1200 or 2400").arg(request.m_speed);
         }
-        if (request.m_pocsag.m_text.size() > (size_t) m_maxTextLength) {
+
+        sourceRequest.m_pocsag = request.m_pocsag;
+
+        if (request.m_pocsag.m_type == RadioPagingPocsag::Alphanumeric)
+        {
+            error = encodeText(requestCodepage(request, protocol), sourceRequest.m_pocsag.m_text, warning);
+
+            if (!error.empty()) {
+                return QString::fromStdString(error);
+            }
+        }
+        if (sourceRequest.m_pocsag.m_text.size() > (size_t) m_maxTextLength) {
             return QString("Message text longer than %1 characters").arg(m_maxTextLength);
         }
 
-        sourceRequest.m_pocsag = request.m_pocsag;
         sourceRequest.m_pocsagBaud = (request.m_speed != 0) ? request.m_speed : m_settings.m_pocsagSpeed;
         sourceRequest.m_pocsagInverted = (request.m_polarity < 0) ? m_settings.m_pocsagInverted : (request.m_polarity == 1);
         sourceRequest.m_pocsagSchedule.m_repeat = request.m_retransmit;
@@ -325,11 +420,20 @@ QString RadioPagingMod::checkRequest(const TxRequest& request, RadioPagingModSou
     }
     else if (protocol == RadioPagingModSettings::Flex)
     {
-        if (request.m_flex.m_text.size() > (size_t) m_maxTextLength) {
+        sourceRequest.m_flex = request.m_flex;
+
+        if (isAlphanumeric(request.m_flex))
+        {
+            error = encodeText(requestCodepage(request, protocol), sourceRequest.m_flex.m_text, warning);
+
+            if (!error.empty()) {
+                return QString::fromStdString(error);
+            }
+        }
+        if (sourceRequest.m_flex.m_text.size() > (size_t) m_maxTextLength) {
             return QString("Message text longer than %1 characters").arg(m_maxTextLength);
         }
 
-        sourceRequest.m_flex = request.m_flex;
         sourceRequest.m_flexInverted = (request.m_polarity < 0) ? m_settings.m_flexInverted : (request.m_polarity == 1);
         // Seconds to frames of 1.875 s, rounded up: the message is not sent earlier than asked
         auto frames = [](double seconds) { return (int) std::ceil(seconds * 1000.0 / RadioPagingFlex::m_frameMs - 1e-9); };
@@ -360,12 +464,23 @@ QString RadioPagingMod::checkRequest(const TxRequest& request, RadioPagingModSou
     }
     else if (protocol == RadioPagingModSettings::Gsc)
     {
-        if (request.m_gsc.m_text.size() > (size_t) m_maxTextLength) {
+        // GSC has no network mode: it is sent one-shot whatever the mode setting
+        sourceRequest.m_gsc = request.m_gsc;
+
+        if (request.m_gsc.m_type == RadioPagingGsc::Alphanumeric)
+        {
+            error = encodeText(requestCodepage(request, protocol), sourceRequest.m_gsc.m_text, warning);
+
+            if (!error.empty()) {
+                return QString::fromStdString(error);
+            }
+
+            sourceRequest.m_gsc.m_codes = true;
+        }
+        if (sourceRequest.m_gsc.m_text.size() > (size_t) m_maxTextLength) {
             return QString("Message text longer than %1 characters").arg(m_maxTextLength);
         }
 
-        // GSC has no network mode: it is sent one-shot whatever the mode setting
-        sourceRequest.m_gsc = request.m_gsc;
         sourceRequest.m_gscInverted = (request.m_polarity < 0) ? m_settings.m_gscInverted : (request.m_polarity == 1);
         RadioPagingGscTxStream trial((RadioPagingGsc::Mode) m_settings.m_gscMode);
 
@@ -494,6 +609,10 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
     record.m_channelOffset = m_settings.m_inputFrequencyOffset;
     record.m_protocolData.insert("tx_id", (qulonglong) id);
     bool inverted = false;
+    const RadioPagingCharset::Codepage *charset = nullptr;   // Alphanumeric: the codepage of the text
+    std::vector<uint8_t> bits;                               // Message bits sent, POCSAG and GSC
+    bool raw = false;
+    std::string error;
 
     if (sourceRequest.m_protocol == RadioPagingModSettings::Pocsag)
     {
@@ -506,8 +625,18 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
         record.m_protocolData.insert("function", m.m_function);
         record.m_msgType = (m.m_type == RadioPagingPocsag::Tone) ? "tone"
             : (m.m_type == RadioPagingPocsag::Numeric) ? "numeric" : "alphanumeric";
-        record.m_text = QString::fromStdString(m.m_text);
+        // The text as asked; the message bits as the decoder stores them
+        record.m_text = QString::fromStdString(request.m_pocsag.m_text);
         inverted = sourceRequest.m_pocsagInverted;
+
+        if (m.m_type == RadioPagingPocsag::Alphanumeric) {
+            charset = requestCodepage(request, RadioPagingModSettings::Pocsag);
+        }
+        if ((m.m_type != RadioPagingPocsag::Tone)
+            && RadioPagingPocsag::messageBits(m, RadioPagingPocsag::EncodeOptions(), bits, error))
+        {
+            raw = true;
+        }
     }
     else if (sourceRequest.m_protocol == RadioPagingModSettings::Flex)
     {
@@ -549,7 +678,11 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
                 : (m.m_numericFormat == RadioPagingFlex::NumericNumbered) ? "numbered_numeric"
                 : (m.m_numericFormat == RadioPagingFlex::NumericNumberedSpecial) ? "numbered_special_numeric" : "numeric")
             : "alphanumeric";
-        record.m_text = (m.m_type == RadioPagingFlex::Tone) ? QString() : QString::fromStdString(m.m_text);
+        record.m_text = (m.m_type == RadioPagingFlex::Tone) ? QString() : QString::fromStdString(request.m_flex.m_text);
+
+        if (isAlphanumeric(m)) {
+            charset = requestCodepage(request, RadioPagingModSettings::Flex);
+        }
 
         if (m.m_type == RadioPagingFlex::ShortMessage)
         {
@@ -599,14 +732,31 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
         record.m_protocolData.insert("function", m.m_addressNumber - 1);
         record.m_msgType = (m.m_type == RadioPagingGsc::Voice) ? "voice" : (m.m_type == RadioPagingGsc::Tone) ? "tone"
             : (m.m_type == RadioPagingGsc::Numeric) ? "numeric" : "alphanumeric";
-        record.m_text = QString::fromStdString(m.m_text);
+        record.m_text = QString::fromStdString(request.m_gsc.m_text);
         inverted = sourceRequest.m_gscInverted;
         pending.m_isVoice = (m.m_type == RadioPagingGsc::Voice);
         pending.m_voice = sourceRequest.m_voice;
+
+        if (m.m_type == RadioPagingGsc::Alphanumeric) {
+            charset = requestCodepage(request, RadioPagingModSettings::Gsc);
+        }
+        if (((m.m_type == RadioPagingGsc::Alphanumeric) || (m.m_type == RadioPagingGsc::Numeric))
+            && RadioPagingGsc::messageBits(m, bits, error))
+        {
+            raw = true;
+        }
+    }
+
+    if (charset) {
+        record.m_protocolData.insert("charset", RadioPagingPage::charsetData(charset->key()));
+    }
+    if (raw)
+    {
+        record.m_rawData = packBits(bits);
+        record.m_rawBits = (int) bits.size();
     }
 
     record.m_polarity = inverted ? MessageRecord::PolarityInverted : MessageRecord::PolarityNormal;
-    (void) request;
 }
 
 // A message was sent or dropped: the voice is recorded, the record goes to the log and, if sent, to
@@ -705,8 +855,15 @@ void RadioPagingMod::repeated(quint64 id)
     record.m_protocolData.insert("retransmission", repeating.m_sent);
     record.m_protocolData.insert("retransmission_of", repeating.m_record.m_id);
 
-    if (record.m_protocol == "flex") {
+    if (record.m_protocol == "flex")
+    {
         record.m_protocolData.insert("retrieval", false);
+
+        if (repeating.m_hasStatus)
+        {
+            setStatus(record, repeating.m_status);
+            repeating.m_hasStatus = false;
+        }
     }
 
     if (repeating.m_copies <= 0) {
@@ -929,6 +1086,32 @@ bool RadioPagingMod::handleMessage(const Message& cmd)
     {
         const MsgTxEvent& event = (const MsgTxEvent&) cmd;
         txEvent(event.getId(), event.getEvent());
+
+        return true;
+    }
+    else if (MsgTxStatus::match(cmd))
+    {
+        // FLEX: the message number, fragments and R of the record of the message, or of its next copy
+        const MsgTxStatus& msg = (const MsgTxStatus&) cmd;
+
+        if (!msg.getRepeat())
+        {
+            auto it = m_pending.find(msg.getId());
+
+            if (it != m_pending.end()) {
+                setStatus(it->second.m_record, msg.getStatus());
+            }
+        }
+        else
+        {
+            auto it = m_repeating.find(msg.getId());
+
+            if (it != m_repeating.end())
+            {
+                it->second.m_status = msg.getStatus();
+                it->second.m_hasStatus = true;
+            }
+        }
 
         return true;
     }
@@ -1192,6 +1375,25 @@ int RadioPagingMod::webapiSettingsPutPatch(
         return 400;
     }
 
+    // A codepage of the protocol (RadioPagingCharset names)
+    {
+        const QString keys[3] = {"pocsagCharset", "flexCharset", "gscCharset"};
+        SWGSDRangel::SWGRadioPagingCharset *charsets[3] = {swg->getPocsagCharset(), swg->getFlexCharset(), swg->getGscCharset()};
+        const char *protocols[3] = {"pocsag", "flex", "gsc"};
+
+        for (int i = 0; i < 3; i++)
+        {
+            const QString error = channelSettingsKeys.contains(keys[i])
+                ? RadioPagingPage::checkCharset(protocols[i], RadioPagingPage::charsetKey(charsets[i])) : QString();
+
+            if (!error.isEmpty())
+            {
+                errorMessage = QString("%1: %2").arg(keys[i]).arg(error);
+                return 400;
+            }
+        }
+    }
+
     QMutexLocker mutexLocker(&m_settingsMutex);
     RadioPagingModSettings settings = m_settings;
     mutexLocker.unlock();
@@ -1314,6 +1516,15 @@ void RadioPagingMod::webapiUpdateChannelSettings(
     }
     if (channelSettingsKeys.contains("flexMaxMessageNumber")) {
         settings.m_flexMaxMessageNumber = swg->getFlexMaxMessageNumber();
+    }
+    if (channelSettingsKeys.contains("pocsagCharset")) {
+        settings.m_pocsagCharset = RadioPagingPage::charsetKey(swg->getPocsagCharset());
+    }
+    if (channelSettingsKeys.contains("flexCharset")) {
+        settings.m_flexCharset = RadioPagingPage::charsetKey(swg->getFlexCharset());
+    }
+    if (channelSettingsKeys.contains("gscCharset")) {
+        settings.m_gscCharset = RadioPagingPage::charsetKey(swg->getGscCharset());
     }
     if (channelSettingsKeys.contains("gscMode")) {
         settings.m_gscMode = swg->getGscMode();
@@ -1531,6 +1742,9 @@ void RadioPagingMod::webapiFormatChannelSettings(SWGSDRangel::SWGChannelSettings
     swg->setFlexTimeOffsetSeconds(settings.m_flexTimeOffsetSeconds);
     swg->setFlexNumbering(settings.m_flexNumbering ? 1 : 0);
     swg->setFlexMaxMessageNumber(settings.m_flexMaxMessageNumber);
+    swg->setPocsagCharset(RadioPagingPage::charsetSwg(settings.m_pocsagCharset));
+    swg->setFlexCharset(RadioPagingPage::charsetSwg(settings.m_flexCharset));
+    swg->setGscCharset(RadioPagingPage::charsetSwg(settings.m_gscCharset));
     swg->setSsidLocalId(settings.m_ssidLocalId);
     swg->setSsidCoverageZone(settings.m_ssidCoverageZone);
     swg->setSsidCountryCode(settings.m_ssidCountryCode);
@@ -1765,6 +1979,15 @@ void RadioPagingMod::webapiFormatChannelSettings(
     }
     if (channelSettingsKeys.contains("flexMaxMessageNumber") || force) {
         swg->setFlexMaxMessageNumber(settings.m_flexMaxMessageNumber);
+    }
+    if (channelSettingsKeys.contains("pocsagCharset") || force) {
+        swg->setPocsagCharset(RadioPagingPage::charsetSwg(settings.m_pocsagCharset));
+    }
+    if (channelSettingsKeys.contains("flexCharset") || force) {
+        swg->setFlexCharset(RadioPagingPage::charsetSwg(settings.m_flexCharset));
+    }
+    if (channelSettingsKeys.contains("gscCharset") || force) {
+        swg->setGscCharset(RadioPagingPage::charsetSwg(settings.m_gscCharset));
     }
     if (channelSettingsKeys.contains("gscMode") || force) {
         swg->setGscMode(settings.m_gscMode);

@@ -8,6 +8,7 @@
 #include "export.h"
 #include "SWGChannelMarker.h"
 #include "SWGRollupState.h"
+#include "SWGRadioPagingCharset.h"
 
 namespace SWGSDRangel {
 class SWG_API SWGRadioPagingModSettings : public SWGObject {
@@ -100,6 +101,12 @@ public:
     void setRgbColor(qint32 value);
     QString* getChannelAlias();
     void setChannelAlias(QString* value);
+    SWGRadioPagingCharset* getPocsagCharset();
+    void setPocsagCharset(SWGRadioPagingCharset* value);
+    SWGRadioPagingCharset* getFlexCharset();
+    void setFlexCharset(SWGRadioPagingCharset* value);
+    SWGRadioPagingCharset* getGscCharset();
+    void setGscCharset(SWGRadioPagingCharset* value);
     QString* getGscVoiceDirectory();
     void setGscVoiceDirectory(QString* value);
     qint32 getGscVoiceKeepDays();
@@ -203,6 +210,12 @@ private:
     bool m_rgbColorIsSet = false;
     QString* m_channelAlias = nullptr;
     bool m_channelAliasIsSet = false;
+    SWGRadioPagingCharset* m_pocsagCharset = nullptr;
+    bool m_pocsagCharsetIsSet = false;
+    SWGRadioPagingCharset* m_flexCharset = nullptr;
+    bool m_flexCharsetIsSet = false;
+    SWGRadioPagingCharset* m_gscCharset = nullptr;
+    bool m_gscCharsetIsSet = false;
     QString* m_gscVoiceDirectory = nullptr;
     bool m_gscVoiceDirectoryIsSet = false;
     qint32 m_gscVoiceKeepDays = 0;

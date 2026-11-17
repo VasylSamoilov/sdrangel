@@ -23,6 +23,7 @@
 #include <QStringList>
 
 #include "dsp/dsptypes.h"
+#include "radiopagingcharset.h"
 
 class Serializable;
 
@@ -53,6 +54,9 @@ struct RadioPagingDemodSettings
     int m_flexMaxMessageNumber;                 //!< FLEX: largest message number of the network, 0-63: skipped numbers are reported
     Real m_volume;                              //!< Voice audio gain
     QString m_audioDeviceName;                  //!< Voice audio output
+    RadioPagingCharset::Key m_pocsagCharset;    //!< Codepage of the alphanumeric messages, in the protocol
+    RadioPagingCharset::Key m_flexCharset;
+    RadioPagingCharset::Key m_gscCharset;
 
     quint32 m_rgbColor;
     QString m_title;
@@ -95,6 +99,8 @@ struct RadioPagingDemodSettings
     QString voiceDirectory() const;
     //!< The name of the demodulator: the alias set, or the frequency of the channel in Hz
     QString effectiveChannelAlias(qint64 frequency) const;
+    //!< The default codepage of a protocol (pocsag, flex, gsc): generic ASCII
+    static RadioPagingCharset::Key defaultCharset(const char *protocol);
 };
 
 #endif // INCLUDE_RADIOPAGINGDEMODSETTINGS_H

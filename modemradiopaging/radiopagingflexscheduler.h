@@ -142,6 +142,14 @@ public:
         uint32_t m_id = 0;
     };
 
+    //!< A message as it went: its message number (-1: none, a group message), its fragments and its R flag
+    struct SentStatus
+    {
+        int m_number = -1;
+        int m_fragments = 1;
+        bool m_retrieval = false;
+    };
+
     struct Frame
     {
         bool m_reserved = false;    //!< Frame reserved for another transmitter: no output
@@ -153,7 +161,9 @@ public:
         unsigned m_traffic = 0;     //!< Low traffic flags of the frame information word
         std::vector<uint32_t> m_sentIds;                    //!< Messages sent: in one piece, or their last fragment (first transmission)
         std::vector<uint32_t> m_sentNumbers;                //!< Message number of each sent id
+        std::vector<SentStatus> m_sentStatus;               //!< How each sent id went
         std::vector<uint32_t> m_retransmittedIds;           //!< Messages sent again (retransmissions, R = 0)
+        std::vector<SentStatus> m_retransmittedStatus;      //!< How each retransmitted id went
         std::vector<uint32_t> m_doneIds;                    //!< Messages with nothing more queued: sent and retransmitted
         std::vector<uint32_t> m_failedIds;                  //!< Group messages dropped: a short instruction did not go before the group message
         bool m_systemEvent = false;                         //!< The System Event Notification is in every phase of the frame

@@ -1163,6 +1163,12 @@ void RadioPagingModGUI::displayProtocol()
     QSignalBlocker mixSwitch1200Blocker(ui->mixSwitch1200);
     QSignalBlocker mixSwitch2400Blocker(ui->mixSwitch2400);
 
+    // The codepage of the protocol of the channel
+    const char *protocolNames[3] = {"pocsag", "flex", "gsc"};
+    PagingComposer::fillCodepages(ui->charset, protocolNames[(int) m_settings.m_protocol], false);
+    PagingComposer::selectCodepage(ui->charset, m_settings.charset(m_settings.m_protocol));
+    ui->charset->setVisible(RadioPagingCharset::codepages(protocolNames[(int) m_settings.m_protocol]).size() > 1);
+
     ui->speed->clear();
 
     bool gsc = (m_settings.m_protocol == RadioPagingModSettings::Gsc);
@@ -1262,9 +1268,16 @@ void RadioPagingModGUI::displayProtocol()
     ui->mixSwitch512->setValue(m_settings.m_mixSwitchMs[0]);
     ui->mixSwitch1200->setValue(m_settings.m_mixSwitchMs[1]);
     ui->mixSwitch2400->setValue(m_settings.m_mixSwitchMs[2]);
+    // The codepage of the POCSAG messages mixed in
+    {
+        QSignalBlocker mixCharsetBlocker(ui->mixCharset);
+        PagingComposer::fillCodepages(ui->mixCharset, "pocsag", false);
+        PagingComposer::selectCodepage(ui->mixCharset, m_settings.m_pocsagCharset);
+        ui->mixCharset->setVisible(mixOptions && (RadioPagingCharset::codepages("pocsag").size() > 1));
+    }
 
     for (QWidget *w : QList<QWidget*>({ui->mixShared, ui->mixSpeed, ui->mixPolarity, ui->mixDeviation, ui->mixFrames,
-        ui->mixSwitch512, ui->mixSwitch1200, ui->mixSwitch2400})) {
+        ui->mixSwitch512, ui->mixSwitch1200, ui->mixSwitch2400, ui->mixCharset})) {
         w->setEnabled(m_settings.m_flexMixPocsag);
     }
 
@@ -1448,6 +1461,20 @@ void RadioPagingModGUI::makeUIConnections()
     QObject::connect(ui->channelMute, &QToolButton::toggled, this, &RadioPagingModGUI::on_channelMute_toggled);
     QObject::connect(ui->protocol, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_protocol_currentIndexChanged);
     QObject::connect(ui->mode, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_mode_currentIndexChanged);
+    QObject::connect(ui->charset, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
+        const RadioPagingCharset::Key key = PagingComposer::codepageKey(ui->charset);
+        const char *keys[3] = {"pocsagCharset", "flexCharset", "gscCharset"};
+
+        if (m_settings.m_protocol == RadioPagingModSettings::Pocsag) {
+            m_settings.m_pocsagCharset = key;
+        } else if (m_settings.m_protocol == RadioPagingModSettings::Flex) {
+            m_settings.m_flexCharset = key;
+        } else {
+            m_settings.m_gscCharset = key;
+        }
+
+        applySettings(QStringList(keys[(int) m_settings.m_protocol]));
+    });
     QObject::connect(ui->deviation, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_deviation_valueChanged);
     QObject::connect(ui->gain, &QDial::valueChanged, this, &RadioPagingModGUI::on_gain_valueChanged);
     QObject::connect(ui->speed, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_speed_currentIndexChanged);
@@ -1473,6 +1500,10 @@ void RadioPagingModGUI::makeUIConnections()
     QObject::connect(ui->mixShared, &QCheckBox::toggled, this, &RadioPagingModGUI::on_mixShared_toggled);
     QObject::connect(ui->mixSpeed, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_mixSpeed_currentIndexChanged);
     QObject::connect(ui->mixPolarity, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_mixPolarity_currentIndexChanged);
+    QObject::connect(ui->mixCharset, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
+        m_settings.m_pocsagCharset = PagingComposer::codepageKey(ui->mixCharset);
+        applySettings(QStringList("pocsagCharset"));
+    });
     QObject::connect(ui->mixDeviation, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_mixDeviation_valueChanged);
     QObject::connect(ui->mixFrames, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_mixFrames_valueChanged);
     QObject::connect(ui->mixSwitch512, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_mixSwitch512_valueChanged);

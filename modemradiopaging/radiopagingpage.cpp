@@ -20,7 +20,9 @@
 #include <QRegularExpression>
 
 #include "SWGRadioPagingModTx.h"
+#include "SWGRadioPagingCharset.h"
 
+#include "radiopagingcharset.h"
 #include "radiopagingflex.h"
 #include "radiopaginggsc.h"
 #include "radiopagingpocsag.h"
@@ -153,6 +155,14 @@ QString RadioPagingPage::check() const
     if ((m_sendDelay < 0.0) || (m_sendDelay > m_maxScheduleSeconds) || (m_retransmitInterval > m_maxScheduleSeconds)) {
         return "Send delay and retransmission interval must be 0 to 3600 s";
     }
+    if (!m_charset.empty())
+    {
+        QString error = checkCharset(m_protocol, m_charset);
+
+        if (!error.isEmpty()) {
+            return error;
+        }
+    }
 
     return QString();
 }
@@ -269,6 +279,9 @@ MessageRecord RadioPagingPage::toRecord() const
     if (m_sendDelay != 0.0) {
         d.insert("send_delay", m_sendDelay);
     }
+    if (!m_charset.empty()) {
+        d.insert("charset", charsetData(m_charset));
+    }
 
     return r;
 }
@@ -325,6 +338,7 @@ RadioPagingPage RadioPagingPage::fromRecord(const MessageRecord& record)
     page.m_retransmit = d.value("retransmit", 0).toInt();
     page.m_retransmitInterval = d.value("retransmit_interval", -1.0).toDouble();
     page.m_sendDelay = d.value("send_delay", 0.0).toDouble();
+    page.m_charset = charsetKey(d.value("charset"));
     return page;
 }
 
@@ -386,6 +400,10 @@ void RadioPagingPage::toTx(SWGSDRangel::SWGRadioPagingModTx& tx) const
     tx.setRetransmit(m_retransmit);
     tx.setRetransmitInterval((float) m_retransmitInterval);
     tx.setSendDelay((float) m_sendDelay);
+
+    if (!m_charset.empty()) {
+        tx.setCharset(charsetSwg(m_charset));
+    }
 }
 
 RadioPagingPage RadioPagingPage::fromTx(SWGSDRangel::SWGRadioPagingModTx& tx, const QString& defaultProtocol)
@@ -413,6 +431,7 @@ RadioPagingPage RadioPagingPage::fromTx(SWGSDRangel::SWGRadioPagingModTx& tx, co
     page.m_retransmit = tx.getRetransmit();
     page.m_retransmitInterval = tx.getRetransmitInterval();
     page.m_sendDelay = tx.getSendDelay();
+    page.m_charset = charsetKey(tx.getCharset());
 
     if (page.m_type == "voice") {
         page.m_voiceFile = text(tx.getText());
@@ -433,4 +452,62 @@ RadioPagingPage RadioPagingPage::fromTx(SWGSDRangel::SWGRadioPagingModTx& tx, co
     }
 
     return page;
+}
+
+QVariantMap RadioPagingPage::charsetData(const RadioPagingCharset::Key& key)
+{
+    QVariantMap data;
+    data.insert("vendor", QString::fromStdString(key.m_vendor));
+    data.insert("model", QString::fromStdString(key.m_model));
+    data.insert("codepage", QString::fromStdString(key.m_codepage));
+    return data;
+}
+
+RadioPagingCharset::Key RadioPagingPage::charsetKey(const QVariant& data)
+{
+    const QVariantMap map = data.toMap();
+    RadioPagingCharset::Key key;
+    key.m_vendor = map.value("vendor").toString().trimmed().toStdString();
+    key.m_model = map.value("model").toString().trimmed().toStdString();
+    key.m_codepage = map.value("codepage").toString().trimmed().toStdString();
+    return key;
+}
+
+SWGSDRangel::SWGRadioPagingCharset *RadioPagingPage::charsetSwg(const RadioPagingCharset::Key& key)
+{
+    SWGSDRangel::SWGRadioPagingCharset *swg = new SWGSDRangel::SWGRadioPagingCharset();
+    swg->setVendor(new QString(QString::fromStdString(key.m_vendor)));
+    swg->setModel(new QString(QString::fromStdString(key.m_model)));
+    swg->setCodepage(new QString(QString::fromStdString(key.m_codepage)));
+    return swg;
+}
+
+RadioPagingCharset::Key RadioPagingPage::charsetKey(SWGSDRangel::SWGRadioPagingCharset *swg)
+{
+    auto text = [](QString *s) { return s ? s->trimmed().toStdString() : std::string(); };
+    RadioPagingCharset::Key key;
+
+    if (swg)
+    {
+        key.m_vendor = text(swg->getVendor());
+        key.m_model = text(swg->getModel());
+        key.m_codepage = text(swg->getCodepage());
+    }
+
+    return key;
+}
+
+QString RadioPagingPage::checkCharset(const QString& protocol, const RadioPagingCharset::Key& key)
+{
+    if (!RadioPagingCharset::find(protocol.toStdString(), key)) {
+        return QString("%1 is not a codepage of %2").arg(charsetText(key)).arg(protocol);
+    }
+
+    return QString();
+}
+
+QString RadioPagingPage::charsetText(const RadioPagingCharset::Key& key)
+{
+    return QString("%1 / %2 / %3").arg(QString::fromStdString(key.m_vendor), QString::fromStdString(key.m_model),
+        QString::fromStdString(key.m_codepage));
 }

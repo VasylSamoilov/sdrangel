@@ -48,6 +48,7 @@
 #include "gui/dialogpositioner.h"
 #include "gui/crightclickenabler.h"
 #include "gui/audioselectdialog.h"
+#include "gui/pagingcomposer.h"
 #include "dsp/dspengine.h"
 #include "maincore.h"
 
@@ -489,6 +490,14 @@ RadioPagingDemodGUI::RadioPagingDemodGUI(PluginAPI* pluginAPI, DeviceUISet *devi
     CRightClickEnabler *recordRightClickEnabler = new CRightClickEnabler(ui->gscVoiceRecord);
     connect(recordRightClickEnabler, SIGNAL(rightClick(const QPoint &)), this, SLOT(voiceDirectorySelect(const QPoint &)));
 
+    PagingComposer::fillCodepages(ui->pocsagCharset, "pocsag", false);
+    PagingComposer::fillCodepages(ui->flexCharset, "flex", false);
+    PagingComposer::fillCodepages(ui->gscCharset, "gsc", false);
+    // A protocol with a single codepage has no choice
+    ui->pocsagCharset->setVisible(RadioPagingCharset::codepages("pocsag").size() > 1);
+    ui->flexCharset->setVisible(RadioPagingCharset::codepages("flex").size() > 1);
+    ui->gscCharset->setVisible(RadioPagingCharset::codepages("gsc").size() > 1);
+
     displaySettings();
     makeUIConnections();
     applySettings(QStringList(), true);
@@ -536,6 +545,9 @@ void RadioPagingDemodGUI::displaySettings()
     ui->pocsagDeviation->setValue(m_settings.m_pocsagDeviation);
     ui->flexDeviation->setValue(m_settings.m_flexDeviation);
     ui->flexMaxMessageNumber->setValue(m_settings.m_flexMaxMessageNumber);
+    PagingComposer::selectCodepage(ui->pocsagCharset, m_settings.m_pocsagCharset);
+    PagingComposer::selectCodepage(ui->flexCharset, m_settings.m_flexCharset);
+    PagingComposer::selectCodepage(ui->gscCharset, m_settings.m_gscCharset);
     ui->pocsagEnabled->setChecked(m_settings.m_pocsagEnabled);
     ui->flexEnabled->setChecked(m_settings.m_flexEnabled);
     ui->gscEnabled->setChecked(m_settings.m_gscEnabled);
@@ -804,6 +816,18 @@ void RadioPagingDemodGUI::makeUIConnections()
     QObject::connect(ui->pocsagDeviation, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingDemodGUI::on_pocsagDeviation_valueChanged);
     QObject::connect(ui->flexDeviation, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingDemodGUI::on_flexDeviation_valueChanged);
     QObject::connect(ui->flexMaxMessageNumber, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingDemodGUI::on_flexMaxMessageNumber_valueChanged);
+    QObject::connect(ui->pocsagCharset, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
+        m_settings.m_pocsagCharset = PagingComposer::codepageKey(ui->pocsagCharset);
+        applySettings(QStringList("pocsagCharset"));
+    });
+    QObject::connect(ui->flexCharset, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
+        m_settings.m_flexCharset = PagingComposer::codepageKey(ui->flexCharset);
+        applySettings(QStringList("flexCharset"));
+    });
+    QObject::connect(ui->gscCharset, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
+        m_settings.m_gscCharset = PagingComposer::codepageKey(ui->gscCharset);
+        applySettings(QStringList("gscCharset"));
+    });
     QObject::connect(ui->pocsagEnabled, &QAbstractButton::clicked, this, &RadioPagingDemodGUI::on_pocsagEnabled_clicked);
     QObject::connect(ui->flexEnabled, &QAbstractButton::clicked, this, &RadioPagingDemodGUI::on_flexEnabled_clicked);
     QObject::connect(ui->gscEnabled, &QAbstractButton::clicked, this, &RadioPagingDemodGUI::on_gscEnabled_clicked);

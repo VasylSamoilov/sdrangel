@@ -716,21 +716,28 @@ void RadioPagingFlexTxStream::buildFrame()
     RadioPagingFlexEncoder::Frame frame = m_encoders[p].buildFrame(m_frame);
     std::vector<uint64_t> ids;
     std::vector<uint64_t> repeatIds;
+    std::vector<RadioPagingFlexEncoder::SentStatus> status;
+    std::vector<RadioPagingFlexEncoder::SentStatus> repeatStatus;
 
-    for (uint32_t encoderId : frame.m_sentIds)
+    for (size_t i = 0; i < frame.m_sentIds.size(); i++)
     {
-        auto it = m_ids[p].find(encoderId);
+        auto it = m_ids[p].find(frame.m_sentIds[i]);
 
-        if (it != m_ids[p].end()) {
+        if (it != m_ids[p].end())
+        {
             ids.push_back(it->second);
+            status.push_back((i < frame.m_sentStatus.size()) ? frame.m_sentStatus[i] : RadioPagingFlexEncoder::SentStatus());
         }
     }
-    for (uint32_t encoderId : frame.m_retransmittedIds)
+    for (size_t i = 0; i < frame.m_retransmittedIds.size(); i++)
     {
-        auto it = m_ids[p].find(encoderId);
+        auto it = m_ids[p].find(frame.m_retransmittedIds[i]);
 
-        if (it != m_ids[p].end()) {
+        if (it != m_ids[p].end())
+        {
             repeatIds.push_back(it->second);
+            repeatStatus.push_back((i < frame.m_retransmittedStatus.size()) ? frame.m_retransmittedStatus[i]
+                : RadioPagingFlexEncoder::SentStatus());
         }
     }
 
@@ -772,6 +779,8 @@ void RadioPagingFlexTxStream::buildFrame()
         {
             block.m_ids = ids;
             block.m_repeatIds = repeatIds;
+            block.m_status = status;
+            block.m_repeatStatus = repeatStatus;
             block.m_failedIds = failedIds;
         }
 

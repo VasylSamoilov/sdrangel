@@ -54,6 +54,9 @@ extern const RadioPagingCharset::Table flexLinguistLatin1;
 extern const RadioPagingCharset::Table flexLinguistLatin2;
 extern const RadioPagingCharset::Table flexLinguistLatin3;
 extern const RadioPagingCharset::Table flexLinguistLatin4;
+
+// Special formats on top of a table
+extern const RadioPagingCharset::Transcoder beepwearProAlarm;    // FLEX: Timex BeepwearPRO alarm command, over ASCII
 extern const RadioPagingCharset::Table flexLinguistPolish;
 extern const RadioPagingCharset::Table flexLinguistTurkish;
 extern const RadioPagingCharset::Table flexLinguistVietnamese;

@@ -87,6 +87,29 @@ check "FLEX: alphanumeric with 2 copies is accepted" '[ "$(tx 0 "{\"protocol\":\
 check "POCSAG: alphanumeric with 2 copies is accepted" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":1100003,\"type\":\"alphanumeric\",\"retransmit\":2,\"retransmitInterval\":3,\"sendDelay\":2,\"text\":\"POCSAG COPIES\"}")" = 202 ]'
 check "FLEX: a group message is accepted" '[ "$(tx 0 "{\"protocol\":\"flex\",\"type\":\"alphanumeric\",\"groupMembers\":\"1100010, 1100011\",\"text\":\"GROUP TEXT\"}")" = 202 ]'
 
+# Codepages: the text of a page is encoded with its codepage, else the one of the channel; a character without a
+# code is refused. The receivers decode with theirs
+GRUSSE=$(printf 'Gr\303\274\303\237e')
+# Ukrainian: pryvit has the i that the KOI-7 Cyrillic of the FLEX Linguist does not have; dobryi den is in it
+PRYVIT=$(printf '\320\277\321\200\320\270\320\262\321\226\321\202')
+DOBRYI=$(printf '\320\224\320\276\320\261\321\200\320\270\320\271 \320\264\320\265\320\275\321\214')
+# Codepages: vendor, model and codepage in the protocol of the field; the records have the keys sorted
+GERMAN='{"vendor":"generic","model":"generic","codepage":"latin-german"}'
+CYRILLIC='{"vendor":"motorola","model":"linguist","codepage":"cyrillic"}'
+GERMAN_REC='"charset":{"codepage":"latin-german","model":"generic","vendor":"generic"}'
+CYRILLIC_REC='"charset":{"codepage":"cyrillic","model":"linguist","vendor":"motorola"}'
+check "POCSAG: a character without a code in the codepage is refused" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":1100005,\"type\":\"alphanumeric\",\"text\":\"$GRUSSE\"}")" = 400 ]'
+check "POCSAG: a FLEX codepage is refused" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":1100005,\"type\":\"alphanumeric\",\"charset\":$CYRILLIC,\"text\":\"x\"}")" = 400 ]'
+check "POCSAG: German text with the German codepage is accepted" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":1100005,\"type\":\"alphanumeric\",\"charset\":$GERMAN,\"text\":\"$GRUSSE\"}")" = 202 ]'
+check "the codepage setting of a transmitter must be one of the protocol" '[ "$(curl_code PATCH /deviceset/0/channel/0/settings "{\"channelType\":\"RadioPagingMod\",\"direction\":1,\"RadioPagingModSettings\":{\"flexCharset\":$GERMAN}}")" = 400 ]'
+curl_code PATCH /deviceset/0/channel/0/settings "{\"channelType\":\"RadioPagingMod\",\"direction\":1,\"RadioPagingModSettings\":{\"flexCharset\":$CYRILLIC}}" > /dev/null
+check "FLEX: a Ukrainian i without a code in the codepage of the channel is refused" '[ "$(tx 0 "{\"protocol\":\"flex\",\"capcode\":1100006,\"type\":\"alphanumeric\",\"text\":\"$PRYVIT\"}")" = 400 ]'
+check "FLEX: Ukrainian text with the codepage of the channel is accepted" '[ "$(tx 0 "{\"protocol\":\"flex\",\"capcode\":1100006,\"type\":\"alphanumeric\",\"text\":\"$DOBRYI\"}")" = 202 ]'
+# BeepwearPRO alarm: a codepage with a special format, the text key=value
+BEEPWEAR='{"vendor":"timex","model":"beepwear-pro","codepage":"alarm"}'
+check "FLEX: a BeepwearPRO alarm without its minute is refused" '[ "$(tx 0 "{\"protocol\":\"flex\",\"capcode\":1100007,\"type\":\"alphanumeric\",\"charset\":$BEEPWEAR,\"text\":\"hour=7 msg=Wake up\"}")" = 400 ]'
+check "FLEX: a BeepwearPRO alarm is accepted" '[ "$(tx 0 "{\"protocol\":\"flex\",\"capcode\":1100007,\"type\":\"alphanumeric\",\"charset\":$BEEPWEAR,\"text\":\"hour=7 min=0 msg=Wake up\"}")" = 202 ]'
+
 # The page waits for the modulator to announce itself (every 5 s)
 check "a page with a copy is accepted by the message center" '[ "$(curl_code POST /featureset/feature/0/actions "{\"featureType\":\"MessageCenter\",\"MessageCenterActions\":{\"post\":{\"id\":\"p-rep\",\"transmitter\":\"tp\",\"protocol\":\"pocsag\",\"address\":\"1100004\",\"type\":\"alphanumeric\",\"retransmit\":1,\"retransmitInterval\":2,\"text\":\"PAGE COPY\"}}}")" = 202 ]'
 
@@ -102,8 +125,11 @@ check "POCSAG: a record for the message and each copy" '[ "$(count tx 1100003)" 
 check "page: a record for the page and its copy" '[ "$(count tx 1100004)" = 2 ]'
 check "FLEX: the copies have R = 0 and their number" '[[ "$(records tx 1100002 | grep "\"retransmission\":1" | grep -c "\"retrieval\":false")" = 1 && "$(records tx 1100002 | grep "\"retransmission\":2" | grep -c "\"retrieval\":false")" = 1 ]]'
 check "page: sent once, with its first transmission" '[[ "$(report | sed "s/},{/}\n{/g" | grep "\"id\":\"p-rep\"" | grep -c "\"state\":\"sent\"")" -ge 1 ]]'
-check "the modulators report each message once" '[ "$(sent 0)" = 2 ] && [ "$(sent 1)" = 2 ]'
+check "the modulators report each message once" '[ "$(sent 0)" = 4 ] && [ "$(sent 1)" = 3 ]'
+check "FLEX: the BeepwearPRO alarm record has the key=value text and its codepage" '[[ "$(records tx 1100007)" == *"\"text\":\"hour=7 min=0 msg=Wake up\""* && "$(records tx 1100007)" == *"\"model\":\"beepwear-pro\""* ]]'
 check "FLEX: a record for the group message, with its pagers" '[[ "$(report | sed "s/},{/}\n{/g" | grep "\"direction\":\"tx\"" | grep "GROUP TEXT" | grep -c "group_members")" = 1 ]]'
+check "POCSAG: the record sent has the text, its codepage and the message bits" '[[ "$(records tx 1100005)" == *"$GRUSSE"* && "$(records tx 1100005)" == *"$GERMAN_REC"* && "$(records tx 1100005)" == *"\"rawBits\":40"* ]]'
+check "FLEX: the record sent has the codepage of the channel" '[[ "$(records tx 1100006)" == *"$DOBRYI"* && "$(records tx 1100006)" == *"$CYRILLIC_REC"* ]]'
 sleep 2
 curl_code DELETE /deviceset/0/device/run > /dev/null
 curl_code DELETE /deviceset/1/device/run > /dev/null
@@ -119,8 +145,9 @@ for ds in 2 3; do
     curl_code PATCH "/deviceset/$ds/device/settings" "{\"deviceHwType\":\"FileInput\",\"direction\":0,\"fileInputSettings\":{\"fileName\":\"$in\",\"accelerationFactor\":1,\"loop\":0}}" > /dev/null
     curl_code POST "/deviceset/$ds/channel" '{"channelType":"RadioPagingDemod","direction":0}' > /dev/null
 done
-curl_code PATCH /deviceset/2/channel/0/settings '{"channelType":"RadioPagingDemod","direction":0,"RadioPagingDemodSettings":{"pocsagEnabled":0,"flexEnabled":1,"gscEnabled":0,"flexDeviation":4800,"channelAlias":"rf"}}' > /dev/null
-curl_code PATCH /deviceset/3/channel/0/settings '{"channelType":"RadioPagingDemod","direction":0,"RadioPagingDemodSettings":{"pocsagEnabled":1,"flexEnabled":0,"gscEnabled":0,"pocsagDeviation":4500,"channelAlias":"rp"}}' > /dev/null
+curl_code PATCH /deviceset/2/channel/0/settings '{"channelType":"RadioPagingDemod","direction":0,"RadioPagingDemodSettings":{"pocsagEnabled":0,"flexEnabled":1,"gscEnabled":0,"flexDeviation":4800,"channelAlias":"rf","flexCharset":{"vendor":"motorola","model":"linguist","codepage":"cyrillic"}}}' > /dev/null
+curl_code PATCH /deviceset/3/channel/0/settings '{"channelType":"RadioPagingDemod","direction":0,"RadioPagingDemodSettings":{"pocsagEnabled":1,"flexEnabled":0,"gscEnabled":0,"pocsagDeviation":4500,"channelAlias":"rp","pocsagCharset":{"vendor":"generic","model":"generic","codepage":"latin-german"}}}' > /dev/null
+check "the codepage setting of a receiver must be one of the protocol" '[ "$(curl_code PATCH /deviceset/3/channel/0/settings "{\"channelType\":\"RadioPagingDemod\",\"direction\":0,\"RadioPagingDemodSettings\":{\"gscCharset\":$CYRILLIC}}")" = 400 ]'
 curl_code POST /deviceset/2/device/run > /dev/null
 curl_code POST /deviceset/3/device/run > /dev/null
 
@@ -132,9 +159,14 @@ check "FLEX: the message received has R = 1, the copies R = 0" '[[ "$(records rx
 check "FLEX: the copies have the number of the message" '[ "$(records rx 1100002 | grep -c "\"message_number\":0")" = 3 ]'
 check "POCSAG: received once, the copies marked as duplicates" '[ "$(countRx 1100003 none)" = 1 ] && [ "$(countRx 1100003 dup)" = 2 ]'
 check "POCSAG page: received once, its copy marked as a duplicate" '[ "$(countRx 1100004 none)" = 1 ] && [ "$(countRx 1100004 dup)" = 1 ]'
-check "FLEX: the group message is received on its temporary address with its pagers" '[[ "$(records rx 2029568 | grep "GROUP TEXT" | grep -c "group_capcodes")" -ge 1 ]]'
+check "FLEX: the group message is received on its temporary address with its pagers" '[[ "$(records rx 2029568 | grep "\"msgType\":\"alphanumeric\"" | grep -c "group_capcodes")" -ge 1 ]]'
 check "FLEX: both pagers have their short instruction" '[ "$(report | sed "s/},{/}\n{/g" | grep "\"direction\":\"rx\"" | grep -c "short_instruction")" -ge 2 ]'
 check "FLEX: the System Event Notification is received in frames, its flags" '[ "$(report | sed "s/},{/}\n{/g" | grep "\"direction\":\"rx\"" | grep -c "\"event_flags\":5")" -ge 3 ]'
+rawData() { records "$1" "$2" | head -1 | grep -o "\"rawData\":\"[^\"]*\""; }
+check "POCSAG: received in the German codepage, the bits as sent" '[[ "$(records rx 1100005)" == *"$GRUSSE"* && -n "$(rawData tx 1100005)" && "$(rawData tx 1100005)" == "$(rawData rx 1100005)" ]]'
+check "FLEX: received in the Cyrillic codepage" '[[ "$(records rx 1100006)" == *"$DOBRYI"* && "$(records rx 1100006)" == *"$CYRILLIC_REC"* ]]'
+# How the FLEX messages went is reported when they are in their frame: message number, R, fragments
+check "FLEX: the records sent have the message number, R and the fragments" '[[ "$(records tx 1100002 | grep -c "\"message_number\":0")" = 3 && "$(records tx 1100002 | grep -v "retransmission" | grep "\"retrieval\":true" | grep -c "\"fragment_count\":1")" = 1 ]]'
 
 if [ "$failed" -ne 0 ]; then
     report | sed 's/},{/}\n{/g' | grep "11000" | sed 's/"ber".*"direction"/"direction"/; s/"errorsCorrected".*"id"/"id"/; s/"rawBits".*"text"/"text"/'

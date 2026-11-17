@@ -24,9 +24,11 @@
 
 #include "export.h"
 #include "util/messagerecord.h"
+#include "radiopagingcharset.h"
 
 namespace SWGSDRangel {
     class SWGRadioPagingModTx;
+    class SWGRadioPagingCharset;
 }
 
 // A page to transmit: the fields of the tx action of the modulator and of the post of the message center.
@@ -47,6 +49,9 @@ struct MODEMRADIOPAGING_API RadioPagingPage
     //!< not used. The message goes to a temporary address that a short instruction tells the pagers (STD-43A 5.2)
     QString m_groupMembers;
     QString m_text;
+    //!< Alphanumeric (FLEX secure type 0 too): the codepage of the text in the protocol of the page, none (no vendor)
+    //!< for the one of the transmitter
+    RadioPagingCharset::Key m_charset;
     QString m_voiceFile;                //!< GSC voice: the sound file
     int m_speed = 0;                    //!< POCSAG baud, 0: the channel setting
     int m_polarity = -1;                //!< -1 the channel setting, 0 normal, 1 inverted
@@ -84,6 +89,18 @@ struct MODEMRADIOPAGING_API RadioPagingPage
     //!< protocol of the channel)
     void toTx(SWGSDRangel::SWGRadioPagingModTx& tx) const;
     static RadioPagingPage fromTx(SWGSDRangel::SWGRadioPagingModTx& tx, const QString& defaultProtocol);
+
+    //!< A codepage key in the records (protocolData charset): vendor, model and codepage; the protocol is the one of the
+    //!< record
+    static QVariantMap charsetData(const RadioPagingCharset::Key& key);
+    static RadioPagingCharset::Key charsetKey(const QVariant& data);
+    //!< A codepage key in the WebAPI, nullptr for none; the key of a WebAPI object (none for nullptr)
+    static SWGSDRangel::SWGRadioPagingCharset *charsetSwg(const RadioPagingCharset::Key& key);
+    static RadioPagingCharset::Key charsetKey(SWGSDRangel::SWGRadioPagingCharset *swg);
+    //!< Empty if the key is a codepage of the protocol, else why not
+    static QString checkCharset(const QString& protocol, const RadioPagingCharset::Key& key);
+    //!< The key as the user reads it: vendor / model / codepage
+    static QString charsetText(const RadioPagingCharset::Key& key);
 };
 
 #endif // MODEMRADIOPAGING_RADIOPAGINGPAGE_H

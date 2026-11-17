@@ -5,6 +5,7 @@
 #include <QJsonObject>
 #include <QString>
 #include "SWGObject.h"
+#include "SWGRadioPagingCharset.h"
 #include "export.h"
 
 namespace SWGSDRangel {
@@ -64,7 +65,11 @@ public:
     void setRetransmitInterval(float value);
     float getSendDelay();
     void setSendDelay(float value);
+    SWGRadioPagingCharset* getCharset();
+    void setCharset(SWGRadioPagingCharset* value);
 private:
+    SWGRadioPagingCharset* m_charset = nullptr;
+    bool m_charsetIsSet = false;
     QString* m_groupMembers = nullptr;
     bool m_groupMembersIsSet = false;
     qint32 m_retransmit = 0;

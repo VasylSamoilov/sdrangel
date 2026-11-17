@@ -350,6 +350,7 @@
 #include "SWGRadioAstronomySettings.h"
 #include "SWGRadioClockReport.h"
 #include "SWGRadioClockSettings.h"
+#include "SWGRadioPagingCharset.h"
 #include "SWGRadioPagingDemodReport.h"
 #include "SWGRadioPagingDemodSettings.h"
 #include "SWGRadioPagingModActions.h"
@@ -2178,6 +2179,11 @@ namespace SWGSDRangel {
     }
     if(QString("SWGRadioPagingModSettings").compare(type) == 0) {
       SWGRadioPagingModSettings *obj = new SWGRadioPagingModSettings();
+      obj->init();
+      return obj;
+    }
+    if(QString("SWGRadioPagingCharset").compare(type) == 0) {
+      SWGRadioPagingCharset *obj = new SWGRadioPagingCharset();
       obj->init();
       return obj;
     }

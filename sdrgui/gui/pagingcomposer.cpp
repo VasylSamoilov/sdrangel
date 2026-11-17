@@ -27,8 +27,10 @@
 #include <QRegularExpressionValidator>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QStandardItemModel>
 #include <QToolButton>
 
+#include "radiopagingcharset.h"
 #include "radiopagingflexscheduler.h"
 #include "radiopaginggsc.h"
 #include "radiopagingtxstream.h"
@@ -101,6 +103,10 @@ PagingComposer::PagingComposer(QWidget *parent) :
 
     m_textLabel = new QLabel(tr("Text"), this);
     m_text = new QLineEdit(this);
+    m_charset = new QComboBox(this);
+    m_charset->setMaximumWidth(160);
+    m_charset->setToolTip(tr("Codepage of the text: the pager shows the glyphs of the codes. Default is the codepage set for the "
+        "channel. A character without a code in it is refused; <0xNN> sends the code NN"));
     m_browse = new QToolButton(this);
     m_browse->setText("...");
     m_browse->setToolTip(tr("Choose the sound file"));
@@ -194,6 +200,7 @@ PagingComposer::PagingComposer(QWidget *parent) :
     textRow->setSpacing(3);
     textRow->addWidget(m_voiceSource);
     textRow->addWidget(m_text, 1);
+    textRow->addWidget(m_charset);
     textRow->addWidget(m_browse);
     textRow->addWidget(m_micInput);
     QHBoxLayout *scheduleRow = new QHBoxLayout();
@@ -232,6 +239,7 @@ PagingComposer::PagingComposer(QWidget *parent) :
     connect(m_protocol, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
         fillFunctions();
         fillTypes();
+        fillCodepages(m_charset, protocol(), true);
         display();
         emit selectionChanged();
     });
@@ -240,6 +248,7 @@ PagingComposer::PagingComposer(QWidget *parent) :
     connect(m_voiceSource, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() { display(); emit selectionChanged(); });
     connect(m_shortType, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &PagingComposer::display);
     connect(m_secureType, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &PagingComposer::display);
+    connect(m_charset, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &PagingComposer::display);
     connect(m_retransmit, QOverload<int>::of(&QSpinBox::valueChanged), this, &PagingComposer::display);
     connect(m_browse, &QToolButton::clicked, this, &PagingComposer::browse);
     connect(m_micInput, &QToolButton::clicked, this, &PagingComposer::microphoneInputRequested);
@@ -268,6 +277,7 @@ void PagingComposer::setProtocols(const QStringList& protocols)
     m_protocol->setVisible(protocols.size() > 1);
     fillFunctions();
     fillTypes();
+    fillCodepages(m_charset, protocol(), true);
     display();
 }
 
@@ -369,6 +379,84 @@ void PagingComposer::fillFunctions()
     m_function->setToolTip(gsc ? tr("GSC address number 1 to 4, function A to D") : tr("POCSAG function A to D"));
 }
 
+void PagingComposer::fillCodepages(QComboBox *combo, const QString& protocol, bool defaultEntry)
+{
+    QSignalBlocker blocker(combo);
+    const RadioPagingCharset::Key current = codepageKey(combo);
+    QStringList vendors;
+
+    combo->clear();
+
+    if (defaultEntry) {
+        combo->addItem(tr("Default"), QVariant());
+    }
+
+    // Grouped by vendor: a header that cannot be selected, then the models and codepages of the vendor
+    const std::vector<const RadioPagingCharset::Codepage*> codepages = RadioPagingCharset::codepages(protocol.toStdString());
+
+    for (const RadioPagingCharset::Codepage *codepage : codepages)
+    {
+        if (!vendors.contains(codepage->m_vendor)) {
+            vendors.append(codepage->m_vendor);
+        }
+    }
+
+    for (const QString& vendor : vendors)
+    {
+        combo->addItem(vendor);
+        QStandardItemModel *model = qobject_cast<QStandardItemModel*>(combo->model());
+
+        if (model)
+        {
+            QStandardItem *header = model->item(combo->count() - 1);
+            header->setFlags(header->flags() & ~(Qt::ItemIsSelectable | Qt::ItemIsEnabled));
+            QFont font = header->font();
+            font.setBold(true);
+            header->setFont(font);
+        }
+
+        for (const RadioPagingCharset::Codepage *codepage : codepages)
+        {
+            if (vendor != codepage->m_vendor) {
+                continue;
+            }
+
+            combo->addItem(QString("  %1").arg(QString::fromUtf8(codepage->m_label)),
+                QStringList({codepage->m_vendor, codepage->m_model, codepage->m_codepage}));
+            combo->setItemData(combo->count() - 1, QString("%1 / %2 / %3").arg(codepage->m_vendor, codepage->m_model, codepage->m_codepage),
+                Qt::ToolTipRole);
+        }
+    }
+
+    selectCodepage(combo, current);
+}
+
+void PagingComposer::selectCodepage(QComboBox *combo, const RadioPagingCharset::Key& key)
+{
+    QSignalBlocker blocker(combo);
+    int index = key.empty() ? -1 : combo->findData(QStringList({QString::fromStdString(key.m_vendor), QString::fromStdString(key.m_model),
+        QString::fromStdString(key.m_codepage)}));
+
+    // Else the first entry that can be chosen: Default, or the first codepage (not a vendor header)
+    const QStandardItemModel *model = qobject_cast<const QStandardItemModel*>(combo->model());
+
+    for (int i = 0; (index < 0) && (i < combo->count()); i++)
+    {
+        if (!model || (model->item(i)->flags() & Qt::ItemIsEnabled)) {
+            index = i;
+        }
+    }
+
+    combo->setCurrentIndex(std::max(0, index));
+}
+
+RadioPagingCharset::Key PagingComposer::codepageKey(const QComboBox *combo)
+{
+    const QStringList data = combo->currentData().toStringList();
+    return (data.size() == 3) ? RadioPagingCharset::Key{data[0].toStdString(), data[1].toStdString(), data[2].toStdString()}
+        : RadioPagingCharset::Key();
+}
+
 // The types of the protocol; the selected type is kept if it is there
 void PagingComposer::fillTypes()
 {
@@ -456,6 +544,10 @@ void PagingComposer::display()
 
     m_secureType->setVisible(secure);
 
+    // The codepage of the characters: alphanumeric, FLEX secure type 00; a protocol with a single codepage has no choice
+    m_charset->setVisible(!microphone && ((type == "alphanumeric") || (secure && (m_secureType->currentIndex() == 0)))
+        && (RadioPagingCharset::codepages(proto.toStdString()).size() > 1));
+
     // Copies and send delay: network mode (POCSAG and FLEX); FLEX copies of the numbered types on a network
     // with message numbering (STD-43A 4.3.7)
     const bool scheduled = m_network && !gsc;
@@ -477,12 +569,23 @@ void PagingComposer::display()
         : hexText
         ? tr("Hex digits: digit i holds the data bits 4i to 4i+3, its least significant bit sent first. Binary: the bits are a "
              "multiple of B. Enter to send")
-        : tr("Message text. Numeric: 0-9, space, U, -, ], [. Alphanumeric: 7-bit characters. Enter to send"));
+        : tr("Message text. Numeric: 0-9, space, U, -, ], [. Alphanumeric: the characters of the codepage, <0xNN> for any code. "
+             "Enter to send"));
 
     if (!m_sendText.isEmpty()) {
         m_send->setText(m_sendText);
     } else {
         m_send->setText(microphone ? tr("Send voice") : tr("Send"));
+    }
+
+    // A special format (key=value command of a pager): its hint
+    const RadioPagingCharset::Codepage *codepage = m_charset->isVisibleTo(this)
+        ? RadioPagingCharset::find(proto.toStdString(), codepageKey(m_charset)) : nullptr;
+
+    if (codepage && codepage->m_transcoder)
+    {
+        m_text->setPlaceholderText(tr("key=value ..."));
+        m_text->setToolTip(QString::fromUtf8(codepage->m_transcoder->m_hint));
     }
 }
 
@@ -521,6 +624,7 @@ RadioPagingPage PagingComposer::page() const
     p.m_headerMessage = m_headerMessage->isChecked();
     p.m_statusInfo = m_statusInfo->isChecked();
     p.m_secureType = m_secureType->currentIndex();
+    p.m_charset = m_charset->isVisibleTo(this) ? codepageKey(m_charset) : RadioPagingCharset::Key();
 
     if (m_retransmit->isVisible())
     {

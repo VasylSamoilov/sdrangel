@@ -272,6 +272,19 @@
        </widget>
       </item>
       <item>
+       <widget class="QComboBox" name="charset">
+        <property name="maximumSize">
+         <size>
+          <width>160</width>
+          <height>16777215</height>
+         </size>
+        </property>
+        <property name="toolTip">
+         <string>Codepage of the alphanumeric messages of the protocol, for the pages that have none: the glyphs of the pager for the codes sent</string>
+        </property>
+       </widget>
+      </item>
+      <item>
        <spacer name="protocolSpacer">
         <property name="orientation">
          <enum>Qt::Horizontal</enum>
@@ -528,6 +541,13 @@
       </property>
       <property name="value">
        <number>4500</number>
+      </property>
+     </widget>
+    </item>
+    <item row="5" column="2" colspan="2">
+     <widget class="QComboBox" name="mixCharset">
+      <property name="toolTip">
+       <string>Codepage of the POCSAG alphanumeric messages mixed in, for the pages that have none</string>
       </property>
      </widget>
     </item>

@@ -25,6 +25,7 @@
 #include "settings/serializable.h"
 #include "audio/audiodevicemanager.h"
 #include "radiopagingvoicestore.h"
+#include "radiopagingcharset.h"
 #include "radiopagingdemodsettings.h"
 
 const int RadioPagingDemodSettings::m_nbPocsagSpeeds;
@@ -59,6 +60,38 @@ QString RadioPagingDemodSettings::effectiveChannelAlias(qint64 frequency) const
     return alias.isEmpty() ? QString::number(frequency) : alias;
 }
 
+RadioPagingCharset::Key RadioPagingDemodSettings::defaultCharset(const char *protocol)
+{
+    const RadioPagingCharset::Codepage *codepage = RadioPagingCharset::defaultFor(protocol);
+    return codepage ? codepage->key() : RadioPagingCharset::Key();
+}
+
+namespace {
+
+void writeCharset(SimpleSerializer& s, int tag, const RadioPagingCharset::Key& key)
+{
+    s.writeString(tag, QString::fromStdString(key.m_vendor));
+    s.writeString(tag + 1, QString::fromStdString(key.m_model));
+    s.writeString(tag + 2, QString::fromStdString(key.m_codepage));
+}
+
+RadioPagingCharset::Key readCharset(SimpleDeserializer& d, int tag, const char *protocol)
+{
+    const RadioPagingCharset::Key def = RadioPagingDemodSettings::defaultCharset(protocol);
+    QString vendor, model, codepage;
+    d.readString(tag, &vendor, QString::fromStdString(def.m_vendor));
+    d.readString(tag + 1, &model, QString::fromStdString(def.m_model));
+    d.readString(tag + 2, &codepage, QString::fromStdString(def.m_codepage));
+    return RadioPagingCharset::Key{vendor.toStdString(), model.toStdString(), codepage.toStdString()};
+}
+
+std::string charsetText(const RadioPagingCharset::Key& key)
+{
+    return key.m_vendor + "/" + key.m_model + "/" + key.m_codepage;
+}
+
+} // namespace
+
 RadioPagingDemodSettings::RadioPagingDemodSettings() :
     m_channelMarker(nullptr),
     m_rollupState(nullptr)
@@ -86,6 +119,9 @@ void RadioPagingDemodSettings::resetToDefaults()
     m_flexMaxMessageNumber = 63;
     m_volume = 1.0f;
     m_audioDeviceName = AudioDeviceManager::m_defaultDeviceName;
+    m_pocsagCharset = defaultCharset("pocsag");
+    m_flexCharset = defaultCharset("flex");
+    m_gscCharset = defaultCharset("gsc");
 
     m_rgbColor = QColor(255, 170, 0).rgb();
     m_title = "Radio Paging Demodulator";
@@ -145,6 +181,9 @@ QByteArray RadioPagingDemodSettings::serialize() const
     s.writeString(35, m_channelAlias);
     s.writeS32(36, m_flexMaxMessageNumber);
     s.writeBlob(37, m_messageColumns);
+    writeCharset(s, 38, m_pocsagCharset);
+    writeCharset(s, 41, m_flexCharset);
+    writeCharset(s, 44, m_gscCharset);
 
     return s.final();
 }
@@ -218,6 +257,9 @@ bool RadioPagingDemodSettings::deserialize(const QByteArray& data)
         d.readS32(36, &m_flexMaxMessageNumber, 63);
         m_flexMaxMessageNumber = std::max(0, std::min(63, m_flexMaxMessageNumber));
         d.readBlob(37, &m_messageColumns);
+        m_pocsagCharset = readCharset(d, 38, "pocsag");
+        m_flexCharset = readCharset(d, 41, "flex");
+        m_gscCharset = readCharset(d, 44, "gsc");
         m_gscVoiceKeepDays = std::max(0, std::min(3650, m_gscVoiceKeepDays));
         m_gscVoiceKeepMin = std::max(0, std::min(100000, m_gscVoiceKeepMin));
 
@@ -285,6 +327,15 @@ void RadioPagingDemodSettings::applySettings(const QStringList& settingsKeys, co
     }
     if (settingsKeys.contains("audioDeviceName")) {
         m_audioDeviceName = settings.m_audioDeviceName;
+    }
+    if (settingsKeys.contains("pocsagCharset")) {
+        m_pocsagCharset = settings.m_pocsagCharset;
+    }
+    if (settingsKeys.contains("flexCharset")) {
+        m_flexCharset = settings.m_flexCharset;
+    }
+    if (settingsKeys.contains("gscCharset")) {
+        m_gscCharset = settings.m_gscCharset;
     }
     if (settingsKeys.contains("rgbColor")) {
         m_rgbColor = settings.m_rgbColor;
@@ -378,6 +429,15 @@ QString RadioPagingDemodSettings::getDebugString(const QStringList& settingsKeys
     }
     if (settingsKeys.contains("audioDeviceName") || force) {
         ostr << " m_audioDeviceName: " << m_audioDeviceName.toStdString();
+    }
+    if (settingsKeys.contains("pocsagCharset") || force) {
+        ostr << " m_pocsagCharset: " << charsetText(m_pocsagCharset);
+    }
+    if (settingsKeys.contains("flexCharset") || force) {
+        ostr << " m_flexCharset: " << charsetText(m_flexCharset);
+    }
+    if (settingsKeys.contains("gscCharset") || force) {
+        ostr << " m_gscCharset: " << charsetText(m_gscCharset);
     }
     if (settingsKeys.contains("rgbColor") || force) {
         ostr << " m_rgbColor: " << m_rgbColor;

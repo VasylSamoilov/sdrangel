@@ -565,6 +565,45 @@
         </property>
        </widget>
       </item>
+      <item row="0" column="5">
+       <widget class="QComboBox" name="pocsagCharset">
+        <property name="maximumSize">
+         <size>
+          <width>160</width>
+          <height>16777215</height>
+         </size>
+        </property>
+        <property name="toolTip">
+         <string>Codepage of the POCSAG alphanumeric messages: the glyphs of the pager shown for the 7-bit codes</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="5">
+       <widget class="QComboBox" name="flexCharset">
+        <property name="maximumSize">
+         <size>
+          <width>160</width>
+          <height>16777215</height>
+         </size>
+        </property>
+        <property name="toolTip">
+         <string>Codepage of the FLEX alphanumeric messages: the glyphs of the pager shown for the 7-bit codes</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="5">
+       <widget class="QComboBox" name="gscCharset">
+        <property name="maximumSize">
+         <size>
+          <width>160</width>
+          <height>16777215</height>
+         </size>
+        </property>
+        <property name="toolTip">
+         <string>Codepage of the GSC alphanumeric messages: the glyphs of the pager shown for the 6-bit codes</string>
+        </property>
+       </widget>
+      </item>
      </layout>
     </item>
    </layout>

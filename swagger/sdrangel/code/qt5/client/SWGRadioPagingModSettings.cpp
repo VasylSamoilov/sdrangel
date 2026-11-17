@@ -10,6 +10,9 @@ void SWGRadioPagingModSettings::cleanup()
 {
     delete m_title; m_title = nullptr;
     delete m_channelAlias; m_channelAlias = nullptr;
+    delete m_pocsagCharset; m_pocsagCharset = nullptr;
+    delete m_flexCharset; m_flexCharset = nullptr;
+    delete m_gscCharset; m_gscCharset = nullptr;
     delete m_gscVoiceDirectory; m_gscVoiceDirectory = nullptr;
     delete m_reverseAPIAddress; m_reverseAPIAddress = nullptr;
     delete m_channelMarker; m_channelMarker = nullptr;
@@ -58,6 +61,9 @@ void SWGRadioPagingModSettings::init()
     m_rgbColor = 0; m_rgbColorIsSet = false;
     m_title = new QString(); m_titleIsSet = false;
     m_channelAlias = new QString(); m_channelAliasIsSet = false;
+    m_pocsagCharset = new SWGRadioPagingCharset(); m_pocsagCharsetIsSet = false;
+    m_flexCharset = new SWGRadioPagingCharset(); m_flexCharsetIsSet = false;
+    m_gscCharset = new SWGRadioPagingCharset(); m_gscCharsetIsSet = false;
     m_gscVoiceDirectory = new QString(); m_gscVoiceDirectoryIsSet = false;
     m_gscVoiceKeepDays = 0; m_gscVoiceKeepDaysIsSet = false;
     m_gscVoiceKeepMin = 0; m_gscVoiceKeepMinIsSet = false;
@@ -115,6 +121,9 @@ void SWGRadioPagingModSettings::fromJsonObject(QJsonObject& json)
     if (json.contains("mixSwitchMs2400")) { ::SWGSDRangel::setValue(&m_mixSwitchMs2400,json["mixSwitchMs2400"],"qint32",""); m_mixSwitchMs2400IsSet = true; }
     if (json.contains("rgbColor")) { ::SWGSDRangel::setValue(&m_rgbColor,json["rgbColor"],"qint32",""); m_rgbColorIsSet = true; }
     if (json.contains("channelAlias")) { ::SWGSDRangel::setValue(&m_channelAlias,json["channelAlias"],"QString","QString"); m_channelAliasIsSet = true; }
+    if (json.contains("pocsagCharset")) { ::SWGSDRangel::setValue(&m_pocsagCharset,json["pocsagCharset"],"SWGRadioPagingCharset","SWGRadioPagingCharset"); m_pocsagCharsetIsSet = true; }
+    if (json.contains("flexCharset")) { ::SWGSDRangel::setValue(&m_flexCharset,json["flexCharset"],"SWGRadioPagingCharset","SWGRadioPagingCharset"); m_flexCharsetIsSet = true; }
+    if (json.contains("gscCharset")) { ::SWGSDRangel::setValue(&m_gscCharset,json["gscCharset"],"SWGRadioPagingCharset","SWGRadioPagingCharset"); m_gscCharsetIsSet = true; }
     if (json.contains("gscVoiceDirectory")) { ::SWGSDRangel::setValue(&m_gscVoiceDirectory,json["gscVoiceDirectory"],"QString","QString"); m_gscVoiceDirectoryIsSet = true; }
     if (json.contains("gscVoiceKeepDays")) { ::SWGSDRangel::setValue(&m_gscVoiceKeepDays,json["gscVoiceKeepDays"],"qint32",""); m_gscVoiceKeepDaysIsSet = true; }
     if (json.contains("gscVoiceKeepMin")) { ::SWGSDRangel::setValue(&m_gscVoiceKeepMin,json["gscVoiceKeepMin"],"qint32",""); m_gscVoiceKeepMinIsSet = true; }
@@ -174,6 +183,9 @@ QJsonObject* SWGRadioPagingModSettings::asJsonObject()
     if (m_mixSwitchMs2400IsSet) { object->insert("mixSwitchMs2400",QJsonValue(m_mixSwitchMs2400)); }
     if (m_rgbColorIsSet) { object->insert("rgbColor",QJsonValue(m_rgbColor)); }
     if (m_channelAlias && (m_channelAliasIsSet || !m_channelAlias->isEmpty())) { toJsonValue(QString("channelAlias"),m_channelAlias,object,QString("QString")); }
+    if (m_pocsagCharset && (m_pocsagCharsetIsSet || m_pocsagCharset->isSet())) { toJsonValue(QString("pocsagCharset"),m_pocsagCharset,object,QString("SWGRadioPagingCharset")); }
+    if (m_flexCharset && (m_flexCharsetIsSet || m_flexCharset->isSet())) { toJsonValue(QString("flexCharset"),m_flexCharset,object,QString("SWGRadioPagingCharset")); }
+    if (m_gscCharset && (m_gscCharsetIsSet || m_gscCharset->isSet())) { toJsonValue(QString("gscCharset"),m_gscCharset,object,QString("SWGRadioPagingCharset")); }
     if (m_gscVoiceDirectory && (m_gscVoiceDirectoryIsSet || !m_gscVoiceDirectory->isEmpty())) { toJsonValue(QString("gscVoiceDirectory"),m_gscVoiceDirectory,object,QString("QString")); }
     if (m_gscVoiceKeepDaysIsSet) { object->insert("gscVoiceKeepDays",QJsonValue(m_gscVoiceKeepDays)); }
     if (m_gscVoiceKeepMinIsSet) { object->insert("gscVoiceKeepMin",QJsonValue(m_gscVoiceKeepMin)); }
@@ -190,7 +202,7 @@ QJsonObject* SWGRadioPagingModSettings::asJsonObject()
 }
 bool SWGRadioPagingModSettings::isSet()
 {
-    return m_channelAliasIsSet || m_gscVoiceDirectoryIsSet || m_gscVoiceKeepDaysIsSet || m_gscVoiceKeepMinIsSet || m_inputFrequencyOffsetIsSet || m_protocolIsSet || m_modeIsSet || m_deviationIsSet || m_gainIsSet || m_channelMuteIsSet || m_rampUpMsIsSet || m_rampDownMsIsSet || m_rampRangeIsSet || m_pocsagSpeedIsSet || m_pocsagInvertedIsSet || m_flexModeIsSet || m_flexInvertedIsSet || m_flexCollapseIsSet || m_flexRoamingIsSet || m_ssidLocalIdIsSet || m_ssidCoverageZoneIsSet || m_ssidCountryCodeIsSet || m_ssidTrafficFlagsIsSet || m_flexTimeIsSet || m_flexTimeFrameZeroIsSet || m_flexTimeZoneMinutesIsSet || m_flexTimeSendZoneIsSet || m_flexTimeDaylightSavingIsSet || m_flexTimeOffsetSecondsIsSet || m_flexNumberingIsSet || m_flexMaxMessageNumberIsSet || m_gscModeIsSet || m_gscInvertedIsSet || m_gscVoiceSecondsIsSet || m_mixPocsagIsSet || m_pocsagDeviationIsSet || m_mixFramesPerMinuteIsSet || m_mixSharedIsSet || m_mixSwitchMs512IsSet || m_mixSwitchMs1200IsSet || m_mixSwitchMs2400IsSet || m_rgbColorIsSet || m_titleIsSet || m_streamIndexIsSet || m_useReverseAPIIsSet || m_reverseAPIAddressIsSet || m_reverseAPIPortIsSet || m_reverseAPIDeviceIndexIsSet || m_reverseAPIChannelIndexIsSet || m_channelMarkerIsSet || m_rollupStateIsSet;
+    return m_channelAliasIsSet || m_pocsagCharsetIsSet || m_flexCharsetIsSet || m_gscCharsetIsSet || m_gscVoiceDirectoryIsSet || m_gscVoiceKeepDaysIsSet || m_gscVoiceKeepMinIsSet || m_inputFrequencyOffsetIsSet || m_protocolIsSet || m_modeIsSet || m_deviationIsSet || m_gainIsSet || m_channelMuteIsSet || m_rampUpMsIsSet || m_rampDownMsIsSet || m_rampRangeIsSet || m_pocsagSpeedIsSet || m_pocsagInvertedIsSet || m_flexModeIsSet || m_flexInvertedIsSet || m_flexCollapseIsSet || m_flexRoamingIsSet || m_ssidLocalIdIsSet || m_ssidCoverageZoneIsSet || m_ssidCountryCodeIsSet || m_ssidTrafficFlagsIsSet || m_flexTimeIsSet || m_flexTimeFrameZeroIsSet || m_flexTimeZoneMinutesIsSet || m_flexTimeSendZoneIsSet || m_flexTimeDaylightSavingIsSet || m_flexTimeOffsetSecondsIsSet || m_flexNumberingIsSet || m_flexMaxMessageNumberIsSet || m_gscModeIsSet || m_gscInvertedIsSet || m_gscVoiceSecondsIsSet || m_mixPocsagIsSet || m_pocsagDeviationIsSet || m_mixFramesPerMinuteIsSet || m_mixSharedIsSet || m_mixSwitchMs512IsSet || m_mixSwitchMs1200IsSet || m_mixSwitchMs2400IsSet || m_rgbColorIsSet || m_titleIsSet || m_streamIndexIsSet || m_useReverseAPIIsSet || m_reverseAPIAddressIsSet || m_reverseAPIPortIsSet || m_reverseAPIDeviceIndexIsSet || m_reverseAPIChannelIndexIsSet || m_channelMarkerIsSet || m_rollupStateIsSet;
 }
 qint64 SWGRadioPagingModSettings::getInputFrequencyOffset() { return m_inputFrequencyOffset; }
 void SWGRadioPagingModSettings::setInputFrequencyOffset(qint64 value) { m_inputFrequencyOffset = value; m_inputFrequencyOffsetIsSet = true; }
@@ -270,6 +282,12 @@ qint32 SWGRadioPagingModSettings::getRgbColor() { return m_rgbColor; }
 void SWGRadioPagingModSettings::setRgbColor(qint32 value) { m_rgbColor = value; m_rgbColorIsSet = true; }
 QString* SWGRadioPagingModSettings::getChannelAlias() { return m_channelAlias; }
 void SWGRadioPagingModSettings::setChannelAlias(QString* value) { if (m_channelAlias != value) { delete m_channelAlias; m_channelAlias = value; } m_channelAliasIsSet = true; }
+SWGRadioPagingCharset* SWGRadioPagingModSettings::getPocsagCharset() { return m_pocsagCharset; }
+void SWGRadioPagingModSettings::setPocsagCharset(SWGRadioPagingCharset* value) { if (m_pocsagCharset != value) { delete m_pocsagCharset; m_pocsagCharset = value; } m_pocsagCharsetIsSet = true; }
+SWGRadioPagingCharset* SWGRadioPagingModSettings::getFlexCharset() { return m_flexCharset; }
+void SWGRadioPagingModSettings::setFlexCharset(SWGRadioPagingCharset* value) { if (m_flexCharset != value) { delete m_flexCharset; m_flexCharset = value; } m_flexCharsetIsSet = true; }
+SWGRadioPagingCharset* SWGRadioPagingModSettings::getGscCharset() { return m_gscCharset; }
+void SWGRadioPagingModSettings::setGscCharset(SWGRadioPagingCharset* value) { if (m_gscCharset != value) { delete m_gscCharset; m_gscCharset = value; } m_gscCharsetIsSet = true; }
 QString* SWGRadioPagingModSettings::getGscVoiceDirectory() { return m_gscVoiceDirectory; }
 void SWGRadioPagingModSettings::setGscVoiceDirectory(QString* value) { if (m_gscVoiceDirectory != value) { delete m_gscVoiceDirectory; m_gscVoiceDirectory = value; } m_gscVoiceDirectoryIsSet = true; }
 qint32 SWGRadioPagingModSettings::getGscVoiceKeepDays() { return m_gscVoiceKeepDays; }

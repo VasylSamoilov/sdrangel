@@ -33,6 +33,7 @@
 #include "radiopagingpocsag.h"
 #include "radiopagingflex.h"
 #include "radiopaginggsc.h"
+#include "radiopagingpage.h"
 
 #include "radiopagingvoicestore.h"
 #include "radiopagingdemodsink.h"
@@ -782,7 +783,8 @@ void RadioPagingDemodSink::sendRecord(MessageRecord& record, int protocol)
 void RadioPagingDemodSink::sendPocsag(const RadioPagingPocsagDecoder::Message& message, int baud)
 {
     MessageRecord record;
-    RadioPagingPocsag::Interpretation interpretation = RadioPagingPocsag::interpret(message.m_rawData, message.m_rawBits);
+    const RadioPagingCharset::Codepage *charset = codepage(m_settings.m_pocsagCharset, "pocsag");
+    RadioPagingPocsag::Interpretation interpretation = RadioPagingPocsag::interpret(message.m_rawData, message.m_rawBits, charset);
 
     record.m_protocol = "pocsag";
     record.m_mode = QString::number(baud);
@@ -806,6 +808,10 @@ void RadioPagingDemodSink::sendPocsag(const RadioPagingPocsagDecoder::Message& m
     record.m_protocolData.insert("alt_type", QString::fromStdString(interpretation.m_altType));
     record.m_protocolData.insert("alt_text", escapeText(interpretation.m_altText));
     record.m_protocolData.insert("alt_score", interpretation.m_altScore);
+    // The codepage of the alphanumeric text (the type or the other candidate)
+    if (message.m_rawBits > 0) {
+        record.m_protocolData.insert("charset", RadioPagingPage::charsetData(charset->key()));
+    }
     record.m_duplicate = message.m_duplicate ? MessageRecord::DuplicateDup : MessageRecord::DuplicateNone;
 
     sendRecord(record, ProtocolPocsag);
@@ -821,9 +827,20 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
     record.m_address = QString::fromStdString(message.m_address);
     record.m_polarity = polarity(message.m_inverted);
     record.m_msgType = QString::fromStdString(message.m_typeName);
-    // A short message with every digit a space is the tone only payload: no text
-    if (!message.m_text.empty() && !message.m_toneOnly) {
-        record.m_text = escapeText(message.m_text);
+    // A short message with every digit a space is the tone only payload: no text. The characters of an alphanumeric
+    // message (secure type 00 too, not Kanji) are the codes of the codepage
+    const bool characters = ((message.m_type == RadioPagingFlexDecoder::TypeAlphanumeric)
+        || ((message.m_type == RadioPagingFlexDecoder::TypeSecure) && (message.m_secureType == 0))) && !message.m_kanji;
+    const RadioPagingCharset::Codepage *charset = characters ? codepage(m_settings.m_flexCharset, "flex") : nullptr;
+
+    if (!message.m_text.empty() && !message.m_toneOnly)
+    {
+        record.m_text = charset
+            ? escapeText(RadioPagingCharset::decode(*charset, std::vector<uint8_t>(message.m_text.begin(), message.m_text.end())))
+            : escapeText(message.m_text);
+    }
+    if (charset) {
+        record.m_protocolData.insert("charset", RadioPagingPage::charsetData(charset->key()));
     }
     record.m_rawData = toByteArray(message.m_rawData);
     record.m_rawBits = message.m_rawBits;
@@ -1010,10 +1027,12 @@ void RadioPagingDemodSink::sendGsc(const RadioPagingGscDecoder::Message& message
 
     if (message.m_type == RadioPagingGsc::Data)
     {
-        RadioPagingGsc::Interpretation interpretation = RadioPagingGsc::interpret(message.m_rawData, message.m_rawBits);
+        const RadioPagingCharset::Codepage *charset = codepage(m_settings.m_gscCharset, "gsc");
+        RadioPagingGsc::Interpretation interpretation = RadioPagingGsc::interpret(message.m_rawData, message.m_rawBits, charset);
 
         record.m_msgType = QString::fromStdString(interpretation.m_type);
         record.m_text = escapeText(interpretation.m_text);
+        record.m_protocolData.insert("charset", RadioPagingPage::charsetData(charset->key()));
         record.m_protocolData.insert("checksum_errors", message.m_checksumErrors);
         record.m_protocolData.insert("checksum_passed", message.m_checksumPassed);
         record.m_protocolData.insert("score", interpretation.m_score);
@@ -1075,6 +1094,12 @@ QString RadioPagingDemodSink::checkName(int check)
 MessageRecord::Polarity RadioPagingDemodSink::polarity(bool inverted)
 {
     return inverted ? MessageRecord::PolarityInverted : MessageRecord::PolarityNormal;
+}
+
+const RadioPagingCharset::Codepage *RadioPagingDemodSink::codepage(const RadioPagingCharset::Key& key, const char *protocol)
+{
+    const RadioPagingCharset::Codepage *codepage = RadioPagingCharset::find(protocol, key);
+    return codepage ? codepage : RadioPagingCharset::defaultFor(protocol);
 }
 
 QString RadioPagingDemodSink::escapeText(const std::string& text)

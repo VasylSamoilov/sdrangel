@@ -61,11 +61,6 @@ int hexValue(char c)
 
 } // namespace
 
-std::string RadioPagingCharset::Codepage::name() const
-{
-    return std::string(m_protocol) + "-" + m_vendor + "-" + m_model + "-" + m_charset;
-}
-
 const char *RadioPagingCharset::Codepage::glyph(unsigned code) const
 {
     return m_table->m_entries[code & (unsigned) (codes() - 1)][0];
@@ -131,6 +126,7 @@ const std::vector<RadioPagingCharset::Codepage>& RadioPagingCharset::codepages()
         {"flex", "motorola", "linguist", "latin2", "Motorola Linguist - Latin-2 (ISO 8859-2)", &flexLinguistLatin2},
         {"flex", "motorola", "linguist", "latin3", "Motorola Linguist - Latin-3 (ISO 8859-3)", &flexLinguistLatin3},
         {"flex", "motorola", "linguist", "latin4", "Motorola Linguist - Latin-4 (ISO 8859-4)", &flexLinguistLatin4},
+        {"flex", "timex", "beepwear-pro", "alarm", "Timex BeepwearPRO - Alarm command (key=value)", &pocsagAscii, &beepwearProAlarm},
         // GSC
         {"gsc", "generic", "generic", "ascii", "Generic - ASCII (Table VII)", &gscAscii},
     };
@@ -153,18 +149,16 @@ std::vector<const RadioPagingCharset::Codepage*> RadioPagingCharset::codepages(c
     return list;
 }
 
-const RadioPagingCharset::Codepage *RadioPagingCharset::byName(const std::string& name)
+const RadioPagingCharset::Codepage *RadioPagingCharset::find(const std::string& protocol, const Key& key)
 {
-    std::string n = lower(name);
+    const std::string vendor = lower(key.m_vendor);
+    const std::string model = lower(key.m_model);
+    const std::string page = lower(key.m_codepage);
 
-    if (n.compare(0, 6, "golay-") == 0) {
-        n = "gsc-" + n.substr(6);
-    }
-
-    for (const Codepage& codepage : codepages())
+    for (const Codepage *codepage : codepages(protocol))
     {
-        if (codepage.name() == n) {
-            return &codepage;
+        if ((vendor == codepage->m_vendor) && (model == codepage->m_model) && (page == codepage->m_codepage)) {
+            return codepage;
         }
     }
 
@@ -197,7 +191,7 @@ std::string RadioPagingCharset::decode(const Codepage& codepage, const std::vect
         }
     }
 
-    return text;
+    return codepage.m_transcoder ? codepage.m_transcoder->m_decode(text) : text;
 }
 
 int RadioPagingCharset::encodeOne(const Codepage& codepage, const std::string& text, size_t& pos)
@@ -261,8 +255,27 @@ int RadioPagingCharset::encodeOne(const Codepage& codepage, const std::string& t
     return -1;
 }
 
-bool RadioPagingCharset::encode(const Codepage& codepage, const std::string& text, std::vector<uint8_t>& codes, std::string *error)
+bool RadioPagingCharset::encode(const Codepage& codepage, const std::string& userText, std::vector<uint8_t>& codes, std::string *error,
+    std::string *warning)
 {
+    std::string text = userText;
+
+    if (codepage.m_transcoder)
+    {
+        std::string transcoderError, transcoderWarning;
+
+        if (!codepage.m_transcoder->m_encode(userText, text, transcoderError, transcoderWarning))
+        {
+            if (error) {
+                *error = transcoderError;
+            }
+            return false;
+        }
+        if (warning) {
+            *warning = transcoderWarning;
+        }
+    }
+
     size_t pos = 0;
 
     while (pos < text.size())
@@ -273,7 +286,7 @@ bool RadioPagingCharset::encode(const Codepage& codepage, const std::string& tex
         if (code < 0)
         {
             if (error) {
-                *error = "The character '" + text.substr(start, pos - start) + "' has no code in the codepage " + codepage.name();
+                *error = "The character '" + text.substr(start, pos - start) + "' has no code in the codepage " + codepage.m_label;
             }
             return false;
         }

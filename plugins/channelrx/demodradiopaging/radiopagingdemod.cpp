@@ -38,6 +38,8 @@
 #include "util/messagerecord.h"
 #include "maincore.h"
 
+#include "radiopagingcharset.h"
+#include "radiopagingpage.h"
 #include "radiopagingdemod.h"
 
 MESSAGE_CLASS_DEFINITION(RadioPagingDemod::MsgConfigureRadioPagingDemod, Message)
@@ -384,6 +386,22 @@ int RadioPagingDemod::webapiSettingsPutPatch(
         return 400;
     }
 
+    // A codepage of the protocol
+    const QString keys[3] = {"pocsagCharset", "flexCharset", "gscCharset"};
+    const RadioPagingCharset::Key charsets[3] = {settings.m_pocsagCharset, settings.m_flexCharset, settings.m_gscCharset};
+    const char *protocols[3] = {"pocsag", "flex", "gsc"};
+
+    for (int i = 0; i < 3; i++)
+    {
+        const QString error = RadioPagingPage::checkCharset(protocols[i], charsets[i]);
+
+        if (channelSettingsKeys.contains(keys[i]) && !error.isEmpty())
+        {
+            errorMessage = QString("%1: %2").arg(keys[i]).arg(error);
+            return 400;
+        }
+    }
+
     MsgConfigureRadioPagingDemod *msg = MsgConfigureRadioPagingDemod::create(channelSettingsKeys, settings, force);
     m_inputMessageQueue.push(msg);
 
@@ -462,6 +480,15 @@ void RadioPagingDemod::webapiUpdateChannelSettings(
     }
     if (channelSettingsKeys.contains("audioDeviceName") && model->getAudioDeviceName()) {
         settings.m_audioDeviceName = *model->getAudioDeviceName();
+    }
+    if (channelSettingsKeys.contains("pocsagCharset")) {
+        settings.m_pocsagCharset = RadioPagingPage::charsetKey(model->getPocsagCharset());
+    }
+    if (channelSettingsKeys.contains("flexCharset")) {
+        settings.m_flexCharset = RadioPagingPage::charsetKey(model->getFlexCharset());
+    }
+    if (channelSettingsKeys.contains("gscCharset")) {
+        settings.m_gscCharset = RadioPagingPage::charsetKey(model->getGscCharset());
     }
     if (channelSettingsKeys.contains("rgbColor")) {
         settings.m_rgbColor = model->getRgbColor();
@@ -544,6 +571,9 @@ void RadioPagingDemod::webapiFormatChannelSettings(SWGSDRangel::SWGChannelSettin
         model->setAudioDeviceName(new QString(settings.m_audioDeviceName));
     }
 
+    model->setPocsagCharset(RadioPagingPage::charsetSwg(settings.m_pocsagCharset));
+    model->setFlexCharset(RadioPagingPage::charsetSwg(settings.m_flexCharset));
+    model->setGscCharset(RadioPagingPage::charsetSwg(settings.m_gscCharset));
     model->setRgbColor(settings.m_rgbColor);
     model->setTitle(new QString(settings.m_title));
     model->setStreamIndex(settings.m_streamIndex);
@@ -689,6 +719,15 @@ void RadioPagingDemod::webapiFormatChannelSettings(
     }
     if (channelSettingsKeys.contains("audioDeviceName") || force) {
         model->setAudioDeviceName(new QString(settings.m_audioDeviceName));
+    }
+    if (channelSettingsKeys.contains("pocsagCharset") || force) {
+        model->setPocsagCharset(RadioPagingPage::charsetSwg(settings.m_pocsagCharset));
+    }
+    if (channelSettingsKeys.contains("flexCharset") || force) {
+        model->setFlexCharset(RadioPagingPage::charsetSwg(settings.m_flexCharset));
+    }
+    if (channelSettingsKeys.contains("gscCharset") || force) {
+        model->setGscCharset(RadioPagingPage::charsetSwg(settings.m_gscCharset));
     }
     if (channelSettingsKeys.contains("rgbColor") || force) {
         model->setRgbColor(settings.m_rgbColor);

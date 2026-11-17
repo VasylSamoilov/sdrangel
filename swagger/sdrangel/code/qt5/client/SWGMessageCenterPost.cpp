@@ -17,6 +17,7 @@ void SWGMessageCenterPost::cleanup()
     delete m_voiceFile; m_voiceFile = nullptr;
     delete m_polarity; m_polarity = nullptr;
     delete m_groupMembers; m_groupMembers = nullptr;
+    delete m_charset; m_charset = nullptr;
 }
 void SWGMessageCenterPost::init()
 {
@@ -44,6 +45,7 @@ void SWGMessageCenterPost::init()
     m_groupMembers = new QString(); m_groupMembersIsSet = false;
     m_retransmitInterval = -1.0f; m_retransmitIntervalIsSet = false;
     m_sendDelay = 0.0f; m_sendDelayIsSet = false;
+    m_charset = new SWGRadioPagingCharset(); m_charsetIsSet = false;
 }
 SWGMessageCenterPost* SWGMessageCenterPost::fromJson(QString& json)
 {
@@ -74,6 +76,7 @@ void SWGMessageCenterPost::fromJsonObject(QJsonObject& json)
     if (json.contains("retransmit")) { ::SWGSDRangel::setValue(&m_retransmit,json["retransmit"],"qint32",""); m_retransmitIsSet = true; }
     if (json.contains("retransmitInterval")) { ::SWGSDRangel::setValue(&m_retransmitInterval,json["retransmitInterval"],"float",""); m_retransmitIntervalIsSet = true; }
     if (json.contains("sendDelay")) { ::SWGSDRangel::setValue(&m_sendDelay,json["sendDelay"],"float",""); m_sendDelayIsSet = true; }
+    if (json.contains("charset")) { ::SWGSDRangel::setValue(&m_charset,json["charset"],"SWGRadioPagingCharset","SWGRadioPagingCharset"); m_charsetIsSet = true; }
 }
 QString SWGMessageCenterPost::asJson()
 {
@@ -105,6 +108,7 @@ QJsonObject* SWGMessageCenterPost::asJsonObject()
     if (m_retransmitIsSet) { object->insert("retransmit",QJsonValue(m_retransmit)); }
     if (m_retransmitIntervalIsSet) { object->insert("retransmitInterval",QJsonValue(m_retransmitInterval)); }
     if (m_sendDelayIsSet) { object->insert("sendDelay",QJsonValue(m_sendDelay)); }
+    if (m_charset && (m_charsetIsSet || m_charset->isSet())) { toJsonValue(QString("charset"),m_charset,object,QString("SWGRadioPagingCharset")); }
     return object;
 }
 bool SWGMessageCenterPost::isSet()
@@ -112,7 +116,7 @@ bool SWGMessageCenterPost::isSet()
     return m_idIsSet || m_transmitterIsSet || m_protocolIsSet || m_addressIsSet || m_functionIsSet || m_priorityIsSet || m_typeIsSet
         || m_textIsSet || m_voiceFileIsSet || m_speedIsSet || m_polarityIsSet || m_shortTypeIsSet || m_sourceIsSet
         || m_blockingIsSet || m_mailDropIsSet || m_rightToLeftIsSet || m_headerMessageIsSet || m_statusInfoIsSet || m_secureTypeIsSet
-        || m_retransmitIsSet || m_retransmitIntervalIsSet || m_sendDelayIsSet || m_groupMembersIsSet;
+        || m_retransmitIsSet || m_retransmitIntervalIsSet || m_sendDelayIsSet || m_groupMembersIsSet || m_charsetIsSet;
 }
 QString* SWGMessageCenterPost::getId() { return m_id; }
 void SWGMessageCenterPost::setId(QString* value) { if (m_id != value) { delete m_id; m_id = value; } m_idIsSet = true; }
@@ -160,4 +164,6 @@ float SWGMessageCenterPost::getRetransmitInterval() { return m_retransmitInterva
 void SWGMessageCenterPost::setRetransmitInterval(float value) { m_retransmitInterval = value; m_retransmitIntervalIsSet = true; }
 float SWGMessageCenterPost::getSendDelay() { return m_sendDelay; }
 void SWGMessageCenterPost::setSendDelay(float value) { m_sendDelay = value; m_sendDelayIsSet = true; }
+SWGRadioPagingCharset* SWGMessageCenterPost::getCharset() { return m_charset; }
+void SWGMessageCenterPost::setCharset(SWGRadioPagingCharset* value) { if (m_charset != value) { delete m_charset; m_charset = value; } m_charsetIsSet = true; }
 }

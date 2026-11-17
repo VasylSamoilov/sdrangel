@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "export.h"
+#include "radiopagingcharset.h"
 
 // POCSAG transmission format: encoder and message interpretation.
 //
@@ -90,6 +91,9 @@ public:
     //!< codeword of the transmission is an idle codeword
     static EncodeResult encode(const std::vector<TxMessage>& messages, const EncodeOptions& options);
     static EncodeResult encode(const std::vector<TxMessage>& messages);
+    //!< The message bits of a numeric or alphanumeric message, padded to whole codewords: 20 a codeword, first
+    //!< transmitted bit first. False and an error if a character is not allowed or the text is empty
+    static bool messageBits(const TxMessage& message, const EncodeOptions& options, std::vector<uint8_t>& bits, std::string& error);
 
     //!< Message bits as stored in a decoded message: packed 8 per byte, first bit in the
     //!< most significant bit of byte 0
@@ -97,8 +101,9 @@ public:
     static std::string decodeAlphanumeric(const std::vector<uint8_t>& packed, int nbBits);
     static int scoreNumeric(const std::string& text);
     static int scoreAlphanumeric(const std::string& text);
-    //!< Decide between numeric and alphanumeric by content. No bits means tone only
-    static Interpretation interpret(const std::vector<uint8_t>& packed, int nbBits);
+    //!< Decide between numeric and alphanumeric by content. No bits means tone only. The alphanumeric text is the
+    //!< glyphs of the codepage (RadioPagingCharset::decode), the 7-bit characters themselves without one
+    static Interpretation interpret(const std::vector<uint8_t>& packed, int nbBits, const RadioPagingCharset::Codepage *codepage = nullptr);
 
     //!< Replace characters below 0x20 and 0x7f by <0xNN>
     static std::string escapeControl(const std::string& text);

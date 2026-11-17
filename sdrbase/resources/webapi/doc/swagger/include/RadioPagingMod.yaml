@@ -110,6 +110,15 @@ RadioPagingModSettings:
       description: "FLEX largest message number of the network, 0 to 63 (the pagers are set to it): after it the numbers of an address start from 0 again"
       type: integer
       format: int32
+    pocsagCharset:
+      description: "Codepage of the POCSAG alphanumeric messages of the pages without one (default generic, generic, ascii)"
+      $ref: "/doc/swagger/include/RadioPagingCharset.yaml#/RadioPagingCharset"
+    flexCharset:
+      description: "Codepage of the FLEX alphanumeric messages of the pages without one"
+      $ref: "/doc/swagger/include/RadioPagingCharset.yaml#/RadioPagingCharset"
+    gscCharset:
+      description: "Codepage of the GSC alphanumeric messages of the pages without one"
+      $ref: "/doc/swagger/include/RadioPagingCharset.yaml#/RadioPagingCharset"
     gscMode:
       description: "GSC transmissions (one-shot only, GSC has no network mode): 0 auto (a batch of messages of the same preamble value, a message alone after its own preamble), 1 single (one message per transmission), 2 batch (a batch even for one message), 3 non battery saver (all queued messages of a polarity after one 1100 pattern)"
       type: integer
@@ -346,8 +355,11 @@ RadioPagingModTx:
       type: number
       format: float
     text:
-      description: "Numeric: 0-9, space, U, -, ], [ (GSC: 0-9 A-H J L N P R U space -). Alphanumeric: 7-bit characters (GSC: ASCII 0x20-0x5d). FLEX binary and secure types 1 and 2: hex digits, digit i the data bits 4i to 4i+3, the least significant bit sent first"
+      description: "Numeric: 0-9, space, U, -, ], [ (GSC: 0-9 A-H J L N P R U space -). Alphanumeric: the characters of the codepage (charset), <0xNN> for any code. FLEX binary and secure types 1 and 2: hex digits, digit i the data bits 4i to 4i+3, the least significant bit sent first"
       type: string
+    charset:
+      description: "Alphanumeric (and FLEX secure type 0): the codepage of the text in the protocol of the message. Omitted: the codepage of the channel for the protocol. A character without a code in it is refused"
+      $ref: "/doc/swagger/include/RadioPagingCharset.yaml#/RadioPagingCharset"
     speed:
       description: "POCSAG speed in baud: 512, 1200 or 2400. 0 or omitted: the channel setting"
       type: integer

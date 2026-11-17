@@ -29,6 +29,7 @@ set(modemradiopaging_SOURCES
     charsets/flexlinguistlatin.cpp
     charsets/flexlinguistscripts.cpp
     charsets/gscascii.cpp
+    charsets/flexbeepwearalarm.cpp
     radiopagingvoicestore.cpp
     radiopagingpage.cpp
 )

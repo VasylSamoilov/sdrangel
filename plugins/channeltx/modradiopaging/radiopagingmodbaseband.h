@@ -114,6 +114,9 @@ public:
     void setNotifyTransmitted(const std::function<void(quint64)>& notify) { m_source.setNotifyTransmitted(notify); }
     void setNotifyFailed(const std::function<void(quint64)>& notify) { m_source.setNotifyFailed(notify); }
     void setNotifyRepeated(const std::function<void(quint64)>& notify) { m_source.setNotifyRepeated(notify); }
+    void setNotifyStatus(const std::function<void(quint64, bool, const RadioPagingFlexEncoder::SentStatus&)>& notify) {
+        m_source.setNotifyStatus(notify);
+    }
     //! Voice of the live voice page and its end, passed to the source (thread safe)
     void pushLive(const std::vector<float>& samples) { m_source.pushLive(samples); }
     //! FLEX System Event Notification, passed to the source (thread safe), see RadioPagingModSource::notifySystemEvent

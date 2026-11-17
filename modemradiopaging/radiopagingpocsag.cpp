@@ -61,6 +61,63 @@ int streamBit(const std::vector<uint8_t>& packed, int index)
 
 } // namespace
 
+bool RadioPagingPocsag::messageBits(const TxMessage& message, const EncodeOptions& options, std::vector<uint8_t>& bits, std::string& error)
+{
+    if (message.m_type == Numeric)
+    {
+        for (char c : message.m_text)
+        {
+            int v = numericValue(c);
+            if (v < 0)
+            {
+                error = std::string("Character not allowed in numeric message: ") + c;
+                return false;
+            }
+            appendLsbFirst(bits, v, 4);
+        }
+        if (bits.empty())
+        {
+            error = "Empty numeric message";
+            return false;
+        }
+        // Pad with spaces
+        while ((bits.size() % dataBitsPerCodeword) != 0) {
+            appendLsbFirst(bits, numericValue(' '), 4);
+        }
+    }
+    else if (message.m_type == Alphanumeric)
+    {
+        for (char c : message.m_text)
+        {
+            unsigned v = (unsigned char) c;
+            if (v > 0x7f)
+            {
+                error = "Character above 0x7f in alphanumeric message";
+                return false;
+            }
+            appendLsbFirst(bits, v, 7);
+        }
+        if (bits.empty())
+        {
+            error = "Empty alphanumeric message";
+            return false;
+        }
+        // Pad with whole padding characters, then zero bits
+        unsigned padding = options.m_padding & 0x7f;
+        if (padding != 0)
+        {
+            while ((dataBitsPerCodeword - (int) (bits.size() % dataBitsPerCodeword)) % dataBitsPerCodeword >= 7) {
+                appendLsbFirst(bits, padding, 7);
+            }
+        }
+        while ((bits.size() % dataBitsPerCodeword) != 0) {
+            bits.push_back(0);
+        }
+    }
+
+    return true;
+}
+
 RadioPagingPocsag::EncodeResult RadioPagingPocsag::encode(const std::vector<TxMessage>& messages, const EncodeOptions& options)
 {
     EncodeResult result;
@@ -101,56 +158,8 @@ RadioPagingPocsag::EncodeResult RadioPagingPocsag::encode(const std::vector<TxMe
         // Message bits
         std::vector<uint8_t> bits;
 
-        if (message.m_type == Numeric)
-        {
-            for (char c : message.m_text)
-            {
-                int v = numericValue(c);
-                if (v < 0)
-                {
-                    result.m_error = std::string("Character not allowed in numeric message: ") + c;
-                    return result;
-                }
-                appendLsbFirst(bits, v, 4);
-            }
-            if (bits.empty())
-            {
-                result.m_error = "Empty numeric message";
-                return result;
-            }
-            // Pad with spaces
-            while ((bits.size() % dataBitsPerCodeword) != 0) {
-                appendLsbFirst(bits, numericValue(' '), 4);
-            }
-        }
-        else if (message.m_type == Alphanumeric)
-        {
-            for (char c : message.m_text)
-            {
-                unsigned v = (unsigned char) c;
-                if (v > 0x7f)
-                {
-                    result.m_error = "Character above 0x7f in alphanumeric message";
-                    return result;
-                }
-                appendLsbFirst(bits, v, 7);
-            }
-            if (bits.empty())
-            {
-                result.m_error = "Empty alphanumeric message";
-                return result;
-            }
-            // Pad with whole padding characters, then zero bits
-            unsigned padding = options.m_padding & 0x7f;
-            if (padding != 0)
-            {
-                while ((dataBitsPerCodeword - (int) (bits.size() % dataBitsPerCodeword)) % dataBitsPerCodeword >= 7) {
-                    appendLsbFirst(bits, padding, 7);
-                }
-            }
-            while ((bits.size() % dataBitsPerCodeword) != 0) {
-                bits.push_back(0);
-            }
+        if ((message.m_type != Tone) && !messageBits(message, options, bits, result.m_error)) {
+            return result;
         }
 
         // At least one idle or address codeword between the end of a message and the
@@ -315,7 +324,8 @@ int RadioPagingPocsag::scoreAlphanumeric(const std::string& text)
     return std::max(0, std::min(100, score));
 }
 
-RadioPagingPocsag::Interpretation RadioPagingPocsag::interpret(const std::vector<uint8_t>& packed, int nbBits)
+RadioPagingPocsag::Interpretation RadioPagingPocsag::interpret(const std::vector<uint8_t>& packed, int nbBits,
+    const RadioPagingCharset::Codepage *codepage)
 {
     Interpretation result;
 
@@ -329,6 +339,10 @@ RadioPagingPocsag::Interpretation RadioPagingPocsag::interpret(const std::vector
     std::string numeric = decodeNumeric(packed, nbBits);
     int alphaScore = scoreAlphanumeric(alpha);
     int numericScore = scoreNumeric(numeric);
+
+    if (codepage) {
+        alpha = RadioPagingCharset::decode(*codepage, std::vector<uint8_t>(alpha.begin(), alpha.end()));
+    }
 
     // Padding zeros of an alphanumeric message decode as the digit 0, so a tie is alphanumeric
     if (numericScore > alphaScore)

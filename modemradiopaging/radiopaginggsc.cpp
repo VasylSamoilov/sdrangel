@@ -180,17 +180,16 @@ const BchTables& bchTables()
     return tables;
 }
 
-// 0 for Null and the spare codes, they have no character
+// The characters of Table VII (the glyphs of the default codepage), 0 for Null
 const char alphaChars[65] =
     " !\"#$%&'()*+,-./0123456789:;<=>?"
-    "\\ABCDEFGHIJKLMNOPQRSTUVWXYZ{\r}\0\0";
+    "@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\r]\0_";
 
 const char numericShiftChars[17] = "ABCDE FGHJ\0LNPR\0";
 
 const char tripleBarUtf8[] = "\xe2\x89\xa1";    // U+2261 IDENTICAL TO
 
 const int alphaNull = 0x3e;
-const int alphaSpare = 0x3f;
 const int numericNull = 0xa;
 const int numericTripleBar = 0xe;
 const int numericShift = 0xf;
@@ -203,29 +202,14 @@ void appendSpare(std::string& text, unsigned code)
     text += buf;
 }
 
+// The code of an ASCII character in Table VII (the default codepage: lowercase as uppercase, \ { } LF as @ [ ] CR),
+// space for the others
 int alphaCode(char c)
 {
-    if ((c >= 'a') && (c <= 'z')) {
-        c = (char) (c - 'a' + 'A');
-    }
-
-    switch (c)
-    {
-    case '\n':
-    case '\r':
-        return 0x3c;
-    case '{':
-        return 0x3b;
-    case '}':
-        return 0x3d;
-    case '\\':
-        return 0x20;
-    default:
-        if (((unsigned char) c < 0x20) || ((unsigned char) c > 0x5d)) {
-            return 0;       // Space
-        }
-        return c - 0x20;
-    }
+    const std::string text(1, c);
+    size_t pos = 0;
+    int code = RadioPagingCharset::encodeOne(*RadioPagingCharset::defaultFor("gsc"), text, pos);
+    return (code < 0) ? 0 : code;
 }
 
 // Nibble sequence of a numeric character: 0-15, or 0xf0 + n for shift followed by n.
@@ -284,53 +268,12 @@ unsigned streamValue(const std::vector<uint8_t>& packed, int index, int nbBits)
 }
 
 // Appends the payload of a message as blocks. Returns false and sets error if it does not fit
-bool appendBlocks(std::vector<uint8_t>& out, RadioPagingGsc::MessageType type, const std::string& text, std::string& error)
+bool appendBlocks(std::vector<uint8_t>& out, const RadioPagingGsc::TxMessage& message, std::string& error)
 {
     std::vector<uint8_t> payload;
 
-    if (type == RadioPagingGsc::Alphanumeric)
-    {
-        for (char c : text) {
-            appendLsbFirst(payload, alphaCode(c), 6);
-        }
-        while (payload.empty() || ((payload.size() % RadioPagingGsc::m_payloadBitsPerBlock) != 0)) {
-            appendLsbFirst(payload, alphaNull, 6);
-        }
-    }
-    else
-    {
-        const size_t tripleBarLength = sizeof(tripleBarUtf8) - 1;
-
-        for (size_t pos = 0; pos < text.size(); pos++)
-        {
-            char c = text[pos];
-            int code;
-
-            if (text.compare(pos, tripleBarLength, tripleBarUtf8) == 0)
-            {
-                code = numericTripleBar;
-                pos += tripleBarLength - 1;
-            }
-            else
-            {
-                code = numericCode(c);
-            }
-
-            if (code < 0)
-            {
-                error = std::string("Character not allowed in numeric message: ") + c;
-                return false;
-            }
-            if (code > 0xf)
-            {
-                appendLsbFirst(payload, 0xf, 4);
-                code &= 0xf;
-            }
-            appendLsbFirst(payload, code, 4);
-        }
-        while (payload.empty() || ((payload.size() % RadioPagingGsc::m_payloadBitsPerBlock) != 0)) {
-            appendLsbFirst(payload, numericNull, 4);
-        }
+    if (!RadioPagingGsc::messageBits(message, payload, error)) {
+        return false;
     }
 
     int nbBlocks = (int) payload.size() / RadioPagingGsc::m_payloadBitsPerBlock;
@@ -378,6 +321,67 @@ bool appendBlocks(std::vector<uint8_t>& out, RadioPagingGsc::MessageType type, c
 }
 
 } // namespace
+
+bool RadioPagingGsc::messageBits(const TxMessage& message, std::vector<uint8_t>& payload, std::string& error)
+{
+    const std::string& text = message.m_text;
+
+    if (message.m_type == Alphanumeric)
+    {
+        for (char c : text)
+        {
+            unsigned code = message.m_codes ? (unsigned char) c : (unsigned) alphaCode(c);
+
+            if (code > 0x3f)
+            {
+                error = "Code above 0x3F in alphanumeric message";
+                return false;
+            }
+
+            appendLsbFirst(payload, code, 6);
+        }
+        while (payload.empty() || ((payload.size() % m_payloadBitsPerBlock) != 0)) {
+            appendLsbFirst(payload, alphaNull, 6);
+        }
+    }
+    else
+    {
+        const size_t tripleBarLength = sizeof(tripleBarUtf8) - 1;
+
+        for (size_t pos = 0; pos < text.size(); pos++)
+        {
+            char c = text[pos];
+            int code;
+
+            if (text.compare(pos, tripleBarLength, tripleBarUtf8) == 0)
+            {
+                code = numericTripleBar;
+                pos += tripleBarLength - 1;
+            }
+            else
+            {
+                code = numericCode(c);
+            }
+
+            if (code < 0)
+            {
+                error = std::string("Character not allowed in numeric message: ") + c;
+                return false;
+            }
+            if (code > 0xf)
+            {
+                appendLsbFirst(payload, 0xf, 4);
+                code &= 0xf;
+            }
+            appendLsbFirst(payload, code, 4);
+        }
+        while (payload.empty() || ((payload.size() % m_payloadBitsPerBlock) != 0)) {
+            appendLsbFirst(payload, numericNull, 4);
+        }
+    }
+
+    return true;
+}
 
 void RadioPagingGsc::appendCodewordPair(std::vector<uint8_t>& bits, uint32_t first, uint32_t second)
 {
@@ -894,7 +898,7 @@ RadioPagingGsc::EncodeResult RadioPagingGsc::encode(const std::vector<TxMessage>
             break;
         case Numeric:
         case Alphanumeric:
-            if (!appendBlocks(bits, message.m_type, message.m_text, result.m_error))
+            if (!appendBlocks(bits, message, result.m_error))
             {
                 bits.clear();
                 return result;
@@ -975,23 +979,21 @@ std::string RadioPagingGsc::decodeNumeric(const std::vector<uint8_t>& packed, in
     return text;
 }
 
-std::string RadioPagingGsc::decodeAlphanumeric(const std::vector<uint8_t>& packed, int nbBits)
+std::string RadioPagingGsc::decodeAlphanumeric(const std::vector<uint8_t>& packed, int nbBits, const RadioPagingCharset::Codepage *codepage)
 {
-    std::string text;
+    std::vector<uint8_t> codes;
 
     for (int i = 0; i + 6 <= nbBits; i += 6)
     {
         unsigned code = streamValue(packed, i, 6);
 
         // Null/EOM is padding and does not give a character
-        if (code == (unsigned) alphaSpare) {
-            appendSpare(text, code);
-        } else if (code != (unsigned) alphaNull) {
-            text.push_back(alphaChars[code]);
+        if (code != (unsigned) alphaNull) {
+            codes.push_back((uint8_t) code);
         }
     }
 
-    return text;
+    return RadioPagingCharset::decode(codepage ? *codepage : *RadioPagingCharset::defaultFor("gsc"), codes);
 }
 
 int RadioPagingGsc::scoreAlphanumeric(const std::vector<uint8_t>& packed, int nbBits)
@@ -1076,7 +1078,8 @@ int RadioPagingGsc::scoreNumeric(const std::vector<uint8_t>& packed, int nbBits)
     return score + fill * fill;
 }
 
-RadioPagingGsc::Interpretation RadioPagingGsc::interpret(const std::vector<uint8_t>& packed, int nbBits)
+RadioPagingGsc::Interpretation RadioPagingGsc::interpret(const std::vector<uint8_t>& packed, int nbBits,
+    const RadioPagingCharset::Codepage *codepage)
 {
     Interpretation result;
 
@@ -1086,7 +1089,7 @@ RadioPagingGsc::Interpretation RadioPagingGsc::interpret(const std::vector<uint8
         return result;
     }
 
-    std::string alpha = decodeAlphanumeric(packed, nbBits);
+    std::string alpha = decodeAlphanumeric(packed, nbBits, codepage);
     std::string numeric = decodeNumeric(packed, nbBits);
     int alphaScore = scoreAlphanumeric(packed, nbBits);
     int numericScore = scoreNumeric(packed, nbBits);

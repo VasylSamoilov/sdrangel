@@ -14,6 +14,7 @@ void SWGRadioPagingModTx::cleanup()
     delete m_polarity; m_polarity = nullptr;
     delete m_id; m_id = nullptr;
     delete m_groupMembers; m_groupMembers = nullptr;
+    delete m_charset; m_charset = nullptr;
 }
 void SWGRadioPagingModTx::init()
 {
@@ -40,6 +41,7 @@ void SWGRadioPagingModTx::init()
     m_groupMembers = new QString(); m_groupMembersIsSet = false;
     m_retransmitInterval = -1.0f; m_retransmitIntervalIsSet = false;
     m_sendDelay = 0.0f; m_sendDelayIsSet = false;
+    m_charset = new SWGRadioPagingCharset(); m_charsetIsSet = false;
 }
 SWGRadioPagingModTx* SWGRadioPagingModTx::fromJson(QString& json)
 {
@@ -69,6 +71,7 @@ void SWGRadioPagingModTx::fromJsonObject(QJsonObject& json)
     if (json.contains("retransmit")) { ::SWGSDRangel::setValue(&m_retransmit,json["retransmit"],"qint32",""); m_retransmitIsSet = true; }
     if (json.contains("retransmitInterval")) { ::SWGSDRangel::setValue(&m_retransmitInterval,json["retransmitInterval"],"float",""); m_retransmitIntervalIsSet = true; }
     if (json.contains("sendDelay")) { ::SWGSDRangel::setValue(&m_sendDelay,json["sendDelay"],"float",""); m_sendDelayIsSet = true; }
+    if (json.contains("charset")) { ::SWGSDRangel::setValue(&m_charset,json["charset"],"SWGRadioPagingCharset","SWGRadioPagingCharset"); m_charsetIsSet = true; }
 }
 QString SWGRadioPagingModTx::asJson()
 {
@@ -99,6 +102,7 @@ QJsonObject* SWGRadioPagingModTx::asJsonObject()
     if (m_retransmitIsSet) { object->insert("retransmit",QJsonValue(m_retransmit)); }
     if (m_retransmitIntervalIsSet) { object->insert("retransmitInterval",QJsonValue(m_retransmitInterval)); }
     if (m_sendDelayIsSet) { object->insert("sendDelay",QJsonValue(m_sendDelay)); }
+    if (m_charset && (m_charsetIsSet || m_charset->isSet())) { toJsonValue(QString("charset"),m_charset,object,QString("SWGRadioPagingCharset")); }
     return object;
 }
 bool SWGRadioPagingModTx::isSet()
@@ -106,7 +110,7 @@ bool SWGRadioPagingModTx::isSet()
     return m_addressIsSet || m_functionIsSet || m_capcodeIsSet || m_priorityIsSet || m_protocolIsSet || m_typeIsSet || m_textIsSet
         || m_speedIsSet || m_polarityIsSet || m_idIsSet || m_shortTypeIsSet || m_sourceIsSet || m_blockingIsSet || m_mailDropIsSet
         || m_rightToLeftIsSet || m_headerMessageIsSet || m_statusInfoIsSet || m_secureTypeIsSet
-        || m_retransmitIsSet || m_retransmitIntervalIsSet || m_sendDelayIsSet || m_groupMembersIsSet;
+        || m_retransmitIsSet || m_retransmitIntervalIsSet || m_sendDelayIsSet || m_groupMembersIsSet || m_charsetIsSet;
 }
 qint32 SWGRadioPagingModTx::getAddress() { return m_address; }
 void SWGRadioPagingModTx::setAddress(qint32 value) { m_address = value; m_addressIsSet = true; }
@@ -152,4 +156,6 @@ float SWGRadioPagingModTx::getRetransmitInterval() { return m_retransmitInterval
 void SWGRadioPagingModTx::setRetransmitInterval(float value) { m_retransmitInterval = value; m_retransmitIntervalIsSet = true; }
 float SWGRadioPagingModTx::getSendDelay() { return m_sendDelay; }
 void SWGRadioPagingModTx::setSendDelay(float value) { m_sendDelay = value; m_sendDelayIsSet = true; }
+SWGRadioPagingCharset* SWGRadioPagingModTx::getCharset() { return m_charset; }
+void SWGRadioPagingModTx::setCharset(SWGRadioPagingCharset* value) { if (m_charset != value) { delete m_charset; m_charset = value; } m_charsetIsSet = true; }
 }

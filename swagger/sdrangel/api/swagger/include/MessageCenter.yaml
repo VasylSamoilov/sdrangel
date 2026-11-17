@@ -131,6 +131,9 @@ MessageCenterPost:
     text:
       description: "The text of the message"
       type: string
+    charset:
+      description: "Alphanumeric: the codepage of the text in the protocol of the page. Omitted: the codepage of the transmitter for the protocol"
+      $ref: "http://swgserver:8081/api/swagger/include/RadioPagingCharset.yaml#/RadioPagingCharset"
     voiceFile:
       description: "voice: the path of the WAV file, on the host of SDRangel"
       type: string

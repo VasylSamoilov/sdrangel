@@ -23,6 +23,7 @@
 #include <QStringList>
 
 #include "dsp/dsptypes.h"
+#include "radiopagingcharset.h"
 
 class Serializable;
 
@@ -104,6 +105,9 @@ struct RadioPagingModSettings
     bool m_hidden;
     QByteArray m_messageColumns;            //!< The columns of the log of messages: order, sizes, hidden
     QString m_voicePlaybackDeviceName;      //!< Audio output of the voice files played from the log
+    RadioPagingCharset::Key m_pocsagCharset; //!< Codepage of the alphanumeric messages of a page without one, in the protocol
+    RadioPagingCharset::Key m_flexCharset;
+    RadioPagingCharset::Key m_gscCharset;
 
     RadioPagingModSettings();
     void resetToDefaults();
@@ -117,6 +121,10 @@ struct RadioPagingModSettings
     QString voiceDirectory() const;
     //!< The name of the transmitter: the alias set, or the frequency of the channel in Hz
     QString effectiveChannelAlias(qint64 frequency) const;
+    //!< The codepage set for a protocol (pocsag, flex, gsc)
+    const RadioPagingCharset::Key& charset(Protocol protocol) const;
+    //!< The default codepage of a protocol: generic ASCII
+    static RadioPagingCharset::Key defaultCharset(const char *protocol);
 
     //! Bring the numeric settings into their ranges (ramps, ramp range, deviation, gain)
     void validate();

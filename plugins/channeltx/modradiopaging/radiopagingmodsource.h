@@ -133,6 +133,11 @@ public:
     void setNotifyFailed(const std::function<void(quint64 id)>& notify) { m_notifyFailed = notify; }
     //! Called when a copy of a message sent before (a retransmission) was sent. A copy that is not sent is not reported
     void setNotifyRepeated(const std::function<void(quint64 id)>& notify) { m_notifyRepeated = notify; }
+    //! FLEX: called when the blocks of a message or of a copy (repeat) are pushed, with how it went (message number,
+    //! fragments, R); before its sent or repeated call
+    void setNotifyStatus(const std::function<void(quint64 id, bool repeat, const RadioPagingFlexEncoder::SentStatus& status)>& notify) {
+        m_notifyStatus = notify;
+    }
     //! Voice of the live voice page being sent (taken once its alert time is over)
     void pushLive(const std::vector<float>& samples);
     //! The live voice page ends: the turn-off word follows
@@ -195,6 +200,7 @@ private:
     std::function<void(quint64)> m_notifyTransmitted;
     std::function<void(quint64)> m_notifyFailed;
     std::function<void(quint64)> m_notifyRepeated;
+    std::function<void(quint64, bool, const RadioPagingFlexEncoder::SentStatus&)> m_notifyStatus;
     void fail(const std::vector<uint64_t>& ids);
     void drop(const std::vector<uint64_t>& ids);
     void makeStream();

@@ -47,7 +47,8 @@ bool same(const RadioPagingPage& a, const RadioPagingPage& b)
         && (a.m_shortType == b.m_shortType) && (a.m_source == b.m_source) && (a.m_blocking == b.m_blocking)
         && (a.m_mailDrop == b.m_mailDrop) && (a.m_rightToLeft == b.m_rightToLeft) && (a.m_headerMessage == b.m_headerMessage)
         && (a.m_statusInfo == b.m_statusInfo) && (a.m_secureType == b.m_secureType) && (a.m_retransmit == b.m_retransmit)
-        && (a.m_retransmitInterval == b.m_retransmitInterval) && (a.m_sendDelay == b.m_sendDelay) && (a.m_groupMembers == b.m_groupMembers);
+        && (a.m_retransmitInterval == b.m_retransmitInterval) && (a.m_sendDelay == b.m_sendDelay) && (a.m_groupMembers == b.m_groupMembers)
+        && (a.m_charset == b.m_charset);
 }
 
 RadioPagingPage page(const char *protocol, const char *type, const char *address)
@@ -72,6 +73,7 @@ void testRoundTrips()
     pocsag.m_retransmit = 3;
     pocsag.m_retransmitInterval = 5.0;
     pocsag.m_sendDelay = 2.0;
+    pocsag.m_charset = RadioPagingCharset::Key{"generic", "generic", "latin-german"};
 
     RadioPagingPage binary = page("flex", "binary", "2101249");
     binary.m_priority = true;
@@ -243,6 +245,19 @@ void testLimits()
         p = page("pocsag", format, "1000");
         check(!p.check().isEmpty(), (std::string("POCSAG refuses ") + format).c_str());
     }
+
+    // The codepage of the text: one of the protocol
+    p = page("flex", "alphanumeric", "1000");
+    p.m_charset = RadioPagingCharset::Key{"motorola", "linguist", "cyrillic"};
+    check(p.check().isEmpty() && (RadioPagingPage::charsetKey(p.toRecord().m_protocolData.value("charset")) == p.m_charset)
+        && (p.toRecord().m_protocolData.value("charset").toMap().value("model").toString() == "linguist"),
+        "FLEX page with a FLEX codepage: vendor, model and codepage in the record");
+    p.m_charset = RadioPagingCharset::Key{"generic", "generic", "latin-german"};
+    check(!p.check().isEmpty(), "FLEX refuses a POCSAG codepage");
+    p.m_charset = RadioPagingCharset::Key{"motorola", "linguist", "none"};
+    check(!p.check().isEmpty(), "an unknown codepage is refused");
+    p.m_charset = RadioPagingCharset::Key();
+    check(p.check().isEmpty() && !p.toRecord().m_protocolData.contains("charset"), "no codepage: the one of the transmitter, no key");
 }
 
 } // namespace
