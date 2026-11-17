@@ -93,7 +93,7 @@ public:
 //   Network: the preamble once, then batches without end: the messages of the current
 //   group at the next batch, idle batches when there are none. After two idle batches the
 //   next group with messages in the carousel order (1200, 512, 2400 normal, then inverted)
-//   takes over with a new preamble (as osmocom-analog pocsag); so does it after
+//   takes over with a new preamble (ITU-R M.584: a transmission starts with its preamble); so does it after
 //   m_maxBlocksPerTurn message blocks in a row, so that a busy group does not hold the
 //   others. With no message anywhere the network goes back to the default group.
 // Normal polarity: a binary 1 is a negative frequency deviation.

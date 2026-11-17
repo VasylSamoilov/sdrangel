@@ -16,6 +16,7 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include <QDateTime>
+#include <QTimeZone>
 #include <QDateTimeEdit>
 #include <QDebug>
 #include <QFileDialog>
@@ -417,7 +418,7 @@ QDateTime RadioPagingModGUI::flexTimeNow() const
 {
     qint64 seconds = QDateTime::currentSecsSinceEpoch() + m_settings.m_flexTimeOffsetSeconds
         + (qint64) (m_settings.m_flexTimeZoneMinutes + (m_settings.m_flexTimeDaylightSaving ? 60 : 0)) * 60;
-    return QDateTime::fromSecsSinceEpoch(seconds, Qt::UTC);
+    return QDateTime::fromSecsSinceEpoch(seconds, QTimeZone::utc());
 }
 
 void RadioPagingModGUI::displayTime(bool flex)
@@ -652,8 +653,8 @@ void RadioPagingModGUI::on_flexTimeSet_editingFinished()
 {
     // Local time wanted now (the editor shows the local time as such): the offset is what it lacks from the
     // clock with the zone and daylight saving
-    QDateTime shown = ui->flexTimeSet->dateTime();
-    shown.setTimeSpec(Qt::UTC);
+    const QDateTime edited = ui->flexTimeSet->dateTime();
+    const QDateTime shown(edited.date(), edited.time(), QTimeZone::utc());
     qint64 wanted = shown.toSecsSinceEpoch();
     qint64 offset = wanted - QDateTime::currentSecsSinceEpoch()
         - (qint64) (m_settings.m_flexTimeZoneMinutes + (m_settings.m_flexTimeDaylightSaving ? 60 : 0)) * 60;

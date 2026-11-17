@@ -28,7 +28,7 @@ const int RadioPagingFlexTxStream::m_shaping;
 
 namespace {
 
-// Carousel order of the speed and polarity groups (osmocom-analog pocsag)
+// Carousel order of the speed and polarity groups
 const std::pair<int, bool> carousel[] = {
     {1200, false}, {512, false}, {2400, false},
     {1200, true}, {512, true}, {2400, true}

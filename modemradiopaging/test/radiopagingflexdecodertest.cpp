@@ -1392,7 +1392,7 @@ void testMisc()
 
 void testRoaming()
 {
-    // Bit layout of STD-43A table 3.7.2-1 (and osmocom flex/frame.c): the check of the words is the same as
+    // Bit layout of STD-43A table 3.7.2-1: the check of the words is the same as
     // any information word, so compare the data bits after decoding the codeword
     uint32_t w1 = Flex::ssid1Word(0x155, 0x0b);
     uint32_t w2 = Flex::ssid2Word(0x2a5, 0x9);

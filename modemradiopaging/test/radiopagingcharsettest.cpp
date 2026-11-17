@@ -86,7 +86,7 @@ int main()
     check((find("flex", "generic", "generic", "latin-german") == nullptr) && (find("pocsag", "motorola", "linguist", "cyrillic") == nullptr)
         && (find("flex", "motorola", "linguist", "cyrillic") != nullptr), "a codepage belongs to its protocol");
     check((find("pocsag", "partner", "generic", "cyrillic") != nullptr) && (find("pocsag", "multitone", "generic", "ascii") != nullptr)
-        && (find("pocsag", "nec", "maxima-compact", "cyrillic") != nullptr), "the codepages missing from the osmocom registry are there");
+        && (find("pocsag", "nec", "maxima-compact", "cyrillic") != nullptr), "the Partner, Multitone and NEC Maxima Compact codepages are there");
 
     // Decode: glyphs, <0xNN> for the codes without one; the code masked to the codepage
     const Cs::Codepage& ascii = *Cs::defaultFor("pocsag");
