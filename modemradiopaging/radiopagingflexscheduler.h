@@ -156,6 +156,7 @@ public:
         std::vector<uint32_t> m_retransmittedIds;           //!< Messages sent again (retransmissions, R = 0)
         std::vector<uint32_t> m_doneIds;                    //!< Messages with nothing more queued: sent and retransmitted
         std::vector<uint32_t> m_failedIds;                  //!< Group messages dropped: a short instruction did not go before the group message
+        bool m_systemEvent = false;                         //!< The System Event Notification is in every phase of the frame
         RadioPagingFlex::FrameBytes m_bytes;
         std::vector<RadioPagingFlex::SymbolBlock> m_blocks; //!< Sync part then data part; empty if reserved
     };
@@ -234,6 +235,24 @@ public:
     //!< False and an error if the largest number is out of range
     bool setNumbering(const Numbering& numbering, std::string& error);
     const Numbering& numbering() const { return m_numbering; }
+
+    //! System Event Notification (STD-43A 3.8.2.4, 3.8.5, Table 3.9.6-1): the pagers are told that the events of the
+    //! flags e10-e0 (e0 traffic split by SSID TMF, e1 traffic split by NID TMF, e2 change of the Channel Set Up
+    //! Instruction, e3 a new frequency of the NID, e4 a new frequency of the SSID coverage zone, e5-e10 reserved,
+    //! 0) take place within the next 4 cycles. The short instruction (type 001, the flags in d0-d10) to the System
+    //! Event Notification address goes in each frame for at least one full cycle: in every phase of the frames built
+    //! (a pager reads its own phase), ahead of the messages, for the given number of frames. Frames reserved for
+    //! another transmitter do not count
+    static const int m_minEventFrames = 128;        //!< One full cycle
+    static const int m_maxEventFrames = 512;        //!< The 4 cycles of the notice
+    static const unsigned m_maxEvents = 0x7ff;
+    //!< Start the notification of the events (1-0x7ff) for frames (128-512) from the next frame built. False and an
+    //!< error if out of range
+    bool notifySystemEvent(unsigned events, int frames, std::string& error);
+    void cancelSystemEvent() { m_eventFrames = 0; }
+    //!< Frames of the notification still to send, 0 when none; its event flags
+    int systemEventFrames() const { return m_eventFrames; }
+    unsigned systemEvents() const { return m_events; }
     //!< One entry per frame (128), non zero = reserved. Frames 0-3 can not be reserved: the table
     //!< is not applied and false is returned. An empty table clears all reservations
     bool setReservedFrames(const std::vector<uint8_t>& table, std::string& error);
@@ -339,6 +358,8 @@ private:
     std::map<int, Group> m_groups;      //!< Group messages in progress, by the index of Item::m_group
     int m_nextGroup = 0;
     bool m_slotBusy[RadioPagingFlex::m_temporaryCount] = {};    //!< Temporary addresses in use
+    unsigned m_events = 0;              //!< System Event Notification: event flags
+    int m_eventFrames = 0;              //!< Frames of the notification still to send
 };
 
 #endif // MODEMRADIOPAGING_RADIOPAGINGFLEXSCHEDULER_H

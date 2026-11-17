@@ -28,6 +28,10 @@ report() { curl -s "$U/featureset/feature/0/report" | tr -d '\n' | sed 's/\\"/"/
 tx() {
     curl_code POST "/deviceset/$1/channel/0/actions" "{\"channelType\":\"RadioPagingMod\",\"direction\":1,\"RadioPagingModActions\":{\"tx\":$2}}"
 }
+# action DEVICESET ACTIONS
+action() {
+    curl_code POST "/deviceset/$1/channel/0/actions" "{\"channelType\":\"RadioPagingMod\",\"direction\":1,\"RadioPagingModActions\":$2}"
+}
 sent() { curl -s "$U/deviceset/$1/channel/0/report" | tr -d "\n " | grep -o "\"sent\":[0-9]*" | cut -d: -f2; }
 # Records of an address in a direction, one per line (a POCSAG address ends with its function letter); the
 # log alone, without the transmitters and the pages
@@ -86,6 +90,12 @@ check "FLEX: a group message is accepted" '[ "$(tx 0 "{\"protocol\":\"flex\",\"t
 # The page waits for the modulator to announce itself (every 5 s)
 check "a page with a copy is accepted by the message center" '[ "$(curl_code POST /featureset/feature/0/actions "{\"featureType\":\"MessageCenter\",\"MessageCenterActions\":{\"post\":{\"id\":\"p-rep\",\"transmitter\":\"tp\",\"protocol\":\"pocsag\",\"address\":\"1100004\",\"type\":\"alphanumeric\",\"retransmit\":1,\"retransmitInterval\":2,\"text\":\"PAGE COPY\"}}}")" = 202 ]'
 
+# FLEX System Event Notification: refused out of range and on POCSAG, then sent in each frame
+check "System Event Notification: flags over 2047 are refused" '[ "$(action 0 "{\"systemEvent\":2048}")" = 400 ]'
+check "System Event Notification: 100 frames are refused" '[ "$(action 0 "{\"systemEvent\":5,\"systemEventFrames\":100}")" = 400 ]'
+check "System Event Notification: refused on POCSAG" '[ "$(action 1 "{\"systemEvent\":5}")" = 400 ]'
+check "System Event Notification: accepted on the FLEX network" '[ "$(action 0 "{\"systemEvent\":5}")" = 202 ]'
+
 for i in $(seq 60); do [ "$(count tx 1100002)" = 3 ] && [ "$(count tx 1100003)" = 3 ] && [ "$(count tx 1100004)" = 2 ] && break; sleep 1; done
 check "FLEX: a record for the message and each copy" '[ "$(count tx 1100002)" = 3 ]'
 check "POCSAG: a record for the message and each copy" '[ "$(count tx 1100003)" = 3 ]'
@@ -124,6 +134,7 @@ check "POCSAG: received once, the copies marked as duplicates" '[ "$(countRx 110
 check "POCSAG page: received once, its copy marked as a duplicate" '[ "$(countRx 1100004 none)" = 1 ] && [ "$(countRx 1100004 dup)" = 1 ]'
 check "FLEX: the group message is received on its temporary address with its pagers" '[[ "$(records rx 2029568 | grep "GROUP TEXT" | grep -c "group_capcodes")" -ge 1 ]]'
 check "FLEX: both pagers have their short instruction" '[ "$(report | sed "s/},{/}\n{/g" | grep "\"direction\":\"rx\"" | grep -c "short_instruction")" -ge 2 ]'
+check "FLEX: the System Event Notification is received in frames, its flags" '[ "$(report | sed "s/},{/}\n{/g" | grep "\"direction\":\"rx\"" | grep -c "\"event_flags\":5")" -ge 3 ]'
 
 if [ "$failed" -ne 0 ]; then
     report | sed 's/},{/}\n{/g' | grep "11000" | sed 's/"ber".*"direction"/"direction"/; s/"errorsCorrected".*"id"/"id"/; s/"rawBits".*"text"/"text"/'

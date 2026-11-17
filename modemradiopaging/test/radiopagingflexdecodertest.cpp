@@ -3008,6 +3008,60 @@ void testGroupTx()
 
         check(er.m_ok && got, "system event notification: the event flags to the notification address, in its frame");
     }
+
+    // The System Event Notification service: in every phase of each frame for the frames asked, with the messages;
+    // reserved frames do not count; out of range refused
+    {
+        Enc enc;
+        std::string error;
+        enc.setMode(Flex::Mode6400_4);
+        check(!enc.notifySystemEvent(0, 128, error) && !enc.notifySystemEvent(0x800, 128, error)
+            && !enc.notifySystemEvent(1, 127, error) && !enc.notifySystemEvent(1, 513, error),
+            "system event notification: flags 1-2047 and 128-512 frames, else refused");
+        std::vector<uint8_t> reserved(128, 0);
+        reserved[10] = 1;
+        enc.setReservedFrames(reserved, error);
+        check(enc.notifySystemEvent(0x013, 128, error) && (enc.systemEventFrames() == 128) && enc.mandatory(5),
+            "system event notification: started, each frame is sent");
+        Enc::TxMessage m;
+        m.m_capcode = 4096;
+        m.m_text = "WITH THE EVENT";
+        enc.enqueue(m);
+        Dec dec;
+        int framesWithAll = 0, framesWithAny = 0;
+        bool messageOk = false, reservedSkipped = true;
+        uint64_t index = 0;
+
+        for (; index < 140; index++)
+        {
+            Enc::Frame f = enc.buildFrame(index);
+
+            if (f.m_reserved)
+            {
+                reservedSkipped = reservedSkipped && !f.m_systemEvent;
+                continue;
+            }
+
+            std::set<char> phases;
+
+            for (const Dec::Message& r : dec.decodeFrame(toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data)))
+            {
+                if ((r.m_type == Dec::TypeShortInstruction) && (r.m_instructionType == 1) && (r.m_eventFlags == 0x013)) {
+                    phases.insert(r.m_phase);
+                }
+                messageOk = messageOk || (r.m_text == "WITH THE EVENT");
+            }
+
+            framesWithAll += (phases.size() == 4) ? 1 : 0;
+            framesWithAny += phases.empty() ? 0 : 1;
+        }
+
+        char what[200];
+        std::snprintf(what, sizeof(what), "system event notification: 128 frames with it in the 4 phases (%d, %d with it), the reserved "
+            "frame skipped, the message sent too, then none left", framesWithAll, framesWithAny);
+        check((framesWithAll == 128) && (framesWithAny == 128) && reservedSkipped && messageOk && (enc.systemEventFrames() == 0)
+            && !enc.mandatory(index), what);
+    }
 }
 
 void testRetransmission()

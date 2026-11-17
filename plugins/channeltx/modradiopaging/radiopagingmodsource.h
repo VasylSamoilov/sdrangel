@@ -92,6 +92,8 @@ public:
         bool m_liveActive = false;      //!< A live voice page is being sent
         bool m_liveOpen = false;        //!< Its alert time is over: the voice is taken
         quint64 m_liveId = 0;
+        int m_systemEventFrames = 0;    //!< FLEX: frames of the System Event Notification still to send, 0 when none
+        unsigned m_systemEvents = 0;    //!< Its event flags
     };
 
     RadioPagingModSource();
@@ -139,6 +141,9 @@ public:
     void clear();
     //! Drop the messages queued; one-shot: end the transmission being sent (ramp down)
     void abort();
+    //! FLEX network: the System Event Notification in each frame for frames (RadioPagingFlexEncoder::notifySystemEvent).
+    //! False and an error for another protocol, one-shot or out of range. Cancel: events 0
+    bool notifySystemEvent(unsigned events, int frames, std::string& error);
     Status getStatus() const;
 
 private:

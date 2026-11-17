@@ -319,6 +319,9 @@ public:
     //! Queue a message: its id, or 0 and an error. Main thread
     quint64 transmit(const TxRequest& request, QString& error, QString *warning = nullptr);
     void clear(bool abort);
+    //! FLEX network: the System Event Notification of the event flags (1-2047, 0 cancels) in each frame for frames
+    //! (128-512, STD-43A 3.8.2.4). False and an error for another protocol, one-shot or out of range
+    bool notifySystemEvent(unsigned events, int frames, QString& error);
 
     static const char* const m_channelIdURI;
     static const char* const m_channelId;

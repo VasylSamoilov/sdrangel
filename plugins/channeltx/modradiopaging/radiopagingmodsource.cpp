@@ -612,6 +612,27 @@ void RadioPagingModSource::abort()
     }
 }
 
+bool RadioPagingModSource::notifySystemEvent(unsigned events, int frames, std::string& error)
+{
+    QMutexLocker mutexLocker(&m_mutex);
+
+    if (!m_stream || (m_streamProtocol != RadioPagingModSettings::Flex))
+    {
+        error = "The System Event Notification is a FLEX service";
+        return false;
+    }
+
+    RadioPagingFlexTxStream *flex = m_mix ? &m_mix->flex() : (RadioPagingFlexTxStream*) m_stream.get();
+
+    if (events == 0)
+    {
+        flex->cancelSystemEvent();
+        return true;
+    }
+
+    return flex->notifySystemEvent(events, frames, error);
+}
+
 RadioPagingModSource::Status RadioPagingModSource::getStatus() const
 {
     QMutexLocker mutexLocker(&m_mutex);
@@ -633,6 +654,12 @@ RadioPagingModSource::Status RadioPagingModSource::getStatus() const
         status.m_liveActive = gsc->liveActive();
         status.m_liveOpen = gsc->liveOpen();
         status.m_liveId = gsc->liveId();
+    }
+    if (m_stream && (m_streamProtocol == RadioPagingModSettings::Flex))
+    {
+        const RadioPagingFlexTxStream *flex = m_mix ? &m_mix->flex() : (const RadioPagingFlexTxStream*) m_stream.get();
+        status.m_systemEventFrames = flex->systemEventFrames();
+        status.m_systemEvents = flex->systemEvents();
     }
 
     // The re-synchronization is on air while one of its symbols is being sent

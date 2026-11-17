@@ -234,6 +234,13 @@ public:
     bool setTimeService(const RadioPagingFlexEncoder::TimeService& time, std::string& error);
     //!< Message numbering of the network (see RadioPagingFlexEncoder::Numbering). False and an error if out of range
     bool setNumbering(const RadioPagingFlexEncoder::Numbering& numbering, std::string& error);
+    //!< System Event Notification in each frame for frames (see RadioPagingFlexEncoder::notifySystemEvent), in both
+    //!< polarities. Network only: false and an error in one-shot or out of range
+    bool notifySystemEvent(unsigned events, int frames, std::string& error);
+    void cancelSystemEvent();
+    //!< Frames of the notification still to send in the polarity of the network, 0 when none; its event flags
+    int systemEventFrames() const { return m_encoders[m_inverted ? 1 : 0].systemEventFrames(); }
+    unsigned systemEvents() const { return m_encoders[m_inverted ? 1 : 0].systemEvents(); }
     //!< False and an error if out of range. Applies to the next re-synchronization
     bool setCollapse(int collapse, std::string& error);
     //!< Collapse of the frames (block information word, placement): network only, 0 for one-shot
@@ -444,6 +451,7 @@ public:
     //!< The frame is FLEX whatever POCSAG has to send
     bool required(uint64_t frameIndex) const;
     RadioPagingFlexTxStream& flex() { return m_flex; }
+    const RadioPagingFlexTxStream& flex() const { return m_flex; }
     RadioPagingPocsagTxStream& pocsag() { return m_pocsag; }
 
     static const int64_t m_frameTicks = (int64_t) RadioPagingFlex::m_frameMs * RadioPagingTxBlock::m_tickRate / 1000;

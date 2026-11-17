@@ -19149,6 +19149,16 @@ margin-bottom: 20px;
       "type" : "integer",
       "format" : "int32",
       "description" : "Drop the messages waiting; one-shot: end the transmission being sent (1 for yes, 0 for no)"
+    },
+    "systemEvent" : {
+      "type" : "integer",
+      "format" : "int32",
+      "description" : "FLEX network: System Event Notification (STD-43A 3.8.2.4), the event flags e10-e0 (1 to 2047; e0 traffic split by SSID TMF, e1 traffic split by NID TMF, e2 change of the Channel Set Up Instruction, e3 a new frequency of the NID, e4 a new frequency of the SSID coverage zone, e5-e10 reserved) announced in every phase of each frame for systemEventFrames; 0 stops it"
+    },
+    "systemEventFrames" : {
+      "type" : "integer",
+      "format" : "int32",
+      "description" : "Frames of the System Event Notification, 128 (one cycle, the default) to 512 (the 4 cycles of the notice)"
     }
   },
   "description" : "Radio paging modulator"

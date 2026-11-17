@@ -876,6 +876,20 @@ void RadioPagingMod::clear(bool abort)
     m_basebandSource->getInputMessageQueue()->push(RadioPagingModBaseband::MsgClear::create(abort));
 }
 
+bool RadioPagingMod::notifySystemEvent(unsigned events, int frames, QString& error)
+{
+    std::string e;
+
+    if (!m_basebandSource->notifySystemEvent(events, frames, e))
+    {
+        error = QString::fromStdString(e);
+        return false;
+    }
+
+    qDebug() << "RadioPagingMod::notifySystemEvent: events" << events << "frames" << frames;
+    return true;
+}
+
 bool RadioPagingMod::handleMessage(const Message& cmd)
 {
     if (MsgConfigureRadioPagingMod::match(cmd))
@@ -1403,12 +1417,29 @@ int RadioPagingMod::webapiActionsPost(
     }
 
     int actions = (channelActionsKeys.contains("tx") ? 1 : 0) + (channelActionsKeys.contains("clear") ? 1 : 0)
-        + (channelActionsKeys.contains("abort") ? 1 : 0);
+        + (channelActionsKeys.contains("abort") ? 1 : 0) + (channelActionsKeys.contains("systemEvent") ? 1 : 0);
 
     if (actions != 1)
     {
-        errorMessage = "One action expected: tx, clear or abort";
+        errorMessage = "One action expected: tx, clear, abort or systemEvent";
         return 400;
+    }
+
+    // FLEX System Event Notification: refused at once if the channel can not send it
+    if (channelActionsKeys.contains("systemEvent"))
+    {
+        int frames = channelActionsKeys.contains("systemEventFrames") ? swgActions->getSystemEventFrames()
+            : RadioPagingFlexEncoder::m_minEventFrames;
+
+        if (swgActions->getSystemEvent() < 0)
+        {
+            errorMessage = "systemEvent must be 0 to 2047";
+            return 400;
+        }
+        if (!notifySystemEvent((unsigned) swgActions->getSystemEvent(), frames, errorMessage)) {
+            return 400;
+        }
+        return 202;
     }
 
     // Through the channel's message queue, as the GUI: the actions and the settings

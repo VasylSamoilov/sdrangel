@@ -116,6 +116,8 @@ public:
     void setNotifyRepeated(const std::function<void(quint64)>& notify) { m_source.setNotifyRepeated(notify); }
     //! Voice of the live voice page and its end, passed to the source (thread safe)
     void pushLive(const std::vector<float>& samples) { m_source.pushLive(samples); }
+    //! FLEX System Event Notification, passed to the source (thread safe), see RadioPagingModSource::notifySystemEvent
+    bool notifySystemEvent(unsigned events, int frames, std::string& error) { return m_source.notifySystemEvent(events, frames, error); }
     void endLive() { m_source.endLive(); }
 
 signals:

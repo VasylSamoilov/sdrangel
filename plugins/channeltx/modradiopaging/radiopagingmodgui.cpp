@@ -479,6 +479,98 @@ void RadioPagingModGUI::on_flexMaxMessageNumber_valueChanged(int value)
     applySettings(QStringList("flexMaxMessageNumber"));
 }
 
+void RadioPagingModGUI::displaySystemEvent(bool flex, bool network)
+{
+    // The events of STD-43A Table 3.9.6-1, e0 to e4 (e5-e10 are reserved)
+    if (!ui->flexEventFlags->menu())
+    {
+        static const char *events[] = {
+            "e0 Traffic split by SSID TMF",
+            "e1 Traffic split by NID TMF",
+            "e2 Change of the Channel Set Up Instruction",
+            "e3 New frequency of the NID",
+            "e4 New frequency of the SSID coverage zone"
+        };
+        QMenu *menu = new QMenu(ui->flexEventFlags);
+
+        for (int i = 0; i < 5; i++)
+        {
+            QAction *action = menu->addAction(events[i]);
+            action->setCheckable(true);
+            action->setData(1 << i);
+            connect(action, &QAction::toggled, this, [this]() {
+                unsigned flags = systemEventFlags();
+                ui->flexEventFlags->setText(flags ? QString("Events %1").arg(QString::number(flags, 16).toUpper().rightJustified(3, QChar('0')))
+                    : QString("Events"));
+            });
+        }
+
+        ui->flexEventFlags->setMenu(menu);
+    }
+
+    const bool shown = flex && network;
+    ui->flexEventFlags->setVisible(shown);
+    ui->flexEventFrames->setVisible(shown);
+    ui->flexEventSend->setVisible(shown);
+}
+
+unsigned RadioPagingModGUI::systemEventFlags() const
+{
+    unsigned flags = 0;
+
+    if (ui->flexEventFlags->menu())
+    {
+        for (QAction *action : ui->flexEventFlags->menu()->actions())
+        {
+            if (action->isChecked()) {
+                flags |= action->data().toUInt();
+            }
+        }
+    }
+
+    return flags;
+}
+
+// Notify starts the notification of the events checked; while it is sent the button stops it
+void RadioPagingModGUI::on_flexEventSend_clicked()
+{
+    RadioPagingModSource::Status status = m_radioPagingMod->getStatus();
+    unsigned events = (status.m_systemEventFrames > 0) ? 0 : systemEventFlags();
+    QString error;
+
+    if ((status.m_systemEventFrames == 0) && (events == 0))
+    {
+        log(tr("System Event Notification: check the events to announce first"));
+        return;
+    }
+
+    if (!m_radioPagingMod->notifySystemEvent(events, ui->flexEventFrames->value(), error)) {
+        log(tr("System Event Notification refused: %1").arg(error));
+    } else if (events == 0) {
+        log(tr("System Event Notification stopped"));
+    } else {
+        log(tr("System Event Notification of events %1 for %2 frames").arg(events, 3, 16, QChar('0')).arg(ui->flexEventFrames->value()));
+    }
+
+    updateSystemEvent(m_radioPagingMod->getStatus());
+}
+
+void RadioPagingModGUI::updateSystemEvent(const RadioPagingModSource::Status& status)
+{
+    if (status.m_systemEventFrames > 0)
+    {
+        ui->flexEventSend->setText(tr("Stop %1").arg(status.m_systemEventFrames));
+        ui->flexEventSend->setToolTip(tr("The System Event Notification of events %1 is being sent: %2 frames left. Click to stop it")
+            .arg(status.m_systemEvents, 3, 16, QChar('0')).arg(status.m_systemEventFrames));
+    }
+    else
+    {
+        ui->flexEventSend->setText(tr("Notify"));
+        ui->flexEventSend->setToolTip(tr("Start the System Event Notification of the events checked (FLEX network mode): it goes in "
+            "every phase of each frame for the frames set"));
+    }
+}
+
 void RadioPagingModGUI::on_flexTime_toggled(bool checked)
 {
     m_settings.m_flexTime = checked;
@@ -1156,6 +1248,7 @@ void RadioPagingModGUI::displayProtocol()
     ui->collapse->setValue(m_settings.m_flexCollapse);
     // Collapse: the re-synchronization length; network: also the schedule of the frames
     bool network = (m_settings.m_mode == RadioPagingModSettings::Network);
+    displaySystemEvent(flex, network);
     ui->collapseLabel->setVisible(flex);
     ui->collapse->setVisible(flex);
     ui->collapse->setToolTip(network
@@ -1353,6 +1446,7 @@ void RadioPagingModGUI::tick()
     text += QString(", %1 waiting, %2 sent").arg(status.m_queued).arg(status.m_sent);
     ui->status->setText(text);
     updateLive(status);
+    updateSystemEvent(status);
 
     // Several transmissions may end between two ticks
     if (status.m_sent > m_lastLoggedSent)
@@ -1394,6 +1488,7 @@ void RadioPagingModGUI::makeUIConnections()
     QObject::connect(ui->flexTimeSendZone, &QCheckBox::toggled, this, &RadioPagingModGUI::on_flexTimeSendZone_toggled);
     QObject::connect(ui->flexNumbering, &QCheckBox::toggled, this, &RadioPagingModGUI::on_flexNumbering_toggled);
     QObject::connect(ui->flexMaxMessageNumber, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_flexMaxMessageNumber_valueChanged);
+    QObject::connect(ui->flexEventSend, &QPushButton::clicked, this, &RadioPagingModGUI::on_flexEventSend_clicked);
     QObject::connect(ui->flexTimeZone, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_flexTimeZone_currentIndexChanged);
     QObject::connect(ui->flexTimeClock, &QCheckBox::toggled, this, &RadioPagingModGUI::on_flexTimeClock_toggled);
     QObject::connect(ui->flexTimeSet, &QDateTimeEdit::editingFinished, this, &RadioPagingModGUI::on_flexTimeSet_editingFinished);

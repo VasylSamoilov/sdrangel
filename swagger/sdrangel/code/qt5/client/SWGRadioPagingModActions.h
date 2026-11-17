@@ -27,6 +27,10 @@ public:
     void setClear(qint32 value);
     qint32 getAbort();
     void setAbort(qint32 value);
+    qint32 getSystemEvent();
+    void setSystemEvent(qint32 value);
+    qint32 getSystemEventFrames();
+    void setSystemEventFrames(qint32 value);
 private:
     SWGRadioPagingModTx* m_tx = nullptr;
     bool m_txIsSet = false;
@@ -34,6 +38,10 @@ private:
     bool m_clearIsSet = false;
     qint32 m_abort = 0;
     bool m_abortIsSet = false;
+    qint32 m_systemEvent = 0;
+    bool m_systemEventIsSet = false;
+    qint32 m_systemEventFrames = 0;
+    bool m_systemEventFramesIsSet = false;
 };
 }
 #endif

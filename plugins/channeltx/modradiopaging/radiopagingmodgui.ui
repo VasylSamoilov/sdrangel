@@ -884,6 +884,48 @@
       </property>
      </widget>
     </item>
+    <item row="12" column="0" colspan="2">
+     <widget class="QToolButton" name="flexEventFlags">
+      <property name="toolTip">
+       <string>FLEX System Event Notification (STD-43A 3.8.2.4): the events announced to the pagers, to take place within the next 4 cycles</string>
+      </property>
+      <property name="text">
+       <string>Events</string>
+      </property>
+      <property name="popupMode">
+       <enum>QToolButton::InstantPopup</enum>
+      </property>
+     </widget>
+    </item>
+    <item row="12" column="2">
+     <widget class="QSpinBox" name="flexEventFrames">
+      <property name="toolTip">
+       <string>Frames of the System Event Notification: it goes in every phase of each frame, for one cycle (128 frames) at least, up to the 4 cycles of the notice (512)</string>
+      </property>
+      <property name="suffix">
+       <string> fr</string>
+      </property>
+      <property name="minimum">
+       <number>128</number>
+      </property>
+      <property name="maximum">
+       <number>512</number>
+      </property>
+      <property name="value">
+       <number>128</number>
+      </property>
+     </widget>
+    </item>
+    <item row="12" column="3">
+     <widget class="QPushButton" name="flexEventSend">
+      <property name="toolTip">
+       <string>Start the System Event Notification of the events checked (FLEX network mode); while it is sent, the frames left, and a click stops it</string>
+      </property>
+      <property name="text">
+       <string>Notify</string>
+      </property>
+     </widget>
+    </item>
    </layout>
   </widget>
   <widget class="QWidget" name="messageContainer" native="true">

@@ -101,6 +101,8 @@ struct Received
     int m_voiceStarts = 0;              //!< Voice page records (partial)
     std::vector<std::string> m_voiceEnds;   //!< The end of each voice message: the reason
     double m_voiceSeconds = 0.0;        //!< Length of the last voice message
+    int m_systemEvents = 0;             //!< FLEX System Event Notification records
+    unsigned m_eventFlags = 0;          //!< Their event flags, or-ed
 };
 
 // The source output, with noise, into the demodulator sink at the same rate and offset
@@ -207,6 +209,12 @@ struct Loop
                     else {
                         m_received.m_voiceStarts++;
                     }
+                }
+
+                if (rec.m_protocolData.contains("event_flags"))
+                {
+                    m_received.m_systemEvents++;
+                    m_received.m_eventFlags |= rec.m_protocolData["event_flags"].toUInt();
                 }
 
                 m_received.m_records++;
@@ -709,6 +717,43 @@ void testFlexNetwork()
     check(loop.m_source.getStatus().m_state == RadioPagingModSource::Idle, "FLEX network to POCSAG one-shot: the transmission ends");
 }
 
+// FLEX System Event Notification: network only, received in the frames sent, the frames left count down to 0
+void testFlexSystemEvent()
+{
+    std::string error;
+
+    {
+        Loop oneShot(48000, 0, RadioPagingModSettings::Flex, RadioPagingModSettings::OneShot);
+        Loop gsc(48000, 0, RadioPagingModSettings::Gsc, RadioPagingModSettings::Network);
+        check(!oneShot.m_source.notifySystemEvent(1, 128, error) && !gsc.m_source.notifySystemEvent(1, 128, error),
+            "System Event Notification: refused in one-shot and for GSC");
+    }
+
+    Loop loop(48000, 0, RadioPagingModSettings::Flex, RadioPagingModSettings::Network);
+    loop.m_settings.m_flexMode = RadioPagingFlex::Mode1600_2;
+    loop.apply(QStringList("flexMode"));
+    loop.runSeconds(2.0);
+    check(!loop.m_source.notifySystemEvent(1, 100, error) && loop.m_source.notifySystemEvent(0x005, 128, error)
+        && (loop.m_source.getStatus().m_systemEventFrames > 0) && (loop.m_source.getStatus().m_systemEvents == 0x005),
+        "System Event Notification: 100 frames refused, 128 frames started");
+    loop.m_source.addRequest(flexRequest(200, 1234567, "DURING THE EVENT", false));
+    loop.runSeconds(20.0);
+    const Received& during = loop.take();
+    int left = loop.m_source.getStatus().m_systemEventFrames;
+    char what[200];
+    std::snprintf(what, sizeof(what), "System Event Notification: received in the frames sent (%d records, %d frames left), the message too",
+        during.m_systemEvents, left);
+    check((during.m_systemEvents >= 8) && (during.m_eventFlags == 0x005) && (left > 0) && (left < 128)
+        && contains(during, { flexKey(RadioPagingFlex::Mode1600_2, 1234567, false, "DURING THE EVENT") }), what);
+
+    check(loop.m_source.notifySystemEvent(0, 128, error) && (loop.m_source.getStatus().m_systemEventFrames == 0),
+        "System Event Notification: stopped");
+    loop.runSeconds(2.0);
+    int before = loop.take().m_systemEvents;
+    loop.runSeconds(6.0);
+    check(loop.take().m_systemEvents == before, "System Event Notification: none after it is stopped");
+}
+
 // Roaming: the system ID words are sent, the messages are still received (plain FLEX and mixed with POCSAG)
 void testFlexRoaming(bool mixed)
 {
@@ -1046,6 +1091,7 @@ int main()
     testFlexOneShot(38400, -5000, RadioPagingFlex::Mode1600_2, false, true);
     testFlexOneShot(62500, 10000, RadioPagingFlex::Mode6400_4, false, true);
     testFlexNetwork();
+    testFlexSystemEvent();
     testFlexRoaming(false);
     testFlexRoaming(true);
     testFlexCutAccounting();

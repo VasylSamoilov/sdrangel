@@ -601,6 +601,24 @@ bool RadioPagingFlexTxStream::setNumbering(const RadioPagingFlexEncoder::Numberi
     return m_encoders[0].setNumbering(numbering, error) && m_encoders[1].setNumbering(numbering, error);
 }
 
+bool RadioPagingFlexTxStream::notifySystemEvent(unsigned events, int frames, std::string& error)
+{
+    // Each frame for a cycle: a one-shot transmission does not last that long
+    if (!m_network)
+    {
+        error = "The System Event Notification needs the network mode";
+        return false;
+    }
+
+    return m_encoders[0].notifySystemEvent(events, frames, error) && m_encoders[1].notifySystemEvent(events, frames, error);
+}
+
+void RadioPagingFlexTxStream::cancelSystemEvent()
+{
+    m_encoders[0].cancelSystemEvent();
+    m_encoders[1].cancelSystemEvent();
+}
+
 bool RadioPagingFlexTxStream::setReservedFrames(const std::vector<uint8_t>& table, std::string& error)
 {
     return m_encoders[0].setReservedFrames(table, error) && m_encoders[1].setReservedFrames(table, error);

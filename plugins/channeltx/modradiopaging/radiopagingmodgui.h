@@ -102,6 +102,11 @@ private:
     QDateTime flexTimeNow() const;
     void displayTime(bool flex);
     void displayNumbering(bool flex);
+    //!< FLEX System Event Notification: the controls (FLEX network only) and, while it is sent, the frames left
+    void displaySystemEvent(bool flex, bool network);
+    void updateSystemEvent(const RadioPagingModSource::Status& status);
+    //!< The event flags checked in the menu of the events, e10-e0
+    unsigned systemEventFlags() const;
     //! The composer for the channel: its protocols, network mode, FLEX numbering, microphone
     void displayMessage();
 
@@ -157,6 +162,7 @@ private slots:
     void on_flexTimeSendZone_toggled(bool checked);
     void on_flexNumbering_toggled(bool checked);
     void on_flexMaxMessageNumber_valueChanged(int value);
+    void on_flexEventSend_clicked();
     void on_flexTimeZone_currentIndexChanged(int index);
     void on_flexTimeClock_toggled(bool checked);
     void on_flexTimeSet_editingFinished();

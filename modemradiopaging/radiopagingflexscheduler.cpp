@@ -895,6 +895,10 @@ bool RadioPagingFlexEncoder::mandatory(uint64_t frameIndex) const
     if (m_time.m_enabled && (time.m_cycle == 0) && (time.m_frame == 0)) {
         return true;
     }
+    // The System Event Notification goes in each frame (STD-43A 3.8.2.4)
+    if (m_eventFrames > 0) {
+        return true;
+    }
 
     for (const Item& item : m_queue)
     {
@@ -908,6 +912,24 @@ bool RadioPagingFlexEncoder::mandatory(uint64_t frameIndex) const
     }
 
     return false;
+}
+
+bool RadioPagingFlexEncoder::notifySystemEvent(unsigned events, int frames, std::string& error)
+{
+    if ((events == 0) || (events > m_maxEvents))
+    {
+        error = "System event flags must be 1 to 2047 (e10-e0)";
+        return false;
+    }
+    if ((frames < m_minEventFrames) || (frames > m_maxEventFrames))
+    {
+        error = "The System Event Notification goes in each frame for 128 to 512 frames (one to 4 cycles)";
+        return false;
+    }
+
+    m_events = events;
+    m_eventFrames = frames;
+    return true;
 }
 
 bool RadioPagingFlexEncoder::setTimeService(const TimeService& time, std::string& error)
@@ -1026,6 +1048,26 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
     {
         extraBiw[p] = extraBlockInfo(frameIndex, p);
         used[p] = (int) extraBiw[p].size();
+    }
+
+    // The System Event Notification in every phase, ahead of the messages (STD-43A 3.8.2.4)
+    RadioPagingFlex::PhaseMessage event;
+    const bool notify = (m_eventFrames > 0);
+
+    if (notify)
+    {
+        event.m_capcode = RadioPagingFlex::m_systemEventAddress;
+        event.m_type = RadioPagingFlex::ShortInstruction;
+        event.m_instruction.m_type = RadioPagingFlex::InstructionParams::SystemEvent;
+        event.m_instruction.m_events = m_events;
+        int eventCost = std::max(0, RadioPagingFlex::messageCost(event));
+
+        for (int p = 0; p < phases; p++) {
+            used[p] += eventCost;
+        }
+
+        m_eventFrames--;
+        frame.m_systemEvent = true;
     }
     int priorityWords[RadioPagingFlex::m_maxPhases] = {0, 0, 0, 0};
 
@@ -1203,7 +1245,7 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
         }
         // The flag tells that the address field ends in block 0 (STD-43A 3.6): block information words 2 to 4
         // come first
-        addressWords[p] += (int) extraBiw[p].size();
+        addressWords[p] += (int) extraBiw[p].size() + (notify ? 1 : 0);
     }
     frame.m_traffic = RadioPagingFlex::lowTrafficFlags(addressWords, phases);
 
@@ -1221,9 +1263,14 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
 
         params.m_extraBiw = extraBiw[p];
 
-        if (!candidates[p].empty())
+        if (!candidates[p].empty() || notify)
         {
             std::vector<RadioPagingFlex::PhaseMessage> messages;
+            const size_t first = notify ? 1 : 0;   // The notification goes first
+
+            if (notify) {
+                messages.push_back(event);
+            }
 
             for (const Candidate& c : candidates[p])
             {
@@ -1241,10 +1288,10 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
             if (result.m_ok)
             {
                 phaseWords[p] = result.m_words;
-                for (size_t j = 0; j < messages.size(); j++)
+                for (size_t j = first; j < messages.size(); j++)
                 {
                     if (result.m_packed[j]) {
-                        sent.push_back(std::make_pair(candidates[p][j].m_item, p));
+                        sent.push_back(std::make_pair(candidates[p][j - first].m_item, p));
                     }
                 }
             }
@@ -1335,7 +1382,7 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
         }
         m_queue.erase(it);
     }
-    frame.m_idle = sent.empty();
+    frame.m_idle = sent.empty() && !notify;
 
     RadioPagingFlex::FrameParams fp;
     fp.m_mode = m_mode;
