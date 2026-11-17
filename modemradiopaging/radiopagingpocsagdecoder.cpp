@@ -59,6 +59,8 @@ void RadioPagingPocsagDecoder::reset()
     m_codewordsUncorrectable = 0;
     m_transmissions = 0;
     m_candidatesDropped = 0;
+    m_syncMissed = 0;
+    m_syncMissedLast = false;
     m_ber.reset();
     m_messages.clear();
 }
@@ -76,6 +78,7 @@ RadioPagingPocsagDecoder::Status RadioPagingPocsagDecoder::getStatus() const
     status.m_codewordsUncorrectable = m_codewordsUncorrectable;
     status.m_transmissions = m_transmissions;
     status.m_candidatesDropped = m_candidatesDropped;
+    status.m_syncMissed = m_syncMissed;
     status.m_ber = m_ber;
 
     return status;
@@ -101,6 +104,7 @@ void RadioPagingPocsagDecoder::startCandidate()
     m_word = 0;
     m_wordBits = 0;
     m_leadingConfirmed = false;
+    m_syncMissedLast = false;
     m_batch = 0;
 }
 
@@ -158,12 +162,27 @@ void RadioPagingPocsagDecoder::feed(int symbol)
                 m_syncWords++;
                 decodeBatch();
                 m_leadingConfirmed = true;
+                m_syncMissedLast = false;
+                m_slot = 0;
+                m_state = InBatch;
+            }
+            else if ((m_leadingConfirmed || batchValid()) && !m_syncMissedLast)
+            {
+                // The batch is received (after a confirmed sync codeword, or all its codewords decode): decoded.
+                // Its following sync codeword was missed (a fade): reception goes on at the expected position,
+                // as a pager decoder does, and the next batch is decoded when the sync codeword after it
+                // confirms it (or all its codewords decode). Two batches in a row without their sync codeword
+                // end the transmission (sync loss)
+                decodeBatch();
+                m_syncMissed++;
+                m_syncMissedLast = true;
+                m_leadingConfirmed = false;
                 m_slot = 0;
                 m_state = InBatch;
             }
             else
             {
-                if (m_leadingConfirmed || batchValid()) {
+                if (batchValid()) {
                     decodeBatch();
                 } else {
                     m_candidatesDropped++;
@@ -207,6 +226,7 @@ void RadioPagingPocsagDecoder::endTransmission()
     finishMessage(true);
     m_state = Hunting;
     m_leadingConfirmed = false;
+    m_syncMissedLast = false;
     m_batch = 0;
     m_uncorrectableRun = 0;
 }

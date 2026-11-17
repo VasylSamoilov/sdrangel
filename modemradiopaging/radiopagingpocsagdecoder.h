@@ -86,6 +86,7 @@ public:
         uint32_t m_codewordsUncorrectable;
         uint32_t m_transmissions;           //!< Transmissions with at least one decoded batch
         uint32_t m_candidatesDropped;       //!< Sync candidates whose batch was not decoded
+        uint32_t m_syncMissed;              //!< Sync codewords missed in a transmission (reception went on)
         RadioPagingBerWindow m_ber;         //!< Of the current (or last) transmission
     };
 
@@ -130,6 +131,8 @@ private:
     uint32_t m_codewordsUncorrectable;
     uint32_t m_transmissions;
     uint32_t m_candidatesDropped;
+    uint32_t m_syncMissed;
+    bool m_syncMissedLast;              //!< The sync codeword before the current batch was missed
     uint32_t m_syncWords = 0;
     RadioPagingBerWindow m_ber;
 

@@ -41,7 +41,7 @@ A leg filter that is not narrower than the channel filter is not applied.
 
 <h3>POCSAG</h3>
 
-The preamble trains the bit clock of the demodulator. Synchronisation uses the codewords only, so a transmission is also acquired when the preamble was missed: a sync codeword with up to 2 bit errors starts a candidate batch, which is decoded when it is confirmed by another sync codeword one batch away, or when all 16 codewords of the batch decode by themselves.
+The preamble trains the bit clock of the demodulator. Synchronisation uses the codewords only, so a transmission is also acquired when the preamble was missed: a sync codeword with up to 2 bit errors starts a candidate batch, which is decoded when it is confirmed by another sync codeword one batch away, or when all 16 codewords of the batch decode by themselves. A sync codeword missed in a transmission (a fade) does not end it: reception goes on at the expected position and the next batch is decoded when the sync codeword after it confirms it. Two batches in a row without their sync codeword are a sync loss: the transmission ends and the decoder hunts again, as pager decoders do.
 
 A message ends with an idle or address codeword, or after two successive codewords that cannot be decoded (ITU-R M.584-2 2.5.1). A single undecodable codeword is kept in the message and counted as uncorrectable.
 

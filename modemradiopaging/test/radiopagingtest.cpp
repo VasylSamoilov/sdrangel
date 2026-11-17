@@ -546,6 +546,44 @@ bool hasAddressText(const std::vector<RadioPagingPocsagDecoder::Message>& messag
     return false;
 }
 
+void testPocsagSyncLoss()
+{
+    RadioPagingPocsag::TxMessage m;
+    m.m_address = 1234567;
+    m.m_function = 3;
+    m.m_type = RadioPagingPocsag::Alphanumeric;
+    m.m_text = std::string(120, 'A');
+    RadioPagingPocsag::EncodeResult r = RadioPagingPocsag::encode({ m });
+    const size_t batchWords = RadioPagingPocsag::m_codewordsPerBatch + 1;
+
+    // One sync codeword missed (4 bit errors, beyond the 2 corrected): reception goes on at the expected
+    // position and the next sync codeword confirms the batch
+    std::vector<uint8_t> bits = r.m_bits;
+    flipBits(bits, batchWords, 4);
+    std::vector<RadioPagingPocsagDecoder::Message> messages = decodeBits(bits);
+    check((messages.size() == 1) && !messages[0].m_truncated && hasAddressText(messages, 1234567, m.m_text),
+        "POCSAG: one sync codeword missed, the message is received whole");
+
+    // Two sync codewords missed in a row: sync loss, the message ends there
+    flipBits(bits, 2 * batchWords, 4);
+    messages = decodeBits(bits);
+    check((messages.size() == 1) && messages[0].m_truncated, "POCSAG: two sync codewords missed in a row, sync loss");
+
+    // The end of a transmission followed by noise: the batch after the last one is not confirmed, no message
+    RadioPagingPocsag::TxMessage tone;
+    tone.m_address = 1000;
+    tone.m_type = RadioPagingPocsag::Tone;
+    bits = RadioPagingPocsag::encode({ tone }).m_bits;
+    std::mt19937 rng(7);
+
+    for (int i = 0; i < 32 * (int) batchWords * 3; i++) {
+        bits.push_back(rng() & 1);
+    }
+
+    messages = decodeBits(bits);
+    check((messages.size() == 1) && (messages[0].m_address == 1000), "POCSAG: noise after a transmission gives no message");
+}
+
 void testPocsagStandardRules()
 {
     // Encoder: an idle or address codeword between a message and the next message's address,
@@ -797,6 +835,7 @@ int main()
     testPocsagCodec();
     testPocsagLink();
     testPocsagStandardRules();
+    testPocsagSyncLoss();
     testPocsagPreambleLock();
     testFsk();
     testBerWindow();
