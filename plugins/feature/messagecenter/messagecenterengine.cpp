@@ -19,6 +19,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QUuid>
 
 #include <algorithm>
@@ -488,11 +489,13 @@ void MessageCenterEngine::store(const MessageRecord& record)
             // Only an update of a message still partial leaves it partial
             merged.m_partial = it->m_partial && record.m_partial;
             *it = merged;
+            appendHistory(merged);
             return;
         }
     }
 
     m_log.push_back(record);
+    appendHistory(record);
 
     while ((int) m_log.size() > m_logSize) {
         m_log.pop_front();
@@ -507,11 +510,171 @@ bool MessageCenterEngine::replace(const MessageRecord& record)
         {
             *it = record;
             m_logged++;
+            appendHistory(record);
             return true;
         }
     }
 
     return false;
+}
+
+void MessageCenterEngine::clearLog()
+{
+    QString error;
+
+    m_log.clear();
+
+    if (!m_historyPath.isEmpty() && !writeHistory(error)) {
+        qWarning("MessageCenterEngine::clearLog: %s", qPrintable(error));
+    }
+}
+
+bool MessageCenterEngine::setHistory(const QString& path, qint64 maxBytes, QString& error)
+{
+    m_historyMaxBytes = std::max((qint64) 1, maxBytes);
+
+    if (path == m_historyPath)
+    {
+        return ((m_historyBytes <= m_historyMaxBytes) || m_historyPath.isEmpty()) ? true : writeHistory(error);
+    }
+
+    m_historyPath = path;
+    m_historyBytes = 0;
+
+    if (m_historyPath.isEmpty()) {
+        return true;
+    }
+
+    // Messages in the log already (the history turned on later): the file starts with them
+    if (!m_log.empty()) {
+        return writeHistory(error);
+    }
+
+    QFile file(m_historyPath);
+
+    if (!file.exists()) {
+        return writeHistory(error);
+    }
+    if (!file.open(QIODevice::ReadOnly))
+    {
+        error = QString("%1: %2").arg(m_historyPath, file.errorString());
+        return false;
+    }
+
+    // The last version of each message, in the order the messages came; the newest logSize of them
+    std::vector<MessageRecord> records;
+    QMap<QString, size_t> index;
+    int lines = 0;
+
+    while (!file.atEnd())
+    {
+        const QByteArray line = file.readLine().trimmed();
+        MessageRecord record;
+
+        if (line.isEmpty()) {
+            continue;
+        }
+
+        lines++;
+
+        if (!MessageRecord::fromJson(QJsonDocument::fromJson(line).object(), record)) {
+            continue;
+        }
+        if (!record.m_id.isEmpty() && index.contains(record.m_id))
+        {
+            records[index[record.m_id]] = record;
+            continue;
+        }
+        if (!record.m_id.isEmpty()) {
+            index.insert(record.m_id, records.size());
+        }
+
+        records.push_back(record);
+    }
+
+    m_historyBytes = file.size();
+    file.close();
+
+    const size_t first = (records.size() > (size_t) m_logSize) ? records.size() - (size_t) m_logSize : 0;
+
+    for (size_t i = first; i < records.size(); i++) {
+        m_log.push_back(records[i]);
+    }
+
+    m_logged += (int) m_log.size();     // The views show the log loaded
+
+    // Other versions of the messages or older messages in the file: written again with the log alone
+    if ((lines != (int) m_log.size()) || (m_historyBytes > m_historyMaxBytes)) {
+        return writeHistory(error);
+    }
+
+    return true;
+}
+
+void MessageCenterEngine::appendHistory(const MessageRecord& record)
+{
+    if (m_historyPath.isEmpty()) {
+        return;
+    }
+
+    QString error;
+    QFile file(m_historyPath);
+    const QByteArray line = record.toJsonLine();
+
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Append) || (file.write(line) != line.size()))
+    {
+        qWarning("MessageCenterEngine::appendHistory: %s: %s", qPrintable(m_historyPath), qPrintable(file.errorString()));
+        return;
+    }
+
+    file.close();
+    m_historyBytes += line.size();
+
+    // Over the limit: the newest messages of the log (the record is in it)
+    if ((m_historyBytes > m_historyMaxBytes) && !writeHistory(error)) {
+        qWarning("MessageCenterEngine::appendHistory: %s", qPrintable(error));
+    }
+}
+
+bool MessageCenterEngine::writeHistory(QString& error)
+{
+    QSaveFile file(m_historyPath);
+
+    if (!file.open(QIODevice::WriteOnly))
+    {
+        error = QString("%1: %2").arg(m_historyPath, file.errorString());
+        return false;
+    }
+
+    // The newest messages of the log up to half the size limit: the file grows again before it is written
+    // again
+    std::vector<QByteArray> lines;
+    qint64 bytes = 0;
+
+    for (auto it = m_log.rbegin(); it != m_log.rend(); ++it)
+    {
+        QByteArray line = it->toJsonLine();
+
+        if (bytes + line.size() > m_historyMaxBytes / 2) {
+            break;
+        }
+
+        bytes += line.size();
+        lines.push_back(std::move(line));
+    }
+
+    for (auto it = lines.rbegin(); it != lines.rend(); ++it) {
+        file.write(*it);
+    }
+
+    if (!file.commit())
+    {
+        error = QString("%1: %2").arg(m_historyPath, file.errorString());
+        return false;
+    }
+
+    m_historyBytes = bytes;
+    return true;
 }
 
 void MessageCenterEngine::deliver(const MessageRecord& record, const QString& sinkName, qint64 now)

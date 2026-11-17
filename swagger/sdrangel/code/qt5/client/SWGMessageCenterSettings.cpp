@@ -20,6 +20,8 @@ void SWGMessageCenterSettings::init()
     m_title = new QString(); m_titleIsSet = false;
     m_rgbColor = 0; m_rgbColorIsSet = false;
     m_logSize = 0; m_logSizeIsSet = false;
+    m_historyEnabled = 0; m_historyEnabledIsSet = false;
+    m_historyMaxMb = 0; m_historyMaxMbIsSet = false;
     m_claimTimeoutSec = 0; m_claimTimeoutSecIsSet = false;
     m_silentSec = 0; m_silentSecIsSet = false;
     m_routes = new QString(); m_routesIsSet = false;
@@ -40,6 +42,8 @@ void SWGMessageCenterSettings::fromJsonObject(QJsonObject& json)
     if (json.contains("title")) { ::SWGSDRangel::setValue(&m_title,json["title"],"QString","QString"); m_titleIsSet = true; }
     if (json.contains("rgbColor")) { ::SWGSDRangel::setValue(&m_rgbColor,json["rgbColor"],"qint64",""); m_rgbColorIsSet = true; }
     if (json.contains("logSize")) { ::SWGSDRangel::setValue(&m_logSize,json["logSize"],"qint32",""); m_logSizeIsSet = true; }
+    if (json.contains("historyEnabled")) { ::SWGSDRangel::setValue(&m_historyEnabled,json["historyEnabled"],"qint32",""); m_historyEnabledIsSet = true; }
+    if (json.contains("historyMaxMB")) { ::SWGSDRangel::setValue(&m_historyMaxMb,json["historyMaxMB"],"qint32",""); m_historyMaxMbIsSet = true; }
     if (json.contains("claimTimeoutSec")) { ::SWGSDRangel::setValue(&m_claimTimeoutSec,json["claimTimeoutSec"],"qint32",""); m_claimTimeoutSecIsSet = true; }
     if (json.contains("silentSec")) { ::SWGSDRangel::setValue(&m_silentSec,json["silentSec"],"qint32",""); m_silentSecIsSet = true; }
     if (json.contains("routes")) { ::SWGSDRangel::setValue(&m_routes,json["routes"],"QString","QString"); m_routesIsSet = true; }
@@ -61,6 +65,8 @@ QJsonObject* SWGMessageCenterSettings::asJsonObject()
     if (m_title && (m_titleIsSet || !m_title->isEmpty())) { toJsonValue(QString("title"),m_title,object,QString("QString")); }
     if (m_rgbColorIsSet) { object->insert("rgbColor",QJsonValue(m_rgbColor)); }
     if (m_logSizeIsSet) { object->insert("logSize",QJsonValue(m_logSize)); }
+    if (m_historyEnabledIsSet) { object->insert("historyEnabled",QJsonValue(m_historyEnabled)); }
+    if (m_historyMaxMbIsSet) { object->insert("historyMaxMB",QJsonValue(m_historyMaxMb)); }
     if (m_claimTimeoutSecIsSet) { object->insert("claimTimeoutSec",QJsonValue(m_claimTimeoutSec)); }
     if (m_silentSecIsSet) { object->insert("silentSec",QJsonValue(m_silentSec)); }
     if (m_routes && (m_routesIsSet || !m_routes->isEmpty())) { toJsonValue(QString("routes"),m_routes,object,QString("QString")); }
@@ -75,7 +81,7 @@ QJsonObject* SWGMessageCenterSettings::asJsonObject()
 }
 bool SWGMessageCenterSettings::isSet()
 {
-    return m_titleIsSet || m_rgbColorIsSet || m_logSizeIsSet || m_claimTimeoutSecIsSet || m_silentSecIsSet || m_routesIsSet
+    return m_titleIsSet || m_rgbColorIsSet || m_logSizeIsSet || m_historyEnabledIsSet || m_historyMaxMbIsSet || m_claimTimeoutSecIsSet || m_silentSecIsSet || m_routesIsSet
         || m_sinksIsSet || m_sourcesIsSet || m_useReverseApiIsSet || m_reverseApiAddressIsSet || m_reverseApiPortIsSet
         || m_reverseApiFeatureSetIndexIsSet || m_reverseApiFeatureIndexIsSet;
 }
@@ -85,6 +91,10 @@ qint64 SWGMessageCenterSettings::getRgbColor() { return m_rgbColor; }
 void SWGMessageCenterSettings::setRgbColor(qint64 value) { m_rgbColor = value; m_rgbColorIsSet = true; }
 qint32 SWGMessageCenterSettings::getLogSize() { return m_logSize; }
 void SWGMessageCenterSettings::setLogSize(qint32 value) { m_logSize = value; m_logSizeIsSet = true; }
+qint32 SWGMessageCenterSettings::getHistoryEnabled() { return m_historyEnabled; }
+void SWGMessageCenterSettings::setHistoryEnabled(qint32 value) { m_historyEnabled = value; m_historyEnabledIsSet = true; }
+qint32 SWGMessageCenterSettings::getHistoryMaxMb() { return m_historyMaxMb; }
+void SWGMessageCenterSettings::setHistoryMaxMb(qint32 value) { m_historyMaxMb = value; m_historyMaxMbIsSet = true; }
 qint32 SWGMessageCenterSettings::getClaimTimeoutSec() { return m_claimTimeoutSec; }
 void SWGMessageCenterSettings::setClaimTimeoutSec(qint32 value) { m_claimTimeoutSec = value; m_claimTimeoutSecIsSet = true; }
 qint32 SWGMessageCenterSettings::getSilentSec() { return m_silentSec; }

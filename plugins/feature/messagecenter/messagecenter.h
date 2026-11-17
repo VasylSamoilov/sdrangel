@@ -186,6 +186,10 @@ public:
 
     //! The engine, for the GUI to read (same thread)
     const MessageCenterEngine& engine() const { return m_engine; }
+    //!< The file of the history of the log (in the application data folder)
+    static QString historyFilePath();
+    //!< Why the history is not kept although it is on (another message center keeps it, a file error); empty if it is
+    QString historyError() const { QMutexLocker mutexLocker(&m_mutex); return m_historyError; }
     const MessageCenterSettings& settings() const { return m_settings; }
     //! Errors of the sinks and sources since the last call
     QStringList takeErrors();
@@ -208,6 +212,9 @@ private:
     void applySettings(const MessageCenterSettings& settings, const QStringList& settingsKeys, bool force = false);
     void webapiReverseSendSettings(const QList<QString>& featureSettingsKeys, const MessageCenterSettings& settings, bool force);
     void applyEngineSettings();
+    void applyHistory();                    //!< The history file of the settings in the engine (one owner a file)
+    QString m_historyError;                 //!< Why the history is not kept, empty if it is
+    static MessageCenter*& historyOwner();
     void ingest(const MessageRecord& record, const QObject *source);
     void tick();
     //! The page to the transmitter named on it, as the "tx" action of its channel. The HTTP code and the error

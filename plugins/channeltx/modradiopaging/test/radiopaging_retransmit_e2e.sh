@@ -44,7 +44,7 @@ count() { records "$1" "$2" | grep -c .; }
 countRx() { records rx "$1" | grep -c "\"duplicate\":\"$2\""; }
 
 mkdir -p "$WORK/config"
-(cd "$BUILD" && XDG_CONFIG_HOME="$WORK/config" LD_LIBRARY_PATH="$BUILD/lib" ./sdrangelsrv --scratch -a 127.0.0.1 -p "$PORT" > "$WORK/server.log" 2>&1 &)
+(cd "$BUILD" && XDG_CONFIG_HOME="$WORK/config" XDG_DATA_HOME="$WORK/data" LD_LIBRARY_PATH="$BUILD/lib" ./sdrangelsrv --scratch -a 127.0.0.1 -p "$PORT" > "$WORK/server.log" 2>&1 &)
 
 for i in $(seq 50); do curl -s "$U" > /dev/null && break; sleep 0.2; done
 

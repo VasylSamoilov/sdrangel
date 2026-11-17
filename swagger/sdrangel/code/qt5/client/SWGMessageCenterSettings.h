@@ -26,6 +26,10 @@ public:
     void setRgbColor(qint64 value);
     qint32 getLogSize();
     void setLogSize(qint32 value);
+    qint32 getHistoryEnabled();
+    void setHistoryEnabled(qint32 value);
+    qint32 getHistoryMaxMb();
+    void setHistoryMaxMb(qint32 value);
     qint32 getClaimTimeoutSec();
     void setClaimTimeoutSec(qint32 value);
     qint32 getSilentSec();
@@ -53,6 +57,10 @@ private:
     bool m_rgbColorIsSet = false;
     qint32 m_logSize = 0;
     bool m_logSizeIsSet = false;
+    qint32 m_historyEnabled = 0;
+    bool m_historyEnabledIsSet = false;
+    qint32 m_historyMaxMb = 0;
+    bool m_historyMaxMbIsSet = false;
     qint32 m_claimTimeoutSec = 0;
     bool m_claimTimeoutSecIsSet = false;
     qint32 m_silentSec = 0;

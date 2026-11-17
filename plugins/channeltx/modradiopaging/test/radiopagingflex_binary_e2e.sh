@@ -30,7 +30,7 @@ sent() { curl -s "$U/deviceset/0/channel/0/report" | tr -d "\n " | grep -o "\"se
 rxRecord() { report | sed 's/},{/}\n{/g' | grep "\"direction\":\"rx\"" | grep "\"address\":\"0*$1\"" | grep -v "\"is_fragment\":true" | head -1; }
 
 mkdir -p "$WORK/config"
-(cd "$BUILD" && XDG_CONFIG_HOME="$WORK/config" LD_LIBRARY_PATH="$BUILD/lib" ./sdrangelsrv --scratch -a 127.0.0.1 -p "$PORT" > "$WORK/server.log" 2>&1 &)
+(cd "$BUILD" && XDG_CONFIG_HOME="$WORK/config" XDG_DATA_HOME="$WORK/data" LD_LIBRARY_PATH="$BUILD/lib" ./sdrangelsrv --scratch -a 127.0.0.1 -p "$PORT" > "$WORK/server.log" 2>&1 &)
 
 for i in $(seq 50); do curl -s "$U" > /dev/null && break; sleep 0.2; done
 

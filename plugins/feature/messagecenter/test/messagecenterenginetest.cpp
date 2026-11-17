@@ -20,6 +20,7 @@
 
 #include <QCoreApplication>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 
 #include <cstdio>
@@ -445,6 +446,57 @@ void testGuards()
     busy.m_status = MessageEndpoint::Busy;
     check(!MessageEndpoint::fromRecord(notEvent, e, what) && !busy.ready() && busy.canTransmit(pageRecord("b", "flex", "1", "x")),
         "Endpoint: a busy one that gives no capacity is not ready, no protocol listed means any");
+
+    // History: the log is there again at the next start, a message once in its last version
+    QTemporaryDir historyDirectory;
+    const QString historyPath = historyDirectory.path() + "/history.jsonl";
+    QString error;
+    {
+        MessageCenterEngine first;
+        check(first.setHistory(historyPath, 1 << 20, error) && first.log().empty(), "History: a new file, an empty log");
+        first.ingest(rx("h1", "pocsag", "1", "first", "A"), "channels", 1);
+        first.ingest(rx("h2", "flex", "2", "second", "A"), "channels", 2);
+        MessageRecord update;
+        update.m_id = "h1";
+        update.m_protocolData.insert("note", "updated");
+        first.ingest(update, "channels", 3);
+        MessageRecord redecoded = *first.find("h2");
+        redecoded.m_text = "decoded again";
+        first.replace(redecoded);
+    }
+    {
+        MessageCenterEngine second;
+        check(second.setHistory(historyPath, 1 << 20, error) && (second.log().size() == 2) && second.find("h1")
+            && (second.find("h1")->m_protocolData.value("note").toString() == "updated") && (second.find("h1")->m_text == "first")
+            && (second.find("h2")->m_text == "decoded again") && (second.log().front().m_id == "h1"),
+            "History: the messages again in their order, the last version of each (update, decoded again)");
+        QFile compact(historyPath);
+        compact.open(QIODevice::ReadOnly);
+        check(compact.readAll().count('\n') == 2, "History: the file is written again with one line a message");
+        compact.close();
+
+        // Over the size limit the newest messages up to half the limit stay
+        const qint64 line = rx("h3", "pocsag", "3", "a third message", "A").toJsonLine().size();
+        second.setHistory(historyPath, line * 4, error);
+        for (int i = 0; i < 6; i++) {
+            second.ingest(rx(QString("n%1").arg(i), "pocsag", "3", "a third message", "A"), "channels", 10 + i);
+        }
+        check((second.historyBytes() <= line * 4) && (second.log().size() == 8), "History: kept under its size limit, the log stays whole");
+
+        second.clearLog();
+        check(second.log().empty() && (QFileInfo(historyPath).size() == 0), "History: clearing the log empties the file");
+    }
+    {
+        // Turned on with messages in the log: the file starts with them
+        MessageCenterEngine later;
+        later.ingest(rx("l1", "gsc", "100123", "earlier", "A"), "channels", 1);
+        check(later.setHistory(historyPath, 1 << 20, error) && (later.log().size() == 1), "History: turned on later, the log stays");
+        MessageCenterEngine next;
+        next.setHistory(historyPath, 1 << 20, error);
+        check((next.log().size() == 1) && next.find("l1"), "History: turned on later, the file starts with the log");
+        MessageCenterEngine none;
+        check(none.setHistory(QString(), 1 << 20, error) && none.log().empty(), "History: no path, no history");
+    }
 }
 
 } // namespace

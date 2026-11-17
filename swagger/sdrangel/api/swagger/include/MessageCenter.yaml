@@ -9,6 +9,12 @@ MessageCenterSettings:
     logSize:
       description: "Messages kept in the log"
       type: integer
+    historyEnabled:
+      description: "1 the log is kept in the history file (messagecenter/history.jsonl in the application data folder) and is there again when the message center starts; 0 the log is in memory only. One message center keeps the history"
+      type: integer
+    historyMaxMB:
+      description: "Size limit of the history file in MB (1 to 10000). Over it the file is written again with the newest messages of the log, up to half the limit"
+      type: integer
     claimTimeoutSec:
       description: "A page given to a transmitter that does not claim it in this time goes back to the queue"
       type: integer

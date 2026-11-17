@@ -99,6 +99,8 @@ private:
     // The routes and the files
     QTableWidget *m_routesTable;
     QSpinBox *m_logSize;
+    QCheckBox *m_historyEnabled;
+    QSpinBox *m_historyMaxMB;
     QSpinBox *m_claimTimeout;
     QSpinBox *m_silentTime;
     QTableWidget *m_sinksTable;

@@ -42,6 +42,8 @@ struct MessageCenterSettings
     QString m_title;
     quint32 m_rgbColor;
     int m_logSize;                          //!< Messages kept in the log
+    bool m_historyEnabled;                  //!< The log kept in a file, there again at the next start
+    int m_historyMaxMB;                     //!< Size limit of the history file, MB
     int m_claimTimeoutSec;                  //!< A page given to a transmitter that does not claim it in this time goes back to the queue
     int m_silentSec;                        //!< A channel that does not announce itself for this time is offline
     std::vector<MessageCenterEngine::Route> m_routes;

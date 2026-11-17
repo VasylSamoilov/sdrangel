@@ -25,7 +25,7 @@ post() {
 }
 
 mkdir -p "$WORK/config"
-(cd "$BUILD" && XDG_CONFIG_HOME="$WORK/config" LD_LIBRARY_PATH="$BUILD/lib" ./sdrangelsrv --scratch -a 127.0.0.1 -p "$PORT" > "$WORK/server.log" 2>&1 &)
+(cd "$BUILD" && XDG_CONFIG_HOME="$WORK/config" XDG_DATA_HOME="$WORK/data" LD_LIBRARY_PATH="$BUILD/lib" ./sdrangelsrv --scratch -a 127.0.0.1 -p "$PORT" > "$WORK/server.log" 2>&1 &)
 
 for i in $(seq 50); do curl -s "$U" > /dev/null && break; sleep 0.2; done
 
@@ -75,6 +75,15 @@ check "the reverse API settings are set" '[ "$(curl_code PATCH /featureset/featu
 sleep 1
 S=$(curl -s "$U/featureset/feature/0/settings" | tr -d "\n" | sed 's/\\"/"/g')
 check "the settings keep the reverse API" '[[ "$S" == *"\"reverseAPIAddress\": \"127.0.0.2\""* && "$S" == *"\"reverseAPIPort\": 8899"* && "$S" == *"\"reverseAPIFeatureSetIndex\": 1"* && "$S" == *"\"reverseAPIFeatureIndex\": 2"* ]]'
+
+# History: the log is in its file and is there again in a new message center
+check "the history is on by default, 50 MB" '[[ "$S" == *"\"historyEnabled\": 1"* && "$S" == *"\"historyMaxMB\": 50"* ]]'
+check "the history file has the log" '[ -n "$(find "$WORK/data" -name history.jsonl -size +0 2>/dev/null)" ]'
+curl_code DELETE /featureset/feature/0 > /dev/null
+sleep 1
+curl_code POST /featureset/feature '{"featureType":"MessageCenter"}' > /dev/null
+sleep 2
+check "a new message center has the log again" '[[ "$(report)" == *"\"text\":\"FROM THE CENTER\""* ]]'
 
 curl_code DELETE /deviceset/0/device/run > /dev/null
 fuser -k "$PORT"/tcp > /dev/null 2>&1

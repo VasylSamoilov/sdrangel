@@ -150,6 +150,7 @@ class MessageCenterEngine
 public:
     static const int m_maxAttempts = 3;         //!< First try and two retransmits
     static const int m_defaultLogSize = 10000;
+    static const int m_defaultHistoryMB = 50;          //!< Size limit of the history file
 
     MessageCenterEngine();
 
@@ -187,7 +188,16 @@ public:
     const MessageRecord *find(const QString& id) const;
     //!< A record of the log decoded again (another codepage or type): it replaces the one of its id. False if none
     bool replace(const MessageRecord& record);
-    void clearLog() { m_log.clear(); }
+    void clearLog();
+
+    // The history: the log kept in a JSON lines file, one line for each record stored (a later version of a
+    // message too), so that the log is there again when the message center starts. Over its size limit the
+    // file is written again with the newest messages of the log, up to half the limit
+    //!< Path empty: no history. A new path loads the newest messages of its file into an empty log, else the
+    //!< file starts with the log. False and an error if the file can not be read or written
+    bool setHistory(const QString& path, qint64 maxBytes, QString& error);
+    const QString& historyPath() const { return m_historyPath; }
+    qint64 historyBytes() const { return m_historyBytes; }
 
     // Endpoints
     const QMap<QString, MessageEndpoint>& endpoints() const { return m_endpoints; }
@@ -226,6 +236,12 @@ private:
     std::deque<MessageRecord> m_log;
     int m_logSize;
     int m_logged = 0;
+    QString m_historyPath;
+    qint64 m_historyMaxBytes = 0;
+    qint64 m_historyBytes = 0;
+
+    void appendHistory(const MessageRecord& record);
+    bool writeHistory(QString& error);              //!< The file with the log alone
     int m_routed = 0;
     std::vector<Route> m_routes;
     std::vector<std::unique_ptr<MessageCenterSink>> m_sinks;

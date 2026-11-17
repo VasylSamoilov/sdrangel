@@ -38,6 +38,8 @@ void MessageCenterSettings::resetToDefaults()
     m_title = "Message Center";
     m_rgbColor = QColor(0, 170, 127).rgb();
     m_logSize = MessageCenterEngine::m_defaultLogSize;
+    m_historyEnabled = true;
+    m_historyMaxMB = MessageCenterEngine::m_defaultHistoryMB;
     m_claimTimeoutSec = 10;
     m_silentSec = 20;
     m_routes.clear();
@@ -156,6 +158,8 @@ QByteArray MessageCenterSettings::serialize() const
     s.writeU32(17, m_reverseAPIFeatureIndex);
     s.writeBlob(18, m_logColumns);
     s.writeString(19, m_voicePlaybackDeviceName);
+    s.writeBool(20, m_historyEnabled);
+    s.writeS32(21, m_historyMaxMB);
 
     return s.final();
 }
@@ -215,6 +219,9 @@ bool MessageCenterSettings::deserialize(const QByteArray& data)
         m_reverseAPIFeatureIndex = utmp > 99 ? 99 : utmp;
         d.readBlob(18, &m_logColumns);
         d.readString(19, &m_voicePlaybackDeviceName, AudioDeviceManager::m_defaultDeviceName);
+        d.readBool(20, &m_historyEnabled, true);
+        d.readS32(21, &m_historyMaxMB, MessageCenterEngine::m_defaultHistoryMB);
+        m_historyMaxMB = std::max(1, std::min(10000, m_historyMaxMB));
         return true;
     }
 
@@ -232,6 +239,12 @@ void MessageCenterSettings::applySettings(const QStringList& settingsKeys, const
     }
     if (settingsKeys.contains("logSize")) {
         m_logSize = settings.m_logSize;
+    }
+    if (settingsKeys.contains("historyEnabled")) {
+        m_historyEnabled = settings.m_historyEnabled;
+    }
+    if (settingsKeys.contains("historyMaxMB")) {
+        m_historyMaxMB = settings.m_historyMaxMB;
     }
     if (settingsKeys.contains("claimTimeoutSec")) {
         m_claimTimeoutSec = settings.m_claimTimeoutSec;

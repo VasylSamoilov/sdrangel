@@ -17,6 +17,9 @@
 
 #include <QDateTime>
 #include <QDebug>
+#include <QDir>
+#include <QFileInfo>
+#include <QStandardPaths>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -90,6 +93,63 @@ MessageCenter::~MessageCenter()
         this, &MessageCenter::handleChannelMessageQueue);
     QObject::disconnect(m_networkManager, &QNetworkAccessManager::finished, this, &MessageCenter::networkManagerFinished);
     delete m_networkManager;
+
+    // The history file is free for another message center
+    if (historyOwner() == this) {
+        historyOwner() = nullptr;
+    }
+}
+
+// The message center that writes the history file: two of them would write the same messages twice
+MessageCenter*& MessageCenter::historyOwner()
+{
+    static MessageCenter *owner = nullptr;
+    return owner;
+}
+
+QString MessageCenter::historyFilePath()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/messagecenter/history.jsonl";
+}
+
+// Called with the engine locked
+void MessageCenter::applyHistory()
+{
+    QString path;
+
+    if (m_settings.m_historyEnabled)
+    {
+        if (historyOwner() && (historyOwner() != this))
+        {
+            m_historyError = "Another message center keeps the history";
+        }
+        else
+        {
+            path = historyFilePath();
+            QDir().mkpath(QFileInfo(path).absolutePath());
+            historyOwner() = this;
+            m_historyError.clear();
+        }
+    }
+    else
+    {
+        if (historyOwner() == this) {
+            historyOwner() = nullptr;
+        }
+
+        m_historyError.clear();
+    }
+
+    QString error;
+
+    if (!m_engine.setHistory(path, (qint64) m_settings.m_historyMaxMB * 1024 * 1024, error))
+    {
+        m_historyError = error;
+        qWarning("MessageCenter::applyHistory: %s", qPrintable(error));
+    }
+    if (!m_historyError.isEmpty()) {
+        qInfo("MessageCenter::applyHistory: %s", qPrintable(m_historyError));
+    }
 }
 
 void MessageCenter::handleChannelMessageQueue(MessageQueue *messageQueue)
@@ -275,7 +335,7 @@ void MessageCenter::applySettings(const MessageCenterSettings& settings, const Q
     }
 
     if (force || settingsKeys.contains("logSize") || settingsKeys.contains("routes") || settingsKeys.contains("sinks")
-        || settingsKeys.contains("sources")) {
+        || settingsKeys.contains("sources") || settingsKeys.contains("historyEnabled") || settingsKeys.contains("historyMaxMB")) {
         applyEngineSettings();
     }
 
@@ -307,6 +367,12 @@ void MessageCenter::webapiReverseSendSettings(const QList<QString>& featureSetti
     }
     if (featureSettingsKeys.contains("logSize") || force) {
         swg->setLogSize(settings.m_logSize);
+    }
+    if (featureSettingsKeys.contains("historyEnabled") || force) {
+        swg->setHistoryEnabled(settings.m_historyEnabled ? 1 : 0);
+    }
+    if (featureSettingsKeys.contains("historyMaxMB") || force) {
+        swg->setHistoryMaxMb(settings.m_historyMaxMB);
     }
     if (featureSettingsKeys.contains("claimTimeoutSec") || force) {
         swg->setClaimTimeoutSec(settings.m_claimTimeoutSec);
@@ -370,6 +436,7 @@ void MessageCenter::applyEngineSettings()
 {
     QMutexLocker mutexLocker(&m_mutex);
     m_engine.setLogSize(m_settings.m_logSize);
+    applyHistory();
 
     for (const QString& name : m_engine.sinkNames())
     {
@@ -411,6 +478,8 @@ void MessageCenter::webapiFormatFeatureSettings(SWGSDRangel::SWGFeatureSettings&
     swg->setTitle(new QString(settings.m_title));
     swg->setRgbColor(settings.m_rgbColor);
     swg->setLogSize(settings.m_logSize);
+    swg->setHistoryEnabled(settings.m_historyEnabled ? 1 : 0);
+    swg->setHistoryMaxMb(settings.m_historyMaxMB);
     swg->setClaimTimeoutSec(settings.m_claimTimeoutSec);
     swg->setSilentSec(settings.m_silentSec);
     swg->setRoutes(new QString(QString::fromUtf8(MessageCenterSettings::routesToJson(settings.m_routes))));
@@ -442,6 +511,12 @@ void MessageCenter::webapiUpdateFeatureSettings(MessageCenterSettings& settings,
     }
     if (featureSettingsKeys.contains("logSize")) {
         settings.m_logSize = std::max(100, std::min(1000000, swg->getLogSize()));
+    }
+    if (featureSettingsKeys.contains("historyEnabled")) {
+        settings.m_historyEnabled = swg->getHistoryEnabled() != 0;
+    }
+    if (featureSettingsKeys.contains("historyMaxMB")) {
+        settings.m_historyMaxMB = std::max(1, std::min(10000, swg->getHistoryMaxMb()));
     }
     if (featureSettingsKeys.contains("claimTimeoutSec")) {
         settings.m_claimTimeoutSec = std::max(1, std::min(3600, swg->getClaimTimeoutSec()));

@@ -466,14 +466,37 @@ void MessageCenterGUI::buildOptions(QWidget *container)
     m_silentTime->setRange(6, 3600);
     m_silentTime->setSuffix(" s");
     m_silentTime->setToolTip("A channel that does not announce itself for this time is offline");
+    m_historyEnabled = new QCheckBox("Keep", container);
+    m_historyEnabled->setToolTip(QString("Keep the log in the history file, so that it is there again when the message center "
+        "starts:\n%1\nOne message center keeps the history").arg(MessageCenter::historyFilePath()));
+    m_historyMaxMB = new QSpinBox(container);
+    m_historyMaxMB->setRange(1, 10000);
+    m_historyMaxMB->setSuffix(" MB");
+    m_historyMaxMB->setToolTip("Size limit of the history file: over it the file is written again with the newest messages "
+        "of the log, up to half the limit");
+    QWidget *history = new QWidget(container);
+    QHBoxLayout *historyLayout = new QHBoxLayout(history);
+    historyLayout->setContentsMargins(0, 0, 0, 0);
+    historyLayout->addWidget(m_historyEnabled);
+    historyLayout->addWidget(m_historyMaxMB, 1);
 
     layout->addRow("Log size", m_logSize);
+    layout->addRow("History", history);
     layout->addRow("Claim time", m_claimTimeout);
     layout->addRow("Offline after", m_silentTime);
 
     connect(m_logSize, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int value) {
         m_settings.m_logSize = value;
         applySettings(QStringList("logSize"));
+    });
+    connect(m_historyEnabled, &QCheckBox::toggled, this, [this](bool checked) {
+        m_settings.m_historyEnabled = checked;
+        m_historyMaxMB->setEnabled(checked);
+        applySettings(QStringList("historyEnabled"));
+    });
+    connect(m_historyMaxMB, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int value) {
+        m_settings.m_historyMaxMB = value;
+        applySettings(QStringList("historyMaxMB"));
     });
     connect(m_claimTimeout, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int value) {
         m_settings.m_claimTimeoutSec = value;
@@ -538,6 +561,9 @@ void MessageCenterGUI::displaySettings()
     setTitle(m_settings.m_title);
     m_doApplySettings = false;
     m_logSize->setValue(m_settings.m_logSize);
+    m_historyEnabled->setChecked(m_settings.m_historyEnabled);
+    m_historyMaxMB->setValue(m_settings.m_historyMaxMB);
+    m_historyMaxMB->setEnabled(m_settings.m_historyEnabled);
     m_claimTimeout->setValue(m_settings.m_claimTimeoutSec);
     m_silentTime->setValue(m_settings.m_silentSec);
     refreshRoutes();
