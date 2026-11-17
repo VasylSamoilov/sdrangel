@@ -21,6 +21,8 @@
 
 #include "channel/channelapi.h"
 #include "maincore.h"
+#include "pipes/messagepipes.h"
+#include "pipes/objectpipe.h"
 
 #include "carrierradio.h"
 #include "tonegenerator.h"
@@ -436,6 +438,34 @@ QString CellularWorker::conflict(const Network& network) const
     return QString();
 }
 
+// carriers of other networks on the same stream closer than the 25 kHz the filters are made for
+// (but not on the same channel): they hear each other a little
+QStringList CellularWorker::neighbours(const Network& network) const
+{
+    QStringList out;
+
+    for (const std::unique_ptr<Network>& other : m_networks)
+    {
+        if (other.get() == &network || !running(*other) || (other->rx != network.rx && other->tx != network.tx)) {
+            continue;
+        }
+        for (const modemnmt::NmtCarrierStatus& mine : network.station->carriers())
+        {
+            for (const modemnmt::NmtCarrierStatus& theirs : other->station->carriers())
+            {
+                const double d = std::fabs(mine.frequency.downlink - theirs.frequency.downlink);
+
+                if (mine.planned && theirs.onAir && d >= kMinSeparation && d < modemnmt::NmtBaseStation::kChannelSpacing)
+                {
+                    out.append(QString("channel %1 is %2 kHz from channel %3 of network %4: they hear each other a little")
+                        .arg(mine.config.channel).arg(d / 1e3, 0, 'f', 1).arg(theirs.config.channel).arg(other->id));
+                }
+            }
+        }
+    }
+    return out;
+}
+
 void CellularWorker::tryBind(Network& n)
 {
     if (!n.rx || !n.tx || !n.rx->haveSpan || !n.tx->haveSpan) {
@@ -475,6 +505,9 @@ void CellularWorker::tryBind(Network& n)
         log(n.id, "error: " + clash + ": the network is off");
         reportStatus(n);
         return;
+    }
+    for (const QString& near : neighbours(n)) {
+        log(n.id, "warning: " + near);
     }
 
     const modemnmt::NmtStreamSpan rx = {1, rxSpan.centre, rxSpan.sampleRate};
@@ -577,7 +610,27 @@ void CellularWorker::processBatch(Radio& radio)
     }
 
     for (const auto& out : m_txOut) {
-        sendTo(out.first->channel, modemcellular::encodeBatch(out.second));
+        sendAudio(out.first->channel, modemcellular::encodeBatch(out.second));
+    }
+}
+
+// the audio for a transmitter goes through the pipe it registered from us to it (drained in its
+// own thread); before it registered (its carriers are on the way) there is nothing to send
+void CellularWorker::sendAudio(ChannelAPI *channel, const std::vector<uint8_t>& wire)
+{
+    QList<ObjectPipe*> pipes;
+    MainCore::instance()->getMessagePipes().getMessagePipes(this, "cellulartx", pipes);
+
+    for (ObjectPipe *pipe : pipes)
+    {
+        MessageQueue *queue = qobject_cast<MessageQueue*>(pipe->m_element);
+
+        if (pipe->m_consumer == channel && queue)
+        {
+            queue->push(MainCore::MsgPacket::create(this,
+                QByteArray(reinterpret_cast<const char*>(wire.data()), static_cast<int>(wire.size()))));
+            return;
+        }
     }
 }
 

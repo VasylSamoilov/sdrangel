@@ -4,9 +4,9 @@
 
 This plugin transmits the carriers of the cellular base stations. Put one on each transmitting device set that a [Cellular](../../feature/cellular/readme.md) network uses.
 
-The plugin has no radio settings of its own. The Cellular feature gives it the carriers of all networks that use the device and the audio of each carrier. The plugin keeps a queue of audio for each carrier, modulates the FM, shifts the carriers to their place in the stream and adds them up, each at an equal share of the full scale of the device.
+The plugin has no radio settings of its own. The Cellular feature gives it the carriers of all networks that use the device and the audio of each carrier. The plugin keeps a queue of audio for each carrier, modulates the FM, shifts the carriers to their place in the stream and adds them up, each at an equal share of the output. The sum stays about 1.4 dB below full scale: the channel filters overshoot a little when they band-limit the FM, and the output never clips. Set the output power with the gain of the device.
 
-The queue holds the lead of the transmitter over the receiver and follows the small difference between the clocks of the two devices by resampling by at most 200 ppm. If the receiving and the transmitting device are on different SDRs the difference is typically a few ppm to a few tens of ppm.
+The queue holds the lead of the transmitter over the receiver and follows the small difference between the clocks of the two devices by resampling by at most 200 ppm. If the receiving and the transmitting device are on different SDRs the difference is typically a few ppm to a few tens of ppm. A queue that runs empty sends silence until it holds its whole lead again, so the delay does not shrink.
 
 <h2>Interface</h2>
 

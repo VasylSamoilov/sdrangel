@@ -16,6 +16,7 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 #include "carrierwire.h"
@@ -68,6 +69,22 @@ static void testBatch()
     damaged[15] = 0xff;
     damaged[16] = 0x7f;
     CHECK(!decodeBatch(damaged.data(), damaged.size(), out));
+
+    // nor a header that names more samples than the packet has (within the limits)
+    std::vector<uint8_t> big = wire;
+    const int32_t length = 48000;
+    const uint32_t many = 1024;
+    std::memcpy(big.data() + 9, &length, 4);
+    std::memcpy(big.data() + 13, &many, 4);
+    big.resize(1 + 8 + 4 + 4 + 4 * 1024 + 1, 0);
+    CarrierBatch fresh;
+    CHECK(!decodeBatch(big.data(), big.size(), fresh));
+    CHECK(fresh.samples.capacity() == 0);
+    // over the limits: 1 s per block, 1024 carriers
+    CarrierBatch tooLong;
+    tooLong.reset(0, 48001, {1});
+    std::vector<uint8_t> longWire = encodeBatch(tooLong);
+    CHECK(!decodeBatch(longWire.data(), longWire.size(), out));
 
     // a batch of the controller has no levels
     CarrierBatch tx;

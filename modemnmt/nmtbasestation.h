@@ -97,6 +97,7 @@ public:
     static constexpr double kUsableBandwidth = 0.75;
     static constexpr double kCarrierBandwidth = 2.0 * (4700.0 + 4055.0);
     static constexpr double kSpeechDeviation = 3000.0;
+    static constexpr double kChannelSpacing = 25000.0;     // the carrier filters are made for it
     static constexpr int kIdStride = 10000;
 
     explicit NmtBaseStation(const NmtNetworkConfig& config);

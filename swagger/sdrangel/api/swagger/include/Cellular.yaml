@@ -49,7 +49,7 @@ CellularNetworkSettings:
       description: "Power level of the phones 0..3 (3 is the highest)."
     carriers:
       type: string
-      description: "The carriers, comma separated: channel[:type[:supervisory]]. Type: cc, cca, ccb, tc, actc, cctc or test (tc if not given); supervisory tone 1..4 on a traffic channel. Example: 1:cctc, 5, 6:tc:2"
+      description: "The carriers, comma separated: channel:type[:supervisory]. Type (required): cc, cca, ccb, tc, actc, cctc or test; supervisory tone 1..4 on a traffic channel (when no carrier gives one the traffic channels get 1..4 in turn). Example: 1:cctc, 5:tc, 6:tc:2"
     compandor:
       type: integer
       description: "Compandor on speech (1) or not (0)."

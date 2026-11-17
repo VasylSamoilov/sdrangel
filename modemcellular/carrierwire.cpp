@@ -25,9 +25,9 @@ namespace modemcellular
 namespace
 {
 
-// the limits of a sane packet, against damaged sizes
-const uint32_t kMaxCarriers = 4096;
-const int32_t kMaxLength = 1 << 20;
+// the limits of a sane packet: more carriers than any device span holds, a block of up to 1 s
+const uint32_t kMaxCarriers = 1024;
+const int32_t kMaxLength = 48000;
 
 class Writer
 {
@@ -142,6 +142,13 @@ bool decodeBatch(const uint8_t* data, size_t size, CarrierBatch& batch)
     if (!r.ok() || length < 0 || length > kMaxLength || n > kMaxCarriers) {
         return false;
     }
+    // the size the header names, before anything is allocated: ids, the level flag, maybe the
+    // levels, the samples
+    const size_t samples = static_cast<size_t>(n) * static_cast<size_t>(length);
+    const size_t head = 1 + 8 + 4 + 4 + n * sizeof(int32_t) + 1;
+    if (size != head + samples * sizeof(float) && size != head + (n + samples) * sizeof(float)) {
+        return false;
+    }
     std::vector<int> ids(n);
     r.getArray(ids.data(), n);
     batch.reset(sample, length, ids);
@@ -197,7 +204,8 @@ bool decodeTuning(const uint8_t* data, size_t size, WireTuning& tuning)
 
     tuning.lead = r.get<uint32_t>();
     const uint32_t n = r.get<uint32_t>();
-    if (!r.ok() || n > kMaxCarriers) {
+    // id, offset, passband and spacing per carrier
+    if (!r.ok() || n > kMaxCarriers || size != 1 + 4 + 4 + n * (4 + 3 * sizeof(double)) || tuning.lead > 10 * 48000) {
         return false;
     }
     tuning.carriers.resize(n);
@@ -231,7 +239,8 @@ bool decodeTxStatus(const uint8_t* data, size_t size, WireTxStatus& status)
     Reader r(data, size, WireKind::TxStatus);
     const uint32_t n = r.get<uint32_t>();
 
-    if (!r.ok() || n > kMaxCarriers) {
+    // id, fill and underruns per carrier
+    if (!r.ok() || n > kMaxCarriers || size != 1 + 4 + n * (4 + 4 + 8)) {
         return false;
     }
     status.carriers.resize(n);

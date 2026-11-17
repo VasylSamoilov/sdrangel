@@ -2,12 +2,14 @@ project(cellulartx)
 
 set(cellulartx_SOURCES
     cellulartx.cpp
+    cellulartxaudio.cpp
     cellulartxsettings.cpp
     cellulartxplugin.cpp
 )
 
 set(cellulartx_HEADERS
     cellulartx.h
+    cellulartxaudio.h
     cellulartxsettings.h
     cellulartxplugin.h
 )

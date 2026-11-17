@@ -44,7 +44,7 @@ struct CellularNetworkSettings
     int m_area;                 // traffic area Y2 within the country
     int m_areaNo;               // area number 1..4, 0 for none
     int m_msPower;              // power level of the phones 0..3
-    QString m_carriers;         // "1:cctc, 5, 6:tc:2" (see parseCarriers)
+    QString m_carriers;         // "1:cctc, 5:tc, 6:tc:2" (see parseCarriers)
     bool m_compandor;
     bool m_sendCallerId;
     bool m_sendClock;
@@ -60,9 +60,10 @@ struct CellularNetworkSettings
     QByteArray serialize() const;
     bool deserialize(const QByteArray& data);
 
-    // The carriers, comma separated: channel[:type[:supervisory]]. Type is cc, tc, cctc, actc
-    // (NMT-900), cca, ccb (NMT-900) or test, tc if not given; the supervisory tone 1..4 on a
-    // traffic channel, none if not given. False with a reason if the text cannot be read.
+    // The carriers, comma separated: channel:type[:supervisory]. The type has to be given: cc, tc,
+    // cctc, actc (NMT-900), cca, ccb (NMT-900) or test. The supervisory tone is 1..4 on a traffic
+    // channel; when no carrier gives one, the traffic channels get 1, 2, 3, 4, 1 ... in turn.
+    // False with a reason if the text cannot be read.
     static bool parseCarriers(const QString& text, std::vector<modemnmt::NmtCarrierConfig>& carriers, QString& error);
     // The network as the base station takes it; false with a reason if the carriers cannot be read.
     bool networkConfig(modemnmt::NmtNetworkConfig& config, QString& error) const;
