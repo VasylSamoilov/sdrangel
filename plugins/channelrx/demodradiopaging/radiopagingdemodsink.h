@@ -265,7 +265,7 @@ private:
     static QString escapeText(const std::string& text);
     //!< The codepage of the key in the protocol, else the default of the protocol
     static const RadioPagingCharset::Codepage *codepage(const RadioPagingCharset::Key& key, const char *protocol);
-    //!< A codepage of 16-bit characters (FLEX Kanji): the decoder takes the characters as 16 bits
+    //!< The codepage of HEX/binary messages (FLEX Kanji, STD-43A Japanese Text Service)
     static bool isKanji(const RadioPagingCharset::Codepage *codepage);
     static QByteArray toByteArray(const std::vector<uint8_t>& data);
 };

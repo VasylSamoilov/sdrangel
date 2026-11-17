@@ -57,6 +57,7 @@ set(modemradiopaging_HEADERS
     radiopagingwav.h
     radiopagingvoiceprocessor.h
     radiopagingcharset.h
+    radiopagingkanji.h
     radiopagingrecode.h
     charsets/radiopagingcharsettables.h
     charsets/radiopagingcharsetbuild.h

@@ -22,6 +22,7 @@
 
 #include "radiopagingcharset.h"
 #include "radiopaginggsc.h"
+#include "radiopagingkanji.h"
 #include "radiopagingpocsag.h"
 #include "radiopagingrecode.h"
 #include "radiopagingpage.h"
@@ -267,20 +268,35 @@ int main()
     rx.m_direction = MessageRecord::DirectionTX;
     check(RadioPagingRecode::types(rx).isEmpty(), "decode again: not a transmitted message");
 
-    // ROT-13: the letters turned by 13 places both ways, <0xNN> kept; Kanji: Shift-JIS byte pairs, not sent
+    // ROT-13: the letters turned by 13 places both ways, <0xNN> kept; Kanji: HEX/binary Shift JIS characters (STD-43A
+    // 1.3.1), the hex digits least significant first
     const Cs::Codepage *rot = find("pocsag", "generic", "generic", "ascii-rot13");
     check(rot && (encode(rot, "Hello, World<0x04>") == std::vector<uint8_t>({'U', 'r', 'y', 'y', 'b', ',', ' ', 'J', 'b', 'e', 'y', 'q', 0x04}))
         && (Cs::decode(*rot, {'U', 'r', 'y', 'y', 'b', 0x03}) == "Hello<0x03>"), "ROT-13: encoded and decoded, a code given as <0xNN> kept");
+    const std::string nihon = "\xE6\x97\xA5\xE6\x9C\xAC";
+    std::string hex;
+    check(RadioPagingKanji::encode(nihon + "A", 16, hex, error) && (hex == "AF39B7691400"),
+        "Kanji: 16-bit Shift JIS characters, a 1-byte character in 16 bits");
+    check((RadioPagingKanji::decode("AF39B769", 16) == nihon) && (RadioPagingKanji::decode("B769AF39", 16, true) == nihon),
+        "Kanji: decoded left to right and right to left");
+    check((RadioPagingKanji::decode("1424", 8) == "AB") && (RadioPagingKanji::decode("AF3?B769", 16) == "?\xE6\x9C\xAC"),
+        "Kanji: 8-bit characters; a character with a lost digit is '?'");
+    check(!RadioPagingKanji::encode(nihon, 8, hex, error) && !RadioPagingKanji::encode("\xD1\x96", 16, hex, error),
+        "Kanji: a 2-byte character in 8 bits and a character without a Shift JIS code refused");
     const Cs::Codepage *kanjiCp = find("flex", "generic", "generic", "kanji");
-    check(kanjiCp && (Cs::decode(*kanjiCp, {0x93, 0xFA, 0x96, 0x7B}) == "\xE6\x97\xA5\xE6\x9C\xAC"), "Kanji: the Shift-JIS byte pairs as text");
-    std::vector<uint8_t> none;
-    check(!Cs::encode(*kanjiCp, "x", none, &error) && (error.find("Kanji") != std::string::npos), "Kanji: not sent");
+    check(kanjiCp && kanjiCp->m_transcoder && kanjiCp->m_transcoder->m_binary, "Kanji: a codepage of HEX/binary messages");
     MessageRecord kanjiRx = flexRx;
-    kanjiRx.m_protocolData.insert("kanji", true);
-    kanjiRx.m_protocolData.insert("alpha_codes", QString("93fa967b"));
-    check(RadioPagingRecode::redecode(kanjiRx, kanjiCp->key(), QString(), out, recodeError) && (out.m_text == QString::fromUtf8("\xE6\x97\xA5\xE6\x9C\xAC"))
-        && !RadioPagingRecode::redecode(kanjiRx, Cs::defaultFor("flex")->key(), QString(), out, recodeError),
-        "decode again: 16-bit characters with Kanji only");
+    kanjiRx.m_msgType = "binary";
+    kanjiRx.m_protocolData.remove("alpha_codes");
+    kanjiRx.m_protocolData.insert("hex", QString("AF39B769"));
+    kanjiRx.m_protocolData.insert("blocking", 16);
+    kanjiRx.m_protocolData.insert("display_direction", QString("ltr"));
+    check((RadioPagingRecode::types(kanjiRx) == QStringList({"binary"}))
+        && RadioPagingRecode::redecode(kanjiRx, kanjiCp->key(), QString(), out, recodeError) && (out.m_text == QString::fromUtf8(nihon.c_str()))
+        && RadioPagingRecode::redecode(MessageRecord(out), Cs::defaultFor("flex")->key(), QString(), out, recodeError) && (out.m_text == "AF39B769")
+        && !out.m_protocolData.contains("charset"),
+        "decode again: HEX/binary as Kanji text and back to hex");
+    check(!RadioPagingRecode::redecode(flexRx, kanjiCp->key(), QString(), out, recodeError), "decode again: alphanumeric not as Kanji");
 
     std::printf("%d passed, %d failed\n", passes, failures);
     return failures ? 1 : 0;

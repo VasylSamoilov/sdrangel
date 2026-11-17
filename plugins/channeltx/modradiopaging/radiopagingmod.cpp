@@ -47,6 +47,7 @@
 #include "maincore.h"
 #include "util/messageendpoint.h"
 #include "radiopagingwav.h"
+#include "radiopagingkanji.h"
 #include "radiopagingvoicestore.h"
 
 #include "radiopagingmodbaseband.h"
@@ -421,16 +422,37 @@ QString RadioPagingMod::checkRequest(const TxRequest& request, RadioPagingModSou
     else if (protocol == RadioPagingModSettings::Flex)
     {
         sourceRequest.m_flex = request.m_flex;
+        const RadioPagingCharset::Codepage *flexCodepage = requestCodepage(request, protocol);
+        const bool kanji = (request.m_flex.m_type == RadioPagingFlex::Alphanumeric) && flexCodepage
+            && flexCodepage->m_transcoder && flexCodepage->m_transcoder->m_binary;
 
-        if (isAlphanumeric(request.m_flex))
+        if (kanji)
         {
-            error = encodeText(requestCodepage(request, protocol), sourceRequest.m_flex.m_text, warning);
+            // Japanese Text Service (STD-43A 1.3.1): the text is sent as a HEX/binary message of 16-bit Shift JIS
+            // characters (B = 0000), left to right
+            std::string hex;
+
+            if (request.m_flex.m_text.size() > (size_t) m_maxTextLength) {
+                return QString("Message text longer than %1 characters").arg(m_maxTextLength);
+            }
+            if (!RadioPagingKanji::encode(request.m_flex.m_text, 16, hex, error)) {
+                return QString::fromStdString(error);
+            }
+
+            sourceRequest.m_flex.m_type = RadioPagingFlex::Binary;
+            sourceRequest.m_flex.m_text = hex;
+            sourceRequest.m_flex.m_binary.m_blocking = 16;
+            sourceRequest.m_flex.m_binary.m_rightToLeft = false;
+        }
+        else if (isAlphanumeric(request.m_flex))
+        {
+            error = encodeText(flexCodepage, sourceRequest.m_flex.m_text, warning);
 
             if (!error.empty()) {
                 return QString::fromStdString(error);
             }
         }
-        if (sourceRequest.m_flex.m_text.size() > (size_t) m_maxTextLength) {
+        if (!kanji && (sourceRequest.m_flex.m_text.size() > (size_t) m_maxTextLength)) {
             return QString("Message text longer than %1 characters").arg(m_maxTextLength);
         }
 
@@ -682,6 +704,12 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
 
         if (isAlphanumeric(m)) {
             charset = requestCodepage(request, RadioPagingModSettings::Flex);
+        }
+        // Japanese Text Service: the text as asked, sent as the hex of its Shift JIS characters
+        if ((m.m_type == RadioPagingFlex::Binary) && (request.m_flex.m_type == RadioPagingFlex::Alphanumeric))
+        {
+            charset = requestCodepage(request, RadioPagingModSettings::Flex);
+            record.m_protocolData.insert("hex", QString::fromStdString(m.m_text));
         }
 
         if (m.m_type == RadioPagingFlex::ShortMessage)

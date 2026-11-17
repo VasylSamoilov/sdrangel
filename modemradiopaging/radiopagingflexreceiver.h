@@ -104,8 +104,6 @@ public:
     void setReportFragments(bool enable) { m_decoder.setReportFragments(enable); }
     //!< Largest message number of the network (RadioPagingFlexDecoder::setMaxMessageNumber)
     void setMaxMessageNumber(int maxNumber) { m_decoder.setMaxMessageNumber(maxNumber); }
-    //!< Alphanumeric characters of 16 bits (RadioPagingFlexDecoder::setKanji)
-    void setKanji(bool enable) { m_decoder.setKanji(enable); }
     //!< Messages remembered for duplicates: the last ones of each pager, within this time (default 30 minutes)
     void setDuplicateWindow(double seconds) { m_dedup.setWindow(seconds); }
     //!< Frequency of the receiver, Hz: a pager is on one frequency (part of the duplicate key)

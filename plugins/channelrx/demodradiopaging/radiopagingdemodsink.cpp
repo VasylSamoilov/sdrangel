@@ -34,6 +34,7 @@
 #include "radiopagingflex.h"
 #include "radiopaginggsc.h"
 #include "radiopagingpage.h"
+#include "radiopagingkanji.h"
 #include "radiopagingrecode.h"
 
 #include "radiopagingvoicestore.h"
@@ -420,10 +421,6 @@ void RadioPagingDemodSink::applySettings(const QStringList& settingsKeys, const 
 
     if (settingsKeys.contains("flexMaxMessageNumber") || force) {
         m_flex.setMaxMessageNumber(m_settings.m_flexMaxMessageNumber);
-    }
-    // The Kanji codepage: the decoder takes the alphanumeric characters as 16 bits
-    if (settingsKeys.contains("flexCharset") || force) {
-        m_flex.setKanji(isKanji(codepage(m_settings.m_flexCharset, "flex")));
     }
 
     // A protocol switched off starts from scratch when it is switched on again
@@ -842,27 +839,41 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
     record.m_polarity = polarity(message.m_inverted);
     record.m_msgType = QString::fromStdString(message.m_typeName);
     // A short message with every digit a space is the tone only payload: no text. The characters of an alphanumeric
-    // message (secure type 00 too) are the codes of the codepage; Kanji: 16-bit characters, the Kanji codepage
+    // message (secure type 00 too) are the codes of the codepage
     const bool characters = (message.m_type == RadioPagingFlexDecoder::TypeAlphanumeric)
         || ((message.m_type == RadioPagingFlexDecoder::TypeSecure) && (message.m_secureType == 0));
-    const RadioPagingCharset::Codepage *charset = characters ? codepage(m_settings.m_flexCharset, "flex") : nullptr;
+    const RadioPagingCharset::Codepage *flexCharset = codepage(m_settings.m_flexCharset, "flex");
+    // Japanese Text Service (STD-43A 1.3.1): the Kanji codepage shows the HEX/binary messages of 16 or 8-bit
+    // characters as Shift JIS text; its alphanumeric messages keep the default codepage
+    const int blocking = (message.m_blocking == 0) ? 16 : message.m_blocking;
+    const bool kanji = isKanji(flexCharset) && (message.m_type == RadioPagingFlexDecoder::TypeBinary)
+        && ((blocking == 16) || (blocking == 8));
+    const RadioPagingCharset::Codepage *charset = kanji ? flexCharset
+        : !characters ? nullptr
+        : isKanji(flexCharset) ? RadioPagingCharset::defaultFor("flex")
+        : flexCharset;
 
-    // The decoder took the message as Kanji or not when it came, the setting may have changed since
-    if (charset && (message.m_kanji != isKanji(charset))) {
-        charset = message.m_kanji ? RadioPagingCharset::find("flex", RadioPagingCharset::Key{"generic", "generic", "kanji"})
-            : RadioPagingCharset::defaultFor("flex");
-    }
-
-    if (!message.m_text.empty() && !message.m_toneOnly)
+    if (kanji)
     {
-        record.m_text = charset
-            ? escapeText(RadioPagingCharset::decode(*charset, std::vector<uint8_t>(message.m_text.begin(), message.m_text.end())))
-            : escapeText(message.m_text);
-    }
-    if (charset) {
+        if (!message.m_text.empty()) {
+            record.m_text = escapeText(RadioPagingKanji::decode(message.m_text, blocking, message.m_displayRtl));
+        }
+
         record.m_protocolData.insert("charset", RadioPagingPage::charsetData(charset->key()));
-        // The 7-bit characters, to decode them again with another codepage
-        record.m_protocolData.insert("alpha_codes", QString::fromLatin1(QByteArray(message.m_text.data(), (int) message.m_text.size()).toHex()));
+    }
+    else
+    {
+        if (!message.m_text.empty() && !message.m_toneOnly)
+        {
+            record.m_text = charset
+                ? escapeText(RadioPagingCharset::decode(*charset, std::vector<uint8_t>(message.m_text.begin(), message.m_text.end())))
+                : escapeText(message.m_text);
+        }
+        if (charset) {
+            record.m_protocolData.insert("charset", RadioPagingPage::charsetData(charset->key()));
+            // The 7-bit characters, to decode them again with another codepage
+            record.m_protocolData.insert("alpha_codes", QString::fromLatin1(QByteArray(message.m_text.data(), (int) message.m_text.size()).toHex()));
+        }
     }
     record.m_rawData = toByteArray(message.m_rawData);
     record.m_rawBits = message.m_rawBits;
@@ -890,7 +901,6 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
     record.m_protocolData.insert("first_cycle", message.m_firstCycle);
     record.m_protocolData.insert("first_frame", message.m_firstFrame);
     record.m_protocolData.insert("complete", message.m_complete);
-    record.m_protocolData.insert("kanji", message.m_kanji);
     record.m_protocolData.insert("word_map", QString::fromStdString(message.m_wordMap));
     record.m_protocolData.insert("words_corrected", message.m_wordsCorrected);
     record.m_protocolData.insert("parity_corrections", message.m_parityCorrections);
@@ -944,6 +954,11 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
         record.m_protocolData.insert("header_message", message.m_headerMessage);
         record.m_protocolData.insert("status_info", message.m_statusInfo);
         record.m_protocolData.insert("reserved_bits", message.m_reservedBits);
+
+        // The digits of characters of 8 or 16 bits, to decode them again as Shift JIS text (or back to hex)
+        if ((blocking == 16) || (blocking == 8)) {
+            record.m_protocolData.insert("hex", QString::fromStdString(message.m_text));
+        }
     }
 
     // Secure message type t1t0 (00 alphanumeric, 10 binary, 01 defined separately, 11 reserved)
@@ -1126,7 +1141,7 @@ const RadioPagingCharset::Codepage *RadioPagingDemodSink::codepage(const RadioPa
 
 bool RadioPagingDemodSink::isKanji(const RadioPagingCharset::Codepage *codepage)
 {
-    return codepage && codepage->m_transcoder && codepage->m_transcoder->m_bytes;
+    return codepage && codepage->m_transcoder && codepage->m_transcoder->m_binary;
 }
 
 QString RadioPagingDemodSink::escapeText(const std::string& text)

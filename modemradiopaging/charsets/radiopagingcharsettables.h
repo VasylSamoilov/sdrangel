@@ -58,7 +58,7 @@ extern const RadioPagingCharset::Table flexLinguistLatin4;
 // Special formats on top of a table
 extern const RadioPagingCharset::Transcoder beepwearProAlarm;    // FLEX: Timex BeepwearPRO alarm command, over ASCII
 extern const RadioPagingCharset::Transcoder rot13;               // POCSAG and FLEX: ROT-13 of the letters, over ASCII
-extern const RadioPagingCharset::Transcoder kanji;               // FLEX: 16-bit Shift-JIS characters
+extern const RadioPagingCharset::Transcoder kanji;               // FLEX: Shift JIS characters of HEX/binary messages
 extern const RadioPagingCharset::Table flexLinguistPolish;
 extern const RadioPagingCharset::Table flexLinguistTurkish;
 extern const RadioPagingCharset::Table flexLinguistVietnamese;

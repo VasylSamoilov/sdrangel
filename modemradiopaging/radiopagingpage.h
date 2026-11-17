@@ -45,7 +45,7 @@ struct MODEMRADIOPAGING_API RadioPagingPage
     QString m_address;                  //!< Digits: POCSAG address, FLEX capcode, GSC cap code (up to 6 digits, or 7 with the suffix)
     int m_function = 0;                 //!< POCSAG function 0-3 (A-D); GSC function 0-3, the address number 1-4
     bool m_priority = false;            //!< FLEX priority address
-    //!< FLEX group message: the capcodes of the pagers (digits separated by commas or spaces, 2 to 64); the address is
+    //!< FLEX group message: the capcodes of the pagers (digits separated by commas or spaces, 2 to 5461); the address is
     //!< not used. The message goes to a temporary address that a short instruction tells the pagers (STD-43A 5.2)
     QString m_groupMembers;
     QString m_text;

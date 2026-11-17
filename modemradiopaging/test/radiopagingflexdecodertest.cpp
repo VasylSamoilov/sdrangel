@@ -2826,6 +2826,134 @@ void testAlphaMailDrop()
 // Group messages with temporary addresses (STD-43A 5.2) and the short instruction vector (3.9.6)
 void testGroupTx()
 {
+    // More pagers than the 8 of a fixed table: the group has all of them; 1000 pagers of one phase take their short
+    // instructions over 24 frames
+    {
+        Enc enc;
+        Enc::TxMessage m;
+        m.m_type = Flex::Numeric;
+        m.m_text = "123";
+
+        for (uint64_t c = 0; c < 1000; c++) {
+            m.m_members.push_back(4000 + c);
+        }
+
+        Enc::EnqueueResult er = enc.enqueue(m);
+        Dec dec;
+        size_t members = 0;
+        int failed = 0;
+
+        for (uint64_t index = 0; (index < 400) && (enc.pending() > 0); index++)
+        {
+            Enc::Frame f = enc.buildFrame(index);
+            failed += (int) f.m_failedIds.size();
+
+            for (const Dec::Message& r : dec.decodeFrame(toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data)))
+            {
+                if ((r.m_addressType == Dec::AddressTemporary) && r.m_groupTracked) {
+                    members = r.m_groupMembers.size();
+                }
+            }
+        }
+
+        check(er.m_ok && (failed == 0) && (members == 1000), "group: the message to 1000 pagers has the 1000 of them");
+        m.m_members.resize(Enc::m_maxGroupMembers + 1, 0);
+
+        for (size_t i = 0; i < m.m_members.size(); i++) {
+            m.m_members[i] = 10000 + i;
+        }
+
+        check(!enc.enqueue(m).m_ok, "group: more pagers than one phase carries before the group message are refused");
+
+        // The most a phase carries: all their short instructions go before the group message
+        m.m_members.resize(Enc::m_maxGroupMembers);
+
+        for (size_t i = 0; i < m.m_members.size(); i++) {
+            m.m_members[i] = 10000 + (uint64_t) i;
+        }
+
+        Enc full;
+        Enc::EnqueueResult fr = full.enqueue(m);
+        int fullFailed = 0, fullSent = 0;
+
+        for (uint64_t index = 0; (index < 400) && (full.pending() > 0); index++)
+        {
+            Enc::Frame f = full.buildFrame(index);
+            fullFailed += (int) f.m_failedIds.size();
+            fullSent += (int) f.m_sentIds.size();
+        }
+
+        check(fr.m_ok && (fullSent == 1) && (fullFailed == 0), "group: the most pagers of one phase (127 frames of 43) are sent");
+    }
+
+    // A group message in fragments: a new assignment on its slot in the middle starts a new group, the message
+    // keeps the pagers it was for; a fragment without its first one gets no pagers
+    {
+        auto phaseFrame = [](unsigned frame, const std::vector<Flex::PhaseMessage>& messages) {
+            Flex::PhaseParams params;
+            Flex::PhaseResult r = Flex::buildPhase(params, messages);
+            Flex::FrameParams fp;
+            fp.m_cycle = 3;
+            fp.m_frame = frame;
+            Flex::FrameBytes bytes = Flex::assemble(fp, {r.m_words});
+            return toRxFrame(Flex::Mode1600_2, false, bytes.m_sync, bytes.m_data);
+        };
+        auto assignment = [](uint64_t capcode, int frame) {
+            Flex::PhaseMessage pm;
+            pm.m_type = Flex::ShortInstruction;
+            pm.m_capcode = capcode;
+            pm.m_instruction.m_type = Flex::InstructionParams::TemporaryAddress;
+            pm.m_instruction.m_slot = 0;
+            pm.m_instruction.m_frame = frame;
+            return pm;
+        };
+        Flex::PhaseMessage message;
+        message.m_type = Flex::Alphanumeric;
+        message.m_capcode = Flex::m_temporaryBase;
+        message.m_text = std::string(400, 'G');
+        message.m_number = 5;
+        std::vector<Flex::PhaseMessage> fragments;
+        std::string error;
+        bool split = Flex::fragmentMessage(message, fragments, error) && (fragments.size() >= 2);
+        Dec dec;
+        std::vector<Dec::Message> out;
+
+        auto take = [&](const Dec::RxFrame& frame) {
+            for (const Dec::Message& r : dec.decodeFrame(frame)) {
+                out.push_back(r);
+            }
+        };
+
+        take(phaseFrame(10, {assignment(3000, 20), assignment(3001, 20), assignment(5000, 20)}));
+        take(phaseFrame(20, {fragments[0]}));
+        take(phaseFrame(21, {assignment(7777, 60)}));
+        const Dec::Message newAssignment = out.back();
+
+        for (size_t f = 1; f < fragments.size(); f++) {
+            take(phaseFrame(21 + f, {fragments[f]}));
+        }
+
+        const Dec::Message delivered = out.back();
+        out.clear();
+        Flex::PhaseMessage numeric;
+        numeric.m_type = Flex::Numeric;
+        numeric.m_capcode = Flex::m_temporaryBase;
+        numeric.m_text = "42";
+        take(phaseFrame(60, {numeric}));
+
+        check(split && (delivered.m_text == message.m_text) && delivered.m_groupTracked
+            && (delivered.m_groupMembers == std::vector<uint64_t>({3000, 3001, 5000})), "group: the fragments of a group message keep its pagers");
+        check((newAssignment.m_type == Dec::TypeShortInstruction) && (newAssignment.m_groupMembers == std::vector<uint64_t>({7777})),
+            "group: an assignment on a slot whose message started is a new group, not added to the old one");
+        check((out.size() == 1) && out[0].m_groupTracked && (out[0].m_groupMembers == std::vector<uint64_t>({7777})),
+            "group: the last fragment of the old message leaves the new group");
+
+        Dec late;
+        std::vector<Dec::Message> orphan = late.decodeFrame(phaseFrame(22, {fragments[1]}));
+        check(!orphan.empty() && !orphan[0].m_groupTracked && orphan[0].m_groupMembers.empty(),
+            "group: a fragment without its first one gets no pagers");
+    }
+
     // The way the pagers read it: the decoder tracks the assignment, then the message to the temporary address
     for (int collapse : {0, 2})
     {

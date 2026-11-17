@@ -84,7 +84,7 @@ PagingComposer::PagingComposer(QWidget *parent) :
     m_groupLabel = new QLabel(tr("Group"), this);
     m_group = new QLineEdit(this);
     m_group->setPlaceholderText(tr("capcodes separated by commas"));
-    m_group->setToolTip(tr("FLEX group message (STD-43A 5.2): the capcodes of 2 to 64 pagers, separated by commas. The address above is "
+    m_group->setToolTip(tr("FLEX group message (STD-43A 5.2): the capcodes of 2 to 5461 pagers, separated by commas. The address above is "
         "not used. Each pager gets a short instruction with a temporary address and a frame, then the message goes to that address in "
         "that frame. Numeric, alphanumeric, tone and short messages; no copies"));
 
@@ -608,7 +608,7 @@ void PagingComposer::display()
     // A codepage of 16-bit characters has no table of codes
     const RadioPagingCharset::Codepage *tableCodepage = textCodepage();
     m_codepageTable->setVisible(m_codepageTable->isVisibleTo(this) && tableCodepage
-        && !(tableCodepage->m_transcoder && tableCodepage->m_transcoder->m_bytes));
+        && !(tableCodepage->m_transcoder && tableCodepage->m_transcoder->m_binary));
 }
 
 void PagingComposer::setDefaultCodepage(const QString& protocol, const RadioPagingCharset::Key& key)

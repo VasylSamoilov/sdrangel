@@ -55,7 +55,6 @@ int subframeWords(int transmissions)
 
 RadioPagingFlexDecoder::RadioPagingFlexDecoder() :
     m_reportFragments(false),
-    m_kanji(false),
     m_fixedYear(false),
     m_referenceYear(2026),
     m_name('A'),
@@ -322,8 +321,9 @@ void RadioPagingFlexDecoder::expireTempGroups()
             continue;
         }
 
-        uint32_t setup = slot.m_setupCycle * 128 + slot.m_setupFrame;
-        uint32_t elapsed = (current >= setup) ? (current - setup) : (15 * 128 - setup + current);
+        // Pending: from its last assignment; delivering: from its last fragment
+        uint32_t last = slot.m_lastFrame;
+        uint32_t elapsed = (current >= last) ? (current - last) : (15 * 128 - last + current);
 
         if (elapsed >= (uint32_t) m_tempTimeout) {
             slot = TempSlot();

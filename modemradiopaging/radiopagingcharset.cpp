@@ -129,7 +129,7 @@ const std::vector<RadioPagingCharset::Codepage>& RadioPagingCharset::codepages()
         {"flex", "motorola", "linguist", "latin4", "Motorola Linguist - Latin-4 (ISO 8859-4)", &flexLinguistLatin4},
         {"flex", "timex", "beepwear-pro", "alarm", "Timex BeepwearPRO - Alarm command (key=value)", &pocsagAscii, &beepwearProAlarm},
         {"flex", "generic", "generic", "ascii-rot13", "Generic - ASCII, ROT-13", &pocsagAscii, &rot13},
-        {"flex", "generic", "generic", "kanji", "Generic - Kanji (Shift-JIS, 16-bit characters)", &pocsagAscii, &kanji},
+        {"flex", "generic", "generic", "kanji", "Generic - Kanji (Shift JIS, HEX/binary messages)", &pocsagAscii, &kanji},
         // GSC
         {"gsc", "generic", "generic", "ascii", "Generic - ASCII (Table VII)", &gscAscii},
     };
@@ -178,10 +178,6 @@ std::string RadioPagingCharset::decode(const Codepage& codepage, const std::vect
 {
     std::string text;
 
-    if (codepage.m_transcoder && codepage.m_transcoder->m_bytes) {
-        return codepage.m_transcoder->m_decode(std::string(codes.begin(), codes.end()));
-    }
-
     for (uint8_t code : codes)
     {
         const char *glyph = codepage.glyph(code);
@@ -198,7 +194,7 @@ std::string RadioPagingCharset::decode(const Codepage& codepage, const std::vect
         }
     }
 
-    return codepage.m_transcoder ? codepage.m_transcoder->m_decode(text) : text;
+    return (codepage.m_transcoder && !codepage.m_transcoder->m_binary) ? codepage.m_transcoder->m_decode(text) : text;
 }
 
 int RadioPagingCharset::encodeOne(const Codepage& codepage, const std::string& text, size_t& pos)
@@ -267,7 +263,7 @@ bool RadioPagingCharset::encode(const Codepage& codepage, const std::string& use
 {
     std::string text = userText;
 
-    if (codepage.m_transcoder)
+    if (codepage.m_transcoder && !codepage.m_transcoder->m_binary)
     {
         std::string transcoderError, transcoderWarning;
 

@@ -536,26 +536,65 @@ void RadioPagingFlexDecoder::handleTemporaryAddress(const AddressContext& a, int
 {
     TempSlot& t = pol().m_temp[a.m_tempSlot];
     bool complete = true;
+    bool initial = true;
+    int number = -1;
 
-    // A continued alphanumeric or secure message keeps the assignment
+    // Alphanumeric and secure messages may be in fragments: C continued, F 3 the first, N the message number
     if ((vecType == 5) || (vecType == 0))
     {
         int hi = a.m_long ? (j + 1) : mw1;
 
-        if ((hi <= 87) && wordOk(hi) && ((m_w[hi].m_data >> 10) & 1)) {
-            complete = false;
+        if ((hi <= 87) && wordOk(hi))
+        {
+            const uint32_t hdr = m_w[hi].m_data;
+            complete = ((hdr >> 10) & 1) == 0;
+            initial = ((hdr >> 11) & 3) == 3;
+            number = (int) ((hdr >> 13) & 0x3f);
         }
     }
 
     proto.m_tempSlot = a.m_tempSlot;
 
+    // A fragment after the first: the members of its first fragment; without it, no members are guessed
+    if (!initial)
+    {
+        int slot = reassemblyFind(a.m_capcode, number);
+
+        if (slot >= 0)
+        {
+            const Message& first = pol().m_reassembly[slot].m_message;
+            proto.m_groupTracked = first.m_groupTracked;
+            proto.m_groupMembers = first.m_groupMembers;
+            proto.m_groupGeneration = first.m_groupGeneration;
+
+            // The group goes with the last fragment of its message, unless a new group took the slot
+            if (t.m_active && (t.m_generation == first.m_groupGeneration))
+            {
+                t.m_lastFrame = absFrame();
+
+                if (complete) {
+                    t = TempSlot();
+                }
+            }
+        }
+
+        return;
+    }
+
     if (t.m_active)
     {
         proto.m_groupTracked = true;
         proto.m_groupMembers = t.m_members;
+        proto.m_groupGeneration = t.m_generation;
 
-        if (complete) {
+        if (complete)
+        {
             t = TempSlot();
+        }
+        else
+        {
+            t.m_delivering = true;
+            t.m_lastFrame = absFrame();
         }
     }
 }
@@ -671,18 +710,22 @@ void RadioPagingFlexDecoder::decodeShortInstruction(Message& proto, const Addres
         unsigned target = (data >> 3) & 0x7f;
         TempSlot& t = pol().m_temp[slot];
 
-        // A new assignment on a slot in use replaces the old group
-        if (!t.m_active)
+        // A group: the assignments of the slot to the same frame until its group message. An assignment to another
+        // frame, or after the group message started, is a new group (the fragments in flight keep the old members)
+        if (!t.m_active || t.m_delivering || (t.m_targetFrame != target))
         {
             t = TempSlot();
             t.m_targetFrame = target;
             t.m_setupFrame = m_ctx.m_frame;
             t.m_setupCycle = m_ctx.m_cycle;
             t.m_active = true;
+            t.m_generation = ++pol().m_tempGeneration;
         }
 
+        t.m_lastFrame = absFrame();
+
         if (std::find(t.m_members.begin(), t.m_members.end(), a.m_capcode) == t.m_members.end()
-            && (t.m_members.size() < 8)) {
+            && ((int) t.m_members.size() < m_maxGroupMembers)) {
             t.m_members.push_back(a.m_capcode);
         }
 
@@ -690,6 +733,7 @@ void RadioPagingFlexDecoder::decodeShortInstruction(Message& proto, const Addres
         proto.m_instructionFrame = (int) target;
         proto.m_groupTracked = true;
         proto.m_groupMembers = t.m_members;
+        proto.m_groupGeneration = t.m_generation;
     }
     else if ((type == 1) && (a.m_type == AddressOperator))
     {
@@ -806,7 +850,6 @@ void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& 
         slot.m_signature = info.m_signature;
         slot.m_signatureSum = info.m_signatureSum;
         slot.m_signatureValid = info.m_wordsOk;
-        slot.m_kanji = info.m_kanji;
         slot.m_text = msg.m_text;
         slot.m_raw = info.m_raw;
         slot.m_bits = info.m_bits;
@@ -1055,20 +1098,6 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
     // (3.10.1.3). A secure message has none: the slot is character a0 (Fig. 3.10.1.4-1)
     const bool sigSlot = initial && !secure;
     int startWord = a.m_long ? mw1 : (mw1 + 1);
-    bool kanji = false;
-
-    if (!secure)
-    {
-        if (initial)
-        {
-            kanji = m_kanji;
-        }
-        else
-        {
-            int slot = reassemblyFind(a.m_capcode, hdrN);
-            kanji = (slot >= 0) ? pol().m_reassembly[slot].m_kanji : m_kanji;
-        }
-    }
 
     std::string text;
     std::vector<uint8_t> chars;     // 7-bit characters of the fragment as sent, signature slot excluded
@@ -1077,37 +1106,6 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
     bool wordsOk = true;
     bool nulError = false;
 
-    if (kanji)
-    {
-        for (int w = startWord; (w <= mw2) && (w < wordsPerFrame); w++)
-        {
-            if ((m_w[w].m_status == WordUncorrectable) || (m_w[w].m_status == WordNotReceived))
-            {
-                wordsOk = false;
-
-                if (!((w == startWord) && sigSlot)) {
-                    text += '?';
-                }
-                continue;
-            }
-
-            if ((w == startWord) && sigSlot)
-            {
-                signature = m_w[w].m_data & 0x7f;
-                continue;
-            }
-
-            uint32_t ch16 = m_w[w].m_data & 0xffff;
-
-            if (ch16 == 0) {
-                continue;
-            }
-
-            text += (char) ((ch16 >> 8) & 0xff);
-            text += (char) (ch16 & 0xff);
-        }
-    }
-    else
     {
         for (int w = startWord; (w <= mw2) && (w < wordsPerFrame); w++)
         {
@@ -1177,7 +1175,6 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
     msg.m_retrieval = (hdrR != 0);
     msg.m_mailDrop = (hdrM != 0);
     msg.m_secureType = secureType;
-    msg.m_kanji = kanji;
     msg.m_recovered = recovered;
     msg.m_duplicate = duplicate;
     msg.m_fragmented = (kind == FragmentFirst) || (kind == FragmentMiddle) || (kind == FragmentLast);
@@ -1292,7 +1289,6 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
     info.m_signature = signature;
     info.m_signatureSum = sum;
     info.m_wordsOk = wordsOk;
-    info.m_kanji = kanji;
     info.m_bits = secureBits;
 
     handleFragment(msg, a, vecType, info);

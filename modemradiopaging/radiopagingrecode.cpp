@@ -20,6 +20,7 @@
 #include "radiopagingpage.h"
 #include "radiopagingpocsag.h"
 #include "radiopaginggsc.h"
+#include "radiopagingkanji.h"
 #include "radiopagingrecode.h"
 
 namespace {
@@ -55,6 +56,9 @@ QStringList RadioPagingRecode::types(const MessageRecord& record)
     }
     if ((record.m_protocol == "flex") && record.m_protocolData.contains("alpha_codes")) {
         return {"alphanumeric"};
+    }
+    if ((record.m_protocol == "flex") && (record.m_msgType == "binary") && record.m_protocolData.contains("hex")) {
+        return {"binary"};
     }
 
     return QStringList();
@@ -104,15 +108,29 @@ bool RadioPagingRecode::redecode(const MessageRecord& record, const RadioPagingC
     {
         setInterpretation(RadioPagingGsc::interpret(raw, record.m_rawBits, codepage), as, out);
     }
+    else if (as == "binary")
+    {
+        // HEX/binary of 8 or 16-bit characters: Shift JIS text with the Kanji codepage (STD-43A 1.3.1), the hex
+        // digits with any other
+        const QString hex = record.m_protocolData.value("hex").toString();
+
+        if (!(codepage->m_transcoder && codepage->m_transcoder->m_binary))
+        {
+            out.m_text = hex;
+            out.m_protocolData.remove("charset");
+            out.m_protocolData.insert("redecoded", true);
+            return true;
+        }
+
+        out.m_text = escapeText(RadioPagingKanji::decode(hex.toStdString(), record.m_protocolData.value("blocking", 16).toInt(),
+            record.m_protocolData.value("display_direction").toString() == "rtl"));
+    }
     else
     {
-        // The characters are 16-bit (Kanji) or 7-bit: the codepage of the same kind
-        const bool kanji = record.m_protocolData.value("kanji").toBool();
-        const bool wide = codepage->m_transcoder && codepage->m_transcoder->m_bytes;
-
-        if (kanji != wide)
+        // The 7-bit characters of an alphanumeric message: not the Kanji codepage (HEX/binary messages)
+        if (codepage->m_transcoder && codepage->m_transcoder->m_binary)
         {
-            error = kanji ? QString("The message has 16-bit characters: Kanji only") : QString("The message has 7-bit characters: not Kanji");
+            error = QString("Kanji is the codepage of HEX/binary messages");
             return false;
         }
 

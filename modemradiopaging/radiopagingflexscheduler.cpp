@@ -514,7 +514,7 @@ RadioPagingFlexEncoder::EnqueueResult RadioPagingFlexEncoder::enqueueGroup(const
 
     if ((message.m_members.size() < 2) || ((int) message.m_members.size() > m_maxGroupMembers))
     {
-        result.m_error = "A group has 2 to 64 pagers";
+        result.m_error = "A group has 2 to " + std::to_string(m_maxGroupMembers) + " pagers";
         return result;
     }
     if ((message.m_type != RadioPagingFlex::Numeric) && (message.m_type != RadioPagingFlex::Alphanumeric) && !tone && !shortMessage)
@@ -692,7 +692,23 @@ void RadioPagingFlexEncoder::setGroupTargets(uint64_t frameIndex)
             continue;
         }
 
-        uint64_t target = frameIndex + (1u << m_collapse) + 2 + group.m_members.size() / 8;
+        // Frames the short instructions take: the busiest phase at most m_instructionsPerFrame a frame, a pager in its
+        // frames only (one in 2^collapse); the group message within 128 frames of the first instruction
+        const int phases = RadioPagingFlex::phaseCount(m_mode);
+        std::map<int, int> perPhase;
+
+        for (uint64_t member : group.m_members) {
+            perPhase[(int) (RadioPagingFlexScheduler::capcodeSlot(member).m_phase % (uint32_t) phases)]++;
+        }
+
+        int busiest = 0;
+
+        for (const auto& p : perPhase) {
+            busiest = std::max(busiest, p.second);
+        }
+
+        const uint64_t instructionFrames = (uint64_t) ((busiest + m_instructionsPerFrame - 1) / m_instructionsPerFrame) << m_collapse;
+        uint64_t target = frameIndex + std::min<uint64_t>((1u << m_collapse) + 2 + instructionFrames, RadioPagingFlexScheduler::m_framesPerCycle - 1);
 
         for (int tries = 0; (tries < RadioPagingFlexScheduler::m_framesPerCycle) && m_reserved[target % RadioPagingFlexScheduler::m_framesPerCycle]; tries++) {
             target++;

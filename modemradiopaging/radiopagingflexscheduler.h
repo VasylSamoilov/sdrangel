@@ -132,7 +132,12 @@ public:
 
     static const int m_maxRetransmit = 15;
     static const int m_maxScheduleFrames = 1920;    //!< Longest retransmission interval and send delay: an hour
-    static const int m_maxGroupMembers = 64;
+    //!< Pagers of a group: the short instructions one phase can carry before the group message, which is at most 127
+    //!< frames after the first of them (its frame is a frame number of the cycle, STD-43A 3.9.6): 127 frames of 43
+    //!< address and vector word pairs (88 words less the block information word, STD-43A 3.4.1)
+    static const int m_maxGroupMembers = 127 * 43;
+    //!< Short instructions of a phase in a frame, at most
+    static const int m_instructionsPerFrame = 43;
     static const int m_maxGroupCollapse = 6;        //!< A group message follows its instructions within 128 frames (5.2)
 
     struct EnqueueResult

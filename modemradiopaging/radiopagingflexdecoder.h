@@ -210,7 +210,7 @@ public:
         std::vector<uint8_t> m_rawData;
         int m_rawBits = 0;
         //! Alphanumeric: 7-bit characters (the default charset), lost characters are '?', unprintable characters
-        //! stay (or two bytes per character if the kanji mode is set). Numeric: digits 0-9 . U space - ] [,
+        //! stay. Numeric: digits 0-9 . U space - ] [,
         //! lost digits '?'. Binary, and secure messages of type t = 01, 10, 11: hex digits of the data bits (see
         //! m_hexNibbleBits). Short message: digits. Else empty
         std::string m_text;
@@ -252,7 +252,6 @@ public:
         bool m_special = false;             //!< S flag of numbered numeric: special format
         int m_secureType = -1;              //!< t1 t0 of a secure message
         bool m_registrationAck = false;     //!< Secure message with operation code "="
-        bool m_kanji = false;               //!< Characters are 16 bit, two bytes each
         bool m_recovered = false;           //!< Words taken from an earlier copy of the message
         bool m_duplicate = false;           //!< Retransmission of a message already output (with m_recovered: it repaired it)
         Check m_checksum = CheckNone;       //!< K checksum of the message words
@@ -301,6 +300,7 @@ public:
         int m_tempSlot = -1;                //!< Slot 0-15 if the address is a temporary address
         bool m_groupTracked = false;        //!< The group assignment was received
         std::vector<uint64_t> m_groupMembers;
+        uint64_t m_groupGeneration = 0;     //!< The group the members are of (the fragments of a message keep it)
 
         // Network address with a vector other than the short message vector: a system message of the NID
         // (FLEX-93001 3.9.2 p.44). A secure message of type t = 01 is the System NID Change Instruction
@@ -393,8 +393,6 @@ public:
 
     //! Report each fragment as a message too. Default off: the reassembled message only
     void setReportFragments(bool enable) { m_reportFragments = enable; }
-    //! 16-bit characters (Shift-JIS) in alphanumeric messages. Default off
-    void setKanji(bool enable) { m_kanji = enable; }
     //! Largest message number of the network (0-63, default 63): after it the sequence of an address is 0 again.
     //! Messages with R = 1 of an address are checked for skipped numbers (STD-43A 3.10.1.3 N and R, 4.3.7)
     void setMaxMessageNumber(int maxNumber) { m_maxMessageNumber = std::max(0, std::min(63, maxNumber)); }
@@ -418,7 +416,13 @@ public:
     //!< age of an entry is not ambiguous
     static const int m_historyWindow = 960;
     static const int m_tempSlots = 16;
-    static const int m_tempTimeout = 128;           //!< Frames from the assignment to the group message
+    //!< Frames a group stays without its group message: the frame of the group message is a frame number of the
+    //!< cycle (STD-43A 3.9.6), within 128 frames of the assignment; a group delivering in fragments, from its last one
+    static const int m_tempTimeout = 128;
+    //!< Pagers of a group: the assignments the protocol can carry in the 128 frames before the group message, 4
+    //!< phases a frame of 43 address and vector word pairs each (88 words less the block information word, STD-43A
+    //!< 3.4.1), 128 x 4 x 43; the standard sets no other limit
+    static const int m_maxGroupMembers = 128 * 4 * 43;
     static const int m_voteThreshold = 3;
     static const int m_voteRing = 8;
 
@@ -463,7 +467,6 @@ private:
         uint32_t m_signature = 0;           //!< Signature field of the first fragment
         uint32_t m_signatureSum = 0;        //!< Sum of the characters of this fragment
         bool m_wordsOk = true;              //!< No lost words in the fragment
-        bool m_kanji = false;
         std::vector<uint32_t> m_raw;        //!< Message words of the fragment
         std::vector<int8_t> m_bits;         //!< Data bits of a secure hex fragment: 0, 1, -1 lost
     };
@@ -499,6 +502,9 @@ private:
         unsigned m_targetFrame = 0;
         unsigned m_setupFrame = 0;
         unsigned m_setupCycle = 0;
+        uint32_t m_lastFrame = 0;       //!< Absolute frame of the last assignment, or of the last fragment once delivering
+        bool m_delivering = false;      //!< The group message started (its first fragment came)
+        uint64_t m_generation = 0;      //!< The group of the slot: a new assignment after the delivery is a new group
     };
 
     struct Reassembly
@@ -515,7 +521,6 @@ private:
         uint32_t m_lastCycle = 0;
         int m_fragments = 0;
         bool m_gap = false;
-        bool m_kanji = false;
         bool m_checksumFailed = false;
         std::string m_text;
         std::vector<uint32_t> m_raw;
@@ -588,6 +593,7 @@ private:
     struct PolarityState
     {
         TempSlot m_temp[16];
+        uint64_t m_tempGeneration = 0;      //!< Groups started
         std::vector<Reassembly> m_reassembly;
         std::vector<HistoryEntry> m_history;
         std::vector<SubframeStore> m_stores[4];     //!< Per phase, contents waiting for copies
@@ -601,7 +607,6 @@ private:
     FrameContext m_ctx;
     PolarityState m_pol[2];
     bool m_reportFragments;
-    bool m_kanji;
     int m_maxMessageNumber = 63;
     bool m_fixedYear;
     int m_referenceYear;

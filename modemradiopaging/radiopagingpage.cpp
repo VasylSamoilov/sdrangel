@@ -24,6 +24,7 @@
 
 #include "radiopagingcharset.h"
 #include "radiopagingflex.h"
+#include "radiopagingflexscheduler.h"
 #include "radiopaginggsc.h"
 #include "radiopagingpocsag.h"
 #include "radiopagingpage.h"
@@ -91,8 +92,8 @@ QString RadioPagingPage::check() const
         bool ok = false;
         QList<qulonglong> members = groupMembers(&ok);
 
-        if (!ok || (members.size() < 2) || (members.size() > 64)) {
-            return "A group has 2 to 64 pagers: capcodes of digits separated by commas";
+        if (!ok || (members.size() < 2) || (members.size() > RadioPagingFlexEncoder::m_maxGroupMembers)) {
+            return QString("A group has 2 to %1 pagers: capcodes of digits separated by commas").arg(RadioPagingFlexEncoder::m_maxGroupMembers);
         }
         for (qulonglong capcode : members)
         {

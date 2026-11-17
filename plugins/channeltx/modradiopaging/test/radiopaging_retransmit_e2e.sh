@@ -109,6 +109,11 @@ check "FLEX: Ukrainian text with the codepage of the channel is accepted" '[ "$(
 BEEPWEAR='{"vendor":"timex","model":"beepwear-pro","codepage":"alarm"}'
 check "FLEX: a BeepwearPRO alarm without its minute is refused" '[ "$(tx 0 "{\"protocol\":\"flex\",\"capcode\":1100007,\"type\":\"alphanumeric\",\"charset\":$BEEPWEAR,\"text\":\"hour=7 msg=Wake up\"}")" = 400 ]'
 check "FLEX: a BeepwearPRO alarm is accepted" '[ "$(tx 0 "{\"protocol\":\"flex\",\"capcode\":1100007,\"type\":\"alphanumeric\",\"charset\":$BEEPWEAR,\"text\":\"hour=7 min=0 msg=Wake up\"}")" = 202 ]'
+# Japanese Text Service: the text is sent as a HEX/binary message of 16-bit Shift JIS characters
+KANJI='{"vendor":"generic","model":"generic","codepage":"kanji"}'
+NIHON=$(printf '\346\227\245\346\234\254')
+check "FLEX: Ukrainian text is refused with Kanji" '[ "$(tx 0 "{\"protocol\":\"flex\",\"capcode\":1100008,\"type\":\"alphanumeric\",\"charset\":$KANJI,\"text\":\"$PRYVIT\"}")" = 400 ]'
+check "FLEX: Japanese text with Kanji is accepted" '[ "$(tx 0 "{\"protocol\":\"flex\",\"capcode\":1100008,\"type\":\"alphanumeric\",\"charset\":$KANJI,\"text\":\"$NIHON\"}")" = 202 ]'
 
 # The page waits for the modulator to announce itself (every 5 s)
 check "a page with a copy is accepted by the message center" '[ "$(curl_code POST /featureset/feature/0/actions "{\"featureType\":\"MessageCenter\",\"MessageCenterActions\":{\"post\":{\"id\":\"p-rep\",\"transmitter\":\"tp\",\"protocol\":\"pocsag\",\"address\":\"1100004\",\"type\":\"alphanumeric\",\"retransmit\":1,\"retransmitInterval\":2,\"text\":\"PAGE COPY\"}}}")" = 202 ]'
@@ -125,7 +130,8 @@ check "POCSAG: a record for the message and each copy" '[ "$(count tx 1100003)" 
 check "page: a record for the page and its copy" '[ "$(count tx 1100004)" = 2 ]'
 check "FLEX: the copies have R = 0 and their number" '[[ "$(records tx 1100002 | grep "\"retransmission\":1" | grep -c "\"retrieval\":false")" = 1 && "$(records tx 1100002 | grep "\"retransmission\":2" | grep -c "\"retrieval\":false")" = 1 ]]'
 check "page: sent once, with its first transmission" '[[ "$(report | sed "s/},{/}\n{/g" | grep "\"id\":\"p-rep\"" | grep -c "\"state\":\"sent\"")" -ge 1 ]]'
-check "the modulators report each message once" '[ "$(sent 0)" = 4 ] && [ "$(sent 1)" = 3 ]'
+check "the modulators report each message once" '[ "$(sent 0)" = 5 ] && [ "$(sent 1)" = 3 ]'
+check "FLEX: the Kanji record sent is HEX/binary of B = 16, with the text and its codepage" '[[ "$(records tx 1100008)" == *"\"text\":\"$NIHON\""* && "$(records tx 1100008)" == *"\"msgType\":\"binary\""* && "$(records tx 1100008)" == *"\"blocking\":16"* && "$(records tx 1100008)" == *"\"hex\":\"AF39B769\""* && "$(records tx 1100008)" == *"\"codepage\":\"kanji\""* ]]'
 check "FLEX: the BeepwearPRO alarm record has the key=value text and its codepage" '[[ "$(records tx 1100007)" == *"\"text\":\"hour=7 min=0 msg=Wake up\""* && "$(records tx 1100007)" == *"\"model\":\"beepwear-pro\""* ]]'
 check "FLEX: a record for the group message, with its pagers" '[[ "$(report | sed "s/},{/}\n{/g" | grep "\"direction\":\"tx\"" | grep "GROUP TEXT" | grep -c "group_members")" = 1 ]]'
 check "POCSAG: the record sent has the text, its codepage and the message bits" '[[ "$(records tx 1100005)" == *"$GRUSSE"* && "$(records tx 1100005)" == *"$GERMAN_REC"* && "$(records tx 1100005)" == *"\"rawBits\":40"* ]]'
@@ -168,6 +174,7 @@ rawData() { records "$1" "$2" | head -1 | grep -o "\"rawData\":\"[^\"]*\""; }
 check "POCSAG: received in the German codepage, the bits as sent" '[[ "$(records rx 1100005)" == *"$GRUSSE"* && -n "$(rawData tx 1100005)" && "$(rawData tx 1100005)" == "$(rawData rx 1100005)" ]]'
 check "FLEX: received in the Cyrillic codepage" '[[ "$(records rx 1100006)" == *"$DOBRYI"* && "$(records rx 1100006)" == *"$CYRILLIC_REC"* ]]'
 check "the received records keep what decodes them again: POCSAG fill codes, FLEX characters" '[[ "$(records rx 1100005)" == *"\"fill_codes\":[0,3,4]"* && "$(records rx 1100006)" == *"\"alpha_codes\":\""* ]]'
+check "FLEX: the Kanji message is received as HEX/binary of B = 16 with the Cyrillic codepage" '[[ "$(records rx 1100008)" == *"\"text\":\"AF39B769\""* && "$(records rx 1100008)" == *"\"blocking\":16"* && "$(records rx 1100008)" == *"\"hex\":\"AF39B769\""* ]]'
 # Decoding again (message center WebAPI): the record of the log is replaced
 redecode() { curl_code POST /featureset/feature/0/actions "{\"featureType\":\"MessageCenter\",\"MessageCenterActions\":{\"redecode\":$1}}"; }
 RXID=$(records rx 1100005 | head -1 | grep -o "\"id\":\"[^\"]*\"" | head -1 | cut -d\" -f4)
@@ -180,6 +187,10 @@ check "decode again: the record has the ASCII text and codepage" '[[ "$(records 
 check "decode again: POCSAG as numeric" '[ "$(redecode "{\"id\":\"$RXID\",\"type\":\"numeric\"}")" = 202 ]'
 sleep 1
 check "decode again: the record is numeric, alphanumeric the other candidate" '[[ "$(records rx 1100005 | grep "\"id\":\"$RXID\"")" == *"\"msgType\":\"numeric\""* && "$(records rx 1100005 | grep "\"id\":\"$RXID\"")" == *"\"alt_type\":\"alphanumeric\""* ]]'
+KANJIID=$(records rx 1100008 | head -1 | grep -o "\"id\":\"[^\"]*\"" | head -1 | cut -d\" -f4)
+check "decode again: FLEX HEX/binary with Kanji" '[ "$(redecode "{\"id\":\"$KANJIID\",\"charset\":$KANJI}")" = 202 ]'
+sleep 1
+check "decode again: the HEX/binary record has the Japanese text" '[[ "$(records rx 1100008 | grep "\"id\":\"$KANJIID\"")" == *"\"text\":\"$NIHON\""* && "$(records rx 1100008 | grep "\"id\":\"$KANJIID\"")" == *"\"codepage\":\"kanji\""* ]]'
 # How the FLEX messages went is reported when they are in their frame: message number, R, fragments
 check "FLEX: the records sent have the message number, R and the fragments" '[[ "$(records tx 1100002 | grep -c "\"message_number\":0")" = 3 && "$(records tx 1100002 | grep -v "retransmission" | grep "\"retrieval\":true" | grep -c "\"fragment_count\":1")" = 1 ]]'
 
