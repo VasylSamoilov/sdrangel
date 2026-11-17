@@ -45,6 +45,7 @@
 #include "dsp/wavfilerecord.h"
 #include "util/db.h"
 #include "maincore.h"
+#include "feature/featurewebapiutils.h"
 #include "util/messageendpoint.h"
 #include "radiopagingwav.h"
 #include "radiopagingkanji.h"
@@ -182,9 +183,18 @@ RadioPagingMod::RadioPagingMod(DeviceAPI *deviceAPI) :
     m_deviceAPI->addChannelSource(this);
     m_deviceAPI->addChannelSourceAPI(this);
 
-    // The message center learns this transmitter at the next announcement, whenever it starts
+    // The message center learns this transmitter at the next announcement, whenever it starts. The first
+    // announcement adds a Message Center if there is none: the messages are logged
     m_announceTimer = new QTimer(this);
-    QObject::connect(m_announceTimer, &QTimer::timeout, this, [this]() { announce("status"); });
+    QObject::connect(m_announceTimer, &QTimer::timeout, this, [this]() {
+        if (!m_messageCenterChecked)
+        {
+            m_messageCenterChecked = true;
+            FeatureWebAPIUtils::openMessageCenter();
+        }
+
+        announce("status");
+    });
     m_announceTimer->start(5000);
 
     m_networkManager = new QNetworkAccessManager();
@@ -1396,6 +1406,12 @@ int RadioPagingMod::webapiSettingsPutPatch(
         errorMessage = "flexTimeZoneMinutes must be a zone of STD-43A Table 3.7.2-3 (offset from UTC in minutes)";
         return 400;
     }
+    if (channelSettingsKeys.contains("flexTimeExtendedSeconds")
+        && ((swg->getFlexTimeExtendedSeconds() < 0) || (swg->getFlexTimeExtendedSeconds() > 7)))
+    {
+        errorMessage = "flexTimeExtendedSeconds must be 0 to 7 (steps of 0.9375 s)";
+        return 400;
+    }
     if (channelSettingsKeys.contains("flexMaxMessageNumber")
         && ((swg->getFlexMaxMessageNumber() < 0) || (swg->getFlexMaxMessageNumber() > 63)))
     {
@@ -1538,6 +1554,12 @@ void RadioPagingMod::webapiUpdateChannelSettings(
     }
     if (channelSettingsKeys.contains("flexTimeOffsetSeconds")) {
         settings.m_flexTimeOffsetSeconds = swg->getFlexTimeOffsetSeconds();
+    }
+    if (channelSettingsKeys.contains("flexTimeEquivalentYear")) {
+        settings.m_flexTimeEquivalentYear = swg->getFlexTimeEquivalentYear() != 0;
+    }
+    if (channelSettingsKeys.contains("flexTimeExtendedSeconds")) {
+        settings.m_flexTimeExtendedSeconds = swg->getFlexTimeExtendedSeconds();
     }
     if (channelSettingsKeys.contains("flexNumbering")) {
         settings.m_flexNumbering = swg->getFlexNumbering() != 0;
@@ -1768,6 +1790,8 @@ void RadioPagingMod::webapiFormatChannelSettings(SWGSDRangel::SWGChannelSettings
     swg->setFlexTimeSendZone(settings.m_flexTimeSendZone ? 1 : 0);
     swg->setFlexTimeDaylightSaving(settings.m_flexTimeDaylightSaving ? 1 : 0);
     swg->setFlexTimeOffsetSeconds(settings.m_flexTimeOffsetSeconds);
+    swg->setFlexTimeEquivalentYear(settings.m_flexTimeEquivalentYear ? 1 : 0);
+    swg->setFlexTimeExtendedSeconds(settings.m_flexTimeExtendedSeconds);
     swg->setFlexNumbering(settings.m_flexNumbering ? 1 : 0);
     swg->setFlexMaxMessageNumber(settings.m_flexMaxMessageNumber);
     swg->setPocsagCharset(RadioPagingPage::charsetSwg(settings.m_pocsagCharset));
@@ -2001,6 +2025,12 @@ void RadioPagingMod::webapiFormatChannelSettings(
     }
     if (channelSettingsKeys.contains("flexTimeOffsetSeconds") || force) {
         swg->setFlexTimeOffsetSeconds(settings.m_flexTimeOffsetSeconds);
+    }
+    if (channelSettingsKeys.contains("flexTimeEquivalentYear") || force) {
+        swg->setFlexTimeEquivalentYear(settings.m_flexTimeEquivalentYear ? 1 : 0);
+    }
+    if (channelSettingsKeys.contains("flexTimeExtendedSeconds") || force) {
+        swg->setFlexTimeExtendedSeconds(settings.m_flexTimeExtendedSeconds);
     }
     if (channelSettingsKeys.contains("flexNumbering") || force) {
         swg->setFlexNumbering(settings.m_flexNumbering ? 1 : 0);

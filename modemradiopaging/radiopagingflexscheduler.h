@@ -221,6 +221,12 @@ public:
         bool m_sendZone = true;         //!< Send the time zone word (101)
         bool m_daylightSaving = false;  //!< The time is daylight saving time: one hour ahead, L0 = 0
         int64_t m_offsetSeconds = 0;    //!< Added to the frame grid time: sets any date and time
+        //!< A year outside 1994-2025 (the year field) is sent as the latest year in it with the same calendar
+        //!< (leap year and weekday of January 1): the pager shows the right weekday
+        bool m_equivalentYear = false;
+        //!< Extended second S5-S3 of the time zone word (3.7.2, 0-7 steps of 1/64 minute, 0.9375 s): the correction of
+        //!< the time a pager shows when the frames are not aligned to the second
+        unsigned m_extendedSeconds = 0;
     };
 
     //!< False and an error if the zone is not in Table 3.7.2-3

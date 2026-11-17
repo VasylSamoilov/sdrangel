@@ -401,6 +401,7 @@ private:
     MessageRecord endpointRecord(const QString& event);
     void announce(const QString& event = "status");
     QTimer *m_announceTimer = nullptr;
+    bool m_messageCenterChecked = false;        //!< A Message Center was looked for (added if none)
     QString m_lastAlias;                        //!< The alias announced last
     QString recordVoice(const PendingTx& pending, double& seconds);
     void publishRecord(const MessageRecord& record);

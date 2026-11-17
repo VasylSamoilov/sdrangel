@@ -153,6 +153,7 @@ private:
     void publishRecord(MessageRecord record);
     void announce(const QString& event);
     QTimer *m_announceTimer = nullptr;
+    bool m_messageCenterChecked = false;        //!< A Message Center was looked for (added if none)
     QString m_lastAlias;                        //!< The alias announced last
     void webapiReverseSendSettings(const QStringList& channelSettingsKeys, const RadioPagingDemodSettings& settings, bool force);
     void webapiFormatChannelSettings(

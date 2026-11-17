@@ -571,18 +571,9 @@ void MessageCenterEngine::ingest(const MessageRecord& record, const QString& sou
             // A receiver and a transmitter may have the same alias (the frequency): they are two endpoints
             QString key = endpointKey(endpoint.m_role, endpoint.m_alias);
 
-            // A status record changes the status and the queue, the capabilities stay as registered
-            if ((event == "status") && m_endpoints.contains(key))
-            {
-                MessageEndpoint& current = m_endpoints[key];
-                current.m_status = endpoint.m_status;
-                current.m_queueDepth = endpoint.m_queueDepth;
-                current.m_capacity = endpoint.m_capacity;
-                current.m_lastSeen = endpoint.m_lastSeen;
-            }
-            else {
-                m_endpoints[key] = endpoint;
-            }
+            // Every announcement (status too) carries the whole description: the protocols, speeds and
+            // capabilities follow the settings of the channel
+            m_endpoints[key] = endpoint;
 
             if ((m_endpoints[key].m_status == MessageEndpoint::Offline) && (endpoint.m_role == MessageEndpoint::Transmitter)) {
                 endpointGone(endpoint.m_alias, now);

@@ -3452,6 +3452,39 @@ void testTime()
         ts.m_enabled = true;
         ts.m_zoneMinutes = 61;
         check(!enc.setTimeService(ts, error) && !error.empty(), "time: zone offset not in Table 3.7.2-3 refused");
+        ts.m_zoneMinutes = 0;
+        ts.m_extendedSeconds = 8;
+        check(!enc.setTimeService(ts, error), "time: extended seconds over 7 refused");
+    }
+
+    // Equivalent year: the year itself in 1994-2025, else the latest year of the period with the same calendar
+    check((Flex::equivalentYear(2024) == 2024) && (Flex::equivalentYear(2026) == 2015) && (Flex::equivalentYear(2028) == 2000)
+        && (Flex::equivalentYear(1990) == 2018), "time: equivalent years (2026 as 2015, leap 2028 as 2000, 1990 as 2018)");
+
+    // The equivalent year and the extended second correction (S5-S3) as set are decoded
+    {
+        Enc enc;
+        std::string error;
+        enc.setMode(Flex::Mode1600_2);
+        Enc::TimeService ts;
+        ts.m_enabled = true;
+        ts.m_equivalentYear = true;
+        ts.m_extendedSeconds = 5;
+        const uint64_t hourIndex = 1920ull * 400000;
+        ts.m_offsetSeconds = 20768LL * 86400 + 13 * 3600 - (int64_t) (hourIndex * 1875 / 1000);
+        bool set = enc.setTimeService(ts, error);
+
+        Dec dec;
+        dec.setReferenceYear(2015);
+        for (uint64_t index = hourIndex; index < hourIndex + 40; index++)
+        {
+            Enc::Frame f = enc.buildFrame(index);
+            dec.decodeFrame(toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data));
+        }
+
+        Dec::NetworkTime nt = dec.networkTime(false);
+        check(set && nt.m_dateValid && (nt.m_year == 2015) && (nt.m_month == 11) && (nt.m_day == 11) && nt.m_zoneValid
+            && (nt.m_extendedSeconds == 5), "time: 2026 sent as the equivalent year 2015, the extended second correction 5");
     }
 }
 

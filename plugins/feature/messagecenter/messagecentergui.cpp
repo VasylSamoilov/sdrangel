@@ -135,13 +135,35 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     m_hideDuplicates = new QCheckBox("Hide duplicates", this);
     m_voiceOnly = new QCheckBox("Voice files", this);
 
+    m_protocol->setToolTip("Protocol of the messages: any, POCSAG, FLEX or GSC");
+    m_direction->setToolTip("Received (RX), transmitted (TX) or both");
+    m_polarity->setToolTip("Polarity the message was received or sent with");
+    m_type->setToolTip("Message type as the decoder or encoder names it");
+    m_alias->setToolTip("Alias of the channel, or the transmitter of a page (exact). Empty: any channel");
+    m_address->setToolTip("Address: RIC, capcode or GSC address; * matches any characters, ? one. Empty: any address");
+    m_text->setToolTip("Messages whose text contains this (case insensitive). Empty: any text");
+    m_hideDuplicates->setToolTip("Hide the messages marked as duplicates (copies received again)");
+    m_voiceOnly->setToolTip("Only the GSC voice pages that have a sound file");
+
+    // The text fields with their names: a placeholder alone is hard to see
+    auto labelled = [this](const QString& name, QLineEdit *edit) {
+        QWidget *w = new QWidget(this);
+        QHBoxLayout *l = new QHBoxLayout(w);
+        l->setContentsMargins(0, 0, 0, 0);
+        QLabel *label = new QLabel(name, w);
+        label->setToolTip(edit->toolTip());
+        l->addWidget(label);
+        l->addWidget(edit, 1);
+        return w;
+    };
+
     layout->addWidget(m_protocol, 0, 0);
     layout->addWidget(m_direction, 0, 1);
     layout->addWidget(m_polarity, 0, 2);
     layout->addWidget(m_type, 0, 3);
-    layout->addWidget(m_alias, 1, 0);
-    layout->addWidget(m_address, 1, 1);
-    layout->addWidget(m_text, 1, 2, 1, 2);
+    layout->addWidget(labelled("Alias", m_alias), 1, 0);
+    layout->addWidget(labelled("Address", m_address), 1, 1);
+    layout->addWidget(labelled("Text", m_text), 1, 2, 1, 2);
     layout->addWidget(m_hideDuplicates, 2, 0, 1, 2);
     layout->addWidget(m_voiceOnly, 2, 2, 1, 2);
 

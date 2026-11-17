@@ -429,9 +429,11 @@ void RadioPagingModGUI::displayTime(bool flex)
     QSignalBlocker zoneBlocker(ui->flexTimeZone);
     QSignalBlocker clockBlocker(ui->flexTimeClock);
     QSignalBlocker setBlocker(ui->flexTimeSet);
+    QSignalBlocker yearBlocker(ui->flexTimeEquivalentYear);
+    QSignalBlocker extendedBlocker(ui->flexTimeExtendedSeconds);
 
     for (QWidget *w : QList<QWidget*>({ui->flexTime, ui->flexTimeReference, ui->flexTimeDaylightSaving, ui->flexTimeSendZone,
-            ui->flexTimeZone, ui->flexTimeClock, ui->flexTimeSet})) {
+            ui->flexTimeZone, ui->flexTimeClock, ui->flexTimeSet, ui->flexTimeEquivalentYear, ui->flexTimeExtendedSeconds})) {
         w->setVisible(flex);
     }
 
@@ -439,6 +441,8 @@ void RadioPagingModGUI::displayTime(bool flex)
     ui->flexTimeReference->setCurrentIndex(m_settings.m_flexTimeFrameZero ? 0 : 1);
     ui->flexTimeDaylightSaving->setChecked(m_settings.m_flexTimeDaylightSaving);
     ui->flexTimeSendZone->setChecked(m_settings.m_flexTimeSendZone);
+    ui->flexTimeEquivalentYear->setChecked(m_settings.m_flexTimeEquivalentYear);
+    ui->flexTimeExtendedSeconds->setValue(m_settings.m_flexTimeExtendedSeconds);
     int zoneIndex = ui->flexTimeZone->findData(m_settings.m_flexTimeZoneMinutes);
     ui->flexTimeZone->setCurrentIndex((zoneIndex >= 0) ? zoneIndex : ui->flexTimeZone->findData(0));
     bool clock = (m_settings.m_flexTimeOffsetSeconds == 0);
@@ -446,10 +450,12 @@ void RadioPagingModGUI::displayTime(bool flex)
     ui->flexTimeSet->setDateTime(flexTimeNow());
 
     for (QWidget *w : QList<QWidget*>({ui->flexTimeReference, ui->flexTimeDaylightSaving, ui->flexTimeSendZone, ui->flexTimeZone,
-            ui->flexTimeClock})) {
+            ui->flexTimeClock, ui->flexTimeEquivalentYear})) {
         w->setEnabled(m_settings.m_flexTime);
     }
 
+    // The extended second is in the zone word
+    ui->flexTimeExtendedSeconds->setEnabled(m_settings.m_flexTime && m_settings.m_flexTimeSendZone);
     ui->flexTimeSet->setEnabled(m_settings.m_flexTime && !clock);
 }
 
@@ -600,6 +606,19 @@ void RadioPagingModGUI::on_flexTimeSendZone_toggled(bool checked)
 {
     m_settings.m_flexTimeSendZone = checked;
     applySettings(QStringList("flexTimeSendZone"));
+    displayTime(true);
+}
+
+void RadioPagingModGUI::on_flexTimeEquivalentYear_toggled(bool checked)
+{
+    m_settings.m_flexTimeEquivalentYear = checked;
+    applySettings(QStringList("flexTimeEquivalentYear"));
+}
+
+void RadioPagingModGUI::on_flexTimeExtendedSeconds_valueChanged(int value)
+{
+    m_settings.m_flexTimeExtendedSeconds = value;
+    applySettings(QStringList("flexTimeExtendedSeconds"));
 }
 
 void RadioPagingModGUI::on_flexTimeZone_currentIndexChanged(int index)
@@ -1495,6 +1514,9 @@ void RadioPagingModGUI::makeUIConnections()
     QObject::connect(ui->flexTimeReference, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_flexTimeReference_currentIndexChanged);
     QObject::connect(ui->flexTimeDaylightSaving, &QCheckBox::toggled, this, &RadioPagingModGUI::on_flexTimeDaylightSaving_toggled);
     QObject::connect(ui->flexTimeSendZone, &QCheckBox::toggled, this, &RadioPagingModGUI::on_flexTimeSendZone_toggled);
+    QObject::connect(ui->flexTimeEquivalentYear, &QCheckBox::toggled, this, &RadioPagingModGUI::on_flexTimeEquivalentYear_toggled);
+    QObject::connect(ui->flexTimeExtendedSeconds, QOverload<int>::of(&QSpinBox::valueChanged), this,
+        &RadioPagingModGUI::on_flexTimeExtendedSeconds_valueChanged);
     QObject::connect(ui->flexNumbering, &QCheckBox::toggled, this, &RadioPagingModGUI::on_flexNumbering_toggled);
     QObject::connect(ui->flexMaxMessageNumber, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_flexMaxMessageNumber_valueChanged);
     QObject::connect(ui->flexEventSend, &QPushButton::clicked, this, &RadioPagingModGUI::on_flexEventSend_clicked);

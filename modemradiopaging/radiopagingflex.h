@@ -243,6 +243,9 @@ public:
     //!< Date word, format 001: Y4-Y0 (year in a period of 32 years from 1994, the year modulo 32 after 2025),
     //!< d4-d0 day 1-31, m3-m0 month 1-12
     static uint32_t dateWord(int year, unsigned month, unsigned day);
+    //!< The year itself in 1994-2025 (the period of the year field), else the latest year of that period with the
+    //!< same calendar: leap or not, and the same weekday of January 1
+    static int equivalentYear(int year);
     //!< Time word, format 010: H4-H0 hour 0-23, M5-M0 minute 0-59, s2-s0 second in eighths of a minute (7.5 s)
     static uint32_t timeWord(unsigned hour, unsigned minute, unsigned eighths);
     //!< System information word, format 101, A3-A0 = 0101 Additional Time Instruction: Z4-Z0 time zone code

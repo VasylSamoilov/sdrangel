@@ -102,6 +102,14 @@ RadioPagingModSettings:
       description: "FLEX time: seconds added to the time of the frame grid (UTC from the computer clock), to send any date and time"
       type: integer
       format: int64
+    flexTimeEquivalentYear:
+      description: "FLEX time: 1 a year outside 1994-2025 (the period of the year field) is sent as the latest year of the period with the same calendar (leap year, weekday of January 1), so the pager shows the right weekday; 0 the year modulo 32"
+      type: integer
+      format: int32
+    flexTimeExtendedSeconds:
+      description: "FLEX time: extended second S5-S3 of the time zone word, 0-7 steps of 1/64 minute (0.9375 s), to correct the time a pager shows when the frames are not aligned to the second"
+      type: integer
+      format: int32
     flexNumbering:
       description: "FLEX message numbering of the network (STD-43A 8.4, optional): 1 the alphanumeric, HEX/binary and numbered short messages of each address are numbered 0, 1 ... flexMaxMessageNumber, 0 ... with R = 1; 0 the network does not number them: N = 0 and R = 0 (a message in fragments takes a number apart from the other messages of the address in progress) and numbered short messages are refused"
       type: integer

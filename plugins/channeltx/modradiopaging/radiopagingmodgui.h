@@ -157,6 +157,8 @@ private slots:
     void on_flexTimeReference_currentIndexChanged(int index);
     void on_flexTimeDaylightSaving_toggled(bool checked);
     void on_flexTimeSendZone_toggled(bool checked);
+    void on_flexTimeEquivalentYear_toggled(bool checked);
+    void on_flexTimeExtendedSeconds_valueChanged(int value);
     void on_flexNumbering_toggled(bool checked);
     void on_flexMaxMessageNumber_valueChanged(int value);
     void on_flexEventSend_clicked();

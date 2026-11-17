@@ -566,6 +566,29 @@ uint32_t RadioPagingFlex::dateWord(int year, unsigned month, unsigned day)
     return encodeWord(addChecksum(data));
 }
 
+int RadioPagingFlex::equivalentYear(int year)
+{
+    auto leap = [](int y) { return ((y % 4) == 0) && (((y % 100) != 0) || ((y % 400) == 0)); };
+    // Weekday of January 1 (0 Sunday), Gregorian calendar
+    auto january1 = [](int y) {
+        int p = y - 1;
+        return (((1 + 5 * (p % 4) + 4 * (p % 100) + 6 * (p % 400)) % 7) + 7) % 7;
+    };
+
+    if ((year >= 1994) && (year <= 2025)) {
+        return year;
+    }
+
+    for (int y = 2025; y >= 1994; y--)
+    {
+        if ((leap(y) == leap(year)) && (january1(y) == january1(year))) {
+            return y;
+        }
+    }
+
+    return 1994 + (((year - 1994) % 32) + 32) % 32;
+}
+
 uint32_t RadioPagingFlex::timeWord(unsigned hour, unsigned minute, unsigned eighths)
 {
     uint32_t data = (2u << 4) | ((hour & 0x1f) << 7) | ((minute & 0x3f) << 12) | ((eighths & 7) << 18);

@@ -71,6 +71,8 @@ struct RadioPagingModSettings
     bool m_flexTimeSendZone;                    //!< Send the time zone word
     bool m_flexTimeDaylightSaving;              //!< The time is daylight saving time (one hour ahead)
     qint64 m_flexTimeOffsetSeconds;             //!< Added to the time of the frame grid (UTC): any date and time can be sent
+    bool m_flexTimeEquivalentYear;              //!< A year after 2025 as the equivalent year of 1994-2025 (same calendar)
+    int m_flexTimeExtendedSeconds;              //!< S5-S3 of the time zone word, 0-7 steps of 0.9375 s: time display correction
     bool m_flexNumbering;                       //!< The network numbers the messages of each address (STD-43A 8.4); off: N = 0, R = 0
     int m_flexMaxMessageNumber;                 //!< Largest message number of the network, 0-63: then 0 again
     int m_gscMode;                              //!< RadioPagingGsc::Mode: auto, single, batch, non battery saver. One-shot only
@@ -125,6 +127,9 @@ struct RadioPagingModSettings
     const RadioPagingCharset::Key& charset(Protocol protocol) const;
     //!< The default codepage of a protocol: generic ASCII
     static RadioPagingCharset::Key defaultCharset(const char *protocol);
+    //!< The standard time offset (minutes) and daylight saving of the system time zone now; UTC if the zone is not
+    //!< in STD-43A Table 3.7.2-3
+    static void systemTimeZone(int& zoneMinutes, bool& daylightSaving);
 
     //! Bring the numeric settings into their ranges (ramps, ramp range, deviation, gain)
     void validate();

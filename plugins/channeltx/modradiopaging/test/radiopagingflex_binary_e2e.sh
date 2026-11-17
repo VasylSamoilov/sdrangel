@@ -118,6 +118,14 @@ if [ "$failed" -ne 0 ]; then
     report | sed 's/},{/}\n{/g' | grep "\"direction\":\"rx\""
 fi
 
+# The first announcement of a paging channel adds a Message Center when there is none, and only then
+centers() { curl -s "$U/featureset" | tr -d '\n ' | grep -o '"id":"MessageCenter"' | wc -l; }
+check "a Message Center: the channels do not add another" '[ "$(centers)" = 1 ]'
+curl_code DELETE /featureset/feature/0 > /dev/null
+curl_code POST /deviceset/0/channel '{"channelType":"RadioPagingMod","direction":1}' > /dev/null
+for i in $(seq 15); do [ "$(centers)" = 1 ] && break; sleep 1; done
+check "without a Message Center, a new paging channel adds one" '[ "$(centers)" = 1 ]'
+
 curl_code DELETE /deviceset/1/device/run > /dev/null
 fuser -k "$PORT"/tcp > /dev/null 2>&1
 rm -rf "$WORK"

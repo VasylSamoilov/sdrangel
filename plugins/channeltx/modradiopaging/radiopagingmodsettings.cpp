@@ -16,6 +16,8 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include <QColor>
+#include <QDateTime>
+#include <QTimeZone>
 
 #include <algorithm>
 #include <sstream>
@@ -49,6 +51,22 @@ RadioPagingCharset::Key RadioPagingModSettings::defaultCharset(const char *proto
 {
     const RadioPagingCharset::Codepage *codepage = RadioPagingCharset::defaultFor(protocol);
     return codepage ? codepage->key() : RadioPagingCharset::Key();
+}
+
+void RadioPagingModSettings::systemTimeZone(int& zoneMinutes, bool& daylightSaving)
+{
+    const QTimeZone zone = QTimeZone::systemTimeZone();
+    const QDateTime now = QDateTime::currentDateTime();
+
+    // The standard time offset of the system zone, UTC if it is not a zone of STD-43A Table 3.7.2-3
+    zoneMinutes = zone.standardTimeOffset(now) / 60;
+    daylightSaving = zone.isDaylightTime(now);
+
+    if (RadioPagingFlex::timeZoneCode(zoneMinutes) < 0)
+    {
+        zoneMinutes = 0;
+        daylightSaving = false;
+    }
 }
 
 namespace {
@@ -110,12 +128,14 @@ void RadioPagingModSettings::resetToDefaults()
     m_ssidCoverageZone = 0;
     m_ssidCountryCode = 0;
     m_ssidTrafficFlags = 0xf;
-    m_flexTime = false;
+    // FLEX time on by default: date, time and zone, the zone and daylight saving of the system
+    m_flexTime = true;
     m_flexTimeFrameZero = true;
-    m_flexTimeZoneMinutes = 0;
+    systemTimeZone(m_flexTimeZoneMinutes, m_flexTimeDaylightSaving);
     m_flexTimeSendZone = true;
-    m_flexTimeDaylightSaving = false;
     m_flexTimeOffsetSeconds = 0;
+    m_flexTimeEquivalentYear = true;
+    m_flexTimeExtendedSeconds = 0;
     m_flexNumbering = true;
     m_flexMaxMessageNumber = 63;
     m_gscMode = (int) RadioPagingGsc::Auto;
@@ -184,6 +204,7 @@ void RadioPagingModSettings::validate()
     if (RadioPagingFlex::timeZoneCode(m_flexTimeZoneMinutes) < 0) {
         m_flexTimeZoneMinutes = 0;
     }
+    m_flexTimeExtendedSeconds = std::max(0, std::min(7, m_flexTimeExtendedSeconds));
 
     m_flexMaxMessageNumber = std::max(0, std::min(63, m_flexMaxMessageNumber));
     m_gscVoiceSeconds = std::max(1, std::min(50, m_gscVoiceSeconds));
@@ -313,6 +334,8 @@ QByteArray RadioPagingModSettings::serialize() const
     writeCharset(s, 63, m_pocsagCharset);
     writeCharset(s, 66, m_flexCharset);
     writeCharset(s, 69, m_gscCharset);
+    s.writeBool(72, m_flexTimeEquivalentYear);
+    s.writeS32(73, m_flexTimeExtendedSeconds);
 
     return s.final();
 }
@@ -422,6 +445,8 @@ bool RadioPagingModSettings::deserialize(const QByteArray& data)
         m_pocsagCharset = readCharset(d, 63, "pocsag");
         m_flexCharset = readCharset(d, 66, "flex");
         m_gscCharset = readCharset(d, 69, "gsc");
+        d.readBool(72, &m_flexTimeEquivalentYear, true);
+        d.readS32(73, &m_flexTimeExtendedSeconds, 0);
         m_gscVoiceKeepDays = std::max(0, std::min(3650, m_gscVoiceKeepDays));
         m_gscVoiceKeepMin = std::max(0, std::min(100000, m_gscVoiceKeepMin));
 
@@ -512,6 +537,12 @@ void RadioPagingModSettings::applySettings(const QStringList& settingsKeys, cons
     }
     if (settingsKeys.contains("flexTimeOffsetSeconds")) {
         m_flexTimeOffsetSeconds = settings.m_flexTimeOffsetSeconds;
+    }
+    if (settingsKeys.contains("flexTimeEquivalentYear")) {
+        m_flexTimeEquivalentYear = settings.m_flexTimeEquivalentYear;
+    }
+    if (settingsKeys.contains("flexTimeExtendedSeconds")) {
+        m_flexTimeExtendedSeconds = settings.m_flexTimeExtendedSeconds;
     }
     if (settingsKeys.contains("flexNumbering")) {
         m_flexNumbering = settings.m_flexNumbering;
@@ -689,6 +720,12 @@ QString RadioPagingModSettings::getDebugString(const QStringList& settingsKeys, 
     }
     if (settingsKeys.contains("flexTimeOffsetSeconds") || force) {
         ostr << " m_flexTimeOffsetSeconds: " << m_flexTimeOffsetSeconds;
+    }
+    if (settingsKeys.contains("flexTimeEquivalentYear") || force) {
+        ostr << " m_flexTimeEquivalentYear: " << m_flexTimeEquivalentYear;
+    }
+    if (settingsKeys.contains("flexTimeExtendedSeconds") || force) {
+        ostr << " m_flexTimeExtendedSeconds: " << m_flexTimeExtendedSeconds;
     }
     if (settingsKeys.contains("flexNumbering") || force) {
         ostr << " m_flexNumbering: " << m_flexNumbering;

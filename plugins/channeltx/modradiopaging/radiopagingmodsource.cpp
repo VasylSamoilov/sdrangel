@@ -170,6 +170,8 @@ RadioPagingFlexEncoder::TimeService RadioPagingModSource::timeService(const Radi
     t.m_sendZone = settings.m_flexTimeSendZone;
     t.m_daylightSaving = settings.m_flexTimeDaylightSaving;
     t.m_offsetSeconds = settings.m_flexTimeOffsetSeconds;
+    t.m_equivalentYear = settings.m_flexTimeEquivalentYear;
+    t.m_extendedSeconds = (unsigned) settings.m_flexTimeExtendedSeconds;
     return t;
 }
 

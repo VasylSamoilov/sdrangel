@@ -232,7 +232,18 @@ void testEndpoints()
     tx.m_queueDepth = 4;
     engine.ingest(MessageEndpoint::toRecord(tx, "status"), "channels", 2);
     check((engine.endpoints()["tx:tx1"].m_status == MessageEndpoint::Busy) && !engine.endpoints()["tx:tx1"].ready()
-        && (engine.endpoints()["tx:tx1"].m_speeds == QList<int>({1200})), "Endpoint: a status record changes the status and the queue, not the capabilities");
+        && (engine.endpoints()["tx:tx1"].m_speeds == QList<int>({1200})), "Endpoint: a status record changes the status and the queue");
+    // The protocol of the channel changed: its next status has the new one
+    const QStringList protocols = tx.m_protocols;
+    tx.m_protocols = QStringList({"flex"});
+    tx.m_status = MessageEndpoint::Idle;
+    tx.m_queueDepth = 0;
+    engine.ingest(MessageEndpoint::toRecord(tx, "status"), "channels", 2);
+    check(engine.endpoints()["tx:tx1"].canTransmit(pageRecord("tx1", "flex", "5", "x")), "Endpoint: a status record changes the protocols");
+    tx.m_protocols = protocols;
+    tx.m_status = MessageEndpoint::Busy;
+    tx.m_queueDepth = 4;
+    engine.ingest(MessageEndpoint::toRecord(tx, "status"), "channels", 2);
 
     MessageRecord flexPage = pageRecord("tx1", "flex", "5", "x");
     MessageRecord slow = pageRecord("tx1", "pocsag", "5", "x");

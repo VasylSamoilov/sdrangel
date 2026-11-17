@@ -37,6 +37,7 @@
 #include "util/db.h"
 #include "util/messagerecord.h"
 #include "maincore.h"
+#include "feature/featurewebapiutils.h"
 
 #include "radiopagingcharset.h"
 #include "radiopagingpage.h"
@@ -70,9 +71,18 @@ RadioPagingDemod::RadioPagingDemod(DeviceAPI *deviceAPI) :
     QObject::connect(m_networkManager, &QNetworkAccessManager::finished, this, &RadioPagingDemod::networkManagerFinished);
     QObject::connect(this, &ChannelAPI::indexInDeviceSetChanged, this, &RadioPagingDemod::handleIndexInDeviceSetChanged);
 
-    // The message center learns this receiver at the next announcement, whenever it starts
+    // The message center learns this receiver at the next announcement, whenever it starts. The first
+    // announcement adds a Message Center if there is none: the messages are logged
     m_announceTimer = new QTimer(this);
-    QObject::connect(m_announceTimer, &QTimer::timeout, this, [this]() { announce("status"); });
+    QObject::connect(m_announceTimer, &QTimer::timeout, this, [this]() {
+        if (!m_messageCenterChecked)
+        {
+            m_messageCenterChecked = true;
+            FeatureWebAPIUtils::openMessageCenter();
+        }
+
+        announce("status");
+    });
     m_announceTimer->start(5000);
 }
 

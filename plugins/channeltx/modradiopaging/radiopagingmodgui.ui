@@ -815,6 +815,32 @@
      </widget>
     </item>
     <item row="11" column="0" colspan="2">
+     <widget class="QCheckBox" name="flexTimeEquivalentYear">
+      <property name="toolTip">
+       <string>Retro year: a year after 2025 (the year field counts 1994-2025) is sent as the latest year of that period with the same calendar (leap year and weekday of January 1), so a pager shows the right weekday and day of the year. Unchecked: the year modulo 32</string>
+      </property>
+      <property name="text">
+       <string>Retro year</string>
+      </property>
+     </widget>
+    </item>
+    <item row="11" column="2" colspan="2">
+     <widget class="QSpinBox" name="flexTimeExtendedSeconds">
+      <property name="toolTip">
+       <string>Extra seconds: the extended second S5-S3 of the time zone word (STD-43A 3.7.2), 0 to 7 steps of 1/64 minute (0.9375 s) added to the 7.5 s steps of the time word. Corrects the time a pager shows when the frames are not aligned to the second. Sent with the zone word</string>
+      </property>
+      <property name="prefix">
+       <string>+</string>
+      </property>
+      <property name="suffix">
+       <string> x 0.9375 s</string>
+      </property>
+      <property name="maximum">
+       <number>7</number>
+      </property>
+     </widget>
+    </item>
+    <item row="12" column="0" colspan="2">
      <widget class="QCheckBox" name="flexNumbering">
       <property name="toolTip">
        <string>FLEX message numbering of the network (STD-43A 8.4, optional): the alphanumeric, HEX/binary and numbered short messages of each address are numbered from 0 with R = 1. Unchecked: N = 0 and R = 0 (a message in fragments takes a number apart from the other messages of the address in progress), numbered short messages are refused</string>
@@ -824,7 +850,7 @@
       </property>
      </widget>
     </item>
-    <item row="11" column="2" colspan="2">
+    <item row="12" column="2" colspan="2">
      <widget class="QSpinBox" name="flexMaxMessageNumber">
       <property name="toolTip">
        <string>Largest message number of the network (the pagers are set to it): after it the numbers of an address start from 0 again</string>
@@ -840,7 +866,7 @@
       </property>
      </widget>
     </item>
-    <item row="12" column="0" colspan="2">
+    <item row="13" column="0" colspan="2">
      <widget class="QToolButton" name="flexEventFlags">
       <property name="toolTip">
        <string>FLEX System Event Notification (STD-43A 3.8.2.4): the events announced to the pagers, to take place within the next 4 cycles</string>
@@ -853,7 +879,7 @@
       </property>
      </widget>
     </item>
-    <item row="12" column="2">
+    <item row="13" column="2">
      <widget class="QSpinBox" name="flexEventFrames">
       <property name="toolTip">
        <string>Frames of the System Event Notification: it goes in every phase of each frame, for one cycle (128 frames) at least, up to the 4 cycles of the notice (512)</string>
@@ -872,7 +898,7 @@
       </property>
      </widget>
     </item>
-    <item row="12" column="3">
+    <item row="13" column="3">
      <widget class="QPushButton" name="flexEventSend">
       <property name="toolTip">
        <string>Start the System Event Notification of the events checked (FLEX network mode); while it is sent, the frames left, and a click stops it</string>

@@ -955,6 +955,11 @@ bool RadioPagingFlexEncoder::setTimeService(const TimeService& time, std::string
         error = "Time zone offset " + std::to_string(time.m_zoneMinutes) + " minutes is not in STD-43A Table 3.7.2-3";
         return false;
     }
+    if (time.m_extendedSeconds > 7)
+    {
+        error = "Extended seconds must be 0 to 7 (steps of 0.9375 s)";
+        return false;
+    }
 
     m_time = time;
     return true;
@@ -995,17 +1000,21 @@ std::vector<uint32_t> RadioPagingFlexEncoder::extraBlockInfo(uint64_t frameIndex
         int year;
         unsigned month, day, hour, minute, second;
         RadioPagingFlex::civilTime(seconds, year, month, day, hour, minute, second);
-        // The second in 1/64 minute steps: the eighths of minute in the time word, the rest in the zone word
-        int64_t inMinute = (int64_t) second * 1000 + (((ms % 1000) + 1000) % 1000);
-        unsigned steps = (unsigned) ((inMinute * 64) / 60000);
+        // The second in 7.5 s steps (eighths of minute) in the time word; the extended second of the zone word is
+        // the correction set
+        unsigned steps = second * 8 / 60;
+
+        if (m_time.m_equivalentYear) {
+            year = RadioPagingFlex::equivalentYear(year);
+        }
 
         // In the order date, time, time zone; the frame index modulo 3 chooses the first when they do not all fit
         std::vector<uint32_t> timeWords;
         timeWords.push_back(RadioPagingFlex::dateWord(year, month, day));
-        timeWords.push_back(RadioPagingFlex::timeWord(hour, minute, steps / 8));
+        timeWords.push_back(RadioPagingFlex::timeWord(hour, minute, steps));
         if (m_time.m_sendZone) {
             timeWords.push_back(RadioPagingFlex::timeZoneWord((unsigned) RadioPagingFlex::timeZoneCode(m_time.m_zoneMinutes),
-                m_time.m_daylightSaving, steps % 8));
+                m_time.m_daylightSaving, m_time.m_extendedSeconds));
         }
 
         size_t room = maxExtra - words.size();
