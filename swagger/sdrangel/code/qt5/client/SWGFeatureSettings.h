@@ -28,6 +28,7 @@
 #include "SWGAPRSSettings.h"
 #include "SWGAircraftSettings.h"
 #include "SWGAntennaToolsSettings.h"
+#include "SWGCellularSettings.h"
 #include "SWGDemodAnalyzerSettings.h"
 #include "SWGDenoiserSettings.h"
 #include "SWGFreqDisplaySettings.h"
@@ -92,6 +93,9 @@ public:
 
     SWGAPRSSettings* getAprsSettings();
     void setAprsSettings(SWGAPRSSettings* aprs_settings);
+
+    SWGCellularSettings* getCellularSettings();
+    void setCellularSettings(SWGCellularSettings* cellular_settings);
 
     SWGDemodAnalyzerSettings* getDemodAnalyzerSettings();
     void setDemodAnalyzerSettings(SWGDemodAnalyzerSettings* demod_analyzer_settings);
@@ -177,6 +181,9 @@ private:
 
     SWGAPRSSettings* aprs_settings;
     bool m_aprs_settings_isSet;
+
+    SWGCellularSettings* cellular_settings;
+    bool m_cellular_settings_isSet;
 
     SWGDemodAnalyzerSettings* demod_analyzer_settings;
     bool m_demod_analyzer_settings_isSet;

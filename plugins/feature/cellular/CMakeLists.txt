@@ -5,6 +5,7 @@ set(cellular_SOURCES
     cellularsettings.cpp
     cellularworker.cpp
     cellularplugin.cpp
+    cellularwebapiadapter.cpp
 )
 
 set(cellular_HEADERS
@@ -12,6 +13,7 @@ set(cellular_HEADERS
     cellularsettings.h
     cellularworker.h
     cellularplugin.h
+    cellularwebapiadapter.h
 )
 
 include_directories(

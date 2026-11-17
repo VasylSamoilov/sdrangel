@@ -24,6 +24,9 @@ FeatureReport:
     AMBEReport:
       $ref: "http://swgserver:8081/api/swagger/include/AMBE.yaml#/AMBEReport"
       description: "Ambe report data for Feature."
+    CellularReport:
+      $ref: "http://swgserver:8081/api/swagger/include/Cellular.yaml#/CellularReport"
+      description: "Cellular base station controller report data for Feature."
     FreqDisplayReport:
       $ref: "http://swgserver:8081/api/swagger/include/FreqDisplay.yaml#/FreqDisplayReport"
       description: "Freq display report data for Feature."

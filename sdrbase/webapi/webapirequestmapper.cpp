@@ -5813,6 +5813,13 @@ bool WebAPIRequestMapper::getFeatureSettings(
             featureSettings->setAprsSettings(new SWGSDRangel::SWGAPRSSettings());
             featureSettings->getAprsSettings()->fromJsonObject(settingsJsonObject);
         }
+        else if (featureSettingsKey == "CellularSettings")
+        {
+            // init(): the list of networks has to exist before it is read
+            featureSettings->setCellularSettings(new SWGSDRangel::SWGCellularSettings());
+            featureSettings->getCellularSettings()->init();
+            featureSettings->getCellularSettings()->fromJsonObject(settingsJsonObject);
+        }
         else if (featureSettingsKey == "DemodAnalyzerSettings")
         {
             featureSettings->setDemodAnalyzerSettings(new SWGSDRangel::SWGDemodAnalyzerSettings());
@@ -6278,6 +6285,7 @@ void WebAPIRequestMapper::resetFeatureSettings(SWGSDRangel::SWGFeatureSettings& 
     featureSettings.setAisSettings(nullptr);
     featureSettings.setAntennaToolsSettings(nullptr);
     featureSettings.setAprsSettings(nullptr);
+    featureSettings.setCellularSettings(nullptr);
     featureSettings.setFreqDisplaySettings(nullptr);
     featureSettings.setGs232ControllerSettings(nullptr);
     featureSettings.setMapSettings(nullptr);
@@ -6298,6 +6306,7 @@ void WebAPIRequestMapper::resetFeatureReport(SWGSDRangel::SWGFeatureReport& feat
     featureReport.setFeatureType(nullptr);
     featureReport.setAfcReport(nullptr);
     featureReport.setAircraftReport(nullptr);
+    featureReport.setCellularReport(nullptr);
     featureReport.setFreqDisplayReport(nullptr);
     featureReport.setGs232ControllerReport(nullptr);
     featureReport.setPerTesterReport(nullptr);

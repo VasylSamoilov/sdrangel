@@ -30,6 +30,9 @@ FeatureSettings:
     APRSSettings:
       $ref: "/doc/swagger/include/APRS.yaml#/APRSSettings"
       description: "Aprs settings configuration for Feature."
+    CellularSettings:
+      $ref: "/doc/swagger/include/Cellular.yaml#/CellularSettings"
+      description: "Cellular base station controller settings configuration for Feature."
     DemodAnalyzerSettings:
       $ref: "/doc/swagger/include/DemodAnalyzer.yaml#/DemodAnalyzerSettings"
       description: "Demod analyzer settings configuration for Feature."

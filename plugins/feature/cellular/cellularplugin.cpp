@@ -25,6 +25,7 @@
 
 #include "cellular.h"
 #include "cellularplugin.h"
+#include "cellularwebapiadapter.h"
 
 const PluginDescriptor CellularPlugin::m_pluginDescriptor = {
     Cellular::m_featureId,
@@ -70,4 +71,9 @@ FeatureGUI* CellularPlugin::createFeatureGUI(FeatureUISet *featureUISet, Feature
 Feature* CellularPlugin::createFeature(WebAPIAdapterInterface* webAPIAdapterInterface) const
 {
     return new Cellular(webAPIAdapterInterface);
+}
+
+FeatureWebAPIAdapter* CellularPlugin::createFeatureWebAPIAdapter() const
+{
+    return new CellularWebAPIAdapter();
 }

@@ -28,6 +28,7 @@
         <file>webapi/doc/swagger/include/BFMMod.yaml</file>
         <file>webapi/doc/swagger/include/BladeRF1.yaml</file>
         <file>webapi/doc/swagger/include/BladeRF2.yaml</file>
+        <file>webapi/doc/swagger/include/Cellular.yaml</file>
         <file>webapi/doc/swagger/include/ChannelActions.yaml</file>
         <file>webapi/doc/swagger/include/ChannelAnalyzer.yaml</file>
         <file>webapi/doc/swagger/include/ChannelMarker.yaml</file>

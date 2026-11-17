@@ -38,6 +38,7 @@ public:
 
     FeatureGUI* createFeatureGUI(FeatureUISet *featureUISet, Feature *feature) const override;
     Feature* createFeature(WebAPIAdapterInterface *webAPIAdapterInterface) const override;
+    FeatureWebAPIAdapter* createFeatureWebAPIAdapter() const override;
 
 private:
     static const PluginDescriptor m_pluginDescriptor;

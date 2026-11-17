@@ -591,6 +591,9 @@ void CellularWorker::reportStatus(const Network& n)
 
     if (system)
     {
+        msg->m_onAir = true;
+        msg->m_registered = static_cast<int>(system->registeredCount());
+        msg->m_calls = n.cellular ? static_cast<int>(n.cellular->callCount()) : 0;
         msg->m_summary = QString("On the air: %1 registered, %2 calls, %3 s, %4 blocks missed")
             .arg(system->registeredCount())
             .arg(n.cellular ? n.cellular->callCount() : 0)
