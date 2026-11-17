@@ -1,0 +1,137 @@
+CellularSettings:
+  description: "Cellular base station controller: the NMT networks it runs on the Cellular Rx and Cellular Tx channels"
+  properties:
+    leadMs:
+      type: integer
+      description: "Lead of the transmitters over the receivers in ms (part of the round trip). Taken when the controller starts."
+      minimum: 20
+      maximum: 1000
+    networks:
+      description: "The networks. When present the list replaces the networks of the controller; while it runs, networks that are switched on start and networks that are switched off or not in the list stop."
+      type: array
+      items:
+        $ref: "/doc/swagger/include/Cellular.yaml#/CellularNetworkSettings"
+    title:
+      type: string
+      description: "Title of the feature window."
+    rgbColor:
+      type: integer
+      description: "Title color of the feature window (RGB)."
+
+CellularNetworkSettings:
+  description: "One NMT network (one base station) and the radios it runs on"
+  properties:
+    id:
+      type: integer
+      description: "Network id 1..200000, unique in the controller. The carrier ids are id * 10000 + channel number."
+    name:
+      type: string
+      description: "Name of the network."
+    enabled:
+      type: integer
+      description: "On the air while the controller runs (1) or not (0)."
+      minimum: 0
+      maximum: 1
+    system:
+      type: integer
+      description: "(0 NMT-450, 1 NMT-900)"
+    country:
+      type: string
+      description: "Short name of the frequency plan: DK, SE, NO, FI, NL, HU ..."
+    area:
+      type: integer
+      description: "Traffic area within the country (the second digit Y2)."
+    areaNo:
+      type: integer
+      description: "Area number 1..4, 0 for none."
+    msPower:
+      type: integer
+      description: "Power level of the phones 0..3 (3 is the highest)."
+    carriers:
+      type: string
+      description: "The carriers, comma separated: channel[:type[:supervisory]]. Type: cc, cca, ccb, tc, actc, cctc or test (tc if not given); supervisory tone 1..4 on a traffic channel. Example: 1:cctc, 5, 6:tc:2"
+    compandor:
+      type: integer
+      description: "Compandor on speech (1) or not (0)."
+    sendCallerId:
+      type: integer
+      description: "Send the number of the caller while the phone rings (1) or not (0)."
+    sendClock:
+      type: integer
+      description: "Send the time of day (1) or not (0)."
+    smscNumber:
+      type: string
+      description: "The number the phones send short messages to; empty for none."
+    fallback:
+      type: integer
+      description: "What answers a call to a number that is not registered (0 echo, 1 music)."
+    rxDeviceSetIndex:
+      type: integer
+      description: "Index of the device set with the Cellular Rx channel of the network."
+    txDeviceSetIndex:
+      type: integer
+      description: "Index of the device set with the Cellular Tx channel of the network."
+
+CellularReport:
+  description: "Cellular base station controller report"
+  properties:
+    running:
+      type: integer
+      description: "The controller runs (1) or not (0)."
+    networks:
+      description: "The networks that run."
+      type: array
+      items:
+        $ref: "/doc/swagger/include/Cellular.yaml#/CellularNetworkReport"
+
+CellularNetworkReport:
+  description: "The state of one network"
+  properties:
+    id:
+      type: integer
+      description: "Network id."
+    onAir:
+      type: integer
+      description: "The network is on the air (1) or not (0)."
+    summary:
+      type: string
+      description: "One line of the state of the network."
+    registered:
+      type: integer
+      description: "Number of phones that registered."
+    calls:
+      type: integer
+      description: "Number of calls in progress."
+    carriers:
+      type: array
+      items:
+        $ref: "/doc/swagger/include/Cellular.yaml#/CellularCarrierReport"
+
+CellularCarrierReport:
+  description: "The state of one carrier of a network"
+  properties:
+    channel:
+      type: integer
+      description: "Channel number."
+    downlink:
+      type: integer
+      format: int64
+      description: "Frequency of the base station in Hz."
+    uplink:
+      type: integer
+      format: int64
+      description: "Frequency of the phone in Hz."
+    state:
+      type: string
+      description: "State of the channel, or off with the reason."
+    rxLevel:
+      type: number
+      format: float
+      description: "Received level in dB of full scale."
+    txFillMs:
+      type: number
+      format: float
+      description: "Audio in the queue of the transmitter in ms."
+    underruns:
+      type: integer
+      description: "Times the queue of the transmitter ran empty."

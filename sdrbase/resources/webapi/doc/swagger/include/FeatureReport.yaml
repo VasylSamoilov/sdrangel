@@ -24,6 +24,9 @@ FeatureReport:
     AMBEReport:
       $ref: "/doc/swagger/include/AMBE.yaml#/AMBEReport"
       description: "Ambe report data for Feature."
+    CellularReport:
+      $ref: "/doc/swagger/include/Cellular.yaml#/CellularReport"
+      description: "Cellular base station controller report data for Feature."
     FreqDisplayReport:
       $ref: "/doc/swagger/include/FreqDisplay.yaml#/FreqDisplayReport"
       description: "Freq display report data for Feature."

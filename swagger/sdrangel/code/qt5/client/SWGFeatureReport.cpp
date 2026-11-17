@@ -42,6 +42,8 @@ SWGFeatureReport::SWGFeatureReport() {
     m_aircraft_report_isSet = false;
     ambe_report = nullptr;
     m_ambe_report_isSet = false;
+    cellular_report = nullptr;
+    m_cellular_report_isSet = false;
     freq_display_report = nullptr;
     m_freq_display_report_isSet = false;
     gs232_controller_report = nullptr;
@@ -90,6 +92,8 @@ SWGFeatureReport::init() {
     m_aircraft_report_isSet = false;
     ambe_report = new SWGAMBEReport();
     m_ambe_report_isSet = false;
+    cellular_report = new SWGCellularReport();
+    m_cellular_report_isSet = false;
     freq_display_report = new SWGFreqDisplayReport();
     m_freq_display_report_isSet = false;
     gs232_controller_report = new SWGGS232ControllerReport();
@@ -140,6 +144,9 @@ SWGFeatureReport::cleanup() {
     }
     if(ambe_report != nullptr) { 
         delete ambe_report;
+    }
+    if(cellular_report != nullptr) { 
+        delete cellular_report;
     }
     if(freq_display_report != nullptr) { 
         delete freq_display_report;
@@ -207,6 +214,8 @@ SWGFeatureReport::fromJsonObject(QJsonObject &pJson) {
     
     ::SWGSDRangel::setValue(&ambe_report, pJson["AMBEReport"], "SWGAMBEReport", "SWGAMBEReport");
     
+    ::SWGSDRangel::setValue(&cellular_report, pJson["CellularReport"], "SWGCellularReport", "SWGCellularReport");
+    
     ::SWGSDRangel::setValue(&freq_display_report, pJson["FreqDisplayReport"], "SWGFreqDisplayReport", "SWGFreqDisplayReport");
     
     ::SWGSDRangel::setValue(&gs232_controller_report, pJson["GS232ControllerReport"], "SWGGS232ControllerReport", "SWGGS232ControllerReport");
@@ -269,6 +278,9 @@ SWGFeatureReport::asJsonObject() {
     }
     if((ambe_report != nullptr) && (ambe_report->isSet())){
         toJsonValue(QString("AMBEReport"), ambe_report, obj, QString("SWGAMBEReport"));
+    }
+    if((cellular_report != nullptr) && (cellular_report->isSet())){
+        toJsonValue(QString("CellularReport"), cellular_report, obj, QString("SWGCellularReport"));
     }
     if((freq_display_report != nullptr) && (freq_display_report->isSet())){
         toJsonValue(QString("FreqDisplayReport"), freq_display_report, obj, QString("SWGFreqDisplayReport"));
@@ -381,6 +393,16 @@ void
 SWGFeatureReport::setAmbeReport(SWGAMBEReport* ambe_report) {
     this->ambe_report = ambe_report;
     this->m_ambe_report_isSet = true;
+}
+
+SWGCellularReport*
+SWGFeatureReport::getCellularReport() {
+    return cellular_report;
+}
+void
+SWGFeatureReport::setCellularReport(SWGCellularReport* cellular_report) {
+    this->cellular_report = cellular_report;
+    this->m_cellular_report_isSet = true;
 }
 
 SWGFreqDisplayReport*
@@ -537,6 +559,9 @@ SWGFeatureReport::isSet(){
             isObjectUpdated = true; break;
         }
         if(ambe_report && ambe_report->isSet()){
+            isObjectUpdated = true; break;
+        }
+        if(cellular_report && cellular_report->isSet()){
             isObjectUpdated = true; break;
         }
         if(freq_display_report && freq_display_report->isSet()){

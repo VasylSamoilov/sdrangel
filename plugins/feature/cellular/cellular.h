@@ -19,7 +19,9 @@
 #define INCLUDE_FEATURE_CELLULAR_H_
 
 #include <map>
+#include <memory>
 
+#include <QMutex>
 #include <QStringList>
 #include <QThread>
 
@@ -101,6 +103,9 @@ public:
 
         int m_network;
         bool m_stale = false;           // the network runs with other settings than the current ones
+        bool m_onAir = false;
+        int m_registered = 0;
+        int m_calls = 0;
         QString m_summary;
         QList<Carrier> m_carriers;
         static MsgReportStatus* create(int network) { return new MsgReportStatus(network); }
@@ -122,6 +127,16 @@ public:
     bool deserialize(const QByteArray& data) override;
 
     int webapiRun(bool run, SWGSDRangel::SWGDeviceState& response, QString& errorMessage) override;
+    int webapiSettingsGet(SWGSDRangel::SWGFeatureSettings& response, QString& errorMessage) override;
+    int webapiSettingsPutPatch(bool force, const QStringList& featureSettingsKeys,
+        SWGSDRangel::SWGFeatureSettings& response, QString& errorMessage) override;
+    int webapiReportGet(SWGSDRangel::SWGFeatureReport& response, QString& errorMessage) override;
+
+    static void webapiFormatFeatureSettings(SWGSDRangel::SWGFeatureSettings& response, const CellularSettings& settings);
+    // The keys are those of the top level. A network in the list takes the fields it has; the
+    // others come from the network with its id, or from the defaults for a new id.
+    static void webapiUpdateFeatureSettings(CellularSettings& settings, const QStringList& featureSettingsKeys,
+        SWGSDRangel::SWGFeatureSettings& response);
 
     static const char* const m_featureIdURI;
     static const char* const m_featureId;
@@ -145,6 +160,8 @@ private:
     bool m_running;
     std::map<int, Active> m_active;             // the networks that run, by id
     std::map<ChannelAPI*, Pipe> m_pipes;        // the radios in use
+    mutable QMutex m_reportMutex;
+    std::map<int, std::unique_ptr<MsgReportStatus>> m_reports;  // the last state of each network that runs
 
     void start();
     void stop();
@@ -155,6 +172,8 @@ private:
     MessageQueue *usePipe(ChannelAPI *channel);
     void releasePipe(ChannelAPI *channel);
     void report(int network, const QString& text);
+    void keepReport(const MsgReportStatus& report);
+    void dropReport(int network);
 
 private slots:
     void handlePipeToBeDeleted(int reason, QObject *object);

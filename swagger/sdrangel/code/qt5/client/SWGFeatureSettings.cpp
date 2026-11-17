@@ -46,6 +46,8 @@ SWGFeatureSettings::SWGFeatureSettings() {
     m_antenna_tools_settings_isSet = false;
     aprs_settings = nullptr;
     m_aprs_settings_isSet = false;
+    cellular_settings = nullptr;
+    m_cellular_settings_isSet = false;
     demod_analyzer_settings = nullptr;
     m_demod_analyzer_settings_isSet = false;
     denoiser_settings = nullptr;
@@ -110,6 +112,8 @@ SWGFeatureSettings::init() {
     m_antenna_tools_settings_isSet = false;
     aprs_settings = new SWGAPRSSettings();
     m_aprs_settings_isSet = false;
+    cellular_settings = new SWGCellularSettings();
+    m_cellular_settings_isSet = false;
     demod_analyzer_settings = new SWGDemodAnalyzerSettings();
     m_demod_analyzer_settings_isSet = false;
     denoiser_settings = new SWGDenoiserSettings();
@@ -174,6 +178,9 @@ SWGFeatureSettings::cleanup() {
     }
     if(aprs_settings != nullptr) { 
         delete aprs_settings;
+    }
+    if(cellular_settings != nullptr) { 
+        delete cellular_settings;
     }
     if(demod_analyzer_settings != nullptr) { 
         delete demod_analyzer_settings;
@@ -263,6 +270,8 @@ SWGFeatureSettings::fromJsonObject(QJsonObject &pJson) {
     
     ::SWGSDRangel::setValue(&aprs_settings, pJson["APRSSettings"], "SWGAPRSSettings", "SWGAPRSSettings");
     
+    ::SWGSDRangel::setValue(&cellular_settings, pJson["CellularSettings"], "SWGCellularSettings", "SWGCellularSettings");
+    
     ::SWGSDRangel::setValue(&demod_analyzer_settings, pJson["DemodAnalyzerSettings"], "SWGDemodAnalyzerSettings", "SWGDemodAnalyzerSettings");
     
     ::SWGSDRangel::setValue(&denoiser_settings, pJson["DenoiserSettings"], "SWGDenoiserSettings", "SWGDenoiserSettings");
@@ -343,6 +352,9 @@ SWGFeatureSettings::asJsonObject() {
     }
     if((aprs_settings != nullptr) && (aprs_settings->isSet())){
         toJsonValue(QString("APRSSettings"), aprs_settings, obj, QString("SWGAPRSSettings"));
+    }
+    if((cellular_settings != nullptr) && (cellular_settings->isSet())){
+        toJsonValue(QString("CellularSettings"), cellular_settings, obj, QString("SWGCellularSettings"));
     }
     if((demod_analyzer_settings != nullptr) && (demod_analyzer_settings->isSet())){
         toJsonValue(QString("DemodAnalyzerSettings"), demod_analyzer_settings, obj, QString("SWGDemodAnalyzerSettings"));
@@ -493,6 +505,16 @@ void
 SWGFeatureSettings::setAprsSettings(SWGAPRSSettings* aprs_settings) {
     this->aprs_settings = aprs_settings;
     this->m_aprs_settings_isSet = true;
+}
+
+SWGCellularSettings*
+SWGFeatureSettings::getCellularSettings() {
+    return cellular_settings;
+}
+void
+SWGFeatureSettings::setCellularSettings(SWGCellularSettings* cellular_settings) {
+    this->cellular_settings = cellular_settings;
+    this->m_cellular_settings_isSet = true;
 }
 
 SWGDemodAnalyzerSettings*
@@ -715,6 +737,9 @@ SWGFeatureSettings::isSet(){
             isObjectUpdated = true; break;
         }
         if(aprs_settings && aprs_settings->isSet()){
+            isObjectUpdated = true; break;
+        }
+        if(cellular_settings && cellular_settings->isSet()){
             isObjectUpdated = true; break;
         }
         if(demod_analyzer_settings && demod_analyzer_settings->isSet()){

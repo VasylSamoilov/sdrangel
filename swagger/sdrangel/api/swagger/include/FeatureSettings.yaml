@@ -30,6 +30,9 @@ FeatureSettings:
     APRSSettings:
       $ref: "http://swgserver:8081/api/swagger/include/APRS.yaml#/APRSSettings"
       description: "Aprs settings configuration for Feature."
+    CellularSettings:
+      $ref: "http://swgserver:8081/api/swagger/include/Cellular.yaml#/CellularSettings"
+      description: "Cellular base station controller settings configuration for Feature."
     DemodAnalyzerSettings:
       $ref: "http://swgserver:8081/api/swagger/include/DemodAnalyzer.yaml#/DemodAnalyzerSettings"
       description: "Demod analyzer settings configuration for Feature."

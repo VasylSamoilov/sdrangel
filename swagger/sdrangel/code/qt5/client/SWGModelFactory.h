@@ -92,6 +92,11 @@
 #include "SWGBladeRF2OutputSettings.h"
 #include "SWGCWKeyerSettings.h"
 #include "SWGCapture.h"
+#include "SWGCellularCarrierReport.h"
+#include "SWGCellularNetworkReport.h"
+#include "SWGCellularNetworkSettings.h"
+#include "SWGCellularReport.h"
+#include "SWGCellularSettings.h"
 #include "SWGChannel.h"
 #include "SWGChannelActions.h"
 #include "SWGChannelAnalyzerSettings.h"
@@ -883,6 +888,31 @@ namespace SWGSDRangel {
     }
     if(QString("SWGCapture").compare(type) == 0) {
       SWGCapture *obj = new SWGCapture();
+      obj->init();
+      return obj;
+    }
+    if(QString("SWGCellularCarrierReport").compare(type) == 0) {
+      SWGCellularCarrierReport *obj = new SWGCellularCarrierReport();
+      obj->init();
+      return obj;
+    }
+    if(QString("SWGCellularNetworkReport").compare(type) == 0) {
+      SWGCellularNetworkReport *obj = new SWGCellularNetworkReport();
+      obj->init();
+      return obj;
+    }
+    if(QString("SWGCellularNetworkSettings").compare(type) == 0) {
+      SWGCellularNetworkSettings *obj = new SWGCellularNetworkSettings();
+      obj->init();
+      return obj;
+    }
+    if(QString("SWGCellularReport").compare(type) == 0) {
+      SWGCellularReport *obj = new SWGCellularReport();
+      obj->init();
+      return obj;
+    }
+    if(QString("SWGCellularSettings").compare(type) == 0) {
+      SWGCellularSettings *obj = new SWGCellularSettings();
       obj->init();
       return obj;
     }

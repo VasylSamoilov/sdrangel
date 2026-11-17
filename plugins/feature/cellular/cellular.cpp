@@ -15,6 +15,8 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.          //
 ///////////////////////////////////////////////////////////////////////////////////
 
+#include <algorithm>
+
 #include <QDebug>
 
 #include "channel/channelapi.h"
@@ -24,6 +26,13 @@
 #include "pipes/objectpipe.h"
 
 #include "SWGDeviceState.h"
+#include "SWGFeatureSettings.h"
+#include "SWGFeatureReport.h"
+#include "SWGCellularSettings.h"
+#include "SWGCellularNetworkSettings.h"
+#include "SWGCellularReport.h"
+#include "SWGCellularNetworkReport.h"
+#include "SWGCellularCarrierReport.h"
 
 #include "cellularworker.h"
 #include "cellular.h"
@@ -173,6 +182,7 @@ void Cellular::stop()
         releasePipe(a.second.tx);
     }
     m_active.clear();
+    dropReport(-1);
     m_running = false;
     setState(StIdle);
     report(0, "stopped");
@@ -224,6 +234,31 @@ void Cellular::stopNetwork(int id)
     releasePipe(it->second.rx);
     releasePipe(it->second.tx);
     m_active.erase(it);
+    dropReport(id);
+}
+
+void Cellular::keepReport(const MsgReportStatus& report)
+{
+    QMutexLocker locker(&m_reportMutex);
+    std::unique_ptr<MsgReportStatus> copy(MsgReportStatus::create(report.m_network));
+
+    copy->m_onAir = report.m_onAir;
+    copy->m_registered = report.m_registered;
+    copy->m_calls = report.m_calls;
+    copy->m_summary = report.m_summary;
+    copy->m_carriers = report.m_carriers;
+    m_reports[report.m_network] = std::move(copy);
+}
+
+void Cellular::dropReport(int network)
+{
+    QMutexLocker locker(&m_reportMutex);
+
+    if (network < 0) {
+        m_reports.clear();
+    } else {
+        m_reports.erase(network);
+    }
 }
 
 // the networks that are on and the ones that run come to agree
@@ -303,10 +338,17 @@ bool Cellular::handleMessage(const Message& cmd)
     }
     else if (MsgReportStatus::match(cmd))
     {
+        const MsgReportStatus& report = static_cast<const MsgReportStatus&>(cmd);
+
+        if (m_active.find(report.m_network) != m_active.end()) {
+            keepReport(report);
+        }
         if (getMessageQueueToGUI())
         {
-            const MsgReportStatus& report = static_cast<const MsgReportStatus&>(cmd);
             MsgReportStatus *copy = MsgReportStatus::create(report.m_network);
+            copy->m_onAir = report.m_onAir;
+            copy->m_registered = report.m_registered;
+            copy->m_calls = report.m_calls;
             copy->m_summary = report.m_summary;
             copy->m_carriers = report.m_carriers;
             auto active = m_active.find(report.m_network);
@@ -318,4 +360,215 @@ bool Cellular::handleMessage(const Message& cmd)
     }
 
     return false;
+}
+
+// ---- web API ----
+
+int Cellular::webapiSettingsGet(SWGSDRangel::SWGFeatureSettings& response, QString& errorMessage)
+{
+    (void) errorMessage;
+    response.setCellularSettings(new SWGSDRangel::SWGCellularSettings());
+    response.getCellularSettings()->init();
+    webapiFormatFeatureSettings(response, m_settings);
+    return 200;
+}
+
+int Cellular::webapiSettingsPutPatch(bool force, const QStringList& featureSettingsKeys,
+    SWGSDRangel::SWGFeatureSettings& response, QString& errorMessage)
+{
+    (void) force;
+    (void) errorMessage;
+    CellularSettings settings = m_settings;
+    webapiUpdateFeatureSettings(settings, featureSettingsKeys, response);
+
+    // the networks that are switched on start, the others stop
+    getInputMessageQueue()->push(MsgConfigureCellular::create(settings));
+    if (m_guiMessageQueue) {
+        m_guiMessageQueue->push(MsgConfigureCellular::create(settings));
+    }
+
+    webapiFormatFeatureSettings(response, settings);
+    return 200;
+}
+
+int Cellular::webapiReportGet(SWGSDRangel::SWGFeatureReport& response, QString& errorMessage)
+{
+    (void) errorMessage;
+    response.setCellularReport(new SWGSDRangel::SWGCellularReport());
+    response.getCellularReport()->init();
+    SWGSDRangel::SWGCellularReport *report = response.getCellularReport();
+
+    report->setRunning(m_running ? 1 : 0);
+    QMutexLocker locker(&m_reportMutex);
+    for (const auto& r : m_reports)
+    {
+        const MsgReportStatus& status = *r.second;
+        SWGSDRangel::SWGCellularNetworkReport *network = new SWGSDRangel::SWGCellularNetworkReport();
+
+        network->init();
+        network->setId(status.m_network);
+        network->setOnAir(status.m_onAir ? 1 : 0);
+        *network->getSummary() = status.m_summary;
+        network->setRegistered(status.m_registered);
+        network->setCalls(status.m_calls);
+        for (const MsgReportStatus::Carrier& c : status.m_carriers)
+        {
+            SWGSDRangel::SWGCellularCarrierReport *carrier = new SWGSDRangel::SWGCellularCarrierReport();
+
+            carrier->init();
+            carrier->setChannel(c.channel);
+            carrier->setDownlink(static_cast<qint64>(c.downlink));
+            carrier->setUplink(static_cast<qint64>(c.uplink));
+            *carrier->getState() = c.state;
+            carrier->setRxLevel(c.rxLevel);
+            carrier->setTxFillMs(static_cast<float>(c.txFillMs));
+            carrier->setUnderruns(static_cast<qint32>(c.underruns));
+            network->getCarriers()->append(carrier);
+        }
+        report->getNetworks()->append(network);
+    }
+    return 200;
+}
+
+void Cellular::webapiFormatFeatureSettings(SWGSDRangel::SWGFeatureSettings& response, const CellularSettings& settings)
+{
+    SWGSDRangel::SWGCellularSettings *s = response.getCellularSettings();
+
+    s->setLeadMs(settings.m_leadMs);
+    if (s->getTitle()) {
+        *s->getTitle() = settings.m_title;
+    } else {
+        s->setTitle(new QString(settings.m_title));
+    }
+    s->setRgbColor(static_cast<qint32>(settings.m_rgbColor));
+
+    QList<SWGSDRangel::SWGCellularNetworkSettings*> *list = s->getNetworks();
+    if (list)
+    {
+        qDeleteAll(*list);
+        list->clear();
+    }
+    else
+    {
+        list = new QList<SWGSDRangel::SWGCellularNetworkSettings*>();
+        s->setNetworks(list);
+    }
+    for (const CellularNetworkSettings& n : settings.m_networks)
+    {
+        SWGSDRangel::SWGCellularNetworkSettings *item = new SWGSDRangel::SWGCellularNetworkSettings();
+
+        item->init();
+        item->setId(n.m_id);
+        *item->getName() = n.m_name;
+        item->setEnabled(n.m_enabled ? 1 : 0);
+        item->setSystem(n.m_system);
+        *item->getCountry() = n.m_country;
+        item->setArea(n.m_area);
+        item->setAreaNo(n.m_areaNo);
+        item->setMsPower(n.m_msPower);
+        *item->getCarriers() = n.m_carriers;
+        item->setCompandor(n.m_compandor ? 1 : 0);
+        item->setSendCallerId(n.m_sendCallerId ? 1 : 0);
+        item->setSendClock(n.m_sendClock ? 1 : 0);
+        *item->getSmscNumber() = n.m_smscNumber;
+        item->setFallback(n.m_fallback);
+        item->setRxDeviceSetIndex(n.m_rxDeviceSetIndex);
+        item->setTxDeviceSetIndex(n.m_txDeviceSetIndex);
+        list->append(item);
+    }
+}
+
+void Cellular::webapiUpdateFeatureSettings(CellularSettings& settings, const QStringList& featureSettingsKeys,
+    SWGSDRangel::SWGFeatureSettings& response)
+{
+    SWGSDRangel::SWGCellularSettings *s = response.getCellularSettings();
+
+    if (featureSettingsKeys.contains("leadMs")) {
+        settings.m_leadMs = std::max(20, std::min(1000, s->getLeadMs()));
+    }
+    if (featureSettingsKeys.contains("title") && s->getTitle()) {
+        settings.m_title = *s->getTitle();
+    }
+    if (featureSettingsKeys.contains("rgbColor")) {
+        settings.m_rgbColor = static_cast<quint32>(s->getRgbColor());
+    }
+    if (!featureSettingsKeys.contains("networks") || !s->getNetworks()) {
+        return;
+    }
+
+    QList<CellularNetworkSettings> networks;
+    int nextId = 1;
+    for (const CellularNetworkSettings& n : settings.m_networks) {
+        nextId = std::max(nextId, n.m_id + 1);
+    }
+    int index = 0;
+    for (SWGSDRangel::SWGCellularNetworkSettings *item : *s->getNetworks())
+    {
+        // the fields that were given are the keys "networks[i].field" of the request
+        auto given = [&](const char *field) {
+            return featureSettingsKeys.contains(QString("networks[%1].%2").arg(index).arg(field));
+        };
+        const int id = given("id") ? item->getId() : nextId++;
+        bool duplicate = id < 1 || id > 200000;
+        for (const CellularNetworkSettings& n : networks) {
+            duplicate = duplicate || n.m_id == id;
+        }
+        if (duplicate)
+        {
+            index++;
+            continue;
+        }
+        const CellularNetworkSettings *existing = settings.network(id);
+        CellularNetworkSettings n = existing ? *existing : CellularNetworkSettings(id);
+
+        if (given("name") && item->getName()) {
+            n.m_name = *item->getName();
+        }
+        if (given("enabled")) {
+            n.m_enabled = item->getEnabled() != 0;
+        }
+        if (given("system")) {
+            n.m_system = item->getSystem() == 1 ? 1 : 0;
+        }
+        if (given("country") && item->getCountry()) {
+            n.m_country = *item->getCountry();
+        }
+        if (given("area")) {
+            n.m_area = item->getArea();
+        }
+        if (given("areaNo")) {
+            n.m_areaNo = item->getAreaNo();
+        }
+        if (given("msPower")) {
+            n.m_msPower = item->getMsPower();
+        }
+        if (given("carriers") && item->getCarriers()) {
+            n.m_carriers = *item->getCarriers();
+        }
+        if (given("compandor")) {
+            n.m_compandor = item->getCompandor() != 0;
+        }
+        if (given("sendCallerId")) {
+            n.m_sendCallerId = item->getSendCallerId() != 0;
+        }
+        if (given("sendClock")) {
+            n.m_sendClock = item->getSendClock() != 0;
+        }
+        if (given("smscNumber") && item->getSmscNumber()) {
+            n.m_smscNumber = *item->getSmscNumber();
+        }
+        if (given("fallback")) {
+            n.m_fallback = item->getFallback() == CellularNetworkSettings::FallbackMusic
+                ? CellularNetworkSettings::FallbackMusic : CellularNetworkSettings::FallbackEcho;
+        }
+        if (given("rxDeviceSetIndex")) {
+            n.m_rxDeviceSetIndex = item->getRxDeviceSetIndex();
+        }
+        if (given("txDeviceSetIndex")) {
+            n.m_txDeviceSetIndex = item->getTxDeviceSetIndex();
+        }
+        networks.append(n);
+        index++;
+    }
+    settings.m_networks = networks;
 }
