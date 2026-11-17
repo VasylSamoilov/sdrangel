@@ -30,6 +30,8 @@
 #include <QSpinBox>
 #include <QVBoxLayout>
 #include <QPainter>
+#include <QRegularExpression>
+#include <QFontDatabase>
 #include <QScrollBar>
 #include <QStyledItemDelegate>
 #include <QTextDocument>
@@ -263,7 +265,7 @@ void RadioPagingDemodGUI::on_gscVoiceFiles_clicked()
     days->setValue(m_settings.m_gscVoiceKeepDays);
     days->setSpecialValueText("Keep all");
     days->setSuffix(" days");
-    days->setToolTip("Files older than this are deleted, a few at a time, when a new voice file is written. "
+    days->setToolTip("Files older than this are deleted, a few at a time, when a new voice file is written.\n"
         "Keep all: no file is deleted for its age");
     minimum->setRange(0, 100000);
     minimum->setValue(m_settings.m_gscVoiceKeepMin);
@@ -334,8 +336,9 @@ void RadioPagingDemodGUI::voiceDirectorySelect(const QPoint& p)
 
 void RadioPagingDemodGUI::displayVoiceRecordToolTip()
 {
-    ui->gscVoiceRecord->setToolTip(QString("Left: record the voice message of GSC voice pages to a WAV file; its path is in the "
-        "message record (voice_file). Right: select the directory of the files, used from the next voice message. Now: %1")
+    ui->gscVoiceRecord->setToolTip(QString("Left: record the voice message of GSC voice pages to a WAV file;\n"
+        "its path is in the message record (voice_file).\n"
+        "Right: select the directory of the files, used from the next voice message. Now: %1")
         .arg(m_settings.voiceDirectory()));
 }
 
@@ -521,6 +524,23 @@ RadioPagingDemodGUI::RadioPagingDemodGUI(PluginAPI* pluginAPI, DeviceUISet *devi
     ui->flexCharset->setVisible(RadioPagingCharset::codepages("flex").size() > 1);
     ui->gscCharset->setVisible(RadioPagingCharset::codepages("gsc").size() > 1);
 
+    // The status lines: fields of fixed width in a fixed-pitch font, so that nothing moves
+    // when the status changes
+    for (QLabel *label : {ui->pocsagStatus, ui->flexStatus, ui->gscStatus})
+    {
+        QFont font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+        if (label->font().pointSizeF() > 0) {
+            font.setPointSizeF(label->font().pointSizeF());
+        }
+        label->setFont(font);
+        label->setTextFormat(Qt::RichText);
+        label->setWordWrap(false);
+        label->setFixedWidth(statusWidth(label));
+    }
+    m_pocsagToolTip = ui->pocsagStatus->toolTip();
+    m_gscToolTip = ui->gscStatus->toolTip();
+    m_statusClock.start();
+
     displaySettings();
     makeUIConnections();
     applySettings(QStringList(), true);
@@ -577,6 +597,9 @@ void RadioPagingDemodGUI::displaySettings()
     ui->pocsagEnabled->setChecked(m_settings.m_pocsagEnabled);
     ui->flexEnabled->setChecked(m_settings.m_flexEnabled);
     ui->gscEnabled->setChecked(m_settings.m_gscEnabled);
+    ui->pocsagDcCorrection->setChecked(m_settings.m_pocsagDcCorrection);
+    ui->flexDcCorrection->setChecked(m_settings.m_flexDcCorrection);
+    ui->gscDcCorrection->setChecked(m_settings.m_gscDcCorrection);
     ui->gscVoiceTimeout->setValue(m_settings.m_gscVoiceTimeout);
     ui->gscDeviation->setValue(m_settings.m_gscDeviation);
     ui->gscAudio->setChecked(m_settings.m_gscAudio);
@@ -633,48 +656,83 @@ void RadioPagingDemodGUI::tick()
     m_tickCount++;
 }
 
-// Per protocol: SYNC (green) or HUNT (grey), what is received and its polarity, the
-// reception quality and the number of messages
+// Per protocol one line of fixed fields: SYNC (green) or HUNT (grey), what is received and its
+// polarity, the reception quality, the carrier offset and the number of messages. The
+// details of the last reception are in the tooltip
 void RadioPagingDemodGUI::updateStatus()
 {
     RadioPagingDemodSink::Status status = m_radioPagingDemod->getStatus();
     QStringList pocsag;
     bool pocsagSync = false;
+    int pocsagSpeeds = 0;
+
+    for (int i = 0; i < RadioPagingDemodSettings::m_nbPocsagSpeeds; i++) {
+        pocsagSpeeds += status.m_pocsagSync[i] ? 1 : 0;
+    }
 
     for (int i = 0; i < RadioPagingDemodSettings::m_nbPocsagSpeeds; i++)
     {
         if (status.m_pocsagSync[i])
         {
             pocsagSync = true;
-            pocsag.append(QString::number(RadioPagingDemodSettings::m_pocsagSpeeds[i]) + " " + polarityHtml(status.m_pocsagInverted[i]));
+            // Several speeds at once: N or I only, so that they fit the field
+            QString polarity = polarityHtml(status.m_pocsagInverted[i]);
+            if (pocsagSpeeds > 1) {
+                polarity = status.m_pocsagInverted[i] ? QString("<span style=\"color:#ffcc44\">I</span>")
+                    : QString("<span style=\"color:#88aacc\">N</span>");
+            }
+            pocsag.append(QString::number(RadioPagingDemodSettings::m_pocsagSpeeds[i]) + (pocsagSpeeds > 1 ? "" : " ") + polarity);
         }
     }
 
-    setStatus(ui->pocsagStatus, status, 0, pocsagSync, "SYNC", pocsag.join(", "));
-    // The re-synchronization has no mode or polarity
-    if (status.m_flexErs && !status.m_flexSync) {
-        setStatus(ui->flexStatus, status, 1, true, "ERS", QString("%1 s").arg(status.m_flexErsSeconds, 0, 'f', 2));
-    } else {
-        setStatus(ui->flexStatus, status, 1, status.m_flexSync, "SYNC",
-            status.m_flexMode + " " + polarityHtml(status.m_flexInverted));
-    }
-    setStatus(ui->gscStatus, status, 2, status.m_gscSync, status.m_gscVoice ? "VOICE" : "SYNC",
-        polarityHtml(status.m_gscInverted));
+    ui->pocsagStatus->setText(statusLine(status, 0, pocsagSync, "SYNC", pocsag.join(" ")));
 
+    // FLEX: between the frames the decoder hunts for the next sync 1; SYNC stays shown until
+    // that sync is due, then HUNT (the decoder state is not changed)
+    qint64 now = m_statusClock.elapsed();
+
+    if (status.m_flexSync && !m_flexWasSync) {
+        m_flexFrameStart = now;
+    } else if (status.m_flexSync && (now - m_flexFrameStart >= m_flexFrameMs)) {
+        m_flexFrameStart += m_flexFrameMs;  // Frames back to back: the next one started
+    }
+    if (!status.m_enabled[1]) {
+        m_flexFrameStart = -1;
+    }
+    m_flexWasSync = status.m_flexSync;
+
+    bool flexHeld = !status.m_flexSync && (m_flexFrameStart >= 0)
+        && (now - m_flexFrameStart < m_flexFrameMs + m_statusPeriodMs);
+
+    // The re-synchronization has no mode or polarity
+    if (status.m_flexErs && !status.m_flexSync)
+    {
+        ui->flexStatus->setText(statusLine(status, 1, true, "ERS",
+            QString("%1 s").arg(status.m_flexErsSeconds, 0, 'f', 2)));
+    }
+    else
+    {
+        ui->flexStatus->setText(statusLine(status, 1, status.m_flexSync || flexHeld, "SYNC",
+            status.m_flexMode + " " + polarityHtml(status.m_flexInverted)));
+    }
+    ui->gscStatus->setText(statusLine(status, 2, status.m_gscSync, status.m_gscVoice ? "VOICE" : "SYNC",
+        polarityHtml(status.m_gscInverted)));
+
+    QString pocsagTip = m_pocsagToolTip;
     if (status.m_enabled[0] && (status.m_pocsagBatches > 0)) {
-        ui->pocsagStatus->setText(ui->pocsagStatus->text() + QString("<br>batches %1").arg(status.m_pocsagBatches));
+        pocsagTip += tr("\n\nBatches of the last reception: %1").arg(status.m_pocsagBatches);
     }
-    if (status.m_enabled[1]) {
-        ui->flexStatus->setText(ui->flexStatus->text() + flexDetails(status));
-    }
+    ui->pocsagStatus->setToolTip(pocsagTip);
+    ui->flexStatus->setToolTip(flexToolTip(status));
+
+    QString gscTip = m_gscToolTip;
     if (status.m_enabled[2] && (status.m_messages[2] > 0))
     {
         QString last = status.m_gscNbs ? QString("non battery saver")
             : QString("preamble %1%2").arg(status.m_gscPreamble).arg(status.m_gscBatch ? ", batch" : "");
-        ui->gscStatus->setText(ui->gscStatus->text() + QString("<br>last page: %1, slot %2").arg(last).arg(status.m_gscSlot));
+        gscTip += tr("\n\nLast page: %1, slot %2").arg(last).arg(status.m_gscSlot);
     }
-
-    ui->flexStatus->setToolTip(flexToolTip(status));
+    ui->gscStatus->setToolTip(gscTip);
 
     // Green while the voice is played
     bool playing = status.m_enabled[2] && status.m_gscAudio;
@@ -683,15 +741,15 @@ void RadioPagingDemodGUI::updateStatus()
 
 // Extended FLEX status of the network of the last frame: frame, network time and
 // identification (once received several times the same), groups and reassemblies
-QString RadioPagingDemodGUI::flexDetails(const RadioPagingDemodSink::Status& status)
+QStringList RadioPagingDemodGUI::flexDetails(const RadioPagingDemodSink::Status& status)
 {
     const RadioPagingFlexDecoder::FrameReport& frame = status.m_flexFrame;
     const RadioPagingFlexDecoder::NetworkTime& t = status.m_flexTime;
-    QString text;
+    QStringList lines;
 
     if (frame.m_fiwValid)
     {
-        text += QString("<br>C%1/F%2").arg(frame.m_cycle, 2, 10, QChar('0')).arg(frame.m_frame, 3, 10, QChar('0'));
+        QString text = QString("C%1/F%2").arg(frame.m_cycle, 2, 10, QChar('0')).arg(frame.m_frame, 3, 10, QChar('0'));
         if (!frame.m_blocks.empty()) {
             text += QString(" collapse %1").arg(frame.m_blocks.front().m_collapse);
         }
@@ -701,6 +759,7 @@ QString RadioPagingDemodGUI::flexDetails(const RadioPagingDemodSink::Status& sta
         if (frame.m_repeat) {
             text += QString(" repeat x%1").arg(frame.m_transmissions);
         }
+        lines.append(text);
     }
 
     QStringList network;
@@ -736,41 +795,53 @@ QString RadioPagingDemodGUI::flexDetails(const RadioPagingDemodSink::Status& sta
         network.append(QString("country %1 TMF %2").arg(t.m_country).arg(t.m_tmf));
     }
     if (!network.isEmpty()) {
-        text += "<br>" + network.join("&nbsp;&nbsp;");
+        lines.append(network.join("  "));
     }
 
     QStringList groups;
 
     for (const auto& g : status.m_flexGroups) {
-        groups.append(QString("G%1[%2]&gt;F%3").arg(g.m_slot).arg(g.m_members.size()).arg(g.m_targetFrame, 3, 10, QChar('0')));
+        groups.append(QString("G%1[%2]>F%3").arg(g.m_slot).arg(g.m_members.size()).arg(g.m_targetFrame, 3, 10, QChar('0')));
     }
     if (!groups.isEmpty() || (status.m_flexReassemblies > 0))
     {
-        text += QString("<br>groups %1/16 %2&nbsp;&nbsp;reasm %3/%4").arg(status.m_flexGroups.size()).arg(groups.join(" "))
-            .arg(status.m_flexReassemblies).arg(RadioPagingFlexDecoder::m_reassemblySlots);
+        lines.append(QString("Groups %1/16 %2  reasm %3/%4").arg(status.m_flexGroups.size()).arg(groups.join(" "))
+            .arg(status.m_flexReassemblies).arg(RadioPagingFlexDecoder::m_reassemblySlots));
     }
     if ((status.m_flexErsCount > 0) && !status.m_flexErs)
     {
-        text += QString("<br>last ERS %1 s (%2)").arg(status.m_flexErsSeconds, 0, 'f', 2).arg(status.m_flexErsCount);
+        lines.append(QString("Last ERS %1 s (%2)").arg(status.m_flexErsSeconds, 0, 'f', 2).arg(status.m_flexErsCount));
     }
 
-    return text;
+    return lines;
 }
 
 QString RadioPagingDemodGUI::flexToolTip(const RadioPagingDemodSink::Status& status)
 {
-    QString tip = tr("FLEX state: SYNC or HUNT, mode and polarity of the frame, quality (100% minus the bit error rate: "
-        "green no errors, yellow errors corrected, red errors that could not be corrected, grey after the reception), "
-        "df the carrier frequency offset (DC offset of the discriminator; the levels of sync 1 are kept through 4-level "
-        "frames) and messages received.\n"
-        "ERS: emergency re-synchronization being received (no mode or polarity), with its length so far; "
+    QString tip = tr("FLEX state: SYNC or HUNT, mode and polarity of the frame,\n"
+        "quality (100% minus the bit error rate: green no errors, yellow errors corrected,\n"
+        "red errors that could not be corrected, grey after the reception),\n"
+        "%1f the carrier frequency offset (DC offset of the discriminator; the levels of sync 1 are kept through\n"
+        "4-level frames) and messages received.\n"
+        "Between the frames of a transmission SYNC stays shown until the sync of the next frame is due\n"
+        "(1.875 s after the start of the last one).\n"
+        "ERS: emergency re-synchronization being received (no mode or polarity), with its length so far;\n"
         "last ERS: length of the last one and the number received.\n"
-        "Cxx/Fxxx: cycle and frame of the last frame. Collapse n: pagers wake up every 2^n frames. "
+        "Cxx/Fxxx: cycle and frame of the last frame. Collapse n: pagers wake up every 2^n frames.\n"
         "Roaming: roaming bit of the frame. Repeat xN: the frame content is sent N times.\n"
-        "Date, time and zone: network time from the block information words. LID: local id, coverage: coverage zone, "
-        "country: country code, TMF: traffic management flags (which frames this transmitter sends).\n"
-        "Groups: temporary addresses in use, Gs[members]>F target frame of the group message. "
-        "Reasm: fragmented messages being reassembled.");
+        "Date, time and zone: network time from the block information words.\n"
+        "LID: local id, coverage: coverage zone, country: country code,\n"
+        "TMF: traffic management flags (which frames this transmitter sends).\n"
+        "Groups: temporary addresses in use, Gs[members]>F target frame of the group message.\n"
+        "Reasm: fragmented messages being reassembled.").arg(QChar(0x394));
+
+    if (status.m_enabled[1])
+    {
+        QStringList details = flexDetails(status);
+        if (!details.isEmpty()) {
+            tip += "\n\n" + details.join("\n");
+        }
+    }
 
     for (const auto& g : status.m_flexGroups)
     {
@@ -794,7 +865,7 @@ QString RadioPagingDemodGUI::polarityHtml(bool inverted)
 // reception ended (the last value is kept)
 QString RadioPagingDemodGUI::offsetHtml(float offset, bool live)
 {
-    QString text = QString("df %1%2 Hz").arg(offset < 0.0f ? "-" : "+").arg((int) std::round(std::fabs(offset)));
+    QString text = QString("%1f %2%3 Hz").arg(QChar(0x394)).arg(offset < 0.0f ? "-" : "+").arg((int) std::round(std::fabs(offset)));
     return live ? text : QString("<span style=\"color:#888888\">%1</span>").arg(text);
 }
 
@@ -811,28 +882,65 @@ QString RadioPagingDemodGUI::qualityHtml(const RadioPagingBerWindow& ber, bool l
     return QString("<span style=\"color:%1\">Q %2%</span>").arg(colour).arg(100.0 * (1.0 - ber.ber()), 0, 'f', 1);
 }
 
-void RadioPagingDemodGUI::setStatus(QLabel *label, const RadioPagingDemodSink::Status& status, int protocol, bool sync,
+namespace {
+
+// The fields of a status line, in characters of the fixed-pitch font
+const int statusStateWidth = 5;     // VOICE
+const int statusDetailWidth = 16;   // 512N 1200I 2400N
+const int statusQualityWidth = 8;   // Q 100.0%
+const int statusOffsetWidth = 12;   // Df -12500 Hz
+const int statusMessagesWidth = 8;  // (123456)
+const int statusSpacing = 1;
+
+// The text of a field padded to its width (characters beyond it are cut)
+QString statusField(const QString& html, int width)
+{
+    static const QRegularExpression tags("<[^>]*>");
+    QString visible = QString(html).remove(tags);
+    QString text = html;
+
+    if (visible.size() > width)
+    {
+        // Only the plain text of a field too long is cut
+        text = visible.left(width - 1) + "~";
+        visible = text;
+    }
+
+    QString padding;
+    for (int i = (int) visible.size(); i < width + statusSpacing; i++) {
+        padding += "&nbsp;";
+    }
+
+    return text + padding;
+}
+
+} // namespace
+
+QString RadioPagingDemodGUI::statusLine(const RadioPagingDemodSink::Status& status, int protocol, bool sync,
     const QString& state, const QString& detail)
 {
-    if (!status.m_enabled[protocol])
-    {
-        label->setText("<span style=\"color:#888888\">OFF</span>");
-        return;
+    if (!status.m_enabled[protocol]) {
+        return "<span style=\"color:#888888\">OFF</span>";
     }
 
-    QString text = sync
-        ? QString("<b style=\"color:#44cc44\">%1</b> %2").arg(state, detail)
+    QString stateHtml = sync
+        ? QString("<b style=\"color:#44cc44\">%1</b>").arg(state)
         : QString("<b style=\"color:#888888\">HUNT</b>");
-    QString quality = qualityHtml(status.m_ber[protocol], status.m_berLive[protocol]);
+    QString text = statusField(stateHtml, statusStateWidth)
+        + statusField(sync ? detail : QString(), statusDetailWidth)
+        + statusField(qualityHtml(status.m_ber[protocol], status.m_berLive[protocol]), statusQualityWidth)
+        + statusField(status.m_offsetValid[protocol] ? offsetHtml(status.m_offset[protocol], status.m_berLive[protocol]) : QString(),
+            statusOffsetWidth);
 
-    if (!quality.isEmpty()) {
-        text += "&nbsp;&nbsp;" + quality;
-    }
-    if (status.m_offsetValid[protocol]) {
-        text += "&nbsp;&nbsp;" + offsetHtml(status.m_offset[protocol], status.m_berLive[protocol]);
-    }
+    return text + QString("(%1)").arg(status.m_messages[protocol]);
+}
 
-    label->setText(text + QString("&nbsp;&nbsp;(%1)").arg(status.m_messages[protocol]));
+// The width of the longest status line in the font of the label
+int RadioPagingDemodGUI::statusWidth(const QLabel *label)
+{
+    int chars = statusStateWidth + statusDetailWidth + statusQualityWidth + statusOffsetWidth + statusMessagesWidth
+        + 4 * statusSpacing;
+    return label->fontMetrics().horizontalAdvance(QString(chars, QChar('0'))) + 2 * label->margin() + 4;
 }
 
 void RadioPagingDemodGUI::makeUIConnections()
@@ -861,6 +969,18 @@ void RadioPagingDemodGUI::makeUIConnections()
     QObject::connect(ui->pocsagEnabled, &QAbstractButton::clicked, this, &RadioPagingDemodGUI::on_pocsagEnabled_clicked);
     QObject::connect(ui->flexEnabled, &QAbstractButton::clicked, this, &RadioPagingDemodGUI::on_flexEnabled_clicked);
     QObject::connect(ui->gscEnabled, &QAbstractButton::clicked, this, &RadioPagingDemodGUI::on_gscEnabled_clicked);
+    QObject::connect(ui->pocsagDcCorrection, &QAbstractButton::clicked, this, [this](bool checked) {
+        m_settings.m_pocsagDcCorrection = checked;
+        applySettings(QStringList("pocsagDcCorrection"));
+    });
+    QObject::connect(ui->flexDcCorrection, &QAbstractButton::clicked, this, [this](bool checked) {
+        m_settings.m_flexDcCorrection = checked;
+        applySettings(QStringList("flexDcCorrection"));
+    });
+    QObject::connect(ui->gscDcCorrection, &QAbstractButton::clicked, this, [this](bool checked) {
+        m_settings.m_gscDcCorrection = checked;
+        applySettings(QStringList("gscDcCorrection"));
+    });
     QObject::connect(ui->gscVoiceTimeout, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingDemodGUI::on_gscVoiceTimeout_valueChanged);
     QObject::connect(ui->gscDeviation, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingDemodGUI::on_gscDeviation_valueChanged);
     QObject::connect(ui->gscAudio, &QToolButton::toggled, this, &RadioPagingDemodGUI::on_gscAudio_toggled);

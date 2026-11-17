@@ -50,6 +50,7 @@ namespace {
 
 int passes = 0;
 int failures = 0;
+bool dcCorrection = true;   // The sweeps: legs following the measured carrier offset (DC correction)
 
 void check(bool ok, const std::string& what)
 {
@@ -228,6 +229,9 @@ std::vector<int> receiveWithOffset(double offset, float rfBandwidth, std::vector
     RadioPagingDemodSink sink;
     RadioPagingDemodSettings settings;
     settings.m_rfBandwidth = rfBandwidth;
+    settings.m_pocsagDcCorrection = dcCorrection;
+    settings.m_flexDcCorrection = dcCorrection;
+    settings.m_gscDcCorrection = dcCorrection;
     sink.setMessageQueueToChannel(&queue);
     sink.applyChannelSettings((int) sampleRate, 0, true);
     sink.applySettings(QStringList(), settings, true);
@@ -288,6 +292,22 @@ void testFrequencyOffset()
             }
         }
     }
+
+    // DC correction off: the legs stay on the channel centre with the offset room, the
+    // offset is still measured and reported
+    dcCorrection = false;
+    for (double offset : {0.0, 1500.0, -1500.0})
+    {
+        std::vector<float> m;
+        std::vector<int> r = receiveWithOffset(offset, 20000.0f, m);
+        std::printf("      no DC correction, %+5.0f Hz offset: POCSAG %d/2 FLEX %d/2 GSC %d/1, measured %+.0f %+.0f %+.0f Hz\n",
+            offset, r[0], r[1], r[2], m[0], m[1], m[2]);
+        check((r[0] == 2) && (r[1] == 2) && (r[2] == 1), "Without DC correction pages are received with a "
+            + std::to_string((int) offset) + " Hz offset");
+        check((std::fabs(m[0] - offset) < 150.0) && (std::fabs(m[1] - offset) < 150.0) && (std::fabs(m[2] - offset) < 150.0),
+            "Without DC correction the status gives the " + std::to_string((int) offset) + " Hz offset");
+    }
+    dcCorrection = true;
 }
 
 // Sweep of carrier offset and noise ("radiopagingdemodsinktest sweep"): transmissions made by
@@ -444,8 +464,13 @@ SweepResult sweepRun(const SweepCase& c, double offset, float sigma, int repeats
 
     MessageQueue queue;
     RadioPagingDemodSink sink;
+    RadioPagingDemodSettings settings;
+    settings.m_pocsagDcCorrection = dcCorrection;
+    settings.m_flexDcCorrection = dcCorrection;
+    settings.m_gscDcCorrection = dcCorrection;
     sink.setMessageQueueToChannel(&queue);
     sink.applyChannelSettings((int) sampleRate, 0, true);
+    sink.applySettings(QStringList(), settings, true);
 
     SweepResult result;
     result.m_sent = (int) c.m_sent.size() * repeats;
@@ -524,7 +549,7 @@ void sensitivity(const std::string& config, bool deep)
 {
     // afc (the default configuration): legs following the measured carrier. Otherwise fixed
     // legs: Carson, Carson + 2 kHz each side, or the channel
-    RadioPagingDemodSettings::m_legAfc = (config == "afc");
+    dcCorrection = (config == "afc");
 
     if (config == "carson") {
         RadioPagingDemodSettings::m_legOffsetAllowance = 0.0;

@@ -34,9 +34,8 @@ const int RadioPagingDemodSettings::m_nbPocsagSpeeds;
 const int RadioPagingDemodSettings::m_pocsagSpeeds[m_nbPocsagSpeeds] = { 512, 1200, 2400 };
 const int RadioPagingDemodSettings::m_channelSampleRate;
 // Leg configuration, fixed (the sink test compares others): carrier offset room on each side
-// of a leg, and legs following the measured carrier offset
+// of a leg
 double RadioPagingDemodSettings::m_legOffsetAllowance = 2000.0;
-bool RadioPagingDemodSettings::m_legAfc = true;
 
 namespace {
 
@@ -175,6 +174,9 @@ void RadioPagingDemodSettings::resetToDefaults()
     m_gscCharset = defaultCharset("gsc");
     m_pocsagFill = FillMinimal;
     m_pocsagFillCodes = "00 03 04";
+    m_pocsagDcCorrection = true;
+    m_flexDcCorrection = true;
+    m_gscDcCorrection = true;
 
     m_rgbColor = QColor(255, 170, 0).rgb();
     m_title = "Radio Paging Demodulator";
@@ -239,6 +241,9 @@ QByteArray RadioPagingDemodSettings::serialize() const
     writeCharset(s, 44, m_gscCharset);
     s.writeS32(47, m_pocsagFill);
     s.writeString(48, m_pocsagFillCodes);
+    s.writeBool(49, m_pocsagDcCorrection);
+    s.writeBool(50, m_flexDcCorrection);
+    s.writeBool(51, m_gscDcCorrection);
 
     return s.final();
 }
@@ -318,6 +323,9 @@ bool RadioPagingDemodSettings::deserialize(const QByteArray& data)
         d.readS32(47, &m_pocsagFill, FillMinimal);
         m_pocsagFill = std::max((int) FillMinimal, std::min((int) FillCustom, m_pocsagFill));
         d.readString(48, &m_pocsagFillCodes, "00 03 04");
+        d.readBool(49, &m_pocsagDcCorrection, true);
+        d.readBool(50, &m_flexDcCorrection, true);
+        d.readBool(51, &m_gscDcCorrection, true);
         m_gscVoiceKeepDays = std::max(0, std::min(3650, m_gscVoiceKeepDays));
         m_gscVoiceKeepMin = std::max(0, std::min(100000, m_gscVoiceKeepMin));
 
@@ -388,6 +396,15 @@ void RadioPagingDemodSettings::applySettings(const QStringList& settingsKeys, co
     }
     if (settingsKeys.contains("pocsagCharset")) {
         m_pocsagCharset = settings.m_pocsagCharset;
+    }
+    if (settingsKeys.contains("pocsagDcCorrection")) {
+        m_pocsagDcCorrection = settings.m_pocsagDcCorrection;
+    }
+    if (settingsKeys.contains("flexDcCorrection")) {
+        m_flexDcCorrection = settings.m_flexDcCorrection;
+    }
+    if (settingsKeys.contains("gscDcCorrection")) {
+        m_gscDcCorrection = settings.m_gscDcCorrection;
     }
     if (settingsKeys.contains("flexCharset")) {
         m_flexCharset = settings.m_flexCharset;
@@ -496,6 +513,15 @@ QString RadioPagingDemodSettings::getDebugString(const QStringList& settingsKeys
     }
     if (settingsKeys.contains("pocsagCharset") || force) {
         ostr << " m_pocsagCharset: " << charsetText(m_pocsagCharset);
+    }
+    if (settingsKeys.contains("pocsagDcCorrection") || force) {
+        ostr << " m_pocsagDcCorrection: " << m_pocsagDcCorrection;
+    }
+    if (settingsKeys.contains("flexDcCorrection") || force) {
+        ostr << " m_flexDcCorrection: " << m_flexDcCorrection;
+    }
+    if (settingsKeys.contains("gscDcCorrection") || force) {
+        ostr << " m_gscDcCorrection: " << m_gscDcCorrection;
     }
     if (settingsKeys.contains("flexCharset") || force) {
         ostr << " m_flexCharset: " << charsetText(m_flexCharset);

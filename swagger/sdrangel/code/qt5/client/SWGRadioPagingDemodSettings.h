@@ -57,6 +57,12 @@ public:
     void setGscVoiceKeepDays(qint32 value);
     qint32 getGscVoiceKeepMin();
     void setGscVoiceKeepMin(qint32 value);
+    qint32 getPocsagDcCorrection();
+    void setPocsagDcCorrection(qint32 value);
+    qint32 getFlexDcCorrection();
+    void setFlexDcCorrection(qint32 value);
+    qint32 getGscDcCorrection();
+    void setGscDcCorrection(qint32 value);
     QString* getChannelAlias();
     void setChannelAlias(QString* value);
     QString* getGscVoiceDirectory();
@@ -124,6 +130,12 @@ private:
     bool m_gscVoiceKeepDaysIsSet = false;
     qint32 m_gscVoiceKeepMin = 0;
     bool m_gscVoiceKeepMinIsSet = false;
+    qint32 m_pocsagDcCorrection = 0;
+    bool m_pocsagDcCorrectionIsSet = false;
+    qint32 m_flexDcCorrection = 0;
+    bool m_flexDcCorrectionIsSet = false;
+    qint32 m_gscDcCorrection = 0;
+    bool m_gscDcCorrectionIsSet = false;
     QString* m_channelAlias = nullptr;
     bool m_channelAliasIsSet = false;
     QString* m_gscVoiceDirectory = nullptr;

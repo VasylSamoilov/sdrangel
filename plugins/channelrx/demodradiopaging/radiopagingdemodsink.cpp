@@ -127,7 +127,10 @@ Real RadioPagingDemodSink::Leg::demod(const Complex& sample)
 // The residual offset measured by a receiver moves the leg onto the carrier and narrows it
 void RadioPagingDemodSink::legMeasured(Leg& leg, int protocol, float dc)
 {
-    if (!RadioPagingDemodSettings::m_legAfc) {
+    bool correction = (protocol == ProtocolPocsag) ? m_settings.m_pocsagDcCorrection
+        : (protocol == ProtocolFlex) ? m_settings.m_flexDcCorrection : m_settings.m_gscDcCorrection;
+
+    if (!correction) {
         return;
     }
 
@@ -407,7 +410,8 @@ void RadioPagingDemodSink::applySettings(const QStringList& settingsKeys, const 
 
     bool legs = settingsKeys.contains("rfBandwidth")
         || settingsKeys.contains("pocsagDeviation") || settingsKeys.contains("flexDeviation")
-        || settingsKeys.contains("gscDeviation") || force;
+        || settingsKeys.contains("gscDeviation") || settingsKeys.contains("pocsagDcCorrection")
+        || settingsKeys.contains("flexDcCorrection") || settingsKeys.contains("gscDcCorrection") || force;
 
     if (force) {
         m_settings = settings;
@@ -417,6 +421,24 @@ void RadioPagingDemodSink::applySettings(const QStringList& settingsKeys, const 
 
     if (legs) {
         applyLegs();
+    }
+
+    // A leg whose DC correction is switched off goes back to the channel centre
+    const std::pair<const char*, Leg*> corrections[] = {
+        {"pocsagDcCorrection", &m_pocsagLeg}, {"flexDcCorrection", &m_flexLeg}, {"gscDcCorrection", &m_gscLeg}
+    };
+    const bool enabled[] = {m_settings.m_pocsagDcCorrection, m_settings.m_flexDcCorrection, m_settings.m_gscDcCorrection};
+
+    for (int i = 0; i < 3; i++)
+    {
+        if ((settingsKeys.contains(corrections[i].first) || force) && !enabled[i])
+        {
+            Leg& leg = *corrections[i].second;
+            leg.m_fits = 0;
+            leg.m_huntCentre = 0.0;
+            leg.setTracking(false);
+            leg.setShift(0.0);
+        }
     }
 
     if (settingsKeys.contains("flexMaxMessageNumber") || force) {
@@ -648,14 +670,16 @@ void RadioPagingDemodSink::applyLegs()
 {
     double channel = m_settings.m_rfBandwidth;
 
-    // Following the carrier, the legs hunt at the channel width; otherwise at Carson and the
-    // offset room
-    bool afc = RadioPagingDemodSettings::m_legAfc;
+    // Following the carrier (DC correction), a leg hunts at the channel width; otherwise at
+    // Carson and the offset room
+    bool pocsagAfc = m_settings.m_pocsagDcCorrection;
+    bool flexAfc = m_settings.m_flexDcCorrection;
+    bool gscAfc = m_settings.m_gscDcCorrection;
 
-    m_pocsagLeg.create(afc ? channel : m_settings.pocsagBandwidth(), m_settings.pocsagCarson(), channel, m_settings.m_pocsagDeviation);
-    m_flexLeg.create(afc ? channel : m_settings.flexBandwidth(), m_settings.flexCarson(), channel, m_settings.m_flexDeviation);
+    m_pocsagLeg.create(pocsagAfc ? channel : m_settings.pocsagBandwidth(), m_settings.pocsagCarson(), channel, m_settings.m_pocsagDeviation);
+    m_flexLeg.create(flexAfc ? channel : m_settings.flexBandwidth(), m_settings.flexCarson(), channel, m_settings.m_flexDeviation);
     // GSC receives with the offset room: one measurement may place its carrier that far off
-    m_gscLeg.create(afc ? channel : m_settings.gscBandwidth(), afc ? m_settings.gscBandwidth() : m_settings.gscCarson(),
+    m_gscLeg.create(gscAfc ? channel : m_settings.gscBandwidth(), gscAfc ? m_settings.gscBandwidth() : m_settings.gscCarson(),
         channel, m_settings.m_gscDeviation);
 
     qDebug() << "RadioPagingDemodSink::applyLegs: hunting / receiving"

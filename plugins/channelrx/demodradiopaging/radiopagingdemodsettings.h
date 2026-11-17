@@ -66,6 +66,11 @@ struct RadioPagingDemodSettings
         FillCustom                              //!< The codes of m_pocsagFillCodes
     };
     int m_pocsagFill;                           //!< PocsagFill
+    // DC offset correction of each protocol: the leg is moved onto the carrier offset measured as the DC offset of the
+    // discriminator on the known patterns, and narrowed. Off: the leg stays on the channel centre
+    bool m_pocsagDcCorrection;
+    bool m_flexDcCorrection;
+    bool m_gscDcCorrection;
     QString m_pocsagFillCodes;                  //!< FillCustom: hex codes separated by spaces or commas, e.g. "00 03 04"
 
     quint32 m_rgbColor;
@@ -85,7 +90,6 @@ struct RadioPagingDemodSettings
 
     static const int m_channelSampleRate = 38400;   //!< Multiple of 512, 1200, 2400, 1600, 3200 and 600 baud
     static double m_legOffsetAllowance;             //!< Offset room each side of a leg, Hz
-    static bool m_legAfc;                           //!< Legs follow the measured carrier offset
 
     RadioPagingDemodSettings();
     void resetToDefaults();

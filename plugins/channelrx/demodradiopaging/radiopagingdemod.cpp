@@ -502,6 +502,15 @@ void RadioPagingDemod::webapiUpdateChannelSettings(
     if (channelSettingsKeys.contains("gscVoiceKeepMin")) {
         settings.m_gscVoiceKeepMin = std::max(0, std::min(100000, model->getGscVoiceKeepMin()));
     }
+    if (channelSettingsKeys.contains("pocsagDcCorrection")) {
+        settings.m_pocsagDcCorrection = model->getPocsagDcCorrection() != 0;
+    }
+    if (channelSettingsKeys.contains("flexDcCorrection")) {
+        settings.m_flexDcCorrection = model->getFlexDcCorrection() != 0;
+    }
+    if (channelSettingsKeys.contains("gscDcCorrection")) {
+        settings.m_gscDcCorrection = model->getGscDcCorrection() != 0;
+    }
     if (channelSettingsKeys.contains("channelAlias") && model->getChannelAlias()) {
         settings.m_channelAlias = *model->getChannelAlias();
     }
@@ -584,6 +593,9 @@ void RadioPagingDemod::webapiFormatChannelSettings(SWGSDRangel::SWGChannelSettin
 
     model->setGscVoiceKeepDays(settings.m_gscVoiceKeepDays);
     model->setGscVoiceKeepMin(settings.m_gscVoiceKeepMin);
+    model->setPocsagDcCorrection(settings.m_pocsagDcCorrection ? 1 : 0);
+    model->setFlexDcCorrection(settings.m_flexDcCorrection ? 1 : 0);
+    model->setGscDcCorrection(settings.m_gscDcCorrection ? 1 : 0);
 
     if (model->getChannelAlias()) {
         *model->getChannelAlias() = settings.m_channelAlias;
@@ -748,6 +760,15 @@ void RadioPagingDemod::webapiFormatChannelSettings(
     }
     if (channelSettingsKeys.contains("gscVoiceKeepMin") || force) {
         model->setGscVoiceKeepMin(settings.m_gscVoiceKeepMin);
+    }
+    if (channelSettingsKeys.contains("pocsagDcCorrection") || force) {
+        model->setPocsagDcCorrection(settings.m_pocsagDcCorrection ? 1 : 0);
+    }
+    if (channelSettingsKeys.contains("flexDcCorrection") || force) {
+        model->setFlexDcCorrection(settings.m_flexDcCorrection ? 1 : 0);
+    }
+    if (channelSettingsKeys.contains("gscDcCorrection") || force) {
+        model->setGscDcCorrection(settings.m_gscDcCorrection ? 1 : 0);
     }
     if (channelSettingsKeys.contains("channelAlias") || force) {
         model->setChannelAlias(new QString(settings.m_channelAlias));

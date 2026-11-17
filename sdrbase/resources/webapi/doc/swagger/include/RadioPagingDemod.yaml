@@ -68,6 +68,18 @@ RadioPagingDemodSettings:
       description: "The number of the newest voice files that are not deleted"
       type: integer
       format: int32
+    pocsagDcCorrection:
+      description: "POCSAG DC offset correction: the carrier frequency offset, measured as the DC offset of the discriminator, is corrected (1 for yes, the default, 0 for no)"
+      type: integer
+      format: int32
+    flexDcCorrection:
+      description: "FLEX DC offset correction (1 for yes, the default, 0 for no)"
+      type: integer
+      format: int32
+    gscDcCorrection:
+      description: "GSC DC offset correction (1 for yes, the default, 0 for no)"
+      type: integer
+      format: int32
     channelAlias:
       description: "Name of the demodulator, set in the channel alias of every message record and in the names of the voice files. Empty: the frequency of the channel in Hz"
       type: string

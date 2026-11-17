@@ -45,6 +45,9 @@ void SWGRadioPagingDemodSettings::init()
     m_gscVoiceDirectory = new QString(); m_gscVoiceDirectoryIsSet = false;
     m_gscVoiceKeepDays = 0; m_gscVoiceKeepDaysIsSet = false;
     m_gscVoiceKeepMin = 0; m_gscVoiceKeepMinIsSet = false;
+    m_pocsagDcCorrection = 0; m_pocsagDcCorrectionIsSet = false;
+    m_flexDcCorrection = 0; m_flexDcCorrectionIsSet = false;
+    m_gscDcCorrection = 0; m_gscDcCorrectionIsSet = false;
     m_channelAlias = new QString(); m_channelAliasIsSet = false;
     m_rgbColor = 0; m_rgbColorIsSet = false;
     m_title = new QString(); m_titleIsSet = false;
@@ -80,6 +83,9 @@ void SWGRadioPagingDemodSettings::fromJsonObject(QJsonObject& json)
     if (json.contains("gscVoiceRecord")) { ::SWGSDRangel::setValue(&m_gscVoiceRecord,json["gscVoiceRecord"],"qint32",""); m_gscVoiceRecordIsSet = true; }
     if (json.contains("gscVoiceKeepDays")) { ::SWGSDRangel::setValue(&m_gscVoiceKeepDays,json["gscVoiceKeepDays"],"qint32",""); m_gscVoiceKeepDaysIsSet = true; }
     if (json.contains("gscVoiceKeepMin")) { ::SWGSDRangel::setValue(&m_gscVoiceKeepMin,json["gscVoiceKeepMin"],"qint32",""); m_gscVoiceKeepMinIsSet = true; }
+    if (json.contains("pocsagDcCorrection")) { ::SWGSDRangel::setValue(&m_pocsagDcCorrection,json["pocsagDcCorrection"],"qint32",""); m_pocsagDcCorrectionIsSet = true; }
+    if (json.contains("flexDcCorrection")) { ::SWGSDRangel::setValue(&m_flexDcCorrection,json["flexDcCorrection"],"qint32",""); m_flexDcCorrectionIsSet = true; }
+    if (json.contains("gscDcCorrection")) { ::SWGSDRangel::setValue(&m_gscDcCorrection,json["gscDcCorrection"],"qint32",""); m_gscDcCorrectionIsSet = true; }
     if (json.contains("channelAlias")) { ::SWGSDRangel::setValue(&m_channelAlias,json["channelAlias"],"QString","QString"); m_channelAliasIsSet = true; }
     if (json.contains("gscVoiceDirectory")) { ::SWGSDRangel::setValue(&m_gscVoiceDirectory,json["gscVoiceDirectory"],"QString","QString"); m_gscVoiceDirectoryIsSet = true; }
     if (json.contains("audioDeviceName")) { ::SWGSDRangel::setValue(&m_audioDeviceName,json["audioDeviceName"],"QString","QString"); m_audioDeviceNameIsSet = true; }
@@ -121,6 +127,9 @@ QJsonObject* SWGRadioPagingDemodSettings::asJsonObject()
     if (m_gscVoiceRecordIsSet) { object->insert("gscVoiceRecord",QJsonValue(m_gscVoiceRecord)); }
     if (m_gscVoiceKeepDaysIsSet) { object->insert("gscVoiceKeepDays",QJsonValue(m_gscVoiceKeepDays)); }
     if (m_gscVoiceKeepMinIsSet) { object->insert("gscVoiceKeepMin",QJsonValue(m_gscVoiceKeepMin)); }
+    if (m_pocsagDcCorrectionIsSet) { object->insert("pocsagDcCorrection",QJsonValue(m_pocsagDcCorrection)); }
+    if (m_flexDcCorrectionIsSet) { object->insert("flexDcCorrection",QJsonValue(m_flexDcCorrection)); }
+    if (m_gscDcCorrectionIsSet) { object->insert("gscDcCorrection",QJsonValue(m_gscDcCorrection)); }
     if (m_channelAlias && (m_channelAliasIsSet || !m_channelAlias->isEmpty())) { toJsonValue(QString("channelAlias"),m_channelAlias,object,QString("QString")); }
     if (m_gscVoiceDirectory && (m_gscVoiceDirectoryIsSet || !m_gscVoiceDirectory->isEmpty())) { toJsonValue(QString("gscVoiceDirectory"),m_gscVoiceDirectory,object,QString("QString")); }
     if (m_audioDeviceName && (m_audioDeviceNameIsSet || !m_audioDeviceName->isEmpty())) { toJsonValue(QString("audioDeviceName"),m_audioDeviceName,object,QString("QString")); }
@@ -141,7 +150,7 @@ QJsonObject* SWGRadioPagingDemodSettings::asJsonObject()
 }
 bool SWGRadioPagingDemodSettings::isSet()
 {
-    return m_gscVoiceKeepDaysIsSet || m_gscVoiceKeepMinIsSet || m_channelAliasIsSet || m_gscVoiceRecordIsSet || m_gscVoiceDirectoryIsSet || m_inputFrequencyOffsetIsSet || m_rfBandwidthIsSet || m_pocsagEnabledIsSet || m_pocsagDeviationIsSet || m_flexEnabledIsSet || m_flexDeviationIsSet || m_flexMaxMessageNumberIsSet || m_pocsagFillIsSet || m_pocsagFillCodesIsSet || m_gscEnabledIsSet || m_gscDeviationIsSet || m_gscVoiceTimeoutIsSet || m_gscAudioIsSet || m_volumeIsSet || m_audioDeviceNameIsSet || m_pocsagCharsetIsSet || m_flexCharsetIsSet || m_gscCharsetIsSet || m_rgbColorIsSet || m_titleIsSet || m_streamIndexIsSet || m_useReverseAPIIsSet || m_reverseAPIAddressIsSet || m_reverseAPIPortIsSet || m_reverseAPIDeviceIndexIsSet || m_reverseAPIChannelIndexIsSet || m_channelMarkerIsSet || m_rollupStateIsSet;
+    return m_gscVoiceKeepDaysIsSet || m_gscVoiceKeepMinIsSet || m_pocsagDcCorrectionIsSet || m_flexDcCorrectionIsSet || m_gscDcCorrectionIsSet || m_channelAliasIsSet || m_gscVoiceRecordIsSet || m_gscVoiceDirectoryIsSet || m_inputFrequencyOffsetIsSet || m_rfBandwidthIsSet || m_pocsagEnabledIsSet || m_pocsagDeviationIsSet || m_flexEnabledIsSet || m_flexDeviationIsSet || m_flexMaxMessageNumberIsSet || m_pocsagFillIsSet || m_pocsagFillCodesIsSet || m_gscEnabledIsSet || m_gscDeviationIsSet || m_gscVoiceTimeoutIsSet || m_gscAudioIsSet || m_volumeIsSet || m_audioDeviceNameIsSet || m_pocsagCharsetIsSet || m_flexCharsetIsSet || m_gscCharsetIsSet || m_rgbColorIsSet || m_titleIsSet || m_streamIndexIsSet || m_useReverseAPIIsSet || m_reverseAPIAddressIsSet || m_reverseAPIPortIsSet || m_reverseAPIDeviceIndexIsSet || m_reverseAPIChannelIndexIsSet || m_channelMarkerIsSet || m_rollupStateIsSet;
 }
 qint64 SWGRadioPagingDemodSettings::getInputFrequencyOffset() { return m_inputFrequencyOffset; }
 void SWGRadioPagingDemodSettings::setInputFrequencyOffset(qint64 value) { m_inputFrequencyOffset = value; m_inputFrequencyOffsetIsSet = true; }
@@ -177,6 +186,12 @@ qint32 SWGRadioPagingDemodSettings::getGscVoiceKeepDays() { return m_gscVoiceKee
 void SWGRadioPagingDemodSettings::setGscVoiceKeepDays(qint32 value) { m_gscVoiceKeepDays = value; m_gscVoiceKeepDaysIsSet = true; }
 qint32 SWGRadioPagingDemodSettings::getGscVoiceKeepMin() { return m_gscVoiceKeepMin; }
 void SWGRadioPagingDemodSettings::setGscVoiceKeepMin(qint32 value) { m_gscVoiceKeepMin = value; m_gscVoiceKeepMinIsSet = true; }
+qint32 SWGRadioPagingDemodSettings::getPocsagDcCorrection() { return m_pocsagDcCorrection; }
+void SWGRadioPagingDemodSettings::setPocsagDcCorrection(qint32 value) { m_pocsagDcCorrection = value; m_pocsagDcCorrectionIsSet = true; }
+qint32 SWGRadioPagingDemodSettings::getFlexDcCorrection() { return m_flexDcCorrection; }
+void SWGRadioPagingDemodSettings::setFlexDcCorrection(qint32 value) { m_flexDcCorrection = value; m_flexDcCorrectionIsSet = true; }
+qint32 SWGRadioPagingDemodSettings::getGscDcCorrection() { return m_gscDcCorrection; }
+void SWGRadioPagingDemodSettings::setGscDcCorrection(qint32 value) { m_gscDcCorrection = value; m_gscDcCorrectionIsSet = true; }
 QString* SWGRadioPagingDemodSettings::getChannelAlias() { return m_channelAlias; }
 void SWGRadioPagingDemodSettings::setChannelAlias(QString* value) { if (m_channelAlias != value) { delete m_channelAlias; m_channelAlias = value; } m_channelAliasIsSet = true; }
 QString* SWGRadioPagingDemodSettings::getGscVoiceDirectory() { return m_gscVoiceDirectory; }

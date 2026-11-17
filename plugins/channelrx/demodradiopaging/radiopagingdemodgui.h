@@ -18,6 +18,8 @@
 #ifndef INCLUDE_RADIOPAGINGDEMODGUI_H
 #define INCLUDE_RADIOPAGINGDEMODGUI_H
 
+#include <QElapsedTimer>
+
 #include "channel/channelgui.h"
 #include "dsp/channelmarker.h"
 #include "util/messagequeue.h"
@@ -94,13 +96,26 @@ private:
     void leaveEvent(QEvent*);
     void enterEvent(EnterEventType*);
     void updateStatus();
-    static void setStatus(QLabel *label, const RadioPagingDemodSink::Status& status, int protocol, bool sync,
+    //!< One fixed-width line: state, what is received, quality, carrier offset, messages
+    static QString statusLine(const RadioPagingDemodSink::Status& status, int protocol, bool sync,
         const QString& state, const QString& detail);
+    static int statusWidth(const QLabel *label);
     static QString polarityHtml(bool inverted);
-    static QString flexDetails(const RadioPagingDemodSink::Status& status);
-    QString flexToolTip(const RadioPagingDemodSink::Status& status);
+    static QStringList flexDetails(const RadioPagingDemodSink::Status& status);
+    static QString flexToolTip(const RadioPagingDemodSink::Status& status);
     static QString qualityHtml(const RadioPagingBerWindow& ber, bool live);
     static QString offsetHtml(float offset, bool live);
+
+    // FLEX: between the frames of a transmission the decoder hunts for the next sync 1. The
+    // display keeps SYNC until that sync is due: a frame (1.875 s, STD-43A 3.2) after the start
+    // of the last one, plus one status period (the display sees the start that much late)
+    static const qint64 m_flexFrameMs = 1875;
+    static const qint64 m_statusPeriodMs = 200;
+    QString m_pocsagToolTip;            //!< Descriptions of the status fields (from the form)
+    QString m_gscToolTip;
+    QElapsedTimer m_statusClock;
+    qint64 m_flexFrameStart = -1;       //!< m_statusClock when the last frame was first seen, -1 none
+    bool m_flexWasSync = false;
 
 private slots:
     void on_deltaFrequency_changed(qint64 value);
