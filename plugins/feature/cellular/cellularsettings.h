@@ -19,14 +19,15 @@
 #define INCLUDE_FEATURE_CELLULARSETTINGS_H_
 
 #include <QByteArray>
+#include <QList>
 #include <QString>
 
 #include "nmtbasestation.h"
 
 class Serializable;
 
-// One NMT network and the radios it runs on.
-struct CellularSettings
+// One NMT network (one base station) and the radios it runs on.
+struct CellularNetworkSettings
 {
     enum Fallback
     {
@@ -34,7 +35,10 @@ struct CellularSettings
         FallbackMusic = 1       // or music
     };
 
-    // the network
+    int m_id;                   // 1..: stable, the carrier ids are id * 10000 + channel
+    QString m_name;
+    bool m_enabled;             // on the air while the controller runs
+
     int m_system;               // 0: NMT-450, 1: NMT-900
     QString m_country;          // short name of the plan: DK, SE, NO, FI, NL, HU ...
     int m_area;                 // traffic area Y2 within the country
@@ -47,10 +51,30 @@ struct CellularSettings
     QString m_smscNumber;
     int m_fallback;
 
-    // the radios: the device sets that carry a Cellular Rx and a Cellular Tx channel
+    // the device sets that carry the Cellular Rx and the Cellular Tx channel of this network
     int m_rxDeviceSetIndex;
     int m_txDeviceSetIndex;
-    int m_leadMs;               // lead of the transmitter over the receiver
+
+    explicit CellularNetworkSettings(int id = 1);
+    void resetToDefaults();
+    QByteArray serialize() const;
+    bool deserialize(const QByteArray& data);
+
+    // The carriers, comma separated: channel[:type[:supervisory]]. Type is cc, tc, cctc, actc
+    // (NMT-900), cca, ccb (NMT-900) or test, tc if not given; the supervisory tone 1..4 on a
+    // traffic channel, none if not given. False with a reason if the text cannot be read.
+    static bool parseCarriers(const QString& text, std::vector<modemnmt::NmtCarrierConfig>& carriers, QString& error);
+    // The network as the base station takes it; false with a reason if the carriers cannot be read.
+    bool networkConfig(modemnmt::NmtNetworkConfig& config, QString& error) const;
+    // What the base station has to start again for (everything but the name and the switch).
+    bool sameNetwork(const CellularNetworkSettings& other) const;
+};
+
+// The networks of the controller.
+struct CellularSettings
+{
+    QList<CellularNetworkSettings> m_networks;
+    int m_leadMs;               // lead of the transmitters over the receivers
 
     QString m_title;
     quint32 m_rgbColor;
@@ -64,12 +88,9 @@ struct CellularSettings
     QByteArray serialize() const;
     bool deserialize(const QByteArray& data);
 
-    // The carriers, comma separated: channel[:type[:supervisory]]. Type is cc, tc, cctc, actc
-    // (NMT-900), cca, ccb (NMT-900) or test, tc if not given; the supervisory tone 1..4 on a
-    // traffic channel, none if not given. False with a reason if the text cannot be read.
-    static bool parseCarriers(const QString& text, std::vector<modemnmt::NmtCarrierConfig>& carriers, QString& error);
-    // The network as the base station takes it; false with a reason if the carriers cannot be read.
-    bool networkConfig(modemnmt::NmtNetworkConfig& config, QString& error) const;
+    // a new network with the next free id, not on the air
+    CellularNetworkSettings& addNetwork();
+    const CellularNetworkSettings *network(int id) const;
 };
 
 #endif // INCLUDE_FEATURE_CELLULARSETTINGS_H_

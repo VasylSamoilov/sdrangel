@@ -48,8 +48,6 @@ Cellular::Cellular(WebAPIAdapterInterface *webAPIAdapterInterface) :
     Feature(m_featureIdURI, webAPIAdapterInterface),
     m_thread(nullptr),
     m_worker(nullptr),
-    m_rxChannel(nullptr),
-    m_txChannel(nullptr),
     m_running(false)
 {
     setObjectName(m_featureId);
@@ -69,6 +67,7 @@ bool Cellular::deserialize(const QByteArray& data)
     if (m_guiMessageQueue) {
         m_guiMessageQueue->push(MsgConfigureCellular::create(m_settings));
     }
+    applyNetworks();
     return ok;
 }
 
@@ -80,11 +79,11 @@ int Cellular::webapiRun(bool run, SWGSDRangel::SWGDeviceState& response, QString
     return 202;
 }
 
-void Cellular::report(const QString& text)
+void Cellular::report(int network, const QString& text)
 {
-    qInfo() << "Cellular:" << text;
+    qInfo().noquote() << QString("Cellular: network %1: %2").arg(network).arg(text);
     if (getMessageQueueToGUI()) {
-        getMessageQueueToGUI()->push(MsgReportLog::create(text));
+        getMessageQueueToGUI()->push(MsgReportLog::create(network, text));
     }
 }
 
@@ -111,61 +110,48 @@ ChannelAPI *Cellular::findChannel(int deviceSetIndex, const QString& uri, QStrin
     return nullptr;
 }
 
+// the pipe of what the radio sends us, registered with its first network
+MessageQueue *Cellular::usePipe(ChannelAPI *channel)
+{
+    Pipe& p = m_pipes[channel];
+
+    if (!p.pipe)
+    {
+        p.pipe = MainCore::instance()->getMessagePipes().registerProducerToConsumer(channel, this, "cellular");
+        connect(p.pipe, SIGNAL(toBeDeleted(int, QObject*)), this, SLOT(handlePipeToBeDeleted(int, QObject*)));
+    }
+    p.users++;
+    return qobject_cast<MessageQueue*>(p.pipe->m_element);
+}
+
+// and unregistered with its last
+void Cellular::releasePipe(ChannelAPI *channel)
+{
+    auto it = m_pipes.find(channel);
+
+    if (it == m_pipes.end() || --it->second.users > 0) {
+        return;
+    }
+    disconnect(it->second.pipe, SIGNAL(toBeDeleted(int, QObject*)), this, SLOT(handlePipeToBeDeleted(int, QObject*)));
+    MainCore::instance()->getMessagePipes().unregisterProducerToConsumer(channel, this, "cellular");
+    m_pipes.erase(it);
+}
+
 void Cellular::start()
 {
     if (m_running) {
         return;
     }
-
-    modemnmt::NmtNetworkConfig config;
-    QString error;
-
-    if (!m_settings.networkConfig(config, error))
-    {
-        report("error: carriers: " + error);
-        setState(StError);
-        return;
-    }
-    m_rxChannel = findChannel(m_settings.m_rxDeviceSetIndex, kRxURI, error);
-    if (m_rxChannel) {
-        m_txChannel = findChannel(m_settings.m_txDeviceSetIndex, kTxURI, error);
-    }
-    if (!m_rxChannel || !m_txChannel)
-    {
-        report("error: " + error);
-        m_rxChannel = nullptr;
-        m_txChannel = nullptr;
-        setState(StError);
-        return;
-    }
-
-    MessagePipes& messagePipes = MainCore::instance()->getMessagePipes();
-    ObjectPipe *rxPipe = messagePipes.registerProducerToConsumer(m_rxChannel, this, "cellular");
-    ObjectPipe *txPipe = messagePipes.registerProducerToConsumer(m_txChannel, this, "cellular");
-    connect(rxPipe, SIGNAL(toBeDeleted(int, QObject*)), this, SLOT(handlePipeToBeDeleted(int, QObject*)));
-    connect(txPipe, SIGNAL(toBeDeleted(int, QObject*)), this, SLOT(handlePipeToBeDeleted(int, QObject*)));
-
     m_thread = new QThread();
     m_thread->setObjectName("Cellular");
-    m_worker = new CellularWorker();
+    m_worker = new CellularWorker(getInputMessageQueue(),
+        static_cast<uint32_t>(m_settings.m_leadMs * modemnmt::NmtBaseStation::kAudioRate / 1000.0));
     m_worker->moveToThread(m_thread);
     m_thread->start();
-
-    CellularWorker::MsgStart *msg = CellularWorker::MsgStart::create();
-    msg->m_config = config;
-    msg->m_rxChannel = m_rxChannel;
-    msg->m_txChannel = m_txChannel;
-    msg->m_rxPipe = qobject_cast<MessageQueue*>(rxPipe->m_element);
-    msg->m_txPipe = qobject_cast<MessageQueue*>(txPipe->m_element);
-    msg->m_reports = getInputMessageQueue();
-    msg->m_lead = static_cast<uint32_t>(m_settings.m_leadMs * modemnmt::NmtBaseStation::kAudioRate / 1000.0);
-    msg->m_fallback = m_settings.m_fallback;
-    m_worker->getInputMessageQueue()->push(msg);
-
     m_running = true;
     setState(StRunning);
-    report(QString("started: receiver in device set %1, transmitter in device set %2")
-        .arg(m_settings.m_rxDeviceSetIndex).arg(m_settings.m_txDeviceSetIndex));
+    report(0, QString("started, transmit lead %1 ms").arg(m_settings.m_leadMs));
+    applyNetworks();
 }
 
 void Cellular::stop()
@@ -173,48 +159,117 @@ void Cellular::stop()
     if (!m_running) {
         return;
     }
-    QMetaObject::invokeMethod(m_worker, "stopWork", Qt::BlockingQueuedConnection);
+    QMetaObject::invokeMethod(m_worker, "removeAll", Qt::BlockingQueuedConnection);
     m_thread->quit();
     m_thread->wait();
     delete m_worker;
     m_worker = nullptr;
     delete m_thread;
     m_thread = nullptr;
-    unregisterPipes();
+
+    for (auto& a : m_active)
+    {
+        releasePipe(a.second.rx);
+        releasePipe(a.second.tx);
+    }
+    m_active.clear();
     m_running = false;
     setState(StIdle);
+    report(0, "stopped");
 }
 
-void Cellular::unregisterPipes()
+void Cellular::startNetwork(const CellularNetworkSettings& network)
 {
-    MessagePipes& messagePipes = MainCore::instance()->getMessagePipes();
+    modemnmt::NmtNetworkConfig config;
+    QString error;
 
-    for (ChannelAPI *channel : {m_rxChannel, m_txChannel})
+    if (!network.networkConfig(config, error))
     {
-        if (!channel) {
-            continue;
-        }
-        ObjectPipe *pipe = messagePipes.unregisterProducerToConsumer(channel, this, "cellular");
-        if (pipe) {
-            disconnect(pipe, SIGNAL(toBeDeleted(int, QObject*)), this, SLOT(handlePipeToBeDeleted(int, QObject*)));
+        report(network.m_id, "error: carriers: " + error);
+        return;
+    }
+    ChannelAPI *rx = findChannel(network.m_rxDeviceSetIndex, kRxURI, error);
+    ChannelAPI *tx = rx ? findChannel(network.m_txDeviceSetIndex, kTxURI, error) : nullptr;
+    if (!rx || !tx)
+    {
+        report(network.m_id, "error: " + error);
+        return;
+    }
+
+    CellularWorker::MsgAddNetwork *msg = CellularWorker::MsgAddNetwork::create();
+    msg->m_id = network.m_id;
+    msg->m_name = network.m_name;
+    msg->m_config = config;
+    msg->m_fallback = network.m_fallback;
+    msg->m_rxChannel = rx;
+    msg->m_rxPipe = usePipe(rx);
+    msg->m_txChannel = tx;
+    msg->m_txPipe = usePipe(tx);
+    m_worker->getInputMessageQueue()->push(msg);
+
+    Active& a = m_active[network.m_id];
+    a.settings = network;
+    a.rx = rx;
+    a.tx = tx;
+}
+
+void Cellular::stopNetwork(int id)
+{
+    auto it = m_active.find(id);
+
+    if (it == m_active.end()) {
+        return;
+    }
+    QMetaObject::invokeMethod(m_worker, "removeNetwork", Qt::BlockingQueuedConnection, Q_ARG(int, id));
+    releasePipe(it->second.rx);
+    releasePipe(it->second.tx);
+    m_active.erase(it);
+}
+
+// the networks that are on and the ones that run come to agree
+void Cellular::applyNetworks()
+{
+    if (!m_running) {
+        return;
+    }
+
+    std::vector<int> stopping;
+    for (const auto& a : m_active)
+    {
+        const CellularNetworkSettings *n = m_settings.network(a.first);
+
+        if (!n || !n->m_enabled) {
+            stopping.push_back(a.first);
         }
     }
-    m_rxChannel = nullptr;
-    m_txChannel = nullptr;
+    for (int id : stopping) {
+        stopNetwork(id);
+    }
+    for (const CellularNetworkSettings& n : m_settings.m_networks)
+    {
+        if (n.m_enabled && m_active.find(n.m_id) == m_active.end()) {
+            startNetwork(n);
+        }
+    }
 }
 
 void Cellular::handlePipeToBeDeleted(int reason, QObject *object)
 {
-    // reason 0: the producer (one of the radios) goes away
-    if (reason == 0 && m_running && (object == m_rxChannel || object == m_txChannel))
+    // reason 0: the producer (a radio) goes away: the networks on it stop
+    if (reason != 0 || !m_running) {
+        return;
+    }
+    std::vector<int> stopping;
+    for (const auto& a : m_active)
     {
-        if (object == m_rxChannel) {
-            m_rxChannel = nullptr;
-        } else {
-            m_txChannel = nullptr;
+        if (a.second.rx == object || a.second.tx == object) {
+            stopping.push_back(a.first);
         }
-        stop();
-        report("stopped: a radio channel was removed");
+    }
+    for (int id : stopping)
+    {
+        stopNetwork(id);
+        report(id, "stopped: its radio channel was removed");
     }
 }
 
@@ -223,6 +278,8 @@ bool Cellular::handleMessage(const Message& cmd)
     if (MsgConfigureCellular::match(cmd))
     {
         m_settings = static_cast<const MsgConfigureCellular&>(cmd).getSettings();
+        m_settings.setRollupState(nullptr);
+        applyNetworks();
         return true;
     }
     else if (MsgStartStop::match(cmd))
@@ -237,8 +294,10 @@ bool Cellular::handleMessage(const Message& cmd)
     else if (MsgReportLog::match(cmd))
     {
         // from the worker, on to the GUI
-        if (getMessageQueueToGUI()) {
-            getMessageQueueToGUI()->push(MsgReportLog::create(static_cast<const MsgReportLog&>(cmd).getText()));
+        if (getMessageQueueToGUI())
+        {
+            const MsgReportLog& report = static_cast<const MsgReportLog&>(cmd);
+            getMessageQueueToGUI()->push(MsgReportLog::create(report.getNetwork(), report.getText()));
         }
         return true;
     }
@@ -247,9 +306,12 @@ bool Cellular::handleMessage(const Message& cmd)
         if (getMessageQueueToGUI())
         {
             const MsgReportStatus& report = static_cast<const MsgReportStatus&>(cmd);
-            MsgReportStatus *copy = MsgReportStatus::create();
+            MsgReportStatus *copy = MsgReportStatus::create(report.m_network);
             copy->m_summary = report.m_summary;
             copy->m_carriers = report.m_carriers;
+            auto active = m_active.find(report.m_network);
+            const CellularNetworkSettings *current = m_settings.network(report.m_network);
+            copy->m_stale = active != m_active.end() && current && !active->second.settings.sameNetwork(*current);
             getMessageQueueToGUI()->push(copy);
         }
         return true;
