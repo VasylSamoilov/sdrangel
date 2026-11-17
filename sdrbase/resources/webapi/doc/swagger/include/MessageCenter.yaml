@@ -79,7 +79,7 @@ MessageCenterPost:
       description: "pocsag, flex or gsc"
       type: string
     address:
-      description: "POCSAG: the address. FLEX: the capcode. GSC: the address of up to 6 digits"
+      description: "POCSAG: the address. FLEX: the capcode. GSC: the cap code, up to 6 digits zero padded (index, group, 3 address digits; 5 digits: index 0) or 7 digits with the suffix digit, that gives the function (1-4 and 5-8: A-D, 9 and 0: A and B) over function"
       type: string
     function:
       description: "POCSAG function 0 to 3 (A to D). GSC function 0 to 3 (A to D), the address number 1 to 4"

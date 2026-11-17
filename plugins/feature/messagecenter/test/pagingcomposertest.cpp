@@ -21,6 +21,7 @@
 
 #include <QApplication>
 #include <QComboBox>
+#include <QLabel>
 #include <QLineEdit>
 #include <QSpinBox>
 #include <cstdio>
@@ -149,6 +150,32 @@ int main(int argc, char **argv)
     p = composer.page();
     check((p.m_protocol == "gsc") && (p.m_function == 2) && (p.m_type == "numeric") && p.check().isEmpty(),
         "GSC page: the address number 3 is the function 2");
+    addressEdit(composer)->setText("1234560");
+    p = composer.page();
+    QComboBox *functionBox = nullptr;
+
+    for (QComboBox *box : composer.findChildren<QComboBox*>())
+    {
+        if (box->findText("3 (C)") >= 0) {
+            functionBox = box;
+        }
+    }
+
+    QString capCodeText;
+
+    for (QLabel *label : composer.findChildren<QLabel*>())
+    {
+        if (label->text().startsWith("index ")) {
+            capCodeText = label->text();
+        }
+    }
+
+    check(functionBox && !functionBox->isEnabled() && (functionBox->currentIndex() == 1) && (p.m_function == 1)
+        && (composer.summary().startsWith("123456/2 (B)")), "GSC 7 digits: suffix 0 is function B, the selector follows it");
+    check(capCodeText.startsWith("index 1, group 23, address 456, suffix 0 = 2 (B) -> preamble 4"), "GSC cap code explained");
+    addressEdit(composer)->setText("1234");
+    check(functionBox->isEnabled(), "GSC without a suffix: the function is selected");
+    select(composer, "3 (C)");
     select(composer, "Voice");
     textEdit(composer)->setText("/a/b.wav");
     p = composer.page();

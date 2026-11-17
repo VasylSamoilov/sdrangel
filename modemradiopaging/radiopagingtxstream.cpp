@@ -933,7 +933,8 @@ bool RadioPagingGscTxStream::nextLive(RadioPagingTxBlock& block)
 
     for (size_t i = 0; i < n; i++)
     {
-        block.m_levels.push_back(m_liveInverted ? -m_liveSamples.front() : m_liveSamples.front());
+        float sample = m_liveProcessor.process(m_liveSamples.front());
+        block.m_levels.push_back(m_liveInverted ? -sample : sample);
         m_liveSamples.pop_front();
     }
 
@@ -1114,6 +1115,7 @@ bool RadioPagingGscTxStream::next(RadioPagingTxBlock& block)
         m_liveLimit = (size_t) first.m_liveSeconds * RadioPagingWav::m_sampleRate;
         m_liveSent = 0;
         m_liveSamples.clear();
+        m_liveProcessor.reset();
     }
     else
     {
@@ -1125,12 +1127,20 @@ bool RadioPagingGscTxStream::next(RadioPagingTxBlock& block)
         const RadioPagingWav::Audio& voice = *first.m_voice;
         size_t alert = (size_t) (m_alertMs * voice.m_rate / 1000.0);
 
+        RadioPagingVoiceProcessor processor((int) voice.m_rate);
+
         audio.m_baud = voice.m_rate;
         audio.m_shaping = voice.m_rate / 2.0;
         audio.m_levels.assign(alert, 0.0f);
 
-        for (float sample : voice.m_samples) {
-            audio.m_levels.push_back(first.m_inverted ? -sample : sample);
+        // The voice processed, and the samples still in the processor at its end
+        for (size_t i = 0; i < voice.m_samples.size() + (size_t) processor.delay(); i++)
+        {
+            float sample = processor.process((i < voice.m_samples.size()) ? voice.m_samples[i] : 0.0f);
+
+            if (i >= (size_t) processor.delay()) {
+                audio.m_levels.push_back(first.m_inverted ? -sample : sample);
+            }
         }
 
         std::vector<uint8_t> turnOff;

@@ -71,6 +71,11 @@ PagingComposer::PagingComposer(QWidget *parent) :
     m_address = new QLineEdit(this);
     m_address->setValidator(new QRegularExpressionValidator(QRegularExpression("[0-9]{0,10}"), m_address));
     m_function = new QComboBox(this);
+    m_capCode = new QLabel(this);
+    m_capCode->setWordWrap(true);
+    m_capCode->setToolTip(tr("GSC cap code: index I, group G1 G0, address A2 A1 A0 and the suffix F. The preamble is (I + G0) mod 10, "
+        "word 1 comes from G1 G0, word 2 from A2 A1 A0. The suffix gives the function: 1-4 and 5-8 are A-D, 9 and 0 are A and B. "
+        "Without a suffix the function is the one selected"));
     m_priority = new QCheckBox(tr("Priority"), this);
     m_priority->setToolTip(tr("FLEX priority address"));
     m_groupLabel = new QLabel(tr("Group"), this);
@@ -204,6 +209,7 @@ PagingComposer::PagingComposer(QWidget *parent) :
     layout->addWidget(m_protocol, row++, 1, 1, 2);
     layout->addWidget(m_addressLabel, row, 0);
     layout->addLayout(addressRow, row++, 1, 1, 2);
+    layout->addWidget(m_capCode, row++, 1, 1, 2);
     layout->addWidget(m_groupLabel, row, 0);
     layout->addWidget(m_group, row++, 1, 1, 2);
     layout->addWidget(new QLabel(tr("Type"), this), row, 0);
@@ -240,6 +246,7 @@ PagingComposer::PagingComposer(QWidget *parent) :
     connect(m_send, &QPushButton::clicked, this, &PagingComposer::sendRequested);
     connect(m_text, &QLineEdit::returnPressed, this, &PagingComposer::sendRequested);
     connect(m_address, &QLineEdit::returnPressed, this, &PagingComposer::sendRequested);
+    connect(m_address, &QLineEdit::textChanged, this, &PagingComposer::display);
     connect(m_group, &QLineEdit::textChanged, this, &PagingComposer::display);
     connect(m_group, &QLineEdit::returnPressed, this, &PagingComposer::sendRequested);
 }
@@ -394,10 +401,22 @@ void PagingComposer::display()
     const bool hexText = binary || (secure && (m_secureType->currentIndex() != 0));
 
     m_addressLabel->setText(flex ? tr("Capcode") : tr("Address"));
-    m_address->setPlaceholderText(pocsag ? tr("0 to 2097151") : flex ? tr("capcode") : tr("6 digits"));
-    m_address->setToolTip(gsc ? tr("GSC address: 6 digits (index, group, 3 address digits)")
+    m_address->setPlaceholderText(pocsag ? tr("0 to 2097151") : flex ? tr("capcode") : tr("5 to 7 digits"));
+    m_address->setToolTip(gsc ? tr("GSC cap code: 6 digits (index, group, 3 address digits), 5 digits (index 0) or 7 digits "
+        "(the 6 digits and the suffix, that gives the function)")
         : flex ? tr("FLEX capcode: short 1 to 1933312, long 2101249 to 4297068542") : tr("POCSAG address 0 to 2097151"));
     m_function->setVisible(!flex);
+
+    // GSC: the digits of the cap code; a suffix digit sets the function
+    const QString capCode = m_address->text().trimmed();
+    const bool suffix = gsc && (capCode.size() == 7);
+    m_capCode->setVisible(gsc && !capCode.isEmpty());
+    m_capCode->setText(gsc ? QString::fromStdString(RadioPagingGsc::capCodeText(capCode.toStdString())) : QString());
+    m_function->setEnabled(!suffix);
+
+    if (suffix && (m_function->count() == 4)) {
+        m_function->setCurrentIndex(RadioPagingGsc::suffixAddressNumber(capCode.at(6).toLatin1()) - 1);
+    }
     m_priority->setVisible(flex);
     m_groupLabel->setVisible(flex);
     m_group->setVisible(flex);
@@ -522,7 +541,9 @@ QString PagingComposer::summary() const
     if (p.m_protocol == "pocsag") {
         address += QString(" %1").arg(QChar('A' + p.m_function));
     } else if (p.m_protocol == "gsc") {
-        address += QString("/%1 (%2)").arg(p.m_function + 1).arg(QChar(RadioPagingGsc::functionLetter(p.m_function + 1)));
+        int function;
+        p.gscAddress(address, function);
+        address += QString("/%1 (%2)").arg(function + 1).arg(QChar(RadioPagingGsc::functionLetter(function + 1)));
     } else if (p.m_priority) {
         address += tr(" priority");
     }

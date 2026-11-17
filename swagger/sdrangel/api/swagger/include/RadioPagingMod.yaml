@@ -277,7 +277,7 @@ RadioPagingModTx:
       type: integer
       format: int32
     capcode:
-      description: "FLEX: capcode, short 1 to 1933312 or long 2101249 to 4297068542. GSC: address 0 to 999999, sent as 6 digits (index, group, 3 address digits), zero padded"
+      description: "FLEX: capcode, short 1 to 1933312 or long 2101249 to 4297068542. GSC: cap code, up to 6 digits sent zero padded (index, group, 3 address digits), or above 999999 the 7 digits with the suffix digit, that gives the function (1-4 and 5-8: A-D, 9 and 0: A and B) over function"
       type: integer
       format: int64
     priority:

@@ -40,7 +40,7 @@ struct MODEMRADIOPAGING_API RadioPagingPage
     QString m_transmitter;              //!< Alias of the transmitter (message center)
     QString m_protocol;                 //!< pocsag, flex or gsc
     QString m_type;                     //!< One of types(); empty: alphanumeric
-    QString m_address;                  //!< Digits: POCSAG address, FLEX capcode, GSC address (up to 6 digits)
+    QString m_address;                  //!< Digits: POCSAG address, FLEX capcode, GSC cap code (up to 6 digits, or 7 with the suffix)
     int m_function = 0;                 //!< POCSAG function 0-3 (A-D); GSC function 0-3, the address number 1-4
     bool m_priority = false;            //!< FLEX priority address
     //!< FLEX group message: the capcodes of the pagers (digits separated by commas or spaces, 2 to 64); the address is
@@ -73,6 +73,9 @@ struct MODEMRADIOPAGING_API RadioPagingPage
     QString check() const;
     //!< The capcodes of m_groupMembers
     QList<qulonglong> groupMembers(bool *ok = nullptr) const;
+    //!< GSC: the 6 digit address of the cap code in m_address and the function 0-3, of its suffix digit for 7
+    //!< digits, else m_function. False if the cap code is not one
+    bool gscAddress(QString& address, int& function) const;
     //!< The page as a TX record of the message center
     MessageRecord toRecord() const;
     //!< The page of a TX record (toRecord, or a record of a source file in the same keys)

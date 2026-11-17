@@ -119,8 +119,14 @@ QString RadioPagingPage::check() const
     if ((m_protocol == "flex") && !group && (m_address.toULongLong() == 0)) {
         return "FLEX capcode must be 1 to 1933312 or 2101249 to 4297068542";
     }
-    if ((m_protocol == "gsc") && (m_address.size() > 6)) {
-        return "GSC address must be 0 to 999999";
+    if (m_protocol == "gsc")
+    {
+        std::string address, error;
+        int number;
+
+        if (!RadioPagingGsc::parseCapCode(m_address.toStdString(), address, number, &error)) {
+            return QString("GSC: %1").arg(QString::fromStdString(error));
+        }
     }
     if ((m_function < 0) || (m_function > 3)) {
         return (m_protocol == "gsc") ? "GSC function must be 0 to 3 (A to D), for the address number 1 to 4"
@@ -151,6 +157,18 @@ QString RadioPagingPage::check() const
     return QString();
 }
 
+// A cap code that is not one (check() refuses it) is kept as it is, padded to 6 digits
+bool RadioPagingPage::gscAddress(QString& address, int& function) const
+{
+    std::string a;
+    int number = 0;
+    bool ok = RadioPagingGsc::parseCapCode(m_address.toStdString(), a, number);
+
+    address = ok ? QString::fromStdString(a) : m_address.rightJustified(6, QChar('0'));
+    function = (number > 0) ? number - 1 : (m_function & 3);
+    return ok;
+}
+
 MessageRecord RadioPagingPage::toRecord() const
 {
     MessageRecord r;
@@ -177,9 +195,12 @@ MessageRecord RadioPagingPage::toRecord() const
     }
     else if (m_protocol == "gsc")
     {
-        r.m_address = QString::fromStdString(RadioPagingGsc::addressText(m_address.toStdString(), (m_function & 3) + 1));
-        d.insert("address_number", (m_function & 3) + 1);
-        d.insert("function", m_function & 3);
+        QString address;
+        int function;
+        gscAddress(address, function);
+        r.m_address = QString::fromStdString(RadioPagingGsc::addressText(address.toStdString(), function + 1));
+        d.insert("address_number", function + 1);
+        d.insert("function", function);
     }
     else
     {
@@ -355,8 +376,11 @@ void RadioPagingPage::toTx(SWGSDRangel::SWGRadioPagingModTx& tx) const
     }
     else
     {
-        tx.setCapcode(m_address.toLongLong());
-        tx.setFunction(m_function);
+        QString address;
+        int function;
+        gscAddress(address, function);
+        tx.setCapcode(address.toLongLong());
+        tx.setFunction(function);
     }
 
     tx.setRetransmit(m_retransmit);

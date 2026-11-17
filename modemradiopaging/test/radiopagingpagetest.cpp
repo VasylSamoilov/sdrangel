@@ -123,9 +123,9 @@ void testRoundTrips()
         && (r.m_speed == 512) && (r.m_polarity == MessageRecord::PolarityInverted),
         "POCSAG record: address with its function letter, ric, speed, polarity");
     r = gsc.toRecord();
-    check((r.m_address == "0012342") && (r.m_protocolData.value("address_number").toInt() == 2)
+    check((r.m_address == "001234/2") && (r.m_protocolData.value("address_number").toInt() == 2)
         && (r.m_protocolData.value("function").toInt() == 1),
-        "GSC record: 6 digits and the address number, the function 0-3");
+        "GSC record: 6 digits, / and the address number, the function 0-3");
     r = binary.toRecord();
     check((r.m_protocolData.value("blocking").toInt() == 8) && (r.m_protocolData.value("display_direction").toString() == "rtl")
         && r.m_protocolData.value("long_address").toBool() && r.m_protocolData.value("priority").toBool(),
@@ -166,8 +166,10 @@ void testLimits()
     refused.push_back({p, "a POCSAG address over 21 bits"});
     p = page("flex", "alphanumeric", "0");
     refused.push_back({p, "FLEX capcode 0"});
-    p = page("gsc", "alphanumeric", "1234567");
-    refused.push_back({p, "a GSC address of 7 digits"});
+    p = page("gsc", "alphanumeric", "12345678");
+    refused.push_back({p, "a GSC cap code of 8 digits"});
+    p = page("gsc", "alphanumeric", "000000");
+    refused.push_back({p, "GSC address digits not allowed for the group"});
     p = page("pocsag", "alphanumeric", "1");
     p.m_function = 4;
     refused.push_back({p, "function 4"});
@@ -218,6 +220,17 @@ void testLimits()
     check(p.check().isEmpty() && (p.toRecord().m_msgType == "alphanumeric"), "no type is alphanumeric, the largest POCSAG address");
     p = page("pocsag", "tone", "1");
     check(p.toRecord().m_text.isNull(), "a tone page has no text");
+
+    // GSC cap codes: 7 digits, the suffix sets the function; 5 digits, index 0
+    p = page("gsc", "alphanumeric", "1234567");
+    p.m_function = 3;
+    check(p.check().isEmpty() && (p.toRecord().m_address == "123456/3") && (p.toRecord().m_protocolData.value("function").toInt() == 2),
+        "GSC 7 digits: suffix 7 is function C, over the function of the page");
+    p = page("gsc", "alphanumeric", "1234560");
+    check(p.toRecord().m_address == "123456/2", "GSC suffix 0 is function B");
+    p = page("gsc", "alphanumeric", "23456");
+    p.m_function = 1;
+    check(p.check().isEmpty() && (p.toRecord().m_address == "023456/2"), "GSC 5 digits: index 0, the function of the page");
 
     // FLEX numeric formats
     const char *formats[] = {"special_numeric", "numbered_numeric", "numbered_special_numeric"};

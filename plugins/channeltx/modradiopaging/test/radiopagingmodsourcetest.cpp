@@ -763,7 +763,7 @@ int gscPreambleOf(const std::string& address)
 
 std::string gscKey(const std::string& address, int number, bool inverted, const std::string& text)
 {
-    return "gsc 600 " + address + std::to_string(number) + (inverted ? " inverted " : " normal ") + text;
+    return "gsc 600 " + address + "/" + std::to_string(number) + (inverted ? " inverted " : " normal ") + text;
 }
 
 // Messages in each mode and polarity: two of one preamble value, one of another, a tone page

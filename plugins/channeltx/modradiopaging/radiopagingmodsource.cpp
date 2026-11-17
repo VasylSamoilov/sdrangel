@@ -448,7 +448,7 @@ void RadioPagingModSource::modulateSample()
         }
         break;
     case Tx:
-        // The last symbol has left the shaping filter: ramp down on the carrier it ended on
+        // The last symbol is held for the filter delay and one symbol more: ramp down on its carrier
         if (m_streamEnded && !m_mod.busy())
         {
             m_powRamp = rampStep(m_settings.m_rampDownMs);

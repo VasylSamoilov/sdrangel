@@ -67,7 +67,8 @@ public:
     //!< Symbols queued and not finished, the one being sent included: 0 once the last symbol
     //!< of the queue has been sent
     size_t queued() const;
-    //!< Symbols are queued, or the last symbol is still in the shaping filter
+    //!< Symbols are queued, or the last symbol is still held: the shaping filter delay and one
+    //!< symbol more at its level
     bool busy() const { return !m_blocks.empty() || (m_tail > 0); }
 
     //!< Next sample at the channel sample rate
@@ -93,7 +94,7 @@ private:
     bool m_blockStart;                  //!< The next sample is the first of a block
     double m_sampleInSymbol;            //!< Samples of the symbol sent, the fraction carried to the next
     float m_hold;                       //!< Level held after the last symbol
-    int m_tail;                         //!< Samples of the shaping filter delay still to output
+    int m_tail;                         //!< Samples still to output at the level held: the shaping filter delay and one symbol
 
     Gaussian<Real> m_gaussian;
     int m_gaussianDelay;                //!< Group delay of the shaping filter, samples

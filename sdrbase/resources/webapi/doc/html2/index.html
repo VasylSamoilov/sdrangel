@@ -15490,7 +15490,7 @@ margin-bottom: 20px;
     },
     "address" : {
       "type" : "string",
-      "description" : "POCSAG: the address. FLEX: the capcode. GSC: the address of up to 6 digits"
+      "description" : "POCSAG: the address. FLEX: the capcode. GSC: the cap code, up to 6 digits zero padded (index, group, 3 address digits; 5 digits: index 0) or 7 digits with the suffix digit, that gives the function (1-4 and 5-8: A-D, 9 and 0: A and B) over function"
     },
     "function" : {
       "type" : "integer",
@@ -19446,7 +19446,7 @@ margin-bottom: 20px;
     "capcode" : {
       "type" : "integer",
       "format" : "int64",
-      "description" : "FLEX: capcode, short 1 to 1933312 or long 2101249 to 4297068542. GSC: address 0 to 999999, sent as 6 digits (index, group, 3 address digits), zero padded"
+      "description" : "FLEX: capcode, short 1 to 1933312 or long 2101249 to 4297068542. GSC: cap code, up to 6 digits sent zero padded (index, group, 3 address digits), or above 999999 the 7 digits with the suffix digit, that gives the function (1-4 and 5-8: A-D, 9 and 0: A and B) over function"
     },
     "priority" : {
       "type" : "integer",

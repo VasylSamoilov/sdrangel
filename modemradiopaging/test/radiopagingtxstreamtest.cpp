@@ -1233,13 +1233,23 @@ void testGscVoice()
             stream.begin(0);
             bool ok = stream.next(page) && stream.next(sound) && stream.next(end) && !stream.next(more);
 
-            // The voice is inverted with the polarity of the transmission
-            bool voiceOk = ok && (sound.m_baud == 38400.0) && (sound.m_levels.size() == 76800 + audio.m_samples.size()) && sound.m_ids.empty();
+            // The voice is processed (RadioPagingVoiceProcessor, the samples still in it at the end too) and
+            // inverted with the polarity of the transmission
+            RadioPagingVoiceProcessor processor(38400);
+            std::vector<float> expected;
+            for (size_t i = 0; i < audio.m_samples.size() + (size_t) processor.delay(); i++)
+            {
+                float s = processor.process((i < audio.m_samples.size()) ? audio.m_samples[i] : 0.0f);
+                if (i >= (size_t) processor.delay()) {
+                    expected.push_back(s);
+                }
+            }
+            bool voiceOk = ok && (sound.m_baud == 38400.0) && (sound.m_levels.size() == 76800 + expected.size()) && sound.m_ids.empty();
             for (size_t i = 0; voiceOk && (i < 76800); i++) {
                 voiceOk = (sound.m_levels[i] == 0.0f);
             }
-            for (size_t i = 0; voiceOk && (i < audio.m_samples.size()); i++) {
-                voiceOk = (sound.m_levels[76800 + i] == (inverted ? -audio.m_samples[i] : audio.m_samples[i]));
+            for (size_t i = 0; voiceOk && (i < expected.size()); i++) {
+                voiceOk = (sound.m_levels[76800 + i] == (inverted ? -expected[i] : expected[i]));
             }
 
             // The page ends with the activation code; the turn-off word is the activation code after a comma
@@ -1315,10 +1325,15 @@ void testGscVoice()
         stream.pushLive(voice.data(), voice.size());
         size_t got = 0;
         bool voiced = true;
+        RadioPagingVoiceProcessor processor(38400);
 
+        // The voice pushed, processed
         while (got < voice.size())
         {
-            voiced = stream.next(block) && voiced && (block.m_baud == 38400) && (block.m_levels[0] == 0.5f);
+            voiced = stream.next(block) && voiced && (block.m_baud == 38400);
+            for (size_t i = 0; voiced && (i < block.m_levels.size()); i++) {
+                voiced = (block.m_levels[i] == processor.process(0.5f));
+            }
             got += block.m_levels.size();
         }
 

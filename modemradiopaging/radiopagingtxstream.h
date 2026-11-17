@@ -35,6 +35,7 @@
 #include "radiopaginggsc.h"
 #include "radiopagingpocsag.h"
 #include "radiopagingwav.h"
+#include "radiopagingvoiceprocessor.h"
 
 // Symbols of a transmitter, a block at a time, for the modulator (RadioPagingFskMod).
 //
@@ -298,11 +299,11 @@ private:
 // the others stay queued, in order, for the next one.
 // A voice page is a transmission of its own, in any mode (Motorola GSC manual, Figure 6-1):
 //   the page (preamble, start code, address, activation code), the alert time of 2 s (the
-//   carrier unmodulated), the voice message (the samples of a sound file, FM with the full
-//   scale at the deviation, no emphasis) and the turn-off word (a comma and the activation
-//   code again). The voice is a block at the rate of the sound file, its samples as they are
-//   (RadioPagingWav); the modulator smooths the held samples with a Gaussian filter of a
-//   cutoff at half the sample rate.
+//   carrier unmodulated), the voice message (the samples of a sound file or of the microphone,
+//   processed: RadioPagingVoiceProcessor, FM with the full scale at the deviation, no emphasis)
+//   and the turn-off word (a comma and the activation code again). The voice is a block at the
+//   rate of the samples (RadioPagingWav); the modulator smooths the held samples with a
+//   Gaussian filter of a cutoff at half the sample rate.
 // Normal polarity: a binary 1 is a positive deviation; the voice is inverted with it.
 class MODEMRADIOPAGING_API RadioPagingGscTxStream : public RadioPagingTxStream
 {
@@ -368,6 +369,7 @@ private:
     size_t m_liveLimit = 0;             //!< Samples of the longest voice
     size_t m_liveSent = 0;              //!< Voice samples sent
     std::deque<float> m_liveSamples;    //!< Voice waiting to be sent
+    RadioPagingVoiceProcessor m_liveProcessor{RadioPagingWav::m_sampleRate};    //!< Voice of the live page
     RadioPagingTxBlock m_liveEnd;       //!< The turn-off word
     bool nextLive(RadioPagingTxBlock& block);
 

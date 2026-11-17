@@ -195,7 +195,7 @@ void addGsc(Modulator& mod, std::set<std::string>& sent, const std::vector<Radio
 
     // Capcode and function
     for (const auto& m : messages) {
-        sent.insert(key("gsc", "600", m.m_address + std::to_string(m.m_addressNumber), false));
+        sent.insert(key("gsc", "600", m.m_address + "/" + std::to_string(m.m_addressNumber), false));
     }
 }
 
@@ -351,7 +351,7 @@ std::vector<SweepCase> sweepCases()
         c.m_shaping = 600.0;
         for (const auto& m : messages) {
             std::string address = (gm.first == RadioPagingGsc::NonBatterySaver) ? "N" + m.m_address.substr(1) : m.m_address;
-            c.m_sent.insert(key("gsc", "600", address + std::to_string(m.m_addressNumber), false));
+            c.m_sent.insert(key("gsc", "600", address + "/" + std::to_string(m.m_addressNumber), false));
         }
         cases.push_back(c);
     }

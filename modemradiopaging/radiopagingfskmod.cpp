@@ -174,12 +174,15 @@ void RadioPagingFskMod::shapeSample()
 
             if (++m_symbol >= block.m_levels.size())
             {
+                // After the last symbol its level is held at full power for the filter delay and one
+                // symbol more: the receiver sees the whole last symbol and its end before the ramp down
+                int guard = (int) std::ceil(block.m_samplesPerSymbol);
                 m_blocks.pop_front();
                 m_symbol = 0;
                 m_blockStart = true;
 
                 if (m_blocks.empty()) {
-                    m_tail = m_gaussianDelay;
+                    m_tail = m_gaussianDelay + guard;
                 }
             }
         }

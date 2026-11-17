@@ -79,6 +79,7 @@ private:
     QLabel *m_protocolLabel;
     QLabel *m_addressLabel;
     QLineEdit *m_address;
+    QLabel *m_capCode;                  //!< GSC: what the digits of the cap code are
     QLabel *m_groupLabel;
     QLineEdit *m_group;
     QComboBox *m_function;

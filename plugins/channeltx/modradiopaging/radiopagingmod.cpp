@@ -243,8 +243,11 @@ RadioPagingMod::TxRequest RadioPagingMod::requestFromPage(const RadioPagingPage&
     else
     {
         request.m_protocol = (int) RadioPagingModSettings::Gsc;
-        request.m_gsc.m_address = page.m_address.rightJustified(6, QChar('0')).toStdString();
-        request.m_gsc.m_addressNumber = page.m_function + 1;
+        QString address;
+        int function;
+        page.gscAddress(address, function);
+        request.m_gsc.m_address = address.toStdString();
+        request.m_gsc.m_addressNumber = function + 1;
         request.m_gsc.m_type = tone ? RadioPagingGsc::Tone
             : (type == "voice") ? RadioPagingGsc::Voice
             : (type == "numeric") ? RadioPagingGsc::Numeric : RadioPagingGsc::Alphanumeric;

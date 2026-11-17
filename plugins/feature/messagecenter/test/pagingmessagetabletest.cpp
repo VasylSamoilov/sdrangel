@@ -82,12 +82,12 @@ int main(int argc, char **argv)
         "a received message shows its errors");
 
     // The oldest rows go first
-    table.addRecord(record("c", "gsc", "1234561", "C"));
-    table.addRecord(record("d", "gsc", "1234562", "D"));
+    table.addRecord(record("c", "gsc", "123456/1", "C"));
+    table.addRecord(record("d", "gsc", "123456/2", "D"));
     check((table.rowCount() == 3) && (cell(table, 0, PagingMessageTable::ColAddress) == "0001234567"), "the oldest row goes at the maximum");
 
     // The end of a voice message completes its row
-    MessageRecord voice = record("v", "gsc", "1234563", QString());
+    MessageRecord voice = record("v", "gsc", "123456/3", QString());
     voice.m_msgType = "voice";
     table.addRecord(voice);
     check(cell(table, 2, PagingMessageTable::ColMessage) == "(voice)", "a voice message without its end");

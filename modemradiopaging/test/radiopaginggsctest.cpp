@@ -1408,8 +1408,8 @@ void testReceiver()
 int main()
 {
     // Address of the message records: 6 characters (zero padded, N index of non battery saver) and the number 1-4
-    check((RadioPagingGsc::addressText("123456", 2) == "1234562") && (RadioPagingGsc::addressText("42", 1) == "0000421")
-        && (RadioPagingGsc::addressText("N23456", 4) == "N234564"), "record address: 6 characters and the address number");
+    check((RadioPagingGsc::addressText("123456", 2) == "123456/2") && (RadioPagingGsc::addressText("42", 1) == "000042/1")
+        && (RadioPagingGsc::addressText("N23456", 4) == "N23456/4"), "record address: 6 characters, / and the address number");
     // Address number 1-4 and function A-D are the same four address word combinations
     check((RadioPagingGsc::functionLetter(1) == 'A') && (RadioPagingGsc::functionLetter(4) == 'D')
         && (RadioPagingGsc::functionLetter(0) == 0) && (RadioPagingGsc::functionLetter(5) == 0),
@@ -1418,6 +1418,35 @@ int main()
         && (RadioPagingGsc::addressNumber('B') == 2) && (RadioPagingGsc::addressNumber('d') == 4)
         && (RadioPagingGsc::addressNumber('0') == 0) && (RadioPagingGsc::addressNumber('5') == 0)
         && (RadioPagingGsc::addressNumber('E') == 0), "address number of a number or a function letter");
+
+    // Cap codes: the suffix digit gives the address number (1-4 and 5-8: 1-4; 9 and 0: 1 and 2)
+    const char suffixes[] = "1234567890";
+    const int numbers[] = {1, 2, 3, 4, 1, 2, 3, 4, 1, 2};
+    bool suffixOk = (RadioPagingGsc::suffixAddressNumber('x') == 0);
+
+    for (int i = 0; i < 10; i++) {
+        suffixOk = suffixOk && (RadioPagingGsc::suffixAddressNumber(suffixes[i]) == numbers[i]);
+    }
+
+    check(suffixOk, "suffix digit: address number");
+    std::string capAddress;
+    int capNumber = -1;
+    check(RadioPagingGsc::parseCapCode("1234567", capAddress, capNumber) && (capAddress == "123456") && (capNumber == 3),
+        "7 digit cap code: the address and the number of the suffix");
+    check(RadioPagingGsc::parseCapCode("123456", capAddress, capNumber) && (capAddress == "123456") && (capNumber == 0),
+        "6 digit cap code: no suffix");
+    check(RadioPagingGsc::parseCapCode("23456", capAddress, capNumber) && (capAddress == "023456") && (capNumber == 0),
+        "5 digit cap code: index 0");
+    check(!RadioPagingGsc::parseCapCode("12345678", capAddress, capNumber) && !RadioPagingGsc::parseCapCode("12a456", capAddress, capNumber)
+        && !RadioPagingGsc::parseCapCode("", capAddress, capNumber) && !RadioPagingGsc::parseCapCode("1000001", capAddress, capNumber),
+        "cap codes refused: 8 digits, not a digit, empty, address digits not allowed");
+    int capPreamble;
+    uint16_t capWord1, capWord2;
+    RadioPagingGsc::encodeAddress("123456", capPreamble, capWord1, capWord2);
+    check(RadioPagingGsc::capCodeText("1234567") == "index 1, group 23, address 456, suffix 7 = 3 (C) -> preamble 4, word 1 "
+        + std::to_string(capWord1) + ", word 2 " + std::to_string(capWord2), "cap code text");
+    check(RadioPagingGsc::capCodeText("23456").find("index 0 (padded), group 23, address 456 -> preamble 3") == 0,
+        "cap code text: 5 digits");
     testCodes();
     testStartCodeCopies();
     testCharacterSets();

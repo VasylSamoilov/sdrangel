@@ -537,9 +537,9 @@ bool RadioPagingGsc::encodeAddress(const std::string& address, int& preamble, ui
 
 std::string RadioPagingGsc::addressText(const std::string& address, int addressNumber)
 {
-    // Zero padded to the 6 characters of the address
+    // The 6 characters of the address, zero padded, then / and the address number
     std::string text = (address.size() < 6) ? std::string(6 - address.size(), '0') + address : address;
-    return text + (char) ('0' + addressNumber);
+    return text + '/' + (char) ('0' + addressNumber);
 }
 
 char RadioPagingGsc::functionLetter(int addressNumber)
@@ -560,6 +560,71 @@ int RadioPagingGsc::addressNumber(char numberOrFunction)
     }
 
     return 0;
+}
+
+int RadioPagingGsc::suffixAddressNumber(char digit)
+{
+    if ((digit < '0') || (digit > '9')) {
+        return 0;
+    }
+
+    // Suffix 1-4 and 5-8: address 1-4 (functions A-D); 9 and 0: address 1 and 2 (functions A and B)
+    int d = digit - '0';
+    return (d == 0) ? 2 : (d == 9) ? 1 : ((d - 1) % 4) + 1;
+}
+
+bool RadioPagingGsc::parseCapCode(const std::string& capCode, std::string& address, int& addressNumber, std::string *error)
+{
+    if (capCode.empty() || (capCode.size() > 7))
+    {
+        if (error) {
+            *error = "Cap code must have 1 to 7 digits";
+        }
+        return false;
+    }
+
+    for (char c : capCode)
+    {
+        if ((c < '0') || (c > '9'))
+        {
+            if (error) {
+                *error = "Cap code must have digits only";
+            }
+            return false;
+        }
+    }
+
+    address = (capCode.size() == 7) ? capCode.substr(0, 6) : std::string(6 - capCode.size(), '0') + capCode;
+    addressNumber = (capCode.size() == 7) ? suffixAddressNumber(capCode[6]) : 0;
+
+    int preamble;
+    uint16_t word1, word2;
+    return encodeAddress(address, preamble, word1, word2, error);
+}
+
+std::string RadioPagingGsc::capCodeText(const std::string& capCode)
+{
+    std::string address, error;
+    int number;
+
+    if (!parseCapCode(capCode, address, number, &error)) {
+        return error;
+    }
+
+    int preamble;
+    uint16_t word1, word2;
+    encodeAddress(address, preamble, word1, word2);
+
+    std::string text = "index " + address.substr(0, 1) + ((capCode.size() < 6) ? " (padded)" : "")
+        + ", group " + address.substr(1, 2) + ", address " + address.substr(3, 3);
+
+    if (number > 0) {
+        text += std::string(", suffix ") + capCode[6] + " = " + (char) ('0' + number) + " (" + functionLetter(number) + ")";
+    }
+
+    text += " -> preamble " + std::to_string(preamble) + ", word 1 " + std::to_string(word1)
+        + ", word 2 " + std::to_string(word2);
+    return text;
 }
 
 bool RadioPagingGsc::decodeAddress(uint16_t word1, uint16_t word2, int preamble, std::string& address)

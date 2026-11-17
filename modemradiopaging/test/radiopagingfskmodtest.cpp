@@ -460,6 +460,34 @@ void testFractionalAndDeviation()
     std::snprintf(what, sizeof(what), "Block deviation: 3000 Hz then 4500 Hz (%.0f, %.0f)", first, second);
     check((std::fabs(first - 3000.0) < 30.0) && (std::fabs(second - 4500.0) < 45.0), what);
 
+    // The last symbol is held one symbol more after it, on its deviation, before busy() ends
+    {
+        RadioPagingFskMod hold;
+        hold.setChannelSampleRate(48000);
+        hold.setDeviation(4500.0);
+        hold.setShaping(600.0);
+        hold.push(600.0, std::vector<float>{1.0f, -1.0f, 1.0f, -1.0f}, 600.0, 4500.0);
+        size_t samples = 0;
+        int afterLast = 0;
+        Signal h;
+        h.m_rate = 48000;
+
+        while (hold.busy())
+        {
+            h.m_iq.push_back(hold.next());
+            samples++;
+            if (hold.queued() == 0) {
+                afterLast++;
+            }
+        }
+
+        std::vector<float> d = discriminate(h, 1000.0);
+        double end = d[d.size() - 2] * 1000.0;
+        std::snprintf(what, sizeof(what), "Last symbol held one symbol (80 samples) more: %d samples after it, %.0f Hz at the end",
+            afterLast, end);
+        check((afterLast >= 80) && (end < -4000.0), what);
+    }
+
     // After a block with a fractional symbol clock the next block still starts with its own
     // deviation (the fraction carried over is not zero)
     {

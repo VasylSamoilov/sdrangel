@@ -183,12 +183,21 @@ public:
     //!< Inverse of encodeAddress(). Needs the preamble index (-1 if none, non battery saver: the index is then N)
     static bool decodeAddress(uint16_t word1, uint16_t word2, int preamble, std::string& address);
     //!< Address of the message records: the 6 characters of the address (index, group, 3 digits; N for the index
-    //!< of non battery saver) and the address number 1-4, the same in RX, TX and the message center
+    //!< of non battery saver), / and the address number 1-4 (123456/1), the same in RX, TX and the message center
     static std::string addressText(const std::string& address, int addressNumber);
     //!< Function letter A-D of an address number 1-4, 0 if out of range
     static char functionLetter(int addressNumber);
     //!< Address number 1-4 of a number 1-4 or a function letter A-D (either case), 0 if it is none
     static int addressNumber(char numberOrFunction);
+    //!< A cap code: up to 6 digits, the address zero padded to 6 (5 digits: index 0 in front), or 7 digits, the
+    //!< address and the suffix digit. addressNumber: 1-4 of the suffix, 0 without one. False and an error for
+    //!< more digits, non digits and the address digits that are not allowed
+    static bool parseCapCode(const std::string& capCode, std::string& address, int& addressNumber, std::string *error = nullptr);
+    //!< Address number 1-4 of a suffix digit: 1-4 and 5-8 are 1-4, 9 and 0 are 1 and 2; 0 for a non digit
+    static int suffixAddressNumber(char digit);
+    //!< The digits of a cap code (index, group, address, suffix) and the preamble and words they give, or why it
+    //!< is not a cap code
+    static std::string capCodeText(const std::string& capCode);
     //!< Index of a word 1 value in the table of 50 values, -1 if it is none
     static int word1Index(uint16_t word1);
 
