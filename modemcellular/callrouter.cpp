@@ -172,7 +172,7 @@ void CallRouter::deliver(const Notification& n)
     }
 }
 
-void CallRouter::emit(Notification&& notification)
+void CallRouter::emitNotification(Notification&& notification)
 {
     if (m_handler) {
         m_handler(std::move(notification));
@@ -188,7 +188,7 @@ void CallRouter::notify(Notification::Type type, MobileLeg* leg, CallRef callref
     n.leg = leg;
     n.callref = callref;
     n.cause = cause;
-    emit(std::move(n));
+    emitNotification(std::move(n));
 }
 
 bool CallRouter::registerSubscriber(const std::string& number, MobileLeg& leg)
@@ -390,7 +390,7 @@ CallRouter::SetupResult CallRouter::setup(MobileLeg& origin, const std::string& 
         n.callerId = callerId;
         n.callerType = callerId.empty() ? NumberType::NotAvailable : NumberType::Subscriber;
         n.dialed = dialed;
-        emit(std::move(n));     // may call back into the router; the call is not touched after this
+        emitNotification(std::move(n));     // may call back into the router; the call is not touched after this
     }
 
     return SetupResult{refA, Cause::Normal};

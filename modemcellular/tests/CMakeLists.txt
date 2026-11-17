@@ -11,6 +11,7 @@ set(MODEMCELLULAR_LIB_SOURCES
     ../callrouter.cpp
     ../carrierqueue.cpp
     ../carrierradio.cpp
+    ../carrierwire.cpp
     ../cellularsystem.cpp
     ../clock.cpp
     ../compandor.cpp
@@ -51,3 +52,4 @@ modemcellular_add_test(modemcellular_router_test test_router.cpp)
 modemcellular_add_test(modemcellular_system_test test_system.cpp)
 modemcellular_add_test(modemcellular_carrierqueue_test test_carrierqueue.cpp)
 modemcellular_add_test(modemcellular_carrierradio_test test_carrierradio.cpp)
+modemcellular_add_test(modemcellular_carrierwire_test test_carrierwire.cpp)

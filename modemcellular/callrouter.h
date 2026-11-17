@@ -149,7 +149,7 @@ private:
     std::unique_ptr<AudioEndpoint> makeFallbackEndpoint();
     std::unique_ptr<Call> takeCall(CallRef callref);
     void forgetBusy(const std::string& number);
-    void emit(Notification&& notification);
+    void emitNotification(Notification&& notification);
     void notify(Notification::Type type, MobileLeg* leg, CallRef callref, Cause cause = Cause::Normal);
 
     void onProceeding(CallRef refA);

@@ -15,7 +15,9 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.          //
 ///////////////////////////////////////////////////////////////////////////////////
 
+#include <algorithm>
 #include <cmath>
+#include <complex>
 #include <memory>
 
 #include "phone.h"
@@ -199,20 +201,50 @@ static void testBatch()
     CHECK(tx.carriers.size() == 2);
     CHECK(bs.samples() == 960);
 
-    // the idle frames are on both carriers
-    double energy[2] = {0.0, 0.0};
-    for (int b = 0; b < 20; b++)
+    // the idle frames are on both carriers, at the deviation of the signalling: 4.2 kHz at
+    // 1800 Hz after the pre-emphasis, below the 4.7 kHz the plan allows
+    double peak[2] = {0.0, 0.0};
+    for (int b = 0; b < 50; b++)
     {
         rx.reset(5760 + 480 * static_cast<uint64_t>(b), 480, {1, 5});
         bs.process(rx, tx);
         for (size_t c = 0; c < 2; c++)
         {
             for (int i = 0; i < 480; i++) {
-                energy[c] += tx.carrier(c)[i] * tx.carrier(c)[i];
+                peak[c] = std::max(peak[c], static_cast<double>(std::fabs(tx.carrier(c)[i])));
             }
         }
     }
-    CHECK(energy[0] > 1.0 && energy[1] > 1.0);
+    std::printf("idle frames: peak deviation %.0f Hz and %.0f Hz\n", peak[0], peak[1]);
+    CHECK(peak[0] > 3800.0 && peak[0] < 4700.0);
+    CHECK(peak[1] > 3800.0 && peak[1] < 4700.0);
+
+    // a 20 kHz plan: the deviation goes down by its factor (0.8)
+    NmtNetworkConfig c = network({132});
+    c.country = "HU";
+    NmtBaseStation hu(c);
+    CHECK(hu.bind({{1, 457.3e6, 1e6}}, {{2, 467.3e6, 1e6}}));
+    double huPeak = 0.0;
+    for (int b = 0; b < 50; b++)
+    {
+        rx.reset(480 * static_cast<uint64_t>(b), 480, {132});
+        hu.process(rx, tx);
+        for (int i = 0; i < 480; i++) {
+            huPeak = std::max(huPeak, static_cast<double>(std::fabs(tx.carrier(0)[i])));
+        }
+    }
+    CHECK(std::fabs(huPeak - 0.8 * peak[0]) < 0.05 * peak[0]);
+
+    // the carrier ids carry the network id
+    NmtNetworkConfig second = network({1});
+    second.id = 3;
+    NmtBaseStation other(second);
+    CHECK(other.bind({kRx}, {kTx}));
+    CHECK(other.carrierId(0) == 30001);
+    CHECK(other.rxTuning().size() == 1 && other.rxTuning()[0].id == 30001);
+    CHECK(std::fabs(other.rxTuning()[0].offset - (453.0e6 - kRx.centre)) < 1.0);
+    CHECK(std::fabs(other.txTuning()[0].offset - (463.0e6 - kTx.centre)) < 1.0);
+    CHECK(std::fabs(other.rxTuning()[0].spacing - 25000.0) < 1.0);
 }
 
 // A phone on the audio of the traffic channel: roams in and clears down.
@@ -229,6 +261,28 @@ public:
 
     NmtModem& modem() { return m_modem; }
     bool done() const { return m_done; }
+    // the signalling level of the last frame heard, 1.0 is that of a base station
+    double level() const { return m_level; }
+
+    // The radio of the phone: the frequency deviation in Hz to and from the base station, with
+    // the emphasis and the speech deviation (3 kHz at 1 kHz) of the Scandinavian plan.
+    void transmit(float* hz, int count)
+    {
+        m_modem.render(hz, count, false);
+        m_txEmphasis.pre(hz, count);
+        for (int i = 0; i < count; i++) {
+            hz[i] *= static_cast<float>(NmtBaseStation::kSpeechDeviation);
+        }
+    }
+    void listen(const float* hz, int count)
+    {
+        m_audio.resize(static_cast<size_t>(count));
+        for (int i = 0; i < count; i++) {
+            m_audio[static_cast<size_t>(i)] = hz[i] / static_cast<float>(NmtBaseStation::kSpeechDeviation);
+        }
+        m_rxEmphasis.de(m_audio.data(), count);
+        m_modem.receive(m_audio.data(), count);
+    }
 
 private:
     bool next(FrameBits& bits)
@@ -245,6 +299,7 @@ private:
     {
         const Frame f = decodeFrame(rx.bits, Direction::MtxToMs, false);
 
+        m_level = rx.level;
         if (isLineSignal(f, 15)) {
             m_guard = true;
         }
@@ -255,6 +310,10 @@ private:
 
     NmtModem m_modem;
     const NmtChannel& m_channel;
+    Emphasis m_txEmphasis{kRate};
+    Emphasis m_rxEmphasis{kRate};
+    std::vector<float> m_audio;
+    double m_level = 0.0;
     bool m_guard = false;
     bool m_done = false;
 };
@@ -274,13 +333,15 @@ static double roamOverTheAir(size_t lead, double ppm, uint64_t& underruns, int& 
     std::vector<float> air(1024);
     double owed = 0.0;
     const int block = 480;
+    double baseLevel = 0.0;
 
     registrations = 0;
     system.setRegistrationListener([&](const NmtSubscriber&) { registrations++; });
+    tc.setFrameListener([&](const NmtChannel::ReceivedFrame& f) { baseLevel = f.level; });
     for (int i = 0; i < 1500; i++)                  // up to 15 s
     {
         rx.reset(static_cast<uint64_t>(i) * block, block, {1, 5});
-        phone.modem().render(rx.carrier(1), block, false);
+        phone.transmit(rx.carrier(1), block);
         bs.process(rx, tx);
         queue.write(tx.carrier(1), static_cast<size_t>(tx.length));
 
@@ -288,16 +349,98 @@ static double roamOverTheAir(size_t lead, double ppm, uint64_t& underruns, int& 
         const size_t count = static_cast<size_t>(owed);
         owed -= static_cast<double>(count);
         queue.read(air.data(), count, queue.ratio());
-        phone.modem().receive(air.data(), static_cast<int>(count));
+        phone.listen(air.data(), static_cast<int>(count));
 
         if (phone.done() && tc.state() == NmtChannel::State::Idle)
         {
             underruns = queue.underruns();
+            // both ends hear the signalling at the level of a base station
+            CHECK(baseLevel > 0.85 && baseLevel < 1.15);
+            CHECK(phone.level() > 0.85 && phone.level() < 1.15);
             return (i + 1) * block / kRate;
         }
     }
     underruns = queue.underruns();
     return -1.0;
+}
+
+// The whole chain on the air: the phone transmits on the uplink of its channel into the receive
+// stream, the receiver of the stream hands its batches to the base station, the transmitter of the
+// stream renders the downlinks of both carriers from their queues, and the phone receives its
+// downlink out of the transmit stream.
+static void testRadioPath()
+{
+    const double rate = 960000.0;
+    const NmtStreamSpan rxSpan = {1, 453.3e6, rate};
+    const NmtStreamSpan txSpan = {2, 463.3e6, rate};
+    NmtBaseStation bs(network({1, 5}));
+    CHECK(bs.bind({rxSpan}, {txSpan}));
+    NmtSystem& system = *bs.system();
+    NmtChannel& tc = system.channel(1);
+    AudioPhone phone(tc);
+    int registrations = 0;
+    double baseLevel = 0.0;
+    system.setRegistrationListener([&](const NmtSubscriber&) { registrations++; });
+    tc.setFrameListener([&](const NmtChannel::ReceivedFrame& f) { baseLevel = f.level; });
+
+    const std::vector<modemcellular::CarrierTuning> rxTuning = bs.rxTuning();
+    const std::vector<modemcellular::CarrierTuning> txTuning = bs.txTuning();
+    CHECK(rxTuning.size() == 2 && txTuning.size() == 2);
+
+    // the base station side
+    modemcellular::CarrierReceiver bsRx(rate);
+    modemcellular::CarrierTransmitter bsTx(rate);
+    std::vector<std::unique_ptr<CarrierQueue>> queues;
+    for (size_t i = 0; i < txTuning.size(); i++) {
+        queues.push_back(std::make_unique<CarrierQueue>(modemcellular::CarrierRadio::kBlock));
+    }
+    CarrierBatch tx;
+    bsRx.setCarriers(rxTuning);
+    bsTx.setCarriers(txTuning);
+    bsRx.setBatchHandler([&](const CarrierBatch& rx) {
+        bs.process(rx, tx);
+        for (size_t i = 0; i < queues.size(); i++) {
+            queues[i]->write(tx.carrier(i), static_cast<size_t>(tx.length));
+        }
+    });
+    bsTx.setAudioSource([&](size_t index, float* audio, size_t count) {
+        queues[index]->read(audio, count, 1.0);
+    });
+
+    // the phone on channel 5
+    modemcellular::CarrierTransmitter phoneTx(rate);
+    modemcellular::CarrierReceiver phoneRx(rate);
+    phoneTx.setCarriers({rxTuning[1]});
+    phoneRx.setCarriers({txTuning[1]});
+    phoneTx.setAudioSource([&](size_t, float* audio, size_t count) {
+        phone.transmit(audio, static_cast<int>(count));
+    });
+    phoneRx.setBatchHandler([&](const CarrierBatch& b) {
+        phone.listen(b.carrier(0), b.length);
+    });
+
+    std::vector<std::complex<float>> up(9600), down(9600);
+    bool finished = false;
+    int blocks = 0;
+    for (; blocks < 1000 && !finished; blocks++)      // up to 10 s
+    {
+        phoneTx.pull(up.data(), up.size());
+        bsRx.feed(up.data(), up.size());
+        bsTx.pull(down.data(), down.size());
+        phoneRx.feed(down.data(), down.size());
+        finished = phone.done() && tc.state() == NmtChannel::State::Idle;
+    }
+
+    std::printf("radio path: roaming done after %.2f s, levels %.2f at the base station, %.2f at the phone\n",
+        blocks * 0.01, baseLevel, phone.level());
+    CHECK(finished);
+    CHECK(registrations == 1);
+    CHECK(system.isRegistered('1', "123456"));
+    CHECK(baseLevel > 0.85 && baseLevel < 1.15);
+    CHECK(phone.level() > 0.85 && phone.level() < 1.15);
+    for (const std::unique_ptr<CarrierQueue>& q : queues) {
+        CHECK(q->underruns() == 0);
+    }
 }
 
 static void testOverTheAir()
@@ -327,6 +470,7 @@ int main()
     testPlanErrors();
     testBatch();
     testOverTheAir();
+    testRadioPath();
 
     if (g_failures == 0) {
         std::printf("all base station tests passed\n");

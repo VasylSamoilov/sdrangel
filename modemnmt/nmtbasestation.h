@@ -133,6 +133,8 @@ public:
 
     // the network itself, null while it is not running
     NmtSystem* system() { return m_system.get(); }
+    // the clock of the network: the samples of its receive stream
+    const modemcellular::SampleClock& clock() const { return m_clock; }
 
 private:
     double speechDeviation(size_t onAirIndex) const;

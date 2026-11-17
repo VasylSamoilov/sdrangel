@@ -4,6 +4,7 @@ set(modemcellular_SOURCES
     callrouter.cpp
     carrierqueue.cpp
     carrierradio.cpp
+    carrierwire.cpp
     cellularsystem.cpp
     clock.cpp
     compandor.cpp
@@ -22,6 +23,7 @@ set(modemcellular_HEADERS
     carrierbatch.h
     carrierqueue.h
     carrierradio.h
+    carrierwire.h
     cellularsystem.h
     clock.h
     compandor.h

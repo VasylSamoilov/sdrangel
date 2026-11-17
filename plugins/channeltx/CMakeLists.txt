@@ -32,6 +32,10 @@ if (ENABLE_CHANNELTX_MODNFM)
     add_subdirectory(modnfm)
 endif()
 
+if (ENABLE_CHANNELTX_CELLULARTX)
+    add_subdirectory(cellulartx)
+endif()
+
 if (ENABLE_CHANNELTX_MODSSB)
     add_subdirectory(modssb)
 endif()
