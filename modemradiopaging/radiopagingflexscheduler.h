@@ -59,8 +59,9 @@ public:
 
     //! Message number sequence of each capcode (STD-43A 3.10.1.3 N, 8.4): the first number of a capcode is 0,
     //! the next ones ascend by one up to the largest number of the network, then 0 again. The least recently
-    //! used capcode is dropped when the table is full
-    class NumberCounter
+    //! used capcode is dropped when the table is full. Exported on its own: the export of the class does not
+    //! cover its nested classes
+    class MODEMRADIOPAGING_API NumberCounter
     {
     public:
         explicit NumberCounter(size_t maxEntries = m_numberCounterMax) : m_maxEntries(maxEntries) {}

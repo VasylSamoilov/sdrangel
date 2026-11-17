@@ -76,7 +76,8 @@ public:
         bool operator!=(const Key& other) const { return !(*this == other); }
     };
 
-    struct Codepage
+    // Exported on its own: the export of the class does not cover its nested classes
+    struct MODEMRADIOPAGING_API Codepage
     {
         const char *m_protocol;                 //!< pocsag, flex or gsc
         const char *m_vendor;
