@@ -24,6 +24,7 @@
 
 #include "util/simpleserializer.h"
 #include "settings/serializable.h"
+#include "audio/audiodevicemanager.h"
 #include "messagecentersettings.h"
 
 MessageCenterSettings::MessageCenterSettings() :
@@ -51,6 +52,7 @@ void MessageCenterSettings::resetToDefaults()
     m_geometryBytes.clear();
     m_hidden = false;
     m_logColumns.clear();
+    m_voicePlaybackDeviceName = AudioDeviceManager::m_defaultDeviceName;
 }
 
 QByteArray MessageCenterSettings::routesToJson(const std::vector<MessageCenterEngine::Route>& routes)
@@ -153,6 +155,7 @@ QByteArray MessageCenterSettings::serialize() const
     s.writeU32(16, m_reverseAPIFeatureSetIndex);
     s.writeU32(17, m_reverseAPIFeatureIndex);
     s.writeBlob(18, m_logColumns);
+    s.writeString(19, m_voicePlaybackDeviceName);
 
     return s.final();
 }
@@ -211,6 +214,7 @@ bool MessageCenterSettings::deserialize(const QByteArray& data)
         d.readU32(17, &utmp, 0);
         m_reverseAPIFeatureIndex = utmp > 99 ? 99 : utmp;
         d.readBlob(18, &m_logColumns);
+        d.readString(19, &m_voicePlaybackDeviceName, AudioDeviceManager::m_defaultDeviceName);
         return true;
     }
 
@@ -261,6 +265,9 @@ void MessageCenterSettings::applySettings(const QStringList& settingsKeys, const
     }
     if (settingsKeys.contains("logColumns")) {
         m_logColumns = settings.m_logColumns;
+    }
+    if (settingsKeys.contains("voicePlaybackDeviceName")) {
+        m_voicePlaybackDeviceName = settings.m_voicePlaybackDeviceName;
     }
     if (settingsKeys.contains("workspaceIndex")) {
         m_workspaceIndex = settings.m_workspaceIndex;

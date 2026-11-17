@@ -19,20 +19,23 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QDateTime>
-#include <QDesktopServices>
 #include <QFileInfo>
 #include <QHeaderView>
 #include <QJsonDocument>
 #include <QMap>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QScrollBar>
 #include <QStyledItemDelegate>
 #include <QTextDocument>
-#include <QUrl>
 
 #include <algorithm>
 
+#include "dsp/dspengine.h"
+#include "gui/audioselectdialog.h"
+#include "gui/dialogpositioner.h"
+#include "pagingvoiceplayer.h"
 #include "pagingmessagetable.h"
 
 namespace {
@@ -41,6 +44,7 @@ namespace {
 const int htmlRole = Qt::UserRole + 1;
 const int voiceFileRole = Qt::UserRole + 2;     // On the time item of a voice message: the file recorded
 const int jsonRole = Qt::UserRole + 3;          // On the time item: the record as JSON
+const int tipRole = Qt::UserRole + 4;           // On the message item: its tool tip without the voice file
 
 class HtmlDelegate : public QStyledItemDelegate
 {
@@ -62,13 +66,15 @@ public:
         opt.text.clear();
         opt.widget->style()->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
 
+        // The text beside the icon, if the cell has one
+        QRect textRect = opt.widget->style()->subElementRect(QStyle::SE_ItemViewItemText, &opt, opt.widget);
         QTextDocument doc;
         doc.setDocumentMargin(1);
         doc.setDefaultFont(opt.font);
         doc.setHtml(html);
         painter->save();
-        painter->translate(opt.rect.left(), opt.rect.top() + (opt.rect.height() - doc.size().height()) / 2);
-        doc.drawContents(painter, QRectF(0, 0, opt.rect.width(), opt.rect.height()));
+        painter->translate(textRect.left(), opt.rect.top() + (opt.rect.height() - doc.size().height()) / 2);
+        doc.drawContents(painter, QRectF(0, 0, textRect.width(), opt.rect.height()));
         painter->restore();
     }
 
@@ -140,7 +146,8 @@ const char *headers[PagingMessageTable::ColumnCount] = {
 
 PagingMessageTable::PagingMessageTable(QWidget *parent) :
     QTableWidget(0, ColumnCount, parent),
-    m_columnMenu(new QMenu(this))
+    m_columnMenu(new QMenu(this)),
+    m_player(new PagingVoicePlayer(this))
 {
     QStringList labels;
 
@@ -163,7 +170,7 @@ PagingMessageTable::PagingMessageTable(QWidget *parent) :
     connect(horizontalHeader(), &QHeaderView::sectionMoved, this, &PagingMessageTable::columnsChanged);
     connect(horizontalHeader(), &QHeaderView::sectionResized, this, &PagingMessageTable::columnsChanged);
     connect(this, &QWidget::customContextMenuRequested, this, &PagingMessageTable::showRowMenu);
-    connect(this, &QTableWidget::cellDoubleClicked, this, [this](int row, int) { playVoice(row); });
+    connect(m_player, &PagingVoicePlayer::stateChanged, this, &PagingMessageTable::displayPlayer);
 
     m_defaultColumns = {ColTime, ColProtocol, ColAddress, ColType, ColMessage, ColInfo};
     setDefaultColumns(m_defaultColumns);
@@ -254,7 +261,7 @@ QString PagingMessageTable::recordText(const MessageRecord& record)
     {
         QString text = QString("voice ended: %1 after %2 s").arg(d.value("voice_end").toString())
             .arg(d.value("voice_seconds").toDouble(), 0, 'f', 1);
-        return d.value("voice_file").toString().isEmpty() ? text : text + " (double-click to play)";
+        return text;
     }
     if (record.m_text.isEmpty() && (record.m_msgType == "voice"))
     {
@@ -490,11 +497,8 @@ void PagingMessageTable::fillRow(int row, const MessageRecord& record, const QSt
         messageHtml += QString(" <i style=\"color:#888888\">[%1: %2]</i>").arg(altType.toHtmlEscaped(), altText.toHtmlEscaped());
         messageTip += QString("\n%1: %2").arg(altType, altText);
     }
-    if (!d.value("voice_file").toString().isEmpty()) {
-        messageTip += "\n" + d.value("voice_file").toString();
-    }
-
-    cell(ColMessage, text, messageHtml, messageTip);
+    cell(ColMessage, text, messageHtml, messageTip)->setData(tipRole, messageTip);
+    setVoiceCell(row);
 
     // Fragment: the n-th fragment received, or the reassembled message of n fragments
     if (d.value("is_fragment").toBool())
@@ -566,8 +570,10 @@ void PagingMessageTable::addRecord(const MessageRecord& record, const QString& s
 
             timeItem->setData(voiceFileRole, file);
             messageItem->setText(text);
-            messageItem->setToolTip(file.isEmpty() ? text : QString("%1\n%2").arg(text).arg(file));
+            messageItem->setToolTip(text);
+            messageItem->setData(tipRole, text);
             messageItem->setData(htmlRole, QVariant());
+            setVoiceCell(row);
             return;
         }
 
@@ -590,8 +596,58 @@ void PagingMessageTable::addRecord(const MessageRecord& record, const QString& s
     }
 }
 
-// A voice message with a file is played with the player of the system
-void PagingMessageTable::playVoice(int row)
+void PagingMessageTable::setAudioDevice(const QString& deviceName)
+{
+    m_player->setAudioDevice(deviceName);
+}
+
+const QString& PagingMessageTable::audioDevice() const
+{
+    return m_player->audioDevice();
+}
+
+// The message cell of a voice message with a file: a play icon (stop while it is played), and the file in the
+// tool tip: its path, length and format
+void PagingMessageTable::setVoiceCell(int row)
+{
+    QTableWidgetItem *timeItem = item(row, ColTime);
+    QTableWidgetItem *messageItem = item(row, ColMessage);
+
+    if (!timeItem || !messageItem) {
+        return;
+    }
+
+    QString file = timeItem->data(voiceFileRole).toString();
+    QString tip = messageItem->data(tipRole).toString();
+
+    if (file.isEmpty())
+    {
+        messageItem->setIcon(QIcon());
+        messageItem->setToolTip(tip);
+        return;
+    }
+
+    bool playing = m_player->isPlaying() && (m_player->file() == file);
+    messageItem->setIcon(QIcon(playing ? ":/stop.png" : ":/play.png"));
+    messageItem->setToolTip(QString("%1\n\n%2\n\n%3").arg(tip, PagingVoicePlayer::fileInfo(file),
+        playing ? tr("Click the icon to stop. Right click: the audio output")
+                : tr("Click the icon to play. Right click: the audio output")));
+}
+
+// The icons of the voice files: the one played has the stop icon
+void PagingMessageTable::displayPlayer()
+{
+    for (int row = 0; row < rowCount(); row++)
+    {
+        QTableWidgetItem *timeItem = item(row, ColTime);
+
+        if (timeItem && !timeItem->data(voiceFileRole).toString().isEmpty()) {
+            setVoiceCell(row);
+        }
+    }
+}
+
+void PagingMessageTable::toggleVoice(int row)
 {
     QTableWidgetItem *timeItem = item(row, ColTime);
     QString file = timeItem ? timeItem->data(voiceFileRole).toString() : QString();
@@ -600,13 +656,57 @@ void PagingMessageTable::playVoice(int row)
         return;
     }
 
-    if (!QFileInfo::exists(file))
+    if (m_player->isPlaying() && (m_player->file() == file))
     {
-        QMessageBox::information(this, "Voice message", QString("%1\nis not there any more (deleted with the old voice files).").arg(file));
+        m_player->stop();
         return;
     }
 
-    QDesktopServices::openUrl(QUrl::fromLocalFile(file));
+    QString error;
+
+    if (!m_player->play(file, error)) {
+        QMessageBox::information(this, tr("Voice message"), error);
+    }
+}
+
+// A click on the icon of a voice message plays or stops it; elsewhere the click selects as usual
+void PagingMessageTable::mousePressEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton)
+    {
+        QModelIndex index = indexAt(event->pos());
+
+        if (index.isValid() && (index.column() == ColMessage))
+        {
+            QTableWidgetItem *messageItem = item(index.row(), ColMessage);
+            QRect rect = visualRect(index);
+            int iconWidth = iconSize().isValid() ? iconSize().width() : style()->pixelMetric(QStyle::PM_SmallIconSize);
+
+            if (messageItem && !messageItem->icon().isNull() && (event->pos().x() < rect.left() + iconWidth + 6))
+            {
+                toggleVoice(index.row());
+                event->accept();
+                return;
+            }
+        }
+    }
+
+    QTableWidget::mousePressEvent(event);
+}
+
+// The audio output of the voice files, in the dialog of the audio outputs of SDRangel
+void PagingMessageTable::selectAudioDevice(const QPoint& pos)
+{
+    AudioSelectDialog audioSelect(DSPEngine::instance()->getAudioDeviceManager(), m_player->audioDevice());
+    audioSelect.move(pos);
+    new DialogPositioner(&audioSelect, false);
+    audioSelect.exec();
+
+    if (audioSelect.m_selected && (audioSelect.m_audioDeviceName != m_player->audioDevice()))
+    {
+        m_player->setAudioDevice(audioSelect.m_audioDeviceName);
+        emit audioDeviceChanged(audioSelect.m_audioDeviceName);
+    }
 }
 
 // Right click in the header: the columns to show
@@ -659,5 +759,19 @@ void PagingMessageTable::showRowMenu(const QPoint& pos)
         QApplication::clipboard()->setText(item(row, ColTime)->data(jsonRole).toString());
     });
 
-    menu.exec(viewport()->mapToGlobal(pos));
+    // The voice file of the row, and the audio output of the voice files
+    QString file = item(row, ColTime) ? item(row, ColTime)->data(voiceFileRole).toString() : QString();
+    menu.addSeparator();
+
+    if (!file.isEmpty())
+    {
+        bool playing = m_player->isPlaying() && (m_player->file() == file);
+        connect(menu.addAction(QIcon(playing ? ":/stop.png" : ":/play.png"), playing ? tr("Stop voice") : tr("Play voice")),
+            &QAction::triggered, this, [this, row]() { toggleVoice(row); });
+    }
+
+    QPoint global = viewport()->mapToGlobal(pos);
+    connect(menu.addAction(tr("Audio output...")), &QAction::triggered, this, [this, global]() { selectAudioDevice(global); });
+
+    menu.exec(global);
 }

@@ -19,9 +19,13 @@
 // QT_QPA_PLATFORM=offscreen. Prints one line per check and returns non-zero if any check fails.
 
 #include <QApplication>
+#include <QTemporaryDir>
 #include <cstdio>
+#include <vector>
 
+#include "dsp/wavfilerecord.h"
 #include "gui/pagingmessagetable.h"
+#include "gui/pagingvoiceplayer.h"
 
 namespace {
 
@@ -98,6 +102,26 @@ int main(int argc, char **argv)
     table.addRecord(end);
     check((table.rowCount() == 3) && cell(table, 2, PagingMessageTable::ColMessage).startsWith("voice ended: timeout after 4.5 s"),
         "the end of a voice message updates its row");
+    check(table.item(2, PagingMessageTable::ColMessage)->icon().isNull(), "no voice file: no play icon");
+
+    // The voice file: a play icon in the message cell, the file in its tool tip
+    QTemporaryDir dir;
+    WavFileRecord recorder(8000);
+    recorder.setMono(true);
+    recorder.setFileName(dir.path() + "/voice");
+    recorder.startRecording();
+    std::vector<qint16> samples(8000, 1000);
+    recorder.writeMono(samples.data(), (int) samples.size());
+    recorder.stopRecording();
+    QString file = recorder.getCurrentFileName();
+    end.m_protocolData.insert("voice_file", file);
+    table.addRecord(end);
+    QTableWidgetItem *message = table.item(2, PagingMessageTable::ColMessage);
+    QString voiceTip = message->toolTip();
+    check(!message->icon().isNull() && voiceTip.contains(file) && voiceTip.contains("1.0 s, 8000 Hz, 1 channel, 16 bit")
+        && voiceTip.contains("Click the icon to play"), qPrintable("a voice file: play icon, path, length and format in the tool tip: " + voiceTip));
+    check(PagingVoicePlayer::fileInfo(dir.path() + "/none.wav").contains("not there any more"), "a file that is not there");
+    check(!cell(table, 2, PagingMessageTable::ColMessage).contains("double-click"), "no double-click hint");
 
     // Chips: the fields of a transmitted message are the ones it has
     MessageRecord flexTx = record("f", "flex", "0001234567", "X");

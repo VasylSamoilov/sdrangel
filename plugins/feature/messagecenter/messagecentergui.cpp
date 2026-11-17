@@ -309,6 +309,10 @@ void MessageCenterGUI::buildLog(QWidget *container)
         m_settings.m_logColumns = m_logTable->columns();
         applySettings(QStringList("logColumns"));
     });
+    connect(m_logTable, &PagingMessageTable::audioDeviceChanged, this, [this](const QString& deviceName) {
+        m_settings.m_voicePlaybackDeviceName = deviceName;
+        applySettings(QStringList("voicePlaybackDeviceName"));
+    });
 }
 
 void MessageCenterGUI::buildEndpoints(QWidget *container)
@@ -518,6 +522,7 @@ void MessageCenterGUI::displaySettings()
     if (!m_logTable->setColumns(m_settings.m_logColumns)) {
         m_logTable->sizeColumns();
     }
+    m_logTable->setAudioDevice(m_settings.m_voicePlaybackDeviceName);
     getRollupContents()->restoreState(m_rollupState);
     getRollupContents()->arrangeRollups();
 }

@@ -27,13 +27,18 @@
 #include "export.h"
 #include "util/messagerecord.h"
 
+class QMouseEvent;
+class PagingVoicePlayer;
+
 // The messages of the paging channels and of the message center (POCSAG, FLEX, GSC) as a table: the same
 // columns and the same chips for the received and the transmitted messages.
 //
 // A record is a row, found by its id: the record that completes a message (the end of a voice message, the
 // state of a transmitted message, a transmitted copy) updates its row. Each user shows the columns it needs;
 // the header menu shows and hides them, and columns() and setColumns() keep the order, the sizes and what is
-// hidden. Duplicates are grey, without chips. Double-clicking the row of a voice message plays its file.
+// hidden. Duplicates are grey, without chips. A voice message with a file has a play icon in its message cell:
+// a click plays the file on the audio output of the table (PagingVoicePlayer), or stops it; the right click menu
+// has the audio output.
 class SDRGUI_API PagingMessageTable : public QTableWidget
 {
     Q_OBJECT
@@ -76,21 +81,34 @@ public:
     static void recordInfo(const MessageRecord& record, QString& plain, QString& html, QString& tip);
     //!< The text of the row of the record
     static QString recordText(const MessageRecord& record);
+    //!< The audio output of the voice files, by its name in AudioDeviceManager
+    void setAudioDevice(const QString& deviceName);
+    const QString& audioDevice() const;
+    //!< Plays the voice file of a row, or stops it if it is being played
+    void toggleVoice(int row);
 
 signals:
     //!< The user moved, resized, showed or hid a column
     void columnsChanged();
+    //!< The user chose another audio output for the voice files
+    void audioDeviceChanged(const QString& deviceName);
+
+protected:
+    void mousePressEvent(QMouseEvent *event) override;
 
 private:
     int m_maxRows = 1000;
     QList<Column> m_defaultColumns;
     QMenu *m_columnMenu;
+    PagingVoicePlayer *m_player;
 
     int findRow(const QString& id) const;
     void fillRow(int row, const MessageRecord& record, const QString& state);
     void showColumnMenu(const QPoint& pos);
     void showRowMenu(const QPoint& pos);
-    void playVoice(int row);
+    void setVoiceCell(int row);
+    void displayPlayer();
+    void selectAudioDevice(const QPoint& pos);
 };
 
 #endif // SDRGUI_GUI_PAGINGMESSAGETABLE_H_

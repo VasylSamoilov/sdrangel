@@ -354,6 +354,7 @@ void RadioPagingDemodGUI::audioSelect(const QPoint& p)
     if (audioSelect.m_selected)
     {
         m_settings.m_audioDeviceName = audioSelect.m_audioDeviceName;
+        ui->messages->setAudioDevice(m_settings.m_audioDeviceName);
         applySettings(QStringList("audioDeviceName"));
     }
 }
@@ -477,6 +478,11 @@ RadioPagingDemodGUI::RadioPagingDemodGUI(PluginAPI* pluginAPI, DeviceUISet *devi
         m_settings.m_messageColumns = ui->messages->columns();
         applySettings(QStringList("messageColumns"));
     });
+    // The voice files are played on the output of the voice audio
+    connect(ui->messages, &PagingMessageTable::audioDeviceChanged, this, [this](const QString& deviceName) {
+        m_settings.m_audioDeviceName = deviceName;
+        applySettings(QStringList("audioDeviceName"));
+    });
 
     CRightClickEnabler *audioRightClickEnabler = new CRightClickEnabler(ui->gscAudio);
     connect(audioRightClickEnabler, SIGNAL(rightClick(const QPoint &)), this, SLOT(audioSelect(const QPoint &)));
@@ -547,6 +553,7 @@ void RadioPagingDemodGUI::displaySettings()
         ui->messages->sizeColumns();
     }
 
+    ui->messages->setAudioDevice(m_settings.m_audioDeviceName);
     updateIndexLabel();
 
     getRollupContents()->restoreState(m_rollupState);

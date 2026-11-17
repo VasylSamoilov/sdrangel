@@ -57,6 +57,7 @@ struct MessageCenterSettings
     QByteArray m_geometryBytes;
     bool m_hidden;
     QByteArray m_logColumns;                //!< The columns of the table of the log: order, sizes, hidden
+    QString m_voicePlaybackDeviceName;      //!< Audio output of the voice files played from the log
 
     MessageCenterSettings();
     void resetToDefaults();

@@ -105,6 +105,7 @@ void RadioPagingModSettings::resetToDefaults()
     m_workspaceIndex = 0;
     m_hidden = false;
     m_messageColumns.clear();
+    m_voicePlaybackDeviceName = AudioDeviceManager::m_defaultDeviceName;
 }
 
 void RadioPagingModSettings::validate()
@@ -262,6 +263,7 @@ QByteArray RadioPagingModSettings::serialize() const
     s.writeBool(59, m_flexNumbering);
     s.writeS32(60, m_flexMaxMessageNumber);
     s.writeBlob(61, m_messageColumns);
+    s.writeString(62, m_voicePlaybackDeviceName);
 
     return s.final();
 }
@@ -367,6 +369,7 @@ bool RadioPagingModSettings::deserialize(const QByteArray& data)
         d.readBool(59, &m_flexNumbering, true);
         d.readS32(60, &m_flexMaxMessageNumber, 63);
         d.readBlob(61, &m_messageColumns);
+        d.readString(62, &m_voicePlaybackDeviceName, AudioDeviceManager::m_defaultDeviceName);
         m_gscVoiceKeepDays = std::max(0, std::min(3650, m_gscVoiceKeepDays));
         m_gscVoiceKeepMin = std::max(0, std::min(100000, m_gscVoiceKeepMin));
 
@@ -541,6 +544,9 @@ void RadioPagingModSettings::applySettings(const QStringList& settingsKeys, cons
     }
     if (settingsKeys.contains("messageColumns")) {
         m_messageColumns = settings.m_messageColumns;
+    }
+    if (settingsKeys.contains("voicePlaybackDeviceName")) {
+        m_voicePlaybackDeviceName = settings.m_voicePlaybackDeviceName;
     }
 }
 

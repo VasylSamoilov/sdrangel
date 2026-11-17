@@ -1009,6 +1009,10 @@ RadioPagingModGUI::RadioPagingModGUI(PluginAPI* pluginAPI, DeviceUISet *deviceUI
         m_settings.m_messageColumns = ui->txLog->columns();
         applySettings(QStringList("messageColumns"));
     });
+    connect(ui->txLog, &PagingMessageTable::audioDeviceChanged, this, [this](const QString& deviceName) {
+        m_settings.m_voicePlaybackDeviceName = deviceName;
+        applySettings(QStringList("voicePlaybackDeviceName"));
+    });
 
     displayProtocolAvailability();
     fillTimeZones();
@@ -1312,6 +1316,7 @@ void RadioPagingModGUI::displaySettings()
         ui->txLog->sizeColumns();
     }
 
+    ui->txLog->setAudioDevice(m_settings.m_voicePlaybackDeviceName);
     getRollupContents()->restoreState(m_rollupState);
     updateAbsoluteCenterFrequency();
     blockApplySettings(false);

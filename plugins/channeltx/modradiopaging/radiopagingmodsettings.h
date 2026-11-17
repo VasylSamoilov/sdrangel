@@ -103,6 +103,7 @@ struct RadioPagingModSettings
     QByteArray m_geometryBytes;
     bool m_hidden;
     QByteArray m_messageColumns;            //!< The columns of the log of messages: order, sizes, hidden
+    QString m_voicePlaybackDeviceName;      //!< Audio output of the voice files played from the log
 
     RadioPagingModSettings();
     void resetToDefaults();
