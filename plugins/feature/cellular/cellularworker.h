@@ -23,6 +23,7 @@
 #include <vector>
 
 #include <QObject>
+#include <QString>
 
 #include "util/message.h"
 #include "util/messagequeue.h"
@@ -35,84 +36,103 @@
 
 class ChannelAPI;
 
-// The network in the thread of the worker. It asks both radios for their spans; when both are
-// known it binds the carriers to them and gives each radio its carriers. Then every batch of the
-// receiver runs the network one block on: the received audio in, the clock on, the timers, the
-// calls (router and bridge), the audio for the transmitter out. All state of the network lives
-// here and is touched by this thread only.
+// The networks in the thread of the worker. Each network is one base station with its own
+// subscribers, calls and event log, on one receiving and one transmitting radio (a Cellular Rx and
+// a Cellular Tx channel); networks may share radios. The worker asks each radio for its span; when
+// both radios of a network are known it binds the carriers of the network to them, and each radio
+// is given the carriers of all networks on it. Every batch of a receiver runs the networks on it
+// one block on (the received audio in, the clock on, the timers, the calls, the audio out), and
+// the audio for each transmitter goes to it as one batch. All state of the networks lives here and
+// is touched by this thread only.
 class CellularWorker : public QObject
 {
     Q_OBJECT
 public:
-    class MsgStart : public Message {
+    class MsgAddNetwork : public Message {
         MESSAGE_CLASS_DECLARATION
 
     public:
+        int m_id = 0;
+        QString m_name;
         modemnmt::NmtNetworkConfig m_config;
-        ChannelAPI *m_rxChannel = nullptr;
-        ChannelAPI *m_txChannel = nullptr;
-        MessageQueue *m_rxPipe = nullptr;       // what the receiver sends us
-        MessageQueue *m_txPipe = nullptr;       // what the transmitter sends us
-        MessageQueue *m_reports = nullptr;      // the input queue of the feature
-        uint32_t m_lead = 4800;                 // samples
         int m_fallback = 0;
-        static MsgStart* create() { return new MsgStart(); }
+        ChannelAPI *m_rxChannel = nullptr;
+        MessageQueue *m_rxPipe = nullptr;       // what the receiver sends us
+        ChannelAPI *m_txChannel = nullptr;
+        MessageQueue *m_txPipe = nullptr;       // what the transmitter sends us
+        static MsgAddNetwork* create() { return new MsgAddNetwork(); }
 
     private:
-        MsgStart() : Message() { }
+        MsgAddNetwork() : Message() { }
     };
 
-    CellularWorker();
+    // reports: the input queue of the feature; lead: samples of lead of the transmitters
+    CellularWorker(MessageQueue *reports, uint32_t lead);
     ~CellularWorker() override;
     MessageQueue *getInputMessageQueue() { return &m_inputMessageQueue; }
 
 public slots:
-    // stops the network and takes the carriers off both radios (blocking call from the feature)
-    void stopWork();
+    // blocking calls from the feature: after them the worker does not use the radios of the
+    // network (of all networks) any more
+    void removeNetwork(int id);
+    void removeAll();
 
 private slots:
     void handleInputMessages();
 
 private:
-    void startWork(const MsgStart& start);
-    void handlePipe(MessageQueue *queue, bool fromTx);
-    void handlePacket(const QByteArray& bytes, bool fromTx);
-    void tryBind();
-    void processBatch();
-    void reportStatus();
+    struct Radio
+    {
+        ChannelAPI *channel = nullptr;
+        MessageQueue *pipe = nullptr;
+        bool tx = false;
+        bool haveSpan = false;
+        modemcellular::WireSpan span;
+        modemcellular::WireTxStatus txStatus;
+    };
+
+    struct Network
+    {
+        int id = 0;
+        QString name;
+        modemnmt::NmtNetworkConfig config;
+        Radio *rx = nullptr;
+        Radio *tx = nullptr;
+        std::unique_ptr<modemnmt::NmtBaseStation> station;
+        std::unique_ptr<modemcellular::CellularSystem> cellular;
+        std::unique_ptr<modemnmt::NmtCellularBridge> bridge;
+        modemcellular::WireSpan boundRx;
+        modemcellular::WireSpan boundTx;
+        modemcellular::CarrierBatch txBatch;
+        std::vector<float> levels;              // per carrier on air
+        uint64_t batches = 0;
+        uint64_t gaps = 0;                      // batches of the receiver that did not arrive
+        uint64_t nextSample = 0;
+    };
+
+    void addNetwork(const MsgAddNetwork& add);
+    void remove(int id, bool retryOthers);
+    Radio *radioFor(ChannelAPI *channel, MessageQueue *pipe, bool tx);
+    void dropUnusedRadios();
+    void handlePipe(Radio *radio);
+    void handlePacket(Radio& radio, const QByteArray& bytes);
+    void tryBind(Network& network);
+    void unbind(Network& network);
+    bool running(const Network& network) const;
+    QString conflict(const Network& network) const;
+    void updateTuning(Radio& radio);
+    void processBatch(Radio& radio);
+    void reportStatus(const Network& network);
     void sendTo(ChannelAPI *channel, const std::vector<uint8_t>& wire);
-    void unbind();
-    void log(const QString& text);
+    void log(int network, const QString& text);
 
     MessageQueue m_inputMessageQueue;
-    modemnmt::NmtNetworkConfig m_config;
-    ChannelAPI *m_rxChannel;
-    ChannelAPI *m_txChannel;
-    MessageQueue *m_rxPipe;
-    MessageQueue *m_txPipe;
     MessageQueue *m_reports;
     uint32_t m_lead;
-    int m_fallback;
-    bool m_running;
-
-    modemcellular::WireSpan m_rxSpan;
-    modemcellular::WireSpan m_txSpan;
-    bool m_haveRxSpan;
-    bool m_haveTxSpan;
-    modemcellular::WireSpan m_boundRx;
-    modemcellular::WireSpan m_boundTx;
-
-    std::unique_ptr<modemnmt::NmtBaseStation> m_station;
-    std::unique_ptr<modemcellular::CellularSystem> m_cellular;
-    std::unique_ptr<modemnmt::NmtCellularBridge> m_bridge;
-
+    std::map<ChannelAPI*, std::unique_ptr<Radio>> m_radios;
+    std::vector<std::unique_ptr<Network>> m_networks;
     modemcellular::CarrierBatch m_rx;
-    modemcellular::CarrierBatch m_tx;
-    std::vector<float> m_levels;                // per carrier on air
-    modemcellular::WireTxStatus m_txStatus;
-    uint64_t m_batches;
-    uint64_t m_gaps;                            // batches of the receiver that did not arrive
-    uint64_t m_nextSample;
+    std::map<Radio*, modemcellular::CarrierBatch> m_txOut;
 };
 
 #endif // INCLUDE_FEATURE_CELLULARWORKER_H_

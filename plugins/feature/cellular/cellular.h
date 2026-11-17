@@ -18,6 +18,8 @@
 #ifndef INCLUDE_FEATURE_CELLULAR_H_
 #define INCLUDE_FEATURE_CELLULAR_H_
 
+#include <map>
+
 #include <QStringList>
 #include <QThread>
 
@@ -31,10 +33,12 @@ class ChannelAPI;
 class ObjectPipe;
 class CellularWorker;
 
-// The controller of the cellular base stations: it holds the network and all its protocol state.
-// It finds the Cellular Rx channel of the receiving device set and the Cellular Tx channel of the
-// transmitting one, takes the received batches of the receiver, runs the network on them and
-// hands the audio to send to the transmitter. The network runs in a thread of its own (the worker).
+// The controller of the cellular base stations: it holds the networks and all their protocol
+// state. For each network it finds the Cellular Rx channel of its receiving device set and the
+// Cellular Tx channel of its transmitting one; the networks run in a thread of their own (the
+// worker) on the batches of the receivers. While the controller runs, a network that is switched
+// on starts and one that is switched off stops, the others go on. A network that runs keeps the
+// settings it started with.
 class Cellular : public Feature
 {
     Q_OBJECT
@@ -63,20 +67,22 @@ public:
         explicit MsgStartStop(bool startStop) : Message(), m_startStop(startStop) { }
     };
 
-    // a line for the event log of the network
+    // a line for the event log of a network (0: the controller)
     class MsgReportLog : public Message {
         MESSAGE_CLASS_DECLARATION
 
     public:
+        int getNetwork() const { return m_network; }
         const QString& getText() const { return m_text; }
-        static MsgReportLog* create(const QString& text) { return new MsgReportLog(text); }
+        static MsgReportLog* create(int network, const QString& text) { return new MsgReportLog(network, text); }
 
     private:
+        int m_network;
         QString m_text;
-        explicit MsgReportLog(const QString& text) : Message(), m_text(text) { }
+        MsgReportLog(int network, const QString& text) : Message(), m_network(network), m_text(text) { }
     };
 
-    // the state of the network, once a second while it runs
+    // the state of a network, once a second while it runs
     class MsgReportStatus : public Message {
         MESSAGE_CLASS_DECLARATION
 
@@ -93,12 +99,14 @@ public:
             quint64 underruns = 0;
         };
 
+        int m_network;
+        bool m_stale = false;           // the network runs with other settings than the current ones
         QString m_summary;
         QList<Carrier> m_carriers;
-        static MsgReportStatus* create() { return new MsgReportStatus(); }
+        static MsgReportStatus* create(int network) { return new MsgReportStatus(network); }
 
     private:
-        MsgReportStatus() : Message() { }
+        explicit MsgReportStatus(int network) : Message(), m_network(network) { }
     };
 
     Cellular(WebAPIAdapterInterface *webAPIAdapterInterface);
@@ -119,18 +127,34 @@ public:
     static const char* const m_featureId;
 
 private:
+    struct Active
+    {
+        CellularNetworkSettings settings;       // as it started
+        ChannelAPI *rx = nullptr;
+        ChannelAPI *tx = nullptr;
+    };
+    struct Pipe
+    {
+        ObjectPipe *pipe = nullptr;
+        int users = 0;
+    };
+
     CellularSettings m_settings;
     QThread *m_thread;
     CellularWorker *m_worker;
-    ChannelAPI *m_rxChannel;
-    ChannelAPI *m_txChannel;
     bool m_running;
+    std::map<int, Active> m_active;             // the networks that run, by id
+    std::map<ChannelAPI*, Pipe> m_pipes;        // the radios in use
 
     void start();
     void stop();
+    void startNetwork(const CellularNetworkSettings& network);
+    void stopNetwork(int id);
+    void applyNetworks();
     ChannelAPI *findChannel(int deviceSetIndex, const QString& uri, QString& error) const;
-    void unregisterPipes();
-    void report(const QString& text);
+    MessageQueue *usePipe(ChannelAPI *channel);
+    void releasePipe(ChannelAPI *channel);
+    void report(int network, const QString& text);
 
 private slots:
     void handlePipeToBeDeleted(int reason, QObject *object);
