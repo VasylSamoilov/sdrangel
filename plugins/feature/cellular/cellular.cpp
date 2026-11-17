@@ -72,7 +72,11 @@ Cellular::~Cellular()
 
 bool Cellular::deserialize(const QByteArray& data)
 {
-    const bool ok = m_settings.deserialize(data);
+    bool ok;
+    {
+        QMutexLocker locker(&m_settingsMutex);
+        ok = m_settings.deserialize(data);
+    }
 
     if (m_guiMessageQueue) {
         m_guiMessageQueue->push(MsgConfigureCellular::create(m_settings));
@@ -107,17 +111,30 @@ ChannelAPI *Cellular::findChannel(int deviceSetIndex, const QString& uri, QStrin
         return nullptr;
     }
     DeviceSet *deviceSet = deviceSets[static_cast<size_t>(deviceSetIndex)];
+    const QString name = uri == kRxURI ? "Cellular Rx" : "Cellular Tx";
+    ChannelAPI *found = nullptr;
+    int count = 0;
 
+    // one channel carries all the carriers of the device: with more, which one is meant is a guess
     for (int i = 0; i < deviceSet->getNumberOfChannels(); i++)
     {
         ChannelAPI *channel = deviceSet->getChannelAt(i);
 
-        if (channel && channel->getURI() == uri) {
-            return channel;
+        if (channel && channel->getURI() == uri)
+        {
+            found = found ? found : channel;
+            count++;
         }
     }
-    error = QString("device set %1 has no %2 channel").arg(deviceSetIndex).arg(uri == kRxURI ? "Cellular Rx" : "Cellular Tx");
-    return nullptr;
+    if (count > 1)
+    {
+        error = QString("device set %1 has %2 %3 channels, it needs exactly one").arg(deviceSetIndex).arg(count).arg(name);
+        return nullptr;
+    }
+    if (!found) {
+        error = QString("device set %1 has no %2 channel").arg(deviceSetIndex).arg(name);
+    }
+    return found;
 }
 
 // the pipe of what the radio sends us, registered with its first network
@@ -329,8 +346,25 @@ bool Cellular::handleMessage(const Message& cmd)
 {
     if (MsgConfigureCellular::match(cmd))
     {
-        m_settings = static_cast<const MsgConfigureCellular&>(cmd).getSettings();
-        m_settings.setRollupState(nullptr);
+        const MsgConfigureCellular& cfg = static_cast<const MsgConfigureCellular&>(cmd);
+        {
+            QMutexLocker locker(&m_settingsMutex);
+            m_settings = cfg.getSettings();
+            m_settings.setRollupState(nullptr);
+        }
+        if (cfg.getForce() && m_running)
+        {
+            // all settings apply again: the networks that run start again
+            std::vector<int> running;
+            for (const auto& a : m_active) {
+                running.push_back(a.first);
+            }
+            for (int id : running)
+            {
+                stopNetwork(id);
+                report(id, "stopped: settings replaced");
+            }
+        }
         applyNetworks();
         return true;
     }
@@ -396,6 +430,7 @@ int Cellular::webapiSettingsGet(SWGSDRangel::SWGFeatureSettings& response, QStri
     (void) errorMessage;
     response.setCellularSettings(new SWGSDRangel::SWGCellularSettings());
     response.getCellularSettings()->init();
+    QMutexLocker locker(&m_settingsMutex);
     webapiFormatFeatureSettings(response, m_settings);
     return 200;
 }
@@ -403,13 +438,16 @@ int Cellular::webapiSettingsGet(SWGSDRangel::SWGFeatureSettings& response, QStri
 int Cellular::webapiSettingsPutPatch(bool force, const QStringList& featureSettingsKeys,
     SWGSDRangel::SWGFeatureSettings& response, QString& errorMessage)
 {
-    (void) force;
     (void) errorMessage;
-    CellularSettings settings = m_settings;
+    CellularSettings settings;
+    {
+        QMutexLocker locker(&m_settingsMutex);
+        settings = m_settings;
+    }
     webapiUpdateFeatureSettings(settings, featureSettingsKeys, response);
 
-    // the networks that are switched on start, the others stop
-    getInputMessageQueue()->push(MsgConfigureCellular::create(settings));
+    // the networks that are switched on start, the others stop; a PUT starts the running ones again
+    getInputMessageQueue()->push(MsgConfigureCellular::create(settings, force));
     if (m_guiMessageQueue) {
         m_guiMessageQueue->push(MsgConfigureCellular::create(settings));
     }

@@ -55,7 +55,7 @@ A network is refused if its carriers do not fit one receiving and one transmitti
 
 <h2>Web API</h2>
 
-Settings (`GET`, `PUT`, `PATCH` on `/sdrangel/featureset/{n}/feature/{m}/settings`) and report (`GET .../report`) are documented in the web API documentation under `CellularSettings` and `CellularReport`. A `PATCH` with a `networks` list changes the networks that it names by `id` and starts or stops them as `enabled` says; fields that are not given keep their value.
+Settings (`GET`, `PUT`, `PATCH` on `/sdrangel/featureset/{n}/feature/{m}/settings`) and report (`GET .../report`) are documented in the web API documentation under `CellularSettings` and `CellularReport`. A `PATCH` with a `networks` list changes the networks that it names by `id` and starts or stops them as `enabled` says; fields that are not given keep their value. A `PUT` does the same and also starts the networks that run again, with the new settings.
 
 <h2>Limits</h2>
 

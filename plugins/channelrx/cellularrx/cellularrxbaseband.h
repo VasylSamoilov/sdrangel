@@ -69,6 +69,7 @@ private slots:
 private:
     void sendBatch(const modemcellular::CarrierBatch& batch);
     void makeReceiver();
+    void publishStatus();
 
     ChannelAPI *m_channel;
     SampleSinkFifo m_sampleFifo;
@@ -80,6 +81,10 @@ private:
     uint64_t m_batches;
     bool m_running;
     mutable QMutex m_mutex;
+    // what status() returns: published under the lock above, read under its own lock, so that
+    // the GUI does not wait for the demodulation of a whole FIFO
+    Status m_status;
+    mutable QMutex m_statusMutex;
 };
 
 #endif // INCLUDE_CELLULARRXBASEBAND_H

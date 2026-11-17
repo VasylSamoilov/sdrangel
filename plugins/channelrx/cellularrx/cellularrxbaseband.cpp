@@ -100,32 +100,40 @@ void CellularRxBaseband::setCarriers(const std::vector<modemcellular::CarrierTun
     if (m_receiver) {
         m_receiver->setCarriers(carriers);
     }
+    publishStatus();
 }
 
 // under the lock
 void CellularRxBaseband::makeReceiver()
 {
     m_receiver.reset();
-    if (!modemcellular::CarrierRadio::rateSupported(m_sampleRate)) {
-        return;
+    if (modemcellular::CarrierRadio::rateSupported(m_sampleRate))
+    {
+        m_receiver = std::make_unique<modemcellular::CarrierReceiver>(m_sampleRate);
+        m_receiver->setCarriers(m_carriers);
+        m_receiver->setBatchHandler([this](const modemcellular::CarrierBatch& batch) { sendBatch(batch); });
     }
-    m_receiver = std::make_unique<modemcellular::CarrierReceiver>(m_sampleRate);
-    m_receiver->setCarriers(m_carriers);
-    m_receiver->setBatchHandler([this](const modemcellular::CarrierBatch& batch) { sendBatch(batch); });
+    publishStatus();
+}
+
+// under the lock
+void CellularRxBaseband::publishStatus()
+{
+    QMutexLocker statusLocker(&m_statusMutex);
+
+    m_status.sampleRate = m_sampleRate;
+    m_status.supported = modemcellular::CarrierRadio::rateSupported(m_sampleRate);
+    m_status.samples = m_receiver ? m_receiver->samples() : 0;
+    m_status.batches = m_batches;
+    m_status.carriers = m_carriers;
+    m_status.levels = m_levels;
 }
 
 CellularRxBaseband::Status CellularRxBaseband::status() const
 {
-    QMutexLocker mutexLocker(&m_mutex);
-    Status s;
+    QMutexLocker statusLocker(&m_statusMutex);
 
-    s.sampleRate = m_sampleRate;
-    s.supported = modemcellular::CarrierRadio::rateSupported(m_sampleRate);
-    s.samples = m_receiver ? m_receiver->samples() : 0;
-    s.batches = m_batches;
-    s.carriers = m_carriers;
-    s.levels = m_levels;
-    return s;
+    return m_status;
 }
 
 // under the lock, in the thread of the baseband
@@ -135,6 +143,7 @@ void CellularRxBaseband::sendBatch(const modemcellular::CarrierBatch& batch)
     if (batch.levels.size() == m_levels.size()) {
         m_levels = batch.levels;
     }
+    publishStatus();
 
     QList<ObjectPipe*> pipes;
     MainCore::instance()->getMessagePipes().getMessagePipes(m_channel, "cellular", pipes);
