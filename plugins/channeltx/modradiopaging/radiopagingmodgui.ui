@@ -1027,7 +1027,7 @@
     <item>
      <widget class="PagingMessageTable" name="txLog">
       <property name="toolTip">
-       <string>The last messages transmitted: queued, sent or dropped. Double-click a voice message to play the voice recorded.&#10;Right click the header to choose the columns</string>
+       <string>The last messages transmitted: queued, sent or dropped. Click the icon of a voice message to play the voice recorded.&#10;Double-click a message for all its fields. Right click the header to choose the columns</string>
       </property>
      </widget>
     </item>

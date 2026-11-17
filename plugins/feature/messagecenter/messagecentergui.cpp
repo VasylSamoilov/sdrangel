@@ -320,9 +320,9 @@ void MessageCenterGUI::buildLog(QWidget *container)
     m_logTable->setMinimumHeight(220);
     m_logTable->setMaxRows(m_maxLogRows);
     m_logTable->setDefaultColumns({PagingMessageTable::ColTime, PagingMessageTable::ColDirection, PagingMessageTable::ColChannel,
-        PagingMessageTable::ColProtocol, PagingMessageTable::ColAddress, PagingMessageTable::ColType, PagingMessageTable::ColMessage,
-        PagingMessageTable::ColInfo});
-    m_logTable->setToolTip("The messages the routes put in the log. Double-click a voice message to play it.\nRight click the header to choose the columns");
+        PagingMessageTable::ColProtocol, PagingMessageTable::ColRate, PagingMessageTable::ColPolarity, PagingMessageTable::ColAddress,
+        PagingMessageTable::ColType, PagingMessageTable::ColMessage, PagingMessageTable::ColInfo});
+    m_logTable->setToolTip("The messages the routes put in the log. Click the icon of a voice message to play it.\nDouble-click a message for all its fields. Right click the header to choose the columns");
     layout->addWidget(m_logFilter);
     layout->addWidget(m_logTable);
 

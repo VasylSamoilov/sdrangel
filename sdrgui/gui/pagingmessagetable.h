@@ -86,6 +86,8 @@ public:
     const QString& audioDevice() const;
     //!< Plays the voice file of a row, or stops it if it is being played
     void toggleVoice(int row);
+    //!< A window with every field of the record of a row: the common fields, protocolData and the raw payload
+    void showDetails(int row);
 
 signals:
     //!< The user moved, resized, showed or hid a column

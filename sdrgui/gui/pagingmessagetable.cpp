@@ -20,8 +20,11 @@
 #include <QClipboard>
 #include <QDateTime>
 #include <QDebug>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFileInfo>
 #include <QHeaderView>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMap>
@@ -29,9 +32,12 @@
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPushButton>
 #include <QScrollBar>
 #include <QStyledItemDelegate>
 #include <QTextDocument>
+#include <QTreeWidget>
+#include <QVBoxLayout>
 
 #include <algorithm>
 
@@ -175,6 +181,7 @@ PagingMessageTable::PagingMessageTable(QWidget *parent) :
     connect(horizontalHeader(), &QHeaderView::sectionMoved, this, &PagingMessageTable::columnsChanged);
     connect(horizontalHeader(), &QHeaderView::sectionResized, this, &PagingMessageTable::columnsChanged);
     connect(this, &QWidget::customContextMenuRequested, this, &PagingMessageTable::showRowMenu);
+    connect(this, &QTableWidget::cellDoubleClicked, this, [this](int row, int) { showDetails(row); });
     connect(m_player, &PagingVoicePlayer::stateChanged, this, &PagingMessageTable::displayPlayer);
 
     m_defaultColumns = {ColTime, ColProtocol, ColAddress, ColType, ColMessage, ColInfo};
@@ -678,6 +685,98 @@ void PagingMessageTable::toggleVoice(int row)
     }
 }
 
+namespace {
+
+// A JSON value as one line of a tree: objects and arrays as branches
+void addJsonItem(QTreeWidgetItem *parent, const QString& key, const QJsonValue& value)
+{
+    QTreeWidgetItem *item = new QTreeWidgetItem(parent, QStringList(key));
+
+    if (value.isObject())
+    {
+        const QJsonObject object = value.toObject();
+
+        for (auto it = object.begin(); it != object.end(); ++it) {
+            addJsonItem(item, it.key(), it.value());
+        }
+        item->setExpanded(true);
+    }
+    else if (value.isArray())
+    {
+        const QJsonArray array = value.toArray();
+
+        for (int i = 0; i < array.size(); i++) {
+            addJsonItem(item, QString::number(i), array.at(i));
+        }
+        item->setText(1, QString("[%1]").arg(array.size()));
+    }
+    else
+    {
+        QString text = value.isNull() ? QString("null") : value.isBool() ? QString(value.toBool() ? "true" : "false")
+            : value.isDouble() ? QString::number(value.toDouble(), 'g', 15) : value.toString();
+        item->setText(1, text);
+        item->setToolTip(1, text);
+    }
+}
+
+} // namespace
+
+// Every field of the record of the row, as stored (the JSON of the record): the common fields, protocolData
+// and the raw payload, also as bits
+void PagingMessageTable::showDetails(int row)
+{
+    QTableWidgetItem *timeItem = item(row, ColTime);
+
+    if (!timeItem) {
+        return;
+    }
+
+    const QString json = timeItem->data(jsonRole).toString();
+    const QJsonObject object = QJsonDocument::fromJson(json.toUtf8()).object();
+    QDialog *dialog = new QDialog(this);
+    QVBoxLayout *layout = new QVBoxLayout(dialog);
+    QTreeWidget *tree = new QTreeWidget(dialog);
+    QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
+    QPushButton *copy = buttons->addButton(tr("Copy as JSON"), QDialogButtonBox::ActionRole);
+
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowTitle(tr("Message %1 %2").arg(object.value("protocol").toString(), object.value("address").toString()));
+    tree->setColumnCount(2);
+    tree->setHeaderLabels({tr("Field"), tr("Value")});
+
+    for (auto it = object.begin(); it != object.end(); ++it) {
+        addJsonItem(tree->invisibleRootItem(), it.key(), it.value());
+    }
+
+    // The raw payload as bits, in groups of 8 from the first bit
+    const QByteArray raw = QByteArray::fromHex(object.value("rawData").toString().toLatin1());
+    const int rawBits = object.value("rawBits").toInt(-1);
+
+    if (rawBits > 0)
+    {
+        QString bits;
+
+        for (int i = 0; (i < rawBits) && (i / 8 < raw.size()); i++)
+        {
+            if ((i > 0) && (i % 8 == 0)) {
+                bits += ' ';
+            }
+            bits += ((uint8_t) raw[i / 8] & (0x80 >> (i % 8))) ? '1' : '0';
+        }
+
+        QTreeWidgetItem *item = new QTreeWidgetItem(tree->invisibleRootItem(), QStringList({tr("rawData (bits)"), bits}));
+        item->setToolTip(1, bits);
+    }
+
+    tree->resizeColumnToContents(0);
+    layout->addWidget(tree);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::close);
+    connect(copy, &QPushButton::clicked, dialog, [json]() { QApplication::clipboard()->setText(json); });
+    dialog->resize(640, 520);
+    dialog->show();
+}
+
 // A click on the icon of a voice message plays or stops it; elsewhere the click selects as usual
 void PagingMessageTable::mousePressEvent(QMouseEvent *event)
 {
@@ -749,6 +848,7 @@ void PagingMessageTable::showRowMenu(const QPoint& pos)
     int row = clicked->row();
     QMenu menu(this);
 
+    connect(menu.addAction(tr("Details...")), &QAction::triggered, this, [this, row]() { showDetails(row); });
     connect(menu.addAction(tr("Copy cell")), &QAction::triggered, this, [clicked]() {
         QApplication::clipboard()->setText(clicked->text());
     });

@@ -20,6 +20,8 @@
 
 #include <QApplication>
 #include <QTemporaryDir>
+#include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
 #include <cstdio>
 #include <vector>
 
@@ -152,6 +154,27 @@ int main(int argc, char **argv)
     check(other.setColumns(saved) && !other.isColumnHidden(PagingMessageTable::ColAddress)
         && other.isColumnHidden(PagingMessageTable::ColState), "the columns are restored");
     check(!other.setColumns(QByteArray()), "no saved columns: false, the defaults stay");
+
+    // Details: every field of the record, protocolData and the raw payload as bits
+    MessageRecord detailed = record("h", "pocsag", "1234567D", "HI");
+    detailed.m_protocolData.insert("function", 3);
+    detailed.m_rawData = QByteArray::fromHex("a5f0");
+    detailed.m_rawBits = 12;
+    PagingMessageTable details;
+    details.addRecord(detailed);
+    details.showDetails(0);
+    QTreeWidget *tree = details.findChild<QTreeWidget*>();
+    bool function = false, bits = false, address = false;
+
+    for (QTreeWidgetItemIterator it(tree); tree && *it; ++it)
+    {
+        function = function || (((*it)->text(0) == "function") && ((*it)->text(1) == "3") && (*it)->parent()
+            && ((*it)->parent()->text(0) == "protocolData"));
+        bits = bits || (((*it)->text(0) == "rawData (bits)") && ((*it)->text(1) == "10100101 1111"));
+        address = address || (((*it)->text(0) == "address") && ((*it)->text(1) == "1234567D"));
+    }
+
+    check(tree && function && bits && address, "details: the address, protocolData and the raw payload as bits");
 
     std::printf("%d passed, %d failed\n", passes, failures);
     return failures ? 1 : 0;
