@@ -186,6 +186,7 @@ NmtChannel::NmtChannel(const ChannelConfig& config, double sampleRate, double de
     m_superTone(m_valid ? sampleRate : 48000.0, config.supervisory, deviationFactor),
     m_rxAudio(m_valid ? sampleRate : 48000.0, config.supervisory),
     m_txAudio(m_valid ? sampleRate : 48000.0),
+    m_limiter(m_valid ? sampleRate : 48000.0, config.supervisory != 0),
     m_rxMute(0),
     m_alarmRunning(false),
     m_callerIdCount(0),
@@ -559,9 +560,20 @@ int NmtChannel::render(float* samples, int length, bool add)
                 }
                 break;
             }
-            if (callAudioUp()) {
-                m_txAudio.generate(samples + pos, length - pos, add, m_deviationFactor);
-            } else if (!add) {
+            if (callAudioUp())
+            {
+                // the speech, limited to the largest deviation with room for the supervisory tone
+                const int count = length - pos;
+                m_speech.resize(static_cast<size_t>(count));
+                m_txAudio.generate(m_speech.data(), count, false, 1.0);
+                m_limiter.process(m_speech.data(), count);
+                for (int i = 0; i < count; i++)
+                {
+                    const float value = static_cast<float>(m_speech[static_cast<size_t>(i)] * m_deviationFactor);
+                    samples[pos + i] = add ? samples[pos + i] + value : value;
+                }
+            }
+            else if (!add) {
                 std::fill(samples + pos, samples + length, 0.0f);
             }
             // the supervisory tone is on air whenever the channel carries speech

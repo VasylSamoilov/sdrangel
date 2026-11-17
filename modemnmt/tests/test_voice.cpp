@@ -528,6 +528,69 @@ static void testSpeechBothWays()
     }
 }
 
+// The deviation limiter: loud speech is scaled down so that after the pre-emphasis it stays within
+// the largest deviation with the supervisory tone; speech at a normal level is not touched.
+static void testLimiter()
+{
+    // the limiter itself: a loud 2.5 kHz tone (pre-emphasis lifts it about 2.5 times)
+    SpeechLimiter limiter(kRate, true);
+    CHECK(std::fabs(limiter.limit() - (4700.0 - 300.0) / 3000.0) < 1e-9);
+    CHECK(std::fabs(SpeechLimiter(kRate, false).limit() - 4700.0 / 3000.0) < 1e-9);
+    Emphasis check(kRate);
+    std::vector<float> block(480);
+    double peak = 0.0;
+    double phase = 0.0;
+    for (int b = 0; b < 100; b++)
+    {
+        for (float& s : block)
+        {
+            s = static_cast<float>(1.2 * std::sin(phase));
+            phase += 2.0 * 3.14159265358979323846 * 2500.0 / kRate;
+        }
+        limiter.process(block.data(), 480);
+        check.pre(block.data(), 480);
+        if (b > 10) {
+            for (float s : block) {
+                peak = std::max(peak, static_cast<double>(std::fabs(s)));
+            }
+        }
+    }
+    std::printf("limiter: loud 2.5 kHz after the pre-emphasis %.3f of speech level (limit %.3f), %llu blocks limited\n",
+        peak, limiter.limit(), static_cast<unsigned long long>(limiter.limited()));
+    CHECK(peak <= limiter.limit() * 1.01 && peak > limiter.limit() * 0.9);
+    CHECK(limiter.limited() >= 90);
+
+    // a quiet block passes as it is
+    SpeechLimiter quiet(kRate, true);
+    std::vector<float> soft(480), copy;
+    for (int i = 0; i < 480; i++) {
+        soft[static_cast<size_t>(i)] = static_cast<float>(0.5 * std::sin(2.0 * 3.14159265358979323846 * 1000.0 * i / kRate));
+    }
+    copy = soft;
+    quiet.process(soft.data(), 480);
+    CHECK(soft == copy && quiet.limited() == 0);
+
+    // in a call: what goes to the radio stays within 4.7 kHz after the pre-emphasis, tone included
+    VoiceCall call(3);
+    call.toneHz = 2500.0;
+    call.toneAmp = 1.0;
+    std::vector<float> sent = call.air(2.0, nullptr);
+    Emphasis radio(kRate);
+    radio.pre(sent.data(), static_cast<int>(sent.size()));
+    double onAir = 0.0;
+    for (size_t i = sent.size() / 2; i < sent.size(); i++) {
+        onAir = std::max(onAir, static_cast<double>(std::fabs(sent[i])));
+    }
+    std::printf("limiter: loud call after the pre-emphasis %.0f Hz deviation\n", onAir * 3000.0);
+    CHECK(onAir * 3000.0 <= 4700.0 * 1.01);
+    CHECK(call.tc->speechLimited() > 50);
+
+    // normal speech in a call is not limited
+    VoiceCall normal(3);
+    normal.air(2.0, nullptr);
+    CHECK(normal.tc->speechLimited() == 0);
+}
+
 static void testNoSupervisory()
 {
     // without a supervisory tone on the channel nothing is added, and nothing supervises
@@ -863,6 +926,7 @@ int main()
     testTxSource();
     testConfigLimits();
     testSpeechBothWays();
+    testLimiter();
     testNoSupervisory();
     testCompandor();
     testSupervisoryAlarm();
