@@ -147,9 +147,6 @@ private slots:
     void on_gain_valueChanged(int value);
     void on_speed_currentIndexChanged(int index);
     void on_polarity_currentIndexChanged(int index);
-    void on_rampUp_valueChanged(double value);
-    void on_rampDown_valueChanged(double value);
-    void on_rampRange_valueChanged(int value);
     void on_collapse_valueChanged(int value);
     void on_roaming_toggled(bool checked);
     void on_ssidZone_valueChanged(int value);

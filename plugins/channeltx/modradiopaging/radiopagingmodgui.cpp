@@ -650,24 +650,6 @@ void RadioPagingModGUI::on_voiceSeconds_valueChanged(int value)
     applySettings(QStringList("gscVoiceSeconds"));
 }
 
-void RadioPagingModGUI::on_rampUp_valueChanged(double value)
-{
-    m_settings.m_rampUpMs = value;
-    applySettings(QStringList("rampUpMs"));
-}
-
-void RadioPagingModGUI::on_rampDown_valueChanged(double value)
-{
-    m_settings.m_rampDownMs = value;
-    applySettings(QStringList("rampDownMs"));
-}
-
-void RadioPagingModGUI::on_rampRange_valueChanged(int value)
-{
-    m_settings.m_rampRange = value;
-    applySettings(QStringList("rampRange"));
-}
-
 // The message of the composer, for the protocol it chose; the channel checks it and reports the result
 void RadioPagingModGUI::send()
 {
@@ -1400,9 +1382,6 @@ void RadioPagingModGUI::displaySettings()
     ui->gain->setValue((int) m_settings.m_gain);
     ui->gainText->setText(QString("%1dB").arg((int) m_settings.m_gain));
     displayProtocol();
-    ui->rampUp->setValue(m_settings.m_rampUpMs);
-    ui->rampDown->setValue(m_settings.m_rampDownMs);
-    ui->rampRange->setValue(m_settings.m_rampRange);
 
     // The columns the user chose; the first time the usual ones
     if (!ui->txLog->setColumns(m_settings.m_messageColumns)) {
@@ -1473,9 +1452,6 @@ void RadioPagingModGUI::makeUIConnections()
     QObject::connect(ui->gain, &QDial::valueChanged, this, &RadioPagingModGUI::on_gain_valueChanged);
     QObject::connect(ui->speed, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_speed_currentIndexChanged);
     QObject::connect(ui->polarity, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingModGUI::on_polarity_currentIndexChanged);
-    QObject::connect(ui->rampUp, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &RadioPagingModGUI::on_rampUp_valueChanged);
-    QObject::connect(ui->rampDown, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &RadioPagingModGUI::on_rampDown_valueChanged);
-    QObject::connect(ui->rampRange, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_rampRange_valueChanged);
     QObject::connect(ui->collapse, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_collapse_valueChanged);
     QObject::connect(ui->roaming, &QCheckBox::toggled, this, &RadioPagingModGUI::on_roaming_toggled);
     QObject::connect(ui->ssidZone, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingModGUI::on_ssidZone_valueChanged);
