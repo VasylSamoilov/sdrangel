@@ -620,8 +620,8 @@ QString RadioPagingDemodSink::finishVoiceRecording()
     m_voiceFileDone = m_voiceFile;
     m_voiceFile.clear();
 
-    // The old files go a few at a time, when a new one is complete
-    RadioPagingVoiceStore::cleanup(m_settings.voiceDirectory(), m_settings.m_gscVoiceKeepDays, m_settings.m_gscVoiceKeepMin,
+    // The old files go a few at a time, when a new one is complete, away from the DSP thread
+    RadioPagingVoiceStore::cleanupInBackground(m_settings.voiceDirectory(), m_settings.m_gscVoiceKeepDays, m_settings.m_gscVoiceKeepMin,
         RadioPagingVoiceStore::m_autoCleanupBatch, m_voiceFileDone);
 
     return m_voiceFileDone;

@@ -977,7 +977,7 @@ QString RadioPagingMod::recordVoice(const PendingTx& pending, double& seconds)
     recorder.writeMono(block.data(), (int) block.size());
     recorder.stopRecording();
     QString file = recorder.getCurrentFileName();
-    RadioPagingVoiceStore::cleanup(directory, m_settings.m_gscVoiceKeepDays, m_settings.m_gscVoiceKeepMin,
+    RadioPagingVoiceStore::cleanupInBackground(directory, m_settings.m_gscVoiceKeepDays, m_settings.m_gscVoiceKeepMin,
         RadioPagingVoiceStore::m_autoCleanupBatch, file);
     return file;
 }

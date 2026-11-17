@@ -31,6 +31,7 @@
 #include <QFile>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QThreadPool>
 
 #include "dsp/dsptypes.h"
 #include "util/messagequeue.h"
@@ -816,6 +817,17 @@ void testVoiceStore()
         && QFile::exists(names[3]) && QFile::exists(directory.path() + "/notes.wav"), "Voice store: all at once, other files are left");
     check((RadioPagingVoiceStore::fileAlias("146.5/MHz x") == "146.5_MHz_x") && (RadioPagingVoiceStore::fileAlias("") == "rx"),
         "Voice store: the alias in a file name");
+
+    // In the background (the end of a recording on the DSP thread): the old files go in a thread of the pool
+    QFile old(directory.path() + "/146.5_rx_old.wav");
+    old.open(QIODevice::WriteOnly);
+    old.close();
+    old.open(QIODevice::ReadWrite);
+    old.setFileTime(now.addSecs(-10 * 86400), QFileDevice::FileModificationTime);
+    old.close();
+    RadioPagingVoiceStore::cleanupInBackground(directory.path(), 3, 2, 5, QString());
+    QThreadPool::globalInstance()->waitForDone();
+    check(!QFile::exists(old.fileName()) && QFile::exists(names[3]), "Voice store: a cleanup in the background deletes the old files");
 }
 
 } // namespace

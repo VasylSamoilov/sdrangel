@@ -55,6 +55,9 @@ public:
     //!< the file given is never deleted. Returns the number deleted
     static int cleanup(const QString& directory, int keepDays, int keepMin, int maxDelete,
         const QString& keepFile = QString(), const QDateTime& now = QDateTime::currentDateTime());
+    //!< The same in a thread of the global thread pool: the directory is listed and the files deleted away
+    //!< from the thread of the caller (a DSP thread when a recording ends)
+    static void cleanupInBackground(const QString& directory, int keepDays, int keepMin, int maxDelete, const QString& keepFile);
     static const int m_autoCleanupBatch = 5;    //!< Files deleted at most when a recording ends
     //!< A size for display: 1.5 MB
     static QString sizeText(qint64 bytes);

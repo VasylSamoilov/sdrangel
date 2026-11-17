@@ -20,6 +20,7 @@
 #include <QFileInfo>
 #include <QStandardPaths>
 #include <QStorageInfo>
+#include <QThreadPool>
 
 #include <algorithm>
 
@@ -162,4 +163,13 @@ int RadioPagingVoiceStore::cleanup(const QString& directory, int keepDays, int k
     }
 
     return deleted;
+}
+
+void RadioPagingVoiceStore::cleanupInBackground(const QString& directory, int keepDays, int keepMin, int maxDelete,
+    const QString& keepFile)
+{
+    // A file deleted by another cleanup meanwhile is not deleted again (QFile::remove fails)
+    QThreadPool::globalInstance()->start([directory, keepDays, keepMin, maxDelete, keepFile]() {
+        cleanup(directory, keepDays, keepMin, maxDelete, keepFile);
+    });
 }
