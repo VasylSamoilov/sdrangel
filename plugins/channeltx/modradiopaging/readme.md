@@ -86,7 +86,7 @@ The composer of a message:
 * Group: FLEX group message, the capcodes of the pagers separated by commas.
 * Type, polarity and (POCSAG) speed of this message: Default takes the network setting.
 * FLEX short message type and source; HEX/binary header flags; secure message type.
-* Text, with the codepage of the message and its table: a click on a character inserts it, `<0xNN>` sends any code. GSC voice: the WAV file, or the microphone and its audio input.
+* Text, with the codepage of the message and its table: a click on a character inserts it, `<0xNN>` sends any code. CR and LF are written as the symbols for carriage return and line feed (U+240D, U+240A, in the table), or as the characters themselves in the WebAPI. GSC voice: the WAV file, or the microphone and its audio input.
 * Copies, interval and delay (network mode).
 * Send (or Enter in the text) queues the message.
 

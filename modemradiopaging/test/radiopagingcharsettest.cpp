@@ -90,11 +90,13 @@ int main()
 
     // Decode: glyphs, <0xNN> for the codes without one; the code masked to the codepage
     const Cs::Codepage& ascii = *Cs::defaultFor("pocsag");
-    check(Cs::decode(ascii, {0x48, 0x49, 0x00, 0x03, 0x7F, 0x0A}) == "HI<0x00><0x03><0x7F>\n", "ASCII decode: glyphs, <0xNN> for the controls and DEL");
+    check(Cs::decode(ascii, {0x48, 0x49, 0x00, 0x03, 0x7F, 0x0A, 0x0D}) == "HI<0x00><0x03><0x7F>\xE2\x90\x8A\xE2\x90\x8D",
+        "ASCII decode: glyphs, <0xNN> for the controls and DEL, the symbols for LF and CR");
     const Cs::Codepage& german = *find("pocsag", "generic", "generic", "latin-german");
     check(Cs::decode(german, {0x5B, 0x7E}) == "\xC3\x84\xC3\x9F", "German decode: 0x5B A umlaut, 0x7E sharp s");
     const Cs::Codepage& gsc = *Cs::defaultFor("gsc");
-    check((gsc.codes() == 64) && (Cs::decode(gsc, {0x21, 0x3C, 0x3E}) == "A\r<0x3E>"), "GSC: 64 codes, A, CR, the fill without a glyph");
+    check((gsc.codes() == 64) && (Cs::decode(gsc, {0x21, 0x3C, 0x3E}) == "A\xE2\x90\x8D<0x3E>"),
+        "GSC: 64 codes, A, CR/LF as the symbol for CR, the fill without a glyph");
 
     // Encode: the glyph or an alias, <0xNN> for any code, the first character without a code refused
     bool ok;
@@ -111,6 +113,15 @@ int main()
     Cs::encode(ascii, "A\xC3\x84", codes, &error);
     check(!ok && (error.find("\xC3\x84") != std::string::npos), "a character without a code is refused, named in the error");
     check(encode(Cs::defaultFor("gsc"), "hi\n") == std::vector<uint8_t>({0x28, 0x29, 0x3C}), "GSC: lowercase taken as uppercase, LF as CR");
+    check(encode(Cs::defaultFor("gsc"), "A\xE2\x90\x8D" "B\r" "C\xE2\x90\x8A" "D\xE2\x90\xA4")
+        == std::vector<uint8_t>({0x21, 0x3C, 0x22, 0x3C, 0x23, 0x3C, 0x24, 0x3C}),
+        "GSC: CR/LF from the symbols for CR, LF and newline and from CR");
+    check(encode(&ascii, "A\xE2\x90\x8D" "B\xE2\x90\x8A" "C\r\n") == std::vector<uint8_t>({0x41, 0x0D, 0x42, 0x0A, 0x43, 0x0D, 0x0A}),
+        "ASCII: CR and LF from their symbols and from the characters");
+    check(Cs::decode(*find("pocsag", "generic", "generic", "ascii-uppercase"), {0x0D, 0x0A}) == "\xE2\x90\x8D\xE2\x90\x8A",
+        "uppercase ASCII: the symbols for CR and LF");
+    check(Cs::decode(*find("pocsag", "motorola", "advisor-linguist", "latin-cyrillic"), {0x0D, 0x0A}) == "\xE2\x90\x8D\xE2\x90\x8A",
+        "Linguist Latin/Cyrillic: the symbols for CR and LF");
     check(encode(find("pocsag", "nec", "maxima-compact", "cyrillic"), "\xD0\x90\xD0\x91\xD0\x95\xD0\x81") == std::vector<uint8_t>({0x41, 0x61, 0x45, 0x65}),
         "NEC Maxima/Compact (the 21A layout): A and E on the Latin codes, Be on 0x61, Io on 0x65");
     check(encode(find("flex", "motorola", "linguist", "arabic"), "\xD9\x84\xD8\xA7\xD9\x84") == std::vector<uint8_t>({0x5B, 0x64}),

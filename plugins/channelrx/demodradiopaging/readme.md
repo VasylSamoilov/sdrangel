@@ -75,7 +75,7 @@ The decoders lock on three preamble words, then find the start code (on either o
 
 <h3>Codepages</h3>
 
-The alphanumeric messages of each protocol are shown with the glyphs of a pager codepage (vendor, model and codepage), selected per protocol. The codes without a glyph are given as &lt;0xNN&gt;. FLEX Kanji messages are HEX/binary messages in Shift JIS.
+The alphanumeric messages of each protocol are shown with the glyphs of a pager codepage (vendor, model and codepage), selected per protocol. The codes without a glyph are given as &lt;0xNN&gt;. CR and LF are shown as the symbols for carriage return and line feed (U+240D, U+240A), GSC CR/LF as the symbol for carriage return, so a message is one line. FLEX Kanji messages are HEX/binary messages in Shift JIS.
 
 <h3>Duplicates</h3>
 

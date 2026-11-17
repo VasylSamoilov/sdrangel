@@ -16,8 +16,9 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 // GSC alphanumeric character set, Rep. 900-2 Table VII: 6-bit codes, uppercase only. A code is the ASCII character
-// code - 0x20, but 0x3C (CR), 0x3E (the NUL fill) and 0x3F ('_'). Lowercase letters are taken as uppercase, and
-// \ { } LF as the nearest codes
+// code - 0x20, but 0x3C (CR/LF), 0x3E (the NUL fill) and 0x3F ('_'). Lowercase letters are taken as uppercase, and
+// \ { } LF as the nearest codes. CR/LF is shown as the symbol for carriage return (U+240D), so a message is one line;
+// it is taken from that symbol, CR, LF and the symbols for line feed and newline
 
 #include "radiopagingcharsettables.h"
 
@@ -39,7 +40,8 @@ const RadioPagingCharset::Entry entries[64] = {
     /* 0x30 */ {"P", "p"}, /* 0x31 */ {"Q", "q"}, /* 0x32 */ {"R", "r"}, /* 0x33 */ {"S", "s"},
     /* 0x34 */ {"T", "t"}, /* 0x35 */ {"U", "u"}, /* 0x36 */ {"V", "v"}, /* 0x37 */ {"W", "w"},
     /* 0x38 */ {"X", "x"}, /* 0x39 */ {"Y", "y"}, /* 0x3A */ {"Z", "z"}, /* 0x3B */ {"[", "{"},
-    /* 0x3C */ {"\r", "\n"}, /* 0x3D */ {"]", "}"}, /* 0x3E */ {}, /* 0x3F */ {"_"},
+    /* 0x3C */ {"\xE2\x90\x8D" /* U+240D symbol for carriage return */, "\r", "\n", "\xE2\x90\x8A" /* U+240A */,
+        "\xE2\x90\xA4" /* U+2424 symbol for newline */}, /* 0x3D */ {"]", "}"}, /* 0x3E */ {}, /* 0x3F */ {"_"},
 };
 
 } // namespace

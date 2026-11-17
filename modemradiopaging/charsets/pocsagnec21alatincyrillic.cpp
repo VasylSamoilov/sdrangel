@@ -28,8 +28,8 @@ namespace {
 const RadioPagingCharset::Entry entries[128] = {
     /* 0x00 */ {}, /* 0x01 */ {}, /* 0x02 */ {}, /* 0x03 */ {},
     /* 0x04 */ {}, /* 0x05 */ {}, /* 0x06 */ {}, /* 0x07 */ {},
-    /* 0x08 */ {}, /* 0x09 */ {}, /* 0x0A */ {"\n"}, /* 0x0B */ {},
-    /* 0x0C */ {}, /* 0x0D */ {"\r"}, /* 0x0E */ {}, /* 0x0F */ {},
+    /* 0x08 */ {}, /* 0x09 */ {}, /* 0x0A */ {"\xE2\x90\x8A" /* U+240A symbol for line feed */, "\n"}, /* 0x0B */ {},
+    /* 0x0C */ {}, /* 0x0D */ {"\xE2\x90\x8D" /* U+240D symbol for carriage return */, "\r"}, /* 0x0E */ {}, /* 0x0F */ {},
     /* 0x10 */ {Cyr::I_GRAVE, Cyr::i_grave}, /* 0x11 */ {Cyr::LJE, Cyr::lje}, /* 0x12 */ {Cyr::NJE, Cyr::nje},
     /* 0x13 */ {Cyr::DJE, Cyr::dje},
     /* 0x14 */ {Cyr::KJE, Cyr::kje}, /* 0x15 */ {Cyr::SHORT_U, Cyr::short_u}, /* 0x16 */ {Cyr::DZHE, Cyr::dzhe}, /* 0x17 */ {},
