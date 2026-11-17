@@ -124,7 +124,8 @@ private:
     bool handleMessage(const Message& cmd) override;
     void makeTransmitter();
     void setCarriers(const std::vector<modemcellular::CarrierTuning>& carriers, uint32_t lead);
-    void useAudioPipe(const QObject *producer);
+    void useAudioPipe(const QObject *producer, bool carriers);
+    bool controllerAlive(const QObject *producer);
     void dropAudioPipe();
     void sendToController(const std::vector<uint8_t>& wire);
     void sendSpan();

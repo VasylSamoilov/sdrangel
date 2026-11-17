@@ -67,8 +67,10 @@ public:
         MsgAddNetwork() : Message() { }
     };
 
-    // reports: the input queue of the feature; lead: samples of lead of the transmitters
-    CellularWorker(MessageQueue *reports, uint32_t lead);
+    // reports: the input queue of the feature; producer: the controller as the radios see it (the
+    // feature, which outlives the worker): the source of the packets and the producer of the
+    // audio pipes; lead: samples of lead of the transmitters
+    CellularWorker(MessageQueue *reports, const QObject *producer, uint32_t lead);
     ~CellularWorker() override;
     MessageQueue *getInputMessageQueue() { return &m_inputMessageQueue; }
 
@@ -77,6 +79,8 @@ public slots:
     // network (of all networks) any more
     void removeNetwork(int id);
     void removeAll();
+    // blocking call from the feature: the channel is being removed, nothing goes to it any more
+    void radioGone(qulonglong channel);
 
 private slots:
     void handleInputMessages();
@@ -131,7 +135,9 @@ private:
 
     MessageQueue m_inputMessageQueue;
     MessageQueue *m_reports;
+    const QObject *m_producer;
     uint32_t m_lead;
+    bool m_direct;                              // in a blocking call of the feature
     std::map<ChannelAPI*, std::unique_ptr<Radio>> m_radios;
     std::vector<std::unique_ptr<Network>> m_networks;
     modemcellular::CarrierBatch m_rx;
