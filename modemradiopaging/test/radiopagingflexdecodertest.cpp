@@ -2884,6 +2884,44 @@ void testGroupTx()
         }
 
         check(fr.m_ok && (fullSent == 1) && (fullFailed == 0), "group: the most pagers of one phase (127 frames of 43) are sent");
+
+        // Collapse 2: the pagers of one frame in 4 get their instructions in a quarter of the frames. More than fit
+        // before the group frame are refused, not dropped later
+        {
+            Enc narrow;
+            std::string error;
+            narrow.setCollapse(2, error);
+            Enc::TxMessage g = m;
+            g.m_members.clear();
+            for (uint64_t k = 1; k <= 1500; k++) {
+                g.m_members.push_back(64 * k);
+            }
+            Enc::EnqueueResult nr = narrow.enqueue(g);
+            int narrowFailed = 0, narrowSent = 0;
+            for (uint64_t index = 0; (index < 600) && (narrow.pending() > 0); index++)
+            {
+                Enc::Frame f = narrow.buildFrame(index);
+                narrowFailed += (int) f.m_failedIds.size();
+                narrowSent += (int) f.m_sentIds.size();
+            }
+            std::string label = "group: collapse 2, pagers of one frame in 4 that do not fit are refused (ok "
+                + std::to_string(nr.m_ok) + " sent " + std::to_string(narrowSent) + " failed " + std::to_string(narrowFailed) + ")";
+            check(!nr.m_ok && !nr.m_error.empty(), label.c_str());
+
+            // 31 frames of 43 in 127: 1300 of them fit and are sent
+            Enc fits;
+            fits.setCollapse(2, error);
+            g.m_members.resize(1300);
+            Enc::EnqueueResult fitr = fits.enqueue(g);
+            int fitsFailed = 0, fitsSent = 0;
+            for (uint64_t index = 0; (index < 600) && (fits.pending() > 0); index++)
+            {
+                Enc::Frame f = fits.buildFrame(index);
+                fitsFailed += (int) f.m_failedIds.size();
+                fitsSent += (int) f.m_sentIds.size();
+            }
+            check(fitr.m_ok && (fitsSent == 1) && (fitsFailed == 0), "group: collapse 2, 1300 pagers of one frame in 4 are sent");
+        }
     }
 
     // A group message in fragments: a new assignment on its slot in the middle starts a new group, the message

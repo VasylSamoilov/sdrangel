@@ -582,6 +582,31 @@ RadioPagingFlexEncoder::EnqueueResult RadioPagingFlexEncoder::enqueueGroup(const
         phaseSlots[(int) (RadioPagingFlexScheduler::capcodeSlot(member).m_phase % (uint32_t) phases)] = -1;
     }
 
+    // The short instruction of a pager goes in a frame it listens to (one in 2^collapse), before the group frame,
+    // within 128 frames of the first instruction (STD-43A 5.2.1): the pagers of a phase that listen to the same frames
+    // share those frames
+    {
+        std::map<std::pair<int, uint32_t>, int> sameFrames;
+        const uint32_t period = 1u << m_collapse;
+        const int frames = (RadioPagingFlexScheduler::m_framesPerCycle - 1) >> m_collapse;
+
+        for (uint64_t member : message.m_members)
+        {
+            RadioPagingFlexScheduler::CapcodeSlot s = RadioPagingFlexScheduler::capcodeSlot(member);
+            sameFrames[std::make_pair((int) (s.m_phase % (uint32_t) phases), s.m_frame % period)]++;
+        }
+
+        for (const auto& entry : sameFrames)
+        {
+            if ((entry.second + m_instructionsPerFrame - 1) / m_instructionsPerFrame > frames)
+            {
+                result.m_error = "At most " + std::to_string(frames * m_instructionsPerFrame) + " pagers of a phase that listen to "
+                    "the same frames (collapse " + std::to_string(m_collapse) + "): their short instructions go before the group message";
+                return result;
+            }
+        }
+    }
+
     // One temporary address for each phase of the pagers: a group message to one address in more than two phases
     // would use the address more than twice in the frame (STD-43A 3.8.5 (1))
     if ((slot >= 0) && ((phaseSlots.size() > 1) || m_slotBusy[slot]))
