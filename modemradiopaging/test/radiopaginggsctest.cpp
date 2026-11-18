@@ -411,13 +411,13 @@ void testErrors()
 
     // First data block with 1 and with 2 uncorrectable codewords: 7 of 8 good is still
     // data, 6 of 8 is taken for noise after a tone only page
-    auto firstBlockBad = [](int nbBad) {
+    auto firstBlockBad = [](int nbBad, int first = 0) {
         std::vector<G::TxMessage> m = { tx("100123", 1, G::Alphanumeric, "FIRST BLOCK DAMAGED") };
         G::EncodeOptions single;
         single.m_mode = G::Single;
         std::vector<uint8_t> bits = G::encode(m, single).m_bits;
         const int block = 1098;
-        for (int k = 0; k < nbBad; k++)
+        for (int k = first; k < first + nbBad; k++)
         {
             // 3 bit errors that the code detects as uncorrectable
             bool done = false;
@@ -447,6 +447,21 @@ void testErrors()
         "First data block with 1 uncorrectable codeword is data");
     check(!twoBad.m_messages.empty() && (twoBad.m_messages[0].m_type == G::Tone),
         "First data block with 2 uncorrectable codewords is taken for noise: tone only");
+
+    // The characters of an uncorrectable codeword are '?', not those of its zeroed bits; the others are received
+    if (!oneBad.m_messages.empty())
+    {
+        const D::Message& msg = oneBad.m_messages[0];
+        std::string marked = G::interpret(msg.m_rawData, msg.m_rawBits, nullptr, &msg.m_rawLost).m_text;
+        std::string unmarked = G::interpret(msg.m_rawData, msg.m_rawBits).m_text;
+        std::string what = "Characters of an uncorrectable codeword are lost ('" + marked + "')";
+        check((marked.compare(0, 19, "??RST BLOCK DAMAGED") == 0) && (unmarked.compare(0, 2, "??") != 0), what.c_str());
+    }
+
+    // The block end flag is in the last codeword: lost, the end of the message is not known
+    Decoded lastBad = firstBlockBad(1, 6);
+    check((lastBad.m_messages.size() == 1) && lastBad.m_messages[0].m_truncated,
+        "Uncorrectable last codeword of a block: the message is truncated");
 }
 
 void testBatches()

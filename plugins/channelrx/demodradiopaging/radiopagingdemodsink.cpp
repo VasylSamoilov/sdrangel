@@ -1271,10 +1271,15 @@ void RadioPagingDemodSink::sendGsc(const RadioPagingGscDecoder::Message& message
     if (message.m_type == RadioPagingGsc::Data)
     {
         const RadioPagingCharset::Codepage *charset = codepage(m_settings.m_gscCharset, "gsc");
-        RadioPagingGsc::Interpretation interpretation = RadioPagingGsc::interpret(message.m_rawData, message.m_rawBits, charset);
+        RadioPagingGsc::Interpretation interpretation = RadioPagingGsc::interpret(message.m_rawData, message.m_rawBits, charset,
+            &message.m_rawLost);
 
         record.m_msgType = QString::fromStdString(interpretation.m_type);
         record.m_text = escapeText(interpretation.m_text);
+        // The bits of the codewords that could not be corrected, their characters '?': kept for a new decoding
+        if (std::any_of(message.m_rawLost.begin(), message.m_rawLost.end(), [](uint8_t b) { return b != 0; })) {
+            record.m_protocolData.insert("lost_bits", QString(toByteArray(message.m_rawLost).toHex()));
+        }
         record.m_protocolData.insert("charset", RadioPagingPage::charsetData(charset->key()));
         record.m_protocolData.insert("checksum_errors", message.m_checksumErrors);
         record.m_protocolData.insert("checksum_passed", message.m_checksumPassed);

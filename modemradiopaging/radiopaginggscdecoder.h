@@ -99,6 +99,7 @@ public:
         int m_addressNumber = 1;            //!< 1-4 (function A-D), from the complemented address words
         RadioPagingGsc::MessageType m_type = RadioPagingGsc::Tone;   //!< Tone, Voice or Data
         std::vector<uint8_t> m_rawData;     //!< Message bits, packed 8 per byte, first bit in the MSB
+        std::vector<uint8_t> m_rawLost;     //!< The bits of m_rawData from codewords that could not be corrected, packed the same way
         int m_rawBits = 0;                  //!< Number of message bits, a multiple of 48; 0 = tone only or voice
         int m_preamble = -1;                //!< Preamble value index, -1 in non battery saver mode
         int m_slot = 0;                     //!< Index of the address in the transmission, from 0 (addresses only, not 121 bit batch slots)
@@ -244,6 +245,7 @@ private:
     bool m_active;                      //!< A message is being received
     Message m_current;
     std::vector<uint8_t> m_currentBits;
+    std::vector<uint8_t> m_currentLost;     //!< 1 for each bit of m_currentBits from a codeword that could not be corrected
     int m_blocks;
 
     uint32_t m_codewords;

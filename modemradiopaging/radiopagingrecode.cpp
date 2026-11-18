@@ -123,7 +123,10 @@ bool RadioPagingRecode::redecode(const MessageRecord& record, const RadioPagingC
     }
     else if (record.m_protocol == "gsc")
     {
-        setInterpretation(RadioPagingGsc::interpret(raw, record.m_rawBits, codepage), as, out);
+        // The characters of the codewords that could not be corrected stay '?'
+        const QByteArray lostBytes = QByteArray::fromHex(record.m_protocolData.value("lost_bits").toString().toLatin1());
+        const std::vector<uint8_t> lost(lostBytes.begin(), lostBytes.end());
+        setInterpretation(RadioPagingGsc::interpret(raw, record.m_rawBits, codepage, lost.empty() ? nullptr : &lost), as, out);
     }
     else if (as == "binary")
     {
