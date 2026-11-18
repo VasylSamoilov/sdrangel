@@ -24,6 +24,7 @@ The messages received and sent, newest at the bottom (at most the log size, the 
 * The table has the columns of the message tables of the channels: time, direction, channel, protocol, rate, polarity, address, type, message, fragment, info, errors and state. Right click on the header selects the columns.
 * A click on the icon of a voice message plays its file. Double click on a message opens a window with all the fields of its record: the common fields, protocolData (the flags and parameters of the protocol) and the raw payload, also as bits.
 * Right click on a message: details, copy the cell, the row or the record as JSON, play the voice, select the audio output, and decode a received message again as the other type or with another codepage of its protocol.
+* Clear: removes all the messages of the log, and of the history file when it is kept, after a confirmation.
 
 <h3>Channels</h3>
 

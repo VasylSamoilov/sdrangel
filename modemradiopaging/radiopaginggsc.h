@@ -220,6 +220,10 @@ public:
     static std::string decodeAlphanumeric(const std::vector<uint8_t>& packed, int nbBits, const RadioPagingCharset::Codepage *codepage = nullptr);
     static int scoreNumeric(const std::vector<uint8_t>& packed, int nbBits);
     static int scoreAlphanumeric(const std::vector<uint8_t>& packed, int nbBits);
+    //!< Numeric pages longer than this many characters lean heavily towards alphanumeric
+    static const int m_longNumericChars = 15;
+    //!< Taken off the numeric score for each character of the numeric text above m_longNumericChars
+    static int longNumericPenalty(const std::string& numeric);
     //!< Decide between numeric and alphanumeric by content. No bits means tone only
     static Interpretation interpret(const std::vector<uint8_t>& packed, int nbBits, const RadioPagingCharset::Codepage *codepage = nullptr);
 

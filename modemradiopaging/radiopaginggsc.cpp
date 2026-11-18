@@ -1078,6 +1078,23 @@ int RadioPagingGsc::scoreNumeric(const std::vector<uint8_t>& packed, int nbBits)
     return score + fill * fill;
 }
 
+int RadioPagingGsc::longNumericPenalty(const std::string& numeric)
+{
+    int nbChars = 0;
+
+    // Characters, not bytes: the triple bar is UTF-8
+    for (char c : numeric)
+    {
+        if ((((unsigned char) c) & 0xc0) != 0x80) {
+            nbChars++;
+        }
+    }
+
+    // Numeric pages are short; a long one is most likely an alphanumeric message. Each digit
+    // above the limit costs twice what a digit scores
+    return (nbChars > m_longNumericChars) ? 6 * (nbChars - m_longNumericChars) : 0;
+}
+
 RadioPagingGsc::Interpretation RadioPagingGsc::interpret(const std::vector<uint8_t>& packed, int nbBits,
     const RadioPagingCharset::Codepage *codepage)
 {
@@ -1092,7 +1109,7 @@ RadioPagingGsc::Interpretation RadioPagingGsc::interpret(const std::vector<uint8
     std::string alpha = decodeAlphanumeric(packed, nbBits, codepage);
     std::string numeric = decodeNumeric(packed, nbBits);
     int alphaScore = scoreAlphanumeric(packed, nbBits);
-    int numericScore = scoreNumeric(packed, nbBits);
+    int numericScore = scoreNumeric(packed, nbBits) - longNumericPenalty(numeric);
 
     // A tie is alphanumeric
     if (numericScore > alphaScore)

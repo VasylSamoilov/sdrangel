@@ -333,6 +333,14 @@ int RadioPagingPocsag::scoreAlphanumeric(const std::string& text)
     return std::max(0, std::min(100, score));
 }
 
+int RadioPagingPocsag::longNumericPenalty(const std::string& numeric)
+{
+    int nbChars = (int) numeric.size();
+
+    // Numeric pages are short; a long one is most likely an alphanumeric message
+    return (nbChars > m_longNumericChars) ? 10 * (nbChars - m_longNumericChars) : 0;
+}
+
 RadioPagingPocsag::Interpretation RadioPagingPocsag::interpret(const std::vector<uint8_t>& packed, int nbBits,
     const RadioPagingCharset::Codepage *codepage, const std::vector<uint8_t>& fill)
 {
@@ -347,7 +355,7 @@ RadioPagingPocsag::Interpretation RadioPagingPocsag::interpret(const std::vector
     std::string alpha = decodeAlphanumeric(packed, nbBits, fill);
     std::string numeric = decodeNumeric(packed, nbBits);
     int alphaScore = scoreAlphanumeric(alpha);
-    int numericScore = scoreNumeric(numeric);
+    int numericScore = scoreNumeric(numeric) - longNumericPenalty(numeric);
 
     if (codepage) {
         alpha = RadioPagingCharset::decode(*codepage, std::vector<uint8_t>(alpha.begin(), alpha.end()));

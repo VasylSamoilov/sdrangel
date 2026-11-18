@@ -523,7 +523,7 @@ void MessageCenterEngine::clearLog()
     QString error;
 
     m_log.clear();
-
+    m_logged++;     // The views show the empty log
     if (!m_historyPath.isEmpty() && !writeHistory(error)) {
         qWarning("MessageCenterEngine::clearLog: %s", qPrintable(error));
     }

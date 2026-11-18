@@ -546,6 +546,33 @@ bool hasAddressText(const std::vector<RadioPagingPocsagDecoder::Message>& messag
     return false;
 }
 
+// Interpretation of long messages: a long alphanumeric message of figures and punctuation is alphanumeric, a
+// numeric message of 15 digits (the longest without the length penalty) is numeric
+void testPocsagLongNumeric()
+{
+    RadioPagingPocsag::TxMessage a;
+    a.m_address = 1234567;
+    a.m_function = 3;
+    a.m_type = RadioPagingPocsag::Alphanumeric;
+    a.m_text = "SWF 1.5345-55 YEN 117.70-80 SWF 1.3026-46 FT-100 2951.2";
+    RadioPagingPocsag::TxMessage n = a;
+    n.m_function = 0;
+    n.m_type = RadioPagingPocsag::Numeric;
+    n.m_text = "555123456789012";
+
+    std::vector<RadioPagingPocsagDecoder::Message> messages = decodeBits(RadioPagingPocsag::encode({ a }).m_bits);
+    RadioPagingPocsag::Interpretation ia = messages.empty() ? RadioPagingPocsag::Interpretation()
+        : RadioPagingPocsag::interpret(messages[0].m_rawData, messages[0].m_rawBits);
+    messages = decodeBits(RadioPagingPocsag::encode({ n }).m_bits);
+    RadioPagingPocsag::Interpretation in = messages.empty() ? RadioPagingPocsag::Interpretation()
+        : RadioPagingPocsag::interpret(messages[0].m_rawData, messages[0].m_rawBits);
+
+    check((ia.m_type == "alphanumeric") && (ia.m_text == a.m_text), "POCSAG: a long alphanumeric message of figures is alphanumeric");
+    check((in.m_type == "numeric") && (in.m_text == n.m_text), "POCSAG: a 15 digit numeric message is numeric");
+    std::printf("      long alpha: %s %d / %s %d, 15 digits: %s %d / %s %d\n", ia.m_type.c_str(), ia.m_score, ia.m_altType.c_str(),
+        ia.m_altScore, in.m_type.c_str(), in.m_score, in.m_altType.c_str(), in.m_altScore);
+}
+
 void testPocsagSyncLoss()
 {
     RadioPagingPocsag::TxMessage m;
@@ -836,6 +863,7 @@ int main()
     testPocsagLink();
     testPocsagStandardRules();
     testPocsagSyncLoss();
+    testPocsagLongNumeric();
     testPocsagPreambleLock();
     testFsk();
     testBerWindow();

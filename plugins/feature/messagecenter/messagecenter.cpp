@@ -53,6 +53,7 @@ MESSAGE_CLASS_DEFINITION(MessageCenter::MsgPostPage, Message)
 MESSAGE_CLASS_DEFINITION(MessageCenter::MsgPageAction, Message)
 MESSAGE_CLASS_DEFINITION(MessageCenter::MsgUpdated, Message)
 MESSAGE_CLASS_DEFINITION(MessageCenter::MsgRedecoded, Message)
+MESSAGE_CLASS_DEFINITION(MessageCenter::MsgClearLog, Message)
 
 const char* const MessageCenter::m_featureIdURI = "sdrangel.feature.messagecenter";
 const char* const MessageCenter::m_featureId = "MessageCenter";
@@ -212,6 +213,12 @@ bool MessageCenter::handleMessage(const Message& cmd)
     {
         const MsgRedecoded& msg = (const MsgRedecoded&) cmd;
         m_engine.replace(msg.getRecord());
+        m_dirty = true;
+        return true;
+    }
+    else if (MsgClearLog::match(cmd))
+    {
+        m_engine.clearLog();
         m_dirty = true;
         return true;
     }
@@ -742,7 +749,8 @@ int MessageCenter::webapiActionsPost(const QStringList& featureActionsKeys, SWGS
         page.m_statusInfo = post->getStatusInfo() != 0;
         page.m_secureType = post->getSecureType();
         page.m_retransmit = post->getRetransmit();
-        page.m_retransmitInterval = post->getRetransmitInterval();
+        // 0 (not given) or negative: the default of the transmitter
+        page.m_retransmitInterval = (post->getRetransmitInterval() > 0.0f) ? post->getRetransmitInterval() : -1.0f;
         page.m_sendDelay = post->getSendDelay();
         page.m_charset = RadioPagingPage::charsetKey(post->getCharset());
 

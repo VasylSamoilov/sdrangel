@@ -326,6 +326,22 @@ void MessageCenterGUI::buildLog(QWidget *container)
     layout->addWidget(m_logFilter);
     layout->addWidget(m_logTable);
 
+    QHBoxLayout *buttons = new QHBoxLayout();
+    QPushButton *clear = new QPushButton("Clear", container);
+    clear->setToolTip("Remove all the messages of the log, and of the history file when it is kept");
+    buttons->addStretch(1);
+    buttons->addWidget(clear);
+    layout->addLayout(buttons);
+
+    connect(clear, &QPushButton::clicked, this, [this]() {
+        QString text = m_settings.m_historyEnabled
+            ? QString("Remove all the messages of the log and of the history file?\n%1").arg(MessageCenter::historyFilePath())
+            : QString("Remove all the messages of the log?");
+
+        if (QMessageBox::question(this, "Clear the log", text, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) == QMessageBox::Yes) {
+            m_center->getInputMessageQueue()->push(MessageCenter::MsgClearLog::create());
+        }
+    });
     connect(m_logFilter, &MessageCenterFilterWidget::changed, this, [this]() { m_shownLogged = -1; refreshLog(); });
     connect(m_logTable, &PagingMessageTable::columnsChanged, this, [this]() {
         m_settings.m_logColumns = m_logTable->columns();

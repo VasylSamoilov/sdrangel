@@ -188,6 +188,7 @@ public:
     const MessageRecord *find(const QString& id) const;
     //!< A record of the log decoded again (another codepage or type): it replaces the one of its id. False if none
     bool replace(const MessageRecord& record);
+    //!< Empties the log, and the history file when it is kept
     void clearLog();
 
     // The history: the log kept in a JSON lines file, one line for each record stored (a later version of a

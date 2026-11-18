@@ -648,6 +648,21 @@ void testInterpretation()
 
     check(G::interpret(std::vector<uint8_t>(), 0).m_type == "tone", "Interpretation without bits is tone only");
 
+    // A long alphanumeric message of figures and punctuation, and the longest numeric page without the length penalty
+    std::vector<G::TxMessage> longAlpha = { tx("100123", 1, G::Alphanumeric, "SWF 1.5345-55 YEN 117.70-80 SWF 1.3026-46 FT-100 2951.2") };
+    std::vector<G::TxMessage> longNumeric = { tx("100123", 1, G::Numeric, "555123456789012") };
+    Decoded la = decode(G::encode(longAlpha).m_bits, D::Normal, false, 0, 1);
+    Decoded ln = decode(G::encode(longNumeric).m_bits, D::Normal, false, 0, 1);
+    G::Interpretation ila = G::interpret(la.m_messages[0].m_rawData, la.m_messages[0].m_rawBits);
+    G::Interpretation iln = G::interpret(ln.m_messages[0].m_rawData, ln.m_messages[0].m_rawBits);
+
+    check((ila.m_type == "alphanumeric") && (ila.m_text == longAlpha[0].m_text),
+        "Interpretation of a long alphanumeric message of figures");
+    check((iln.m_type == "numeric") && (iln.m_text == longNumeric[0].m_text),
+        "Interpretation of a 15 digit numeric message");
+    std::printf("      long alpha: %s %d / %s %d, 15 digits: %s %d / %s %d\n", ila.m_type.c_str(), ila.m_score, ila.m_altType.c_str(), ila.m_altScore,
+        iln.m_type.c_str(), iln.m_score, iln.m_altType.c_str(), iln.m_altScore);
+
     // A full block of alphanumeric text has no padding
     std::vector<G::TxMessage> full = { tx("100123", 1, G::Alphanumeric, "ABCDEFGH") };
     Decoded f = decode(G::encode(full).m_bits, D::Normal, false, 0, 1);

@@ -461,7 +461,8 @@ RadioPagingPage RadioPagingPage::fromTx(SWGSDRangel::SWGRadioPagingModTx& tx, co
     page.m_statusInfo = tx.getStatusInfo() != 0;
     page.m_secureType = tx.getSecureType();
     page.m_retransmit = tx.getRetransmit();
-    page.m_retransmitInterval = tx.getRetransmitInterval();
+    // 0 (not given) or negative: the default of the protocol
+    page.m_retransmitInterval = (tx.getRetransmitInterval() > 0.0f) ? tx.getRetransmitInterval() : -1.0f;
     page.m_sendDelay = tx.getSendDelay();
     page.m_charset = charsetKey(tx.getCharset());
 

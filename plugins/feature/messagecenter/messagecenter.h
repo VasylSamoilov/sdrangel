@@ -132,6 +132,17 @@ public:
         MsgRedecoded(const MessageRecord& record) : Message(), m_record(record) { }
     };
 
+    //! Empty the log and the history file
+    class MsgClearLog : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        static MsgClearLog* create() { return new MsgClearLog(); }
+
+    private:
+        MsgClearLog() : Message() { }
+    };
+
     //! To the GUI: the log, the endpoints or the queue changed
     class MsgUpdated : public Message {
         MESSAGE_CLASS_DECLARATION

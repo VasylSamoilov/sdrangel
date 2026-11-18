@@ -79,7 +79,7 @@ public:
     {
         std::string m_type;         //!< alphanumeric, numeric or tone
         std::string m_text;
-        int m_score = 0;            //!< 0-100, how well the content fits the type
+        int m_score = 0;            //!< 0-100, how well the content fits the type; a long numeric text scores less, down to below 0
         std::string m_altType;      //!< The other candidate, empty if none
         std::string m_altText;
         int m_altScore = 0;
@@ -103,6 +103,10 @@ public:
     static std::string decodeAlphanumeric(const std::vector<uint8_t>& packed, int nbBits, const std::vector<uint8_t>& fill = fillMinimal());
     static int scoreNumeric(const std::string& text);
     static int scoreAlphanumeric(const std::string& text);
+    //!< Numeric pages longer than this many characters lean heavily towards alphanumeric
+    static const int m_longNumericChars = 15;
+    //!< Taken off the numeric score (0 to 100) for each character above m_longNumericChars
+    static int longNumericPenalty(const std::string& numeric);
     //!< Decide between numeric and alphanumeric by content. No bits means tone only. The alphanumeric text is the
     //!< glyphs of the codepage (RadioPagingCharset::decode), the 7-bit characters themselves without one
     static Interpretation interpret(const std::vector<uint8_t>& packed, int nbBits, const RadioPagingCharset::Codepage *codepage = nullptr,
