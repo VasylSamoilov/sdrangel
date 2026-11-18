@@ -884,6 +884,16 @@
        </spacer>
       </item>
       <item>
+       <widget class="QPushButton" name="importPager">
+        <property name="toolTip">
+         <string>Take over the settings of a Pager demodulator: frequency, bandwidth, deviation, protocols, UDP, log, address filter and notifications. What would change is shown first</string>
+        </property>
+        <property name="text">
+         <string>From Pager...</string>
+        </property>
+       </widget>
+      </item>
+      <item>
        <widget class="QToolButton" name="notifications">
         <property name="toolTip">
          <string>Notifications: highlight, speak, run a command or plot on the Map the messages that match a regular expression</string>

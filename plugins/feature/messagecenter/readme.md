@@ -51,6 +51,7 @@ Every message is checked against all the routes in their number order (#), not o
 
 * Add, Edit (or double click) and Remove manage the routes; a route can be switched off. Up and Down change the order.
 * Export saves the routes, the sinks and the sources to a JSON file; Import replaces them with those of a file, after a check and a confirmation.
+* From Pager makes the routes, sinks and sources that do what a Pager demodulator chosen from those there are does: a UDP sink and its route, a source that reads the rows its log gets from now on, and a route with speech, command, highlight and map sinks for each notification. Their names start with pager and the id of the instance (R0:1): an import again replaces them and deletes those no longer made; the others stay. What would be added, replaced, kept or deleted is listed first.
 
 The filter of a route has the fields of the filter of the log, and the source of the message: the channels, the API (ingest) or a source of Files. Its regular expression on a field of the message (address, message, protocol, type, channel, or any of them separated by spaces) matches anywhere in the field (^ and $ to anchor), as the notifications of the other plugins, and is case sensitive ((?i) at the start for not). Its captures are ${1}, ${2}... in the texts of the sinks the route sends to.
 
@@ -72,7 +73,7 @@ The actions (command, speech, highlight, map) are taken on messages only: not on
 Sources:
 
 * file: a JSON lines file; the lines added to it are read as they are written.
-* csv: a CSV log of a message center (the columns of the record) or of the Pager demodulator (Date, Time, Address, Function Bits, Alpha, Numeric...); the rows added are read as they are written.
+* csv: a CSV log of a message center (the columns of the record) or of the Pager demodulator (Date, Time, Address, Function Bits, Alpha, Numeric...); the rows added are read as they are written. New rows only: the rows already in the file are skipped.
 * udp: datagrams received on an address (default 127.0.0.1, this computer only) and port: message records as JSON lines, or the Pager demodulator format. What is received is a message received: it never becomes a page to transmit.
 
 <h3>Options</h3>

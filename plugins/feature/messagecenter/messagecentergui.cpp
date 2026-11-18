@@ -38,6 +38,7 @@
 #include "feature/featureuiset.h"
 #include "gui/basicfeaturesettingsdialog.h"
 #include "gui/dialogpositioner.h"
+#include "gui/pagerimport.h"
 #include "gui/pagingmessagetable.h"
 
 #include "radiopagingpage.h"
@@ -518,6 +519,9 @@ void MessageCenterGUI::buildRoutes(QWidget *container)
     exportRouting->setToolTip("Save the routes, the sinks and the sources to a JSON file");
     QPushButton *importRouting = new QPushButton("Import...", container);
     importRouting->setToolTip("Replace the routes, the sinks and the sources with those of a JSON file");
+    QPushButton *fromPager = new QPushButton("From Pager...", container);
+    fromPager->setToolTip("Make the routes, sinks and sources that do what a Pager demodulator does: its UDP output, its log\n"
+        "and its notifications. What would be added, replaced or deleted is shown first");
     buttons->addWidget(add);
     buttons->addWidget(edit);
     buttons->addWidget(remove);
@@ -526,6 +530,7 @@ void MessageCenterGUI::buildRoutes(QWidget *container)
     buttons->addStretch();
     buttons->addWidget(exportRouting);
     buttons->addWidget(importRouting);
+    buttons->addWidget(fromPager);
     layout->addWidget(help);
     layout->addWidget(m_routesTable);
     layout->addLayout(buttons);
@@ -537,7 +542,242 @@ void MessageCenterGUI::buildRoutes(QWidget *container)
     connect(down, &QPushButton::clicked, this, [this]() { moveRoute(1); });
     connect(exportRouting, &QPushButton::clicked, this, &MessageCenterGUI::exportRouting);
     connect(importRouting, &QPushButton::clicked, this, &MessageCenterGUI::importRouting);
+    connect(fromPager, &QPushButton::clicked, this, &MessageCenterGUI::importFromPager);
     connect(m_routesTable, &QTableWidget::cellDoubleClicked, this, &MessageCenterGUI::editSelectedRoute);
+}
+
+// The routes, sinks and sources that do what a Pager demodulator does. Their names start with "pager <id> ": an import
+// again replaces those of the same instance, and deletes those it no longer makes
+void MessageCenterGUI::importFromPager()
+{
+    struct Plan
+    {
+        std::vector<MessageCenterEngine::Route> m_routes;
+        QList<MessageCenterFileSetting> m_sinks;
+        QList<MessageCenterFileSetting> m_sources;
+        QStringList m_lines;
+    };
+
+    auto plan = [this](const PagerImport::Config& c, const PagerImport::Instance& instance) {
+        Plan p;
+        const QString prefix = QString("pager %1 ").arg(instance.id());
+        QStringList protocols;
+
+        if (c.m_modulation != PagerImport::Config::Flex) {
+            protocols.append("pocsag");
+        }
+        if (c.m_modulation != PagerImport::Config::Pocsag) {
+            protocols.append("flex");
+        }
+
+        // The messages of the Pager demodulator: its log, read as it grows
+        MessageCenterFileSetting source;
+        bool hasSource = c.m_logEnabled && !c.m_logFilename.isEmpty();
+
+        if (hasSource)
+        {
+            source.m_name = prefix + "log";
+            source.m_type = "csv";
+            source.m_path = c.m_logFilename;
+            source.m_format = 1;
+        }
+
+        auto route = [&](const QString& name, const QStringList& sinks) {
+            MessageCenterEngine::Route r;
+            r.m_name = prefix + name;
+            r.m_filter.m_protocols = protocols;
+            r.m_filter.m_hideDuplicates = c.m_filterDuplicates;
+            r.m_sinks = sinks;
+            return r;
+        };
+
+        if (c.m_udpEnabled)
+        {
+            MessageCenterFileSetting udp;
+            udp.m_name = prefix + "udp";
+            udp.m_type = "udp";
+            udp.m_address = c.m_udpAddress;
+            udp.m_port = c.m_udpPort;
+            udp.m_format = 0;
+            p.m_sinks.append(udp);
+            p.m_routes.push_back(route("udp", QStringList(udp.m_name)));
+        }
+
+        int number = 0;
+
+        for (const PagerImport::Notification& n : c.m_notifications)
+        {
+            number++;
+            QStringList sinks;
+            const QString base = prefix + QString("notification %1 ").arg(number);
+            auto addSink = [&](const QString& type, const QString& text, quint32 color) {
+                MessageCenterFileSetting sink;
+                sink.m_name = base + type;
+                sink.m_type = type;
+                sink.m_text = text;
+                sink.m_color = color;
+                p.m_sinks.append(sink);
+                sinks.append(sink.m_name);
+            };
+
+            if (!n.m_speech.isEmpty()) {
+                addSink("speech", n.m_speech, 0xffff0000);
+            }
+            if (!n.m_command.isEmpty()) {
+                addSink("command", n.m_command, 0xffff0000);
+            }
+            if (n.m_highlight) {
+                addSink("highlight", QString(), n.m_highlightColor);
+            }
+            if (n.m_plotOnMap) {
+                addSink("map", QString(), 0xffff0000);
+            }
+            if (sinks.isEmpty()) {
+                continue;
+            }
+
+            MessageCenterEngine::Route r = route(QString("notification %1").arg(number), sinks);
+            r.m_filter.m_matchField = (n.m_column == PagerImport::Notification::Address) ? MessageCenterFilter::MatchAddress
+                : MessageCenterFilter::MatchMessage;
+            r.m_filter.m_regExp = n.m_regExp;
+            p.m_routes.push_back(r);
+        }
+
+        if (hasSource) {
+            p.m_sources.append(source);
+        }
+
+        // What changes: by name, against the items of the same instance there are
+        auto compare = [&p, &prefix](const QString& what, const QStringList& oldNames, const QStringList& newNames,
+            const std::function<QByteArray(const QString&, bool)>& json) {
+            for (const QString& name : newNames)
+            {
+                if (!oldNames.contains(name)) {
+                    p.m_lines.append(QString("add %1 %2: %3").arg(what, name, QString::fromUtf8(json(name, true))));
+                } else if (json(name, true) != json(name, false)) {
+                    p.m_lines.append(QString("replace %1 %2: %3").arg(what, name, QString::fromUtf8(json(name, true))));
+                } else {
+                    p.m_lines.append(QString("keep %1 %2").arg(what, name));
+                }
+            }
+            for (const QString& name : oldNames)
+            {
+                if (name.startsWith(prefix) && !newNames.contains(name)) {
+                    p.m_lines.append(QString("delete %1 %2").arg(what, name));
+                }
+            }
+        };
+        auto fileJson = [](const QList<MessageCenterFileSetting>& list, const QString& name) {
+            for (const MessageCenterFileSetting& f : list)
+            {
+                if (f.m_name == name) {
+                    return MessageCenterSettings::filesToJson({f});
+                }
+            }
+            return QByteArray();
+        };
+        auto routeJson = [](const std::vector<MessageCenterEngine::Route>& list, const QString& name) {
+            for (const MessageCenterEngine::Route& r : list)
+            {
+                if (r.m_name == name) {
+                    return MessageCenterSettings::routesToJson({r});
+                }
+            }
+            return QByteArray();
+        };
+        QStringList oldSinks, newSinks, oldSources, newSources, oldRoutes, newRoutes;
+
+        for (const MessageCenterFileSetting& f : m_settings.m_sinks) { oldSinks.append(f.m_name); }
+        for (const MessageCenterFileSetting& f : p.m_sinks) { newSinks.append(f.m_name); }
+        for (const MessageCenterFileSetting& f : m_settings.m_sources) { oldSources.append(f.m_name); }
+        for (const MessageCenterFileSetting& f : p.m_sources) { newSources.append(f.m_name); }
+        for (const MessageCenterEngine::Route& r : m_settings.m_routes) { oldRoutes.append(r.m_name); }
+        for (const MessageCenterEngine::Route& r : p.m_routes) { newRoutes.append(r.m_name); }
+
+        compare("source", oldSources, newSources, [&](const QString& name, bool isNew) {
+            return fileJson(isNew ? p.m_sources : m_settings.m_sources, name); });
+        compare("sink", oldSinks, newSinks, [&](const QString& name, bool isNew) {
+            return fileJson(isNew ? p.m_sinks : m_settings.m_sinks, name); });
+        compare("route", oldRoutes, newRoutes, [&](const QString& name, bool isNew) {
+            return routeJson(isNew ? p.m_routes : m_settings.m_routes, name); });
+
+        if (hasSource) {
+            p.m_lines.append(QString("note: the source reads the rows the Pager demodulator adds to %1 from now on").arg(c.m_logFilename));
+        }
+
+        p.m_lines.append("note: the routes act on the messages of all the sources (the Radio Paging channels and this log); "
+            "a route's Source selects one");
+
+        if (!c.m_filterAddress.isEmpty()) {
+            p.m_lines.append(QString("note: the address filter /%1/ is a view of the Pager demodulator: set it in the filter of the log")
+                .arg(c.m_filterAddress));
+        }
+
+        return p;
+    };
+
+    PagerImport::Instance instance;
+    PagerImport::Config config;
+    bool ok = PagerImport::choose(this, "Import from a Pager demodulator",
+        "Routes, sinks and sources that do what the Pager demodulator chosen does: its UDP output, its log (as a source) and its "
+        "notifications (a route with speech, command, highlight and map sinks each). The routes there are stay; those of an "
+        "earlier import of the same instance are replaced.",
+        [&plan](const PagerImport::Config& c, const PagerImport::Instance& i) { return plan(c, i).m_lines; }, instance, config);
+
+    if (!ok) {
+        return;
+    }
+
+    Plan p = plan(config, instance);
+    const QString prefix = QString("pager %1 ").arg(instance.id());
+    auto keepOthers = [&prefix](QList<MessageCenterFileSetting>& list) {
+        for (int i = list.size() - 1; i >= 0; i--)
+        {
+            if (list[i].m_name.startsWith(prefix)) {
+                list.removeAt(i);
+            }
+        }
+    };
+
+    MessageCenterSettings settings = m_settings;
+    keepOthers(settings.m_sinks);
+    keepOthers(settings.m_sources);
+    settings.m_sinks.append(p.m_sinks);
+    settings.m_sources.append(p.m_sources);
+
+    // The routes of the import go where those of an earlier import were, else at the end
+    std::vector<MessageCenterEngine::Route> routes;
+    bool placed = false;
+
+    for (const MessageCenterEngine::Route& r : settings.m_routes)
+    {
+        if (!r.m_name.startsWith(prefix)) {
+            routes.push_back(r);
+        } else if (!placed) {
+            routes.insert(routes.end(), p.m_routes.begin(), p.m_routes.end());
+            placed = true;
+        }
+    }
+
+    if (!placed) {
+        routes.insert(routes.end(), p.m_routes.begin(), p.m_routes.end());
+    }
+
+    settings.m_routes = routes;
+    QString error = MessageCenter::checkRouting(settings);
+
+    if (!error.isEmpty())
+    {
+        QMessageBox::warning(this, "Import from a Pager demodulator", error);
+        return;
+    }
+
+    m_settings.m_routes = settings.m_routes;
+    m_settings.m_sinks = settings.m_sinks;
+    m_settings.m_sources = settings.m_sources;
+    refreshRoutes();
+    refreshFiles();
+    applySettings({"routes", "sinks", "sources"});
 }
 
 void MessageCenterGUI::moveRoute(int step)
@@ -1000,6 +1240,9 @@ QString fileFormat(const MessageCenterFileSetting& f)
     if (type == "udp") {
         return f.m_format == 0 ? "Pager" : "JSON";
     }
+    if (type == "csv") {
+        return f.m_format == 1 ? "new rows only" : "all rows";
+    }
 
     return QString();
 }
@@ -1066,7 +1309,8 @@ void MessageCenterGUI::refreshFiles()
     for (int i = 0; i < m_settings.m_sources.size(); i++)
     {
         const MessageCenterFileSetting& f = m_settings.m_sources[i];
-        setRow(m_sourcesTable, m_builtInSources + i, {f.m_name, f.typeOrDefault(), fileTarget(f)});
+        setRow(m_sourcesTable, m_builtInSources + i, {f.m_name, f.typeOrDefault(),
+            fileFormat(f).isEmpty() ? fileTarget(f) : QString("%1 (%2)").arg(fileTarget(f), fileFormat(f))});
     }
 }
 
@@ -1309,7 +1553,7 @@ void MessageCenterGUI::editFile(bool sink, int index)
         const bool udp = (t == "udp");
         const bool hasText = (t == "command") || (t == "speech");
         setRowVisible(pathRow, file);
-        setRowVisible(format, (sink && (t == "file")) || udp);
+        setRowVisible(format, (sink && (t == "file")) || udp || (!sink && (t == "csv")));
         setRowVisible(address, udp);
         setRowVisible(port, udp);
         setRowVisible(text, hasText);
@@ -1318,7 +1562,11 @@ void MessageCenterGUI::editFile(bool sink, int index)
         format->blockSignals(true);
         format->clear();
 
-        if (udp) {
+        if (!sink && (t == "csv")) {
+            format->addItems({"All rows", "New rows only"});
+            format->setToolTip("All rows: the rows in the file are read, then those added. New rows only: the rows already\n"
+                "there are skipped (a log the Pager demodulator writes to)");
+        } else if (udp) {
             format->addItems({"Pager", "JSON"});
             format->setToolTip(sink ? "Pager: the fields of the Pager demodulator, each ended by a NUL. JSON: the record as one line"
                 : "The datagrams are read in either format");
@@ -1407,7 +1655,7 @@ void MessageCenterGUI::editFile(bool sink, int index)
         setting.m_name = name->text().trimmed();
         setting.m_type = (t == "file") ? QString() : t;
         setting.m_path = ((t == "file") || (t == "csv")) ? path->text().trimmed() : QString();
-        setting.m_format = (((t == "file") && sink) || (t == "udp")) ? format->currentIndex() : 0;
+        setting.m_format = (((t == "file") && sink) || (t == "udp") || (!sink && (t == "csv"))) ? format->currentIndex() : 0;
         setting.m_address = (t == "udp") ? address->text().trimmed() : QString();
         setting.m_port = (t == "udp") ? port->value() : 0;
         setting.m_text = ((t == "command") || (t == "speech")) ? text->text() : QString();

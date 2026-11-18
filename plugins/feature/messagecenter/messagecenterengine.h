@@ -193,7 +193,8 @@ private:
 class MessageCenterCsvSource : public MessageCenterSource
 {
 public:
-    MessageCenterCsvSource(const QString& name, const QString& path);
+    //!< newRowsOnly: the rows already in the file when it is first read are skipped (a log another program writes to)
+    MessageCenterCsvSource(const QString& name, const QString& path, bool newRowsOnly = false);
     QString name() const override { return m_name; }
     bool poll(std::vector<MessageRecord>& records, QString& error) override;
     bool more() const override { return m_more; }
@@ -208,6 +209,8 @@ private:
     int m_skipped = 0;
     bool m_more = false;
     bool m_headerRead = false;
+    bool m_newRowsOnly = false;
+    bool m_skipped0 = false;                        //!< The rows there were at the start are skipped
     bool m_pagerFormat = false;
     bool m_notReported = true;                      //!< The header is wrong, said once
     QHash<QString, int> m_columns;

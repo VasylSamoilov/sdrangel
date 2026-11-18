@@ -92,6 +92,15 @@ if(NOT SERVER_MODE)
     )
     target_include_directories(radiopagingdemodparitytest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(radiopagingdemodparitytest Qt::Core sdrbase modemradiopaging)
+
+    # Self test of the reading of the settings of the Pager demodulator, not built by default:
+    #   cmake --build <build dir> --target radiopagingpagerimporttest
+    add_executable(radiopagingpagerimporttest EXCLUDE_FROM_ALL
+        test/radiopagingpagerimporttest.cpp
+        ../demodpager/pagerdemodsettings.cpp
+    )
+    target_include_directories(radiopagingpagerimporttest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../demodpager)
+    target_link_libraries(radiopagingpagerimporttest Qt::Core Qt::Widgets sdrbase sdrgui)
 endif()
 
 # Install debug symbols

@@ -171,6 +171,7 @@ private slots:
     void moveRoute(int step);
     void exportRouting();
     void importRouting();
+    void importFromPager();
     void transmitterChanged();
 };
 

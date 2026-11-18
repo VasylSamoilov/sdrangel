@@ -20,6 +20,7 @@
 #include <QDesktopServices>
 #include <QDialog>
 #include <QFileDialog>
+#include <QDir>
 #include <QFileInfo>
 #include <QUrl>
 #include <QFormLayout>
@@ -63,6 +64,7 @@
 #include "SWGMapItem.h"
 
 #include "radiopagingdemod.h"
+#include "gui/pagerimport.h"
 #include "radiopagingdemodnotificationdialog.h"
 #include "radiopagingpagerformat.h"
 #include "radiopagingvoicestore.h"
@@ -442,6 +444,143 @@ void RadioPagingDemodGUI::on_notifications_clicked()
         enableSpeechIfNeeded();
         applySettings(QStringList("notificationSettings"));
     }
+}
+
+namespace {
+
+// The log of the Pager demodulator has its own columns: this demodulator writes the columns of the message record to a
+// file of its own next to it
+QString radioPagingLogName(const QString& pagerLog)
+{
+    QFileInfo info(pagerLog);
+    QString base = info.completeBaseName().isEmpty() ? QString("pager_log") : info.completeBaseName();
+    return info.dir().filePath(base + "_radiopaging.csv");
+}
+
+} // namespace
+
+// The settings of a Pager demodulator taken over, after the user saw what would change
+void RadioPagingDemodGUI::importFromPager()
+{
+    typedef RadioPagingDemodSettings::NotificationSettings Notification;
+
+    // The settings the Pager demodulator gives, and the keys that change
+    auto plan = [this](const PagerImport::Config& c, RadioPagingDemodSettings& s, QStringList& keys, QStringList& lines) {
+        auto change = [&](const QString& name, const QString& from, const QString& to, const char *key) {
+            if (from != to)
+            {
+                lines.append(QString("replace %1: %2 -> %3").arg(name, from, to));
+                keys.append(key);
+            }
+        };
+
+        s = m_settings;
+        bool pocsag = (c.m_modulation != PagerImport::Config::Flex);
+        bool flex = (c.m_modulation != PagerImport::Config::Pocsag);
+        change("frequency shift", QString::number(s.m_inputFrequencyOffset), QString::number(c.m_inputFrequencyOffset), "inputFrequencyOffset");
+        s.m_inputFrequencyOffset = c.m_inputFrequencyOffset;
+        change("bandwidth", QString::number(s.m_rfBandwidth), QString::number(c.m_rfBandwidth), "rfBandwidth");
+        s.m_rfBandwidth = c.m_rfBandwidth;
+        change("POCSAG", s.m_pocsagEnabled ? "on" : "off", pocsag ? "on" : "off", "pocsagEnabled");
+        s.m_pocsagEnabled = pocsag;
+        change("FLEX", s.m_flexEnabled ? "on" : "off", flex ? "on" : "off", "flexEnabled");
+        s.m_flexEnabled = flex;
+        change("POCSAG deviation", QString::number(s.m_pocsagDeviation), QString::number(c.m_fmDeviation), "pocsagDeviation");
+        s.m_pocsagDeviation = c.m_fmDeviation;
+        change("UDP", s.m_udpEnabled ? "on" : "off", c.m_udpEnabled ? "on" : "off", "udpEnabled");
+        s.m_udpEnabled = c.m_udpEnabled;
+        change("UDP address", s.m_udpAddress, c.m_udpAddress, "udpAddress");
+        s.m_udpAddress = c.m_udpAddress;
+        change("UDP port", QString::number(s.m_udpPort), QString::number(c.m_udpPort), "udpPort");
+        s.m_udpPort = c.m_udpPort;
+        change("UDP format", s.m_udpFormat == RadioPagingDemodSettings::UdpJson ? "JSON" : "Pager", "Pager", "udpFormat");
+        s.m_udpFormat = RadioPagingDemodSettings::UdpPagerDemod;
+        change("log", s.m_logEnabled ? "on" : "off", c.m_logEnabled ? "on" : "off", "logEnabled");
+        s.m_logEnabled = c.m_logEnabled;
+        QString logName = radioPagingLogName(c.m_logFilename);
+        change("log file", s.m_logFilename, logName, "logFilename");
+        s.m_logFilename = logName;
+
+        if (ui->filterAddress->text() != c.m_filterAddress) {
+            lines.append(QString("replace address filter: '%1' -> '%2'").arg(ui->filterAddress->text(), c.m_filterAddress));
+        }
+
+        // The notifications are replaced with those of the Pager demodulator
+        for (const auto& n : s.m_notificationSettings) {
+            lines.append(QString("delete notification: %1 /%2/").arg(Notification::matchFieldName(n->m_matchField), n->m_regExp));
+        }
+
+        s.m_notificationSettings.clear();
+
+        for (const PagerImport::Notification& n : c.m_notifications)
+        {
+            QSharedPointer<Notification> notification = QSharedPointer<Notification>::create();
+            notification->m_matchField = (n.m_column == PagerImport::Notification::Address) ? Notification::MatchAddress : Notification::MatchMessage;
+            notification->m_regExp = n.m_regExp;
+            notification->m_speech = n.m_speech;
+            notification->m_command = n.m_command;
+            notification->m_highlight = n.m_highlight;
+            notification->m_highlightColor = (qint32) n.m_highlightColor;
+            notification->m_plotOnMap = n.m_plotOnMap;
+            notification->updateRegularExpression();
+            s.m_notificationSettings.append(notification);
+            lines.append(QString("add notification: %1 /%2/%3%4%5%6").arg(Notification::matchFieldName(notification->m_matchField), n.m_regExp,
+                n.m_speech.isEmpty() ? QString() : QString(" speech '%1'").arg(n.m_speech),
+                n.m_command.isEmpty() ? QString() : QString(" command '%1'").arg(n.m_command),
+                n.m_highlight ? QString(" highlight %1").arg(QColor::fromRgba(n.m_highlightColor).name()) : QString(),
+                n.m_plotOnMap ? QString(" map") : QString()));
+
+            if ((n.m_column == PagerImport::Notification::Alpha) || (n.m_column == PagerImport::Notification::Numeric)) {
+                lines.append(QString("  (the %1 column of the Pager demodulator is the message here)").arg(PagerImport::columnName(n.m_column)));
+            }
+        }
+
+        if (!c.m_notifications.isEmpty() || !m_settings.m_notificationSettings.isEmpty()) {
+            keys.append("notificationSettings");
+        }
+
+        lines.append(QString("keep GSC and the FLEX deviation (%1 Hz, the outer symbol): the Pager demodulator has no GSC and one deviation")
+            .arg(s.m_flexDeviation));
+
+        if (c.m_logEnabled) {
+            lines.append(QString("note: the log is %1, with the columns of the message record; the Pager log %2 is left as it is")
+                .arg(logName, c.m_logFilename));
+        }
+        if (c.m_filterDuplicates) {
+            lines.append("note: duplicates are shown, flagged DUP or DUP+ (the Pager demodulator hides them)");
+        }
+        if (c.m_decode != 0) {
+            lines.append("note: the decode choice of the Pager demodulator is not needed: both polarities and both readings are decoded");
+        }
+        if (c.m_customCharacters) {
+            lines.append("note: the characters mapped in the Pager demodulator are not taken over: choose a codepage instead");
+        }
+    };
+
+    PagerImport::Instance instance;
+    PagerImport::Config config;
+    bool ok = PagerImport::choose(this, tr("Import from a Pager demodulator"),
+        tr("The settings of the Pager demodulator chosen replace those of this demodulator. Its notifications replace the "
+           "notifications here."),
+        [&plan](const PagerImport::Config& c, const PagerImport::Instance&) {
+            RadioPagingDemodSettings s;
+            QStringList keys, lines;
+            plan(c, s, keys, lines);
+            return lines;
+        }, instance, config);
+
+    if (!ok) {
+        return;
+    }
+
+    RadioPagingDemodSettings settings;
+    QStringList keys, lines;
+    plan(config, settings, keys, lines);
+    m_settings = settings;
+    ui->filterAddress->setText(config.m_filterAddress);
+    enableSpeechIfNeeded();
+    displaySettings();
+    applySettings(keys);
 }
 
 void RadioPagingDemodGUI::on_logEnable_clicked(bool checked)
@@ -1706,6 +1845,7 @@ void RadioPagingDemodGUI::makeUIConnections()
     QObject::connect(ui->udpPort, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingDemodGUI::on_udpPort_valueChanged);
     QObject::connect(ui->udpFormat, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingDemodGUI::on_udpFormat_currentIndexChanged);
     QObject::connect(ui->notifications, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_notifications_clicked);
+    QObject::connect(ui->importPager, &QPushButton::clicked, this, &RadioPagingDemodGUI::importFromPager);
     QObject::connect(ui->logEnable, &ButtonSwitch::clicked, this, &RadioPagingDemodGUI::on_logEnable_clicked);
     QObject::connect(ui->logFilename, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_logFilename_clicked);
     QObject::connect(ui->logOpen, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_logOpen_clicked);

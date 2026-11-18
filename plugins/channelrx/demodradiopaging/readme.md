@@ -150,6 +150,7 @@ What the Pager demodulator has, for the messages of all three protocols. A messa
 * Log (record button) - writes each message to a .csv file, with the columns of the message record (header first, appended to an existing file). The folder button selects the file.
 * Load (arrow button) - reads the messages of a log written by this demodulator into the table. They are not notified again.
 * Notifications - a regular expression matched on a field of the message (address, message, protocol, type, channel or any of them), and what is done to a message that matches: its row is highlighted, the text of Speech is spoken (when the build has text to speech), the Command is run, and a position (latitude and longitude) in the message is plotted on the Map named by the address. Speech and Command replace ${address}, ${message}, ${protocol}, ${type}, ${channel} and ${0}, ${1}... (the captures of the expression). A duplicate is not notified again.
+* From Pager - takes over the settings of a Pager demodulator chosen from those there are: frequency shift, bandwidth, the POCSAG deviation, the protocols (its modulation), UDP, log, address filter and notifications (they replace those here). What would change is listed before anything is changed. The log is written next to the Pager log, as name_radiopaging.csv, with the columns of the message record.
 * Address filter - only the messages whose whole address matches the regular expression are shown, as in the Pager demodulator (e.g. 12345.., 001001/.). It applies as it is typed.
 
 <h3>8: Waveforms</h3>

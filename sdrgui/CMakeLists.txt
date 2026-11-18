@@ -40,6 +40,7 @@ set(sdrgui_SOURCES
     gui/journalinebrowser.cpp
     gui/messagedialog.cpp
     gui/pagingmessagetable.cpp
+    gui/pagerimport.cpp
     gui/pagingcomposer.cpp
     gui/pagingcodepagetable.cpp
     gui/pagingvoiceplayer.cpp
@@ -199,6 +200,7 @@ set(sdrgui_HEADERS
     gui/journalinebrowser.h
     gui/messagedialog.h
     gui/pagingmessagetable.h
+    gui/pagerimport.h
     gui/pagingcomposer.h
     gui/pagingcodepagetable.h
     gui/pagingvoiceplayer.h

@@ -555,7 +555,7 @@ std::unique_ptr<MessageCenterSource> MessageCenter::makeSource(const MessageCent
     const QString type = setting.typeOrDefault();
 
     if (type == "csv") {
-        return std::unique_ptr<MessageCenterSource>(new MessageCenterCsvSource(setting.m_name, setting.m_path));
+        return std::unique_ptr<MessageCenterSource>(new MessageCenterCsvSource(setting.m_name, setting.m_path, setting.m_format == 1));
     }
     if (type == "udp") {
         return std::unique_ptr<MessageCenterSource>(new MessageCenterUdpSource(setting.m_name, setting.m_address, (quint16) setting.m_port));

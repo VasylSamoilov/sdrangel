@@ -182,6 +182,7 @@ private slots:
     void on_udpPort_valueChanged(int value);
     void on_udpFormat_currentIndexChanged(int index);
     void on_notifications_clicked();
+    void importFromPager();
     void on_logEnable_clicked(bool checked);
     void on_logFilename_clicked();
     void on_logOpen_clicked();

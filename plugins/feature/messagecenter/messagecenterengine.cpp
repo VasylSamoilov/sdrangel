@@ -503,9 +503,10 @@ bool MessageCenterFileSource::poll(std::vector<MessageRecord>& records, QString&
 // CSV source
 // ---------------------------------------------------------------------------
 
-MessageCenterCsvSource::MessageCenterCsvSource(const QString& name, const QString& path) :
+MessageCenterCsvSource::MessageCenterCsvSource(const QString& name, const QString& path, bool newRowsOnly) :
     m_name(name),
-    m_path(path)
+    m_path(path),
+    m_newRowsOnly(newRowsOnly)
 {
 }
 
@@ -598,6 +599,14 @@ bool MessageCenterCsvSource::poll(std::vector<MessageRecord>& records, QString& 
                     return false;
                 }
 
+                return true;
+            }
+
+            // The rows written before: skipped, the next polls read the new ones
+            if (m_newRowsOnly && !m_skipped0)
+            {
+                m_skipped0 = true;
+                m_offset = file.size();
                 return true;
             }
 
