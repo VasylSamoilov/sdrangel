@@ -21,10 +21,11 @@
 
 #include <cmath>
 #include <cstdio>
-#include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include <QtEndian>
 
 #include "radiopagingtxstream.h"
 
@@ -1088,10 +1089,9 @@ std::vector<uint8_t> makeWav(int format, int bits, int channels, int rate, doubl
         {
             if (format == 3)
             {
-                float f = (float) v;
-                uint32_t u;
-                std::memcpy(&u, &f, 4);
-                put32(b, u);
+                uint8_t le[4];
+                qToLittleEndian<float>((float) v, le);   // IEEE 754 binary32, little-endian (WAVE_FORMAT_IEEE_FLOAT)
+                b.insert(b.end(), le, le + 4);
             }
             else if (bits == 8) {
                 b.push_back((uint8_t) (128 + (int) std::lround(v * 127.0)));

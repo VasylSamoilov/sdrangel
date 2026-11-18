@@ -22,6 +22,8 @@
 #include <cstring>
 #include <fstream>
 
+#include <QtEndian>
+
 #include "dsp/interpolator.h"
 
 const int RadioPagingWav::m_sampleRate;
@@ -144,8 +146,7 @@ bool RadioPagingWav::decode(const std::vector<uint8_t>& file, Audio& audio, std:
 
             if (floating)
             {
-                float f;
-                std::memcpy(&f, p, 4);
+                float f = qFromLittleEndian<float>(p);   // IEEE 754 binary32, little-endian (WAVE_FORMAT_IEEE_FLOAT)
                 v = std::isfinite(f) ? f : 0.0f;     // A NaN or an infinity would stay in the filters of the modulator
             }
             else if (bits == 8) {

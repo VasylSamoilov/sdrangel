@@ -26,6 +26,7 @@
 #include <cstring>
 #include <random>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "radiopagingbch.h"
@@ -479,16 +480,12 @@ int phaseOfMessage(const DecodedFrame& frame, uint64_t capcode)
     return -1;
 }
 
-std::vector<uint8_t> hexBytes(const char *hex)
+std::vector<uint8_t> hexBytes(std::string_view hex)
 {
     std::vector<uint8_t> bytes;
-    size_t n = std::strlen(hex);
 
-    for (size_t i = 0; i + 1 < n; i += 2)
-    {
-        unsigned v = 0;
-        std::sscanf(hex + i, "%2x", &v);
-        bytes.push_back((uint8_t) v);
+    for (size_t i = 0; i + 1 < hex.size(); i += 2) {
+        bytes.push_back((uint8_t) std::stoul(std::string(hex.substr(i, 2)), nullptr, 16));
     }
 
     return bytes;

@@ -1,4 +1,6 @@
 #!/bin/bash
+# The checks are evaluated by check(): the variables they use are not seen as used
+# shellcheck disable=SC2034
 # Retransmission and send delay end to end: sdrangelsrv with a FLEX and a POCSAG modulator in network mode,
 # each on a file output, takes messages with copies on its WebAPI (tx action and message center pages) and
 # writes them; file inputs play the files to radio paging demodulators. The message center log has the

@@ -1,4 +1,6 @@
 #!/bin/bash
+# The checks are evaluated by check(): the variables they use are not seen as used
+# shellcheck disable=SC2034
 # Message center end to end: sdrangelsrv with the message center feature and a GSC modulator on a
 # file output. The modulator announces itself, pages are posted to the message center (WebAPI
 # action), claimed and transmitted by the modulator; the states are read back from the report.

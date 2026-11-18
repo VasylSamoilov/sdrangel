@@ -18,7 +18,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
-#include <cstring>
+#include <string_view>
 
 #include "charsets/radiopagingcharsettables.h"
 #include "radiopagingcharset.h"
@@ -224,12 +224,12 @@ int RadioPagingCharset::encodeOne(const Codepage& codepage, const std::string& t
 
         for (int i = 0; (i < m_maxGlyphs) && entry[i]; i++)
         {
-            size_t n = std::strlen(entry[i]);
+            const std::string_view glyph(entry[i]);
 
-            if ((n > bestLength) && (text.compare(pos, n, entry[i]) == 0))
+            if ((glyph.size() > bestLength) && (text.compare(pos, glyph.size(), glyph) == 0))
             {
                 best = code;
-                bestLength = n;
+                bestLength = glyph.size();
             }
         }
     }
@@ -246,7 +246,9 @@ int RadioPagingCharset::encodeOne(const Codepage& codepage, const std::string& t
 
         for (int i = 0; (i < m_maxGlyphs) && entry[i]; i++)
         {
-            if ((std::strlen(entry[i]) == length) && (text.compare(pos, length, entry[i]) == 0))
+            const std::string_view glyph(entry[i]);
+
+            if ((glyph.size() == length) && (text.compare(pos, length, glyph) == 0))
             {
                 pos += length;
                 return code;

@@ -265,7 +265,7 @@ int terminateBits(const std::vector<int8_t>& bits, int blocking, bool lastFragme
     }
 
     // Rule (3): an extra word of the inverse of the last data bit
-    if (lastFragment && (n >= 2 * wordBits) && (((n - wordBits) % blocking) == 0) && (n - wordBits >= blocking))
+    if ((n >= 2 * wordBits) && (((n - wordBits) % blocking) == 0) && (n - wordBits >= blocking))
     {
         bool uniform = true;
 

@@ -1,4 +1,6 @@
 #!/bin/bash
+# The checks are evaluated by check(): the variables they use are not seen as used
+# shellcheck disable=SC2034
 # FLEX HEX/binary and secure messages end to end: sdrangelsrv with a FLEX modulator (one-shot) on a
 # file output takes the messages on its WebAPI (tx action) and writes them; a file input plays the file
 # to a radio paging demodulator. The message center log has the records of both: the received ones are
