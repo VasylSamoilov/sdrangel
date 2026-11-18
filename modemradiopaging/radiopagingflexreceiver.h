@@ -89,6 +89,8 @@ public:
 
     //!< Number of bit errors allowed over the 80 bits of A, B and inverted A
     static const int m_maxSyncErrors = 8;
+    //!< Number of bit errors allowed over the last 16 bits of bit sync 1, before a sync 1 that has bit errors
+    static const int m_maxBitSyncErrors = 4;
     //!< Number of bit errors allowed over a 96 bit cycle of the emergency re-synchronization
     static const int m_maxErsErrors = 8;
     //!< Blocks with a mean power this many dB below sync 1 are erased
@@ -202,7 +204,7 @@ private:
     void sync2Symbol(int symbol);
     void storeDataSymbol(int symbol, float magsq);
     void endFrame();
-    void backToHunting();
+    void backToHunting(bool keepHistory = false);
     int mirror(int symbol, int levels) const { return m_inverted ? (levels - 1 - symbol) : symbol; }
 };
 

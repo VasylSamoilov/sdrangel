@@ -371,6 +371,70 @@ bool receivedWithDamagedSync(const std::vector<int>& positions)
     return found;
 }
 
+// A frame whose bit sync 1 follows 16 bits that make a false sync 1 of the inverted polarity 48 bits early:
+// the 16 bits and the reversals taken for an inverted A (6 bit errors), the reversals for an inverted B and A
+// for an inverted "inverted A". Its frame information word fails; the true sync 1 that follows is received
+bool receivedAfterFalseInvertedSync(RadioPagingFlex::Mode mode)
+{
+    static const uint32_t codeA[4] = {0x78f35939u, 0x84e75939u, 0x4f975939u, 0x215f5939u};
+    RadioPagingFlexEncoder encoder;
+    encoder.setMode(mode);
+    RadioPagingFlexEncoder::TxMessage m;
+    m.m_capcode = 54321;
+    m.m_text = "false sync";
+    encoder.enqueue(m);
+
+    RadioPagingFlexEncoder::Frame frame;
+    for (uint64_t index = 0; index < 200; index++)
+    {
+        frame = encoder.buildFrame(index);
+        if (!frame.m_idle) {
+            break;
+        }
+    }
+
+    RadioPagingFlex::SymbolBlock lead;
+    lead.m_baud = 1600;
+    lead.m_levels = 2;
+    uint32_t bits = ~(codeA[(int) mode] >> 16) & 0xffff;
+    for (int i = 15; i >= 0; i--) {
+        lead.m_symbols.push_back((bits >> i) & 1);
+    }
+
+    std::vector<RadioPagingFlex::SymbolBlock> blocks = {lead};
+    blocks.insert(blocks.end(), frame.m_blocks.begin(), frame.m_blocks.end());
+
+    Signal signal;
+    signal.m_noise = 0.03f;
+    signal.m_clockError = 0.0;
+    std::vector<float> samples = makeSamples(blocks, signal, 2000);
+    RadioPagingFlexReceiver receiver;
+    receiver.create(38400.0);
+    bool found = false;
+
+    for (float s : samples)
+    {
+        receiver.process(s);
+        while (receiver.hasMessage()) {
+            found = found || (receiver.takeMessage().m_text == "false sync");
+        }
+    }
+
+    return found;
+}
+
+void testFalseInvertedSync()
+{
+    const RadioPagingFlex::Mode modes[] = {RadioPagingFlex::Mode1600_2, RadioPagingFlex::Mode3200_2,
+        RadioPagingFlex::Mode3200_4, RadioPagingFlex::Mode6400_4};
+
+    for (RadioPagingFlex::Mode mode : modes)
+    {
+        check(receivedAfterFalseInvertedSync(mode), std::string("FLEX RX ") + RadioPagingFlex::modeName(mode)
+            + ": a false inverted sync 1 before the true one does not lose the frame");
+    }
+}
+
 void testDamagedSync()
 {
     std::vector<int> p;
@@ -411,6 +475,7 @@ int main()
     testPolarityFilter();
     testTwoNetworks();
     testDamagedSync();
+    testFalseInvertedSync();
 
     std::printf("%s (%d failure%s)\n", failures ? "FAILED" : "OK", failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;

@@ -111,11 +111,16 @@ void RadioPagingFlexReceiver::reset()
     backToHunting();
 }
 
-void RadioPagingFlexReceiver::backToHunting()
+// keepHistory: the last bits stay in the sync register, for a sync 1 found false (its frame information word
+// failed): the true one may already be on its way
+void RadioPagingFlexReceiver::backToHunting(bool keepHistory)
 {
     m_state = Hunting;
-    m_regLo = 0;
-    m_regHi = 0;
+    if (!keepHistory)
+    {
+        m_regLo = 0;
+        m_regHi = 0;
+    }
     m_syncDemod.setLocked(false);
     m_syncDemod.setHoldLevels(false);
 }
@@ -287,10 +292,12 @@ void RadioPagingFlexReceiver::offsetLevels(float delta)
 
 bool RadioPagingFlexReceiver::checkSync(RadioPagingFlex::Mode& mode, bool& inverted) const
 {
-    // Bits 79-48: A, 47-32: B, 31-0: inverted A
+    // Bits 79-48: A, 47-32: B, 31-0: inverted A; bits 95-80: the end of bit sync 1, reversals
     uint32_t a = (uint32_t) (((m_regHi & 0xffff) << 16) | (m_regLo >> 48));
     uint32_t b = (uint32_t) ((m_regLo >> 32) & 0xffff);
     uint32_t aInv = (uint32_t) m_regLo;
+    uint32_t bitSync = (uint32_t) ((m_regHi >> 16) & 0xffff);
+    int bitSyncErrors = std::min(popcount32(bitSync ^ 0xaaaau), popcount32(bitSync ^ 0x5555u));
     int best = syncBits + 1;
     int bestMode = -1;
     bool bestInverted = false;
@@ -311,7 +318,9 @@ bool RadioPagingFlexReceiver::checkSync(RadioPagingFlex::Mode& mode, bool& inver
             // copy is the codeword the code corrects it to; one copy may then have one more
             // error when the other confirms the same mode. B is not needed in that case
             bool copiesAgree = ((aErrors <= 2) && (aInvErrors <= 3)) || ((aErrors <= 3) && (aInvErrors <= 2));
-            bool accepted = (errors <= m_maxSyncErrors) || copiesAgree;
+            // Sync 1 follows bit sync 1: a sync with bit errors must have the reversals before A. Without this
+            // the reversals and A of a sync 1 to come pass as an inverted B and inverted A, 48 bits early
+            bool accepted = ((errors <= m_maxSyncErrors) || copiesAgree) && ((errors == 0) || (bitSyncErrors <= m_maxBitSyncErrors));
 
             if (accepted && (errors < best))
             {
@@ -381,6 +390,9 @@ void RadioPagingFlexReceiver::syncSymbol(const RadioPagingFskDemod::Symbol& symb
     {
         int bit = mirror(symbol.m_value & 1, 2);
         m_fiw = (m_fiw << 1) | (uint32_t) bit;
+        // The sync register goes on: if this sync 1 is false, the true one may be in these bits
+        m_regHi = (m_regHi << 1) | (m_regLo >> 63);
+        m_regLo = (m_regLo << 1) | (uint64_t) (symbol.m_value & 1);
 
         if (++m_fiwBits == 32)
         {
@@ -390,7 +402,7 @@ void RadioPagingFlexReceiver::syncSymbol(const RadioPagingFskDemod::Symbol& symb
             if ((result.m_bitErrors < 0) || !RadioPagingFlex::checksumValid(data) || (((data >> 4) & 0xf) > 14))
             {
                 m_frameInfoFailures++;
-                backToHunting();
+                backToHunting(true);
             }
             else
             {
