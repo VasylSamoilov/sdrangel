@@ -15,13 +15,15 @@ The channels publish their messages as message records on the "messages" pipe, a
 
 <h2>Interface</h2>
 
+![Message Center plugin GUI](../../../doc/img/MessageCenter_plugin.png)
+
 The window is in sections that can be rolled up.
 
 <h3>Log</h3>
 
 The messages received and sent, newest at the bottom (at most the log size, the oldest go first).
 
-* Filters: protocol, direction (RX, TX or both), polarity, message type, channel alias, address and text, hide duplicates, voice pages with a file only, and a regular expression on a field (see Routes). Address and text are regular expressions the whole field must match, as the filters of the other plugins of SDRangel: 12345.. for the addresses 1234500 to 1234599, .*FIRE.* for a text that contains FIRE, (?i) at the start for not case sensitive. An expression that is not valid is shown in red and selects nothing. Only the messages the filters select are shown.
+* Filters: protocol, direction (RX, TX or both), polarity, message type, channel alias, address and text, hide duplicates, voice pages with a file only, and a regular expression on a field (see Routes). Address and text are regular expressions the whole field must match, as the filters of the other plugins of SDRangel: 12345.. for the addresses 1234500 to 1234599, .*FIRE.* for a text that contains FIRE, (?i) at the start for not case sensitive. An expression that is not valid is shown in red and selects nothing. Only the messages the filters select are shown. An address selects the FLEX group messages of which it is a member too (the members received with the assignments).
 * The table has the columns of the message tables of the channels: time, direction, channel, protocol, rate, polarity, address, type, message, fragment, info, errors and state. Right click on the header selects the columns.
 * A click on the icon of a voice message plays its file. Double click on a message opens a window with all the fields of its record: the common fields, protocolData (the flags and parameters of the protocol) and the raw payload, also as bits.
 * Right click on a message: details, copy the cell, the row or the record as JSON, play the voice, select the audio output, and decode a received message again as the other type or with another codepage of its protocol.
@@ -35,6 +37,9 @@ The messages received and sent, newest at the bottom (at most the log size, the 
 
 The channels that announced themselves: alias, role (receiver or transmitter), status (online, or offline when it has not announced itself for the silent time), protocols, speeds, polarity, the pages queued to it, and the time it was last seen.
 
+* A channel whose alias changes (the alias is the frequency by default) keeps one entry, of its new alias.
+* Remove: removes the channel selected; it comes back when it announces itself again. Remove offline: removes the channels offline. The pages of a transmitter removed go back to the queue.
+
 <h3>Queue</h3>
 
 The pages to transmit, with the transmitter (alias), protocol, address, text, state, tries, retries and the reason of a failure. A page goes through pending, queued, claimed, transmitted and sent: the transmitter claims it and reports its state back. A page given to a transmitter that does not claim it within the claim timeout goes back to the queue; a page that can not be sent is dead.
@@ -45,11 +50,17 @@ The pages to transmit, with the transmitter (alias), protocol, address, text, st
 
 <h3>Page</h3>
 
+![Message Center page composer and codepage table](../../../doc/img/MessageCenter_plugin_page.png)
+
 The composer of a page, the same as in the Radio Paging modulator: transmitter (alias), protocol, address, type, text and the fields of the protocol. Send queues the page for the transmitter.
 
 <h3>Routes</h3>
 
 Every message is checked against all the routes in their number order (#), not only the first. Each route whose filter selects the message sends it to the sinks of the route: the log, the transmit queue or the sinks of Files. A route with Stop ends the check for the messages it selects, so the routes after it do not see them. The log is a sink as the others: a message no route sends to it is not logged. A new Message Center has one route, 1 "All messages to the log", without a filter. A sink takes only what a route sends to it.
+
+![Message Center routes, sinks and sources](../../../doc/img/MessageCenter_plugin_routes.png)
+
+![A route](../../../doc/img/MessageCenter_plugin_route.png)
 
 * Add, Edit (or double click) and Remove manage the routes; a route can be switched off. Up and Down change the order.
 * Insert: where a new route goes, before route 1 by default, or before or after another.

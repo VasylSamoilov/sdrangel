@@ -60,7 +60,7 @@ The address is the capcode in 10 digits. Short, long and temporary addresses, an
 * Long messages are sent in fragments over several frames. Each fragment is output as it is received, then the reassembled message; a message with lost fragments is output as incomplete.
 * Message numbers: the messages with R = 1 of an address are checked for skipped numbers, up to the largest message number of the network, 63 (the WebAPI setting flexMaxMessageNumber sets another).
 * Retransmissions of a message are recognised by their message number. A retransmission is output again, tagged duplicate; when its words replaced lost words of an earlier copy it is tagged DUP+.
-* Group messages: a short instruction assigns a member capcode to a temporary address (group slot) and the frame of the group message. The instruction is output to the member capcode, the group message once to the temporary address, with its group slot and members (when the assignments were received).
+* Group messages: a short instruction assigns a member capcode to a temporary address (group slot) and the frame of the group message. The instruction is output to the member capcode, the group message once to the temporary address, with its group slot and members (when the assignments were received). In the table the instruction reads "(added to group slot 2, temporary address 2029570, group message in frame 111)" with the chip G2>F111, the group message has the chip G2[n], n members, its tooltip lists them; the details window has them in group_capcodes.
 * The network information of the block information words is kept: date, time and time zone, roaming system ID (local id, coverage zone, country code, traffic management flags), collapse.
 
 <h3>GSC</h3>
@@ -91,6 +91,8 @@ The bit error rate (BER) is the bits the code corrected over the bits received, 
 
 The top and bottom bars of the channel window are described [here](../../../sdrgui/channel/readme.md)
 
+![Radio Paging Demodulator plugin GUI](../../../doc/img/RadioPagingDemod_plugin.png)
+
 The window has a settings section and a section for the received messages. Each section can be rolled up.
 
 <h3>1: Frequency shift from center frequency of reception</h3>
@@ -116,6 +118,8 @@ Name of this demodulator, in every message it outputs (channel alias) and in the
 Bandwidth of the channel filter, from 10 to 25 kHz in 100 Hz steps (default 20 kHz: the 16 kHz of FLEX and room for the frequency offset of the transmitter and receiver oscillators). Each protocol filters further to its own bandwidth.
 
 <h3>6: Protocol rows</h3>
+
+![FLEX network lines and group slots](../../../doc/img/RadioPagingDemod_plugin_groups.png)
 
 Each protocol has a live line, a line of options and, under them, the network lines of each polarity received:
 
@@ -145,6 +149,8 @@ Each protocol has a live line, a line of options and, under them, the network li
 
 GSC has in addition:
 
+![GSC reception](../../../doc/img/RadioPagingDemod_plugin_gsc.png)
+
 * Voice timeout - longest voice message in seconds (default 50 s). The voice message ends after this time if no turn off code is received.
 * Voice audio button - left click plays the voice message of voice pages: the audio opens when the alert time is over, as a pager opens its audio after the alert, and closes at the end of the page (turn off code, new transmission, signal lost or the voice timeout). It is green while the voice is played. Right click selects the audio output device.
 * Rec - left click records the voice message of voice pages to a WAV file; its path is in the message record (voice_file). Right click selects the directory of the files (default: radiopaging/voice/rx in the application data directory).
@@ -162,7 +168,10 @@ What the Pager demodulator has, for the messages of all three protocols. A messa
 * Load (arrow button) - reads the messages of a log written by this demodulator into the table. They are not notified again.
 * Notifications - a regular expression matched on a field of the message (address, message, protocol, type, channel or any of them), and what is done to a message that matches: its row is highlighted, the text of Speech is spoken (when the build has text to speech), the Command is run, and a position (latitude and longitude) in the message is plotted on the Map named by the address. Speech and Command replace ${address}, ${message}, ${protocol}, ${type}, ${channel} and ${0}, ${1}... (the captures of the expression). A duplicate is not notified again.
 * From Pager - takes over the settings of a Pager demodulator chosen from those there are: frequency shift, bandwidth, the POCSAG deviation, the protocols (its modulation), its character encoding, UDP, log, address filter and notifications (they replace those here). The character encoding sets the POCSAG codepage: none is Generic - ASCII, its Hebrew preset is Generic - Hebrew, other characters or the reverse order fill the POCSAG custom codepage. A table lists each setting with what there is here, what the Pager demodulator has and the action (add, update, delete, keep, or not imported and why) before anything is changed. The log is written next to the Pager log, as name_radiopaging.csv, with the columns of the message record.
-* Address filter - only the messages whose whole address matches the regular expression are shown, as in the Pager demodulator (e.g. 12345.., 001001/.). It applies as it is typed.
+
+![Pager demodulator import](../../../doc/img/RadioPagingDemod_plugin_pagerimport.png)
+
+* Address filter - only the messages whose whole address matches the regular expression are shown, as in the Pager demodulator (e.g. 12345.., 001001/.). It applies as it is typed. A FLEX group message is shown for the address of a member of its group too; the notifications on the address match the members as well.
 
 <h3>8: Waveforms</h3>
 
@@ -175,6 +184,8 @@ Clears the table.
 The Message Center button next to it opens the Message Center (and adds it when there is none).
 
 <h3>10: Messages table</h3>
+
+![The fields of a message record](../../../doc/img/RadioPagingDemod_plugin_details.png)
 
 The latest messages, newest at the bottom. The table follows new messages while it is scrolled to the bottom. The end of a GSC voice message updates the row of its voice page. Duplicates are flagged DUP or DUP+ in the info column. Right click on the header selects the columns. A click on the icon of a voice message plays its file. Double click on a message opens a window with all the fields of its record: the common fields, protocolData and the raw payload (also as bits). Right click on a message: details, copy, voice and decode again. Decode as, All codepages... shows the message decoded with every codepage of its protocol; Create route... (on a message, or on a row of that window) opens the route dialog of the Message Center filled from the message.
 

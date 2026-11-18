@@ -53,6 +53,8 @@ The preamble is 576 bits of reversals. The address codeword goes in the frame of
 
 The top and bottom bars of the channel window are described [here](../../../sdrgui/channel/readme.md)
 
+![Radio Paging Modulator plugin GUI, FLEX](../../../doc/img/RadioPagingMod_plugin.png)
+
 The window is in four sections that can be rolled up.
 
 <h3>Settings</h3>
@@ -79,6 +81,10 @@ The window is in four sections that can be rolled up.
 * Mixing with POCSAG: shared channel, POCSAG speed, polarity, deviation and codepage, the FLEX frames, and the switching patterns before each POCSAG speed (STD-43A 7.2: at least 400 ms before 512 bit/s and 200 ms before 1200 bit/s).
 
 <h3>Message</h3>
+
+![Radio Paging Modulator, POCSAG](../../../doc/img/RadioPagingMod_plugin_pocsag.png)
+
+![Radio Paging Modulator, GSC](../../../doc/img/RadioPagingMod_plugin_gsc.png)
 
 The composer of a message:
 
