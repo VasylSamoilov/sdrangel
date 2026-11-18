@@ -37,6 +37,10 @@ public:
     //!< The text, the type, the codepage and the other candidate; redecoded is set. False and an error if it cannot be
     static bool redecode(const MessageRecord& record, const RadioPagingCharset::Key& charset, const QString& type,
         MessageRecord& out, QString& error);
+    //!< Longest numeric alternative reading of a message that is given, characters
+    static const int m_maxAltNumeric = 18;
+    //!< Whether the other reading of a message (type and text) is given with it: not a long numeric one
+    static bool alternativeGiven(const QString& type, const QString& text);
     //!< The text of a record: the codes below 0x20 and 0x7f as <0xNN>, other bytes kept (UTF-8 passes)
     static QString escapeText(const std::string& text);
     //!< The text of codes as they were received: the codes received (status . or c) decoded with the codepage (none:

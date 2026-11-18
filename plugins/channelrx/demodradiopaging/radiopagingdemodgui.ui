@@ -336,26 +336,26 @@
       <item row="0" column="4">
        <widget class="QComboBox" name="pocsagFill">
         <property name="toolTip">
-         <string>POCSAG fill at the end of an alphanumeric message: the last character, and the one before&#10;if it is the same code, is dropped when its code is NUL; NUL, ETX or EOT;&#10;a code without a glyph in the codepage; or one of a list of codes (Custom: right-click to edit the list)</string>
+         <string>Strip the fill at the end of an alphanumeric message: the last character, and the one before&#10;if it is the same code, is dropped when its code is NUL; NUL, ETX or EOT;&#10;a code without a glyph in the codepage; or one of a list of codes (Custom: right-click to edit the list)</string>
         </property>
         <item>
          <property name="text">
-          <string>Fill NUL</string>
+          <string>Strip NUL</string>
          </property>
         </item>
         <item>
          <property name="text">
-          <string>Fill NUL ETX EOT</string>
+          <string>Strip NUL ETX EOT</string>
          </property>
         </item>
         <item>
          <property name="text">
-          <string>Fill no glyph</string>
+          <string>Strip no glyph</string>
          </property>
         </item>
         <item>
          <property name="text">
-          <string>Fill custom</string>
+          <string>Strip custom</string>
          </property>
         </item>
        </widget>

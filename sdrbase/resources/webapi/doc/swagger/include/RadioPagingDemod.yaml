@@ -31,7 +31,7 @@ RadioPagingDemodSettings:
       type: integer
       format: int32
     pocsagFill:
-      description: "POCSAG fill at the end of an alphanumeric message, the last character and the one before if it is the same code: 0 NUL (default), 1 NUL, ETX and EOT, 2 the codes without a glyph in the codepage, 3 the codes of pocsagFillCodes"
+      description: "POCSAG fill at the end of an alphanumeric message, the last character and the one before if it is the same code: 0 NUL, 1 NUL, ETX and EOT (default), 2 the codes without a glyph in the codepage, 3 the codes of pocsagFillCodes"
       type: integer
       format: int32
     pocsagFillCodes:

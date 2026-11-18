@@ -47,9 +47,9 @@ A message ends with an idle or address codeword, or after two successive codewor
 
 The address is the 7 digit RIC followed by the function (the two function bits of the address codeword) as a letter A to D, for example 0300013D.
 
-The message type is not signalled: the message is decoded both as numeric and as alphanumeric (7-bit) and the type whose content scores best is given, the other one is kept as the alternative (alt_type, alt_text). A tie is alphanumeric. A message without message codewords is tone only.
+The message type is not signalled: the message is decoded both as numeric and as alphanumeric (7-bit) and the type whose content scores best is given, the other one is kept as the alternative (alt_type, alt_text). A numeric alternative longer than 18 characters is not given (POCSAG and GSC). A tie is alphanumeric. A message without message codewords is tone only.
 
-The fill at the end of an alphanumeric message (the last character, and the one before when it is the same code) is dropped by the rule selected: NUL; NUL, ETX or EOT; a code without a glyph in the codepage; or a list of codes.
+The fill at the end of an alphanumeric message (the last character, and the one before when it is the same code) is dropped by the rule selected: NUL; NUL, ETX or EOT; a code without a glyph in the codepage; or a list of codes. The default strips NUL, ETX and EOT.
 
 <h3>FLEX</h3>
 
@@ -120,7 +120,7 @@ One row per protocol:
 * Protocol button - decode the protocol. A protocol switched off is reset and shows OFF.
 * Dev - frequency deviation in Hz: POCSAG 4500, FLEX 4800 (outer symbol), GSC 4500 by default. It sets the filter of the protocol and the scale of its discriminator.
 * DC - DC offset correction of the protocol (see Signal processing), on by default.
-* POCSAG: Fill - the rule for the fill at the end of alphanumeric messages. Right click edits the list of the custom codes.
+* POCSAG: Strip - the rule that strips the fill at the end of alphanumeric messages (default NUL, ETX and EOT). Right click edits the list of the custom codes.
 * FLEX: Max N - largest message number of the network (as the pagers are set), 0 to 63, default 63.
 * GSC: voice timeout, voice audio, recording, voice files and volume (see below).
 * Status - one line of fixed fields: HUNT (grey) while not synchronised, else SYNC (green); what is received with its polarity (NORM or INV); the bit error rate BER of the recent codewords; the carrier frequency offset &Delta;f; the number of messages in brackets. BER is green without bit errors, yellow when errors were corrected, red when there were errors the code could not correct; BER and &Delta;f are grey once the reception ended (the last values are kept). FLEX has two more lines (below). The tooltip explains the fields and gives the details of the last reception. There are lines for each polarity received since the last reset (NORM and INV): one polarity is shown, the other is added when it is received.

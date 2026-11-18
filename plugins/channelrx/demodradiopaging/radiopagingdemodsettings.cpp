@@ -175,7 +175,7 @@ void RadioPagingDemodSettings::resetToDefaults()
     m_pocsagCharset = defaultCharset("pocsag");
     m_flexCharset = defaultCharset("flex");
     m_gscCharset = defaultCharset("gsc");
-    m_pocsagFill = FillMinimal;
+    m_pocsagFill = FillConservative;
     m_pocsagFillCodes = "00 03 04";
     m_pocsagDcCorrection = true;
     m_flexDcCorrection = true;
@@ -345,7 +345,7 @@ bool RadioPagingDemodSettings::deserialize(const QByteArray& data)
         m_pocsagCharset = readCharset(d, 38, "pocsag");
         m_flexCharset = readCharset(d, 41, "flex");
         m_gscCharset = readCharset(d, 44, "gsc");
-        d.readS32(47, &m_pocsagFill, FillMinimal);
+        d.readS32(47, &m_pocsagFill, FillConservative);
         m_pocsagFill = std::max((int) FillMinimal, std::min((int) FillCustom, m_pocsagFill));
         d.readString(48, &m_pocsagFillCodes, "00 03 04");
         d.readBool(49, &m_pocsagDcCorrection, true);

@@ -39,8 +39,17 @@ void setInterpretation(const Interpretation& interpretation, const QString& type
     out.m_msgType = type;
     out.m_text = RadioPagingRecode::escapeText(first ? interpretation.m_text : interpretation.m_altText);
     out.m_protocolData.insert("score", first ? interpretation.m_score : interpretation.m_altScore);
-    out.m_protocolData.insert("alt_type", QString::fromStdString(first ? interpretation.m_altType : interpretation.m_type));
-    out.m_protocolData.insert("alt_text", RadioPagingRecode::escapeText(first ? interpretation.m_altText : interpretation.m_text));
+    QString altType = QString::fromStdString(first ? interpretation.m_altType : interpretation.m_type);
+    QString altText = RadioPagingRecode::escapeText(first ? interpretation.m_altText : interpretation.m_text);
+
+    if (!RadioPagingRecode::alternativeGiven(altType, altText))
+    {
+        altType.clear();
+        altText.clear();
+    }
+
+    out.m_protocolData.insert("alt_type", altType);
+    out.m_protocolData.insert("alt_text", altText);
     out.m_protocolData.insert("alt_score", first ? interpretation.m_altScore : interpretation.m_score);
 }
 
@@ -55,6 +64,11 @@ void setCharStatus(MessageRecord& out, const QString& charStatus)
 }
 
 } // namespace
+
+bool RadioPagingRecode::alternativeGiven(const QString& type, const QString& text)
+{
+    return !(type.contains("numeric") && !type.contains("alpha") && (text.size() > m_maxAltNumeric));
+}
 
 QStringList RadioPagingRecode::types(const MessageRecord& record)
 {

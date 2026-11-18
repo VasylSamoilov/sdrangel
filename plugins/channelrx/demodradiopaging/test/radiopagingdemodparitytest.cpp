@@ -28,6 +28,7 @@
 #include "util/csv.h"
 #include "util/messagerecord.h"
 
+#include "radiopagingrecode.h"
 #include "radiopagingdemodoutput.h"
 #include "radiopagingdemodsettings.h"
 #include "radiopagingdemodsink.h"
@@ -120,6 +121,13 @@ void testDatagram()
     v.m_protocolData.insert("voice_end", "turn_off");
     check(RadioPagingDemodOutput::isCompletion(v), "the end of a voice message completes a record");
     check(!RadioPagingDemodOutput::isCompletion(r), "a message is not a completion");
+}
+
+void testAlternative()
+{
+    check(RadioPagingRecode::alternativeGiven("numeric", "123456789012345678"), "numeric alternative of 18 characters is given");
+    check(!RadioPagingRecode::alternativeGiven("numeric", "1234567890123456789"), "numeric alternative of 19 characters is not given");
+    check(RadioPagingRecode::alternativeGiven("alphanumeric", "THIS TEXT IS LONGER THAN EIGHTEEN"), "a long alphanumeric alternative is given");
 }
 
 void testCsv()
@@ -223,6 +231,7 @@ void testSettings()
 int main()
 {
     testDatagram();
+    testAlternative();
     testCsv();
     testSettings();
     std::printf("%d passed, %d failed\n", passes, failures);

@@ -333,6 +333,7 @@ private:
     void sendGsc(const RadioPagingGscDecoder::Message& message);
     static MessageRecord::Polarity polarity(bool inverted);
     static QString checkName(int check);
+    static void insertAlternative(MessageRecord& record, const std::string& type, const std::string& text, int score);
     //!< Characters below 0x20 and 0x7f as <0xNN>, other bytes kept (UTF-8 passes)
     static QString escapeText(const std::string& text);
     //!< The codepage of the key in the protocol, else the default of the protocol

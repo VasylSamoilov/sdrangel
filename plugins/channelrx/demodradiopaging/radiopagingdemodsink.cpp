@@ -1071,9 +1071,7 @@ void RadioPagingDemodSink::sendPocsag(const RadioPagingPocsagDecoder::Message& m
     record.m_protocolData.insert("batch", message.m_batch);
     record.m_protocolData.insert("truncated", message.m_truncated);
     record.m_protocolData.insert("score", interpretation.m_score);
-    record.m_protocolData.insert("alt_type", QString::fromStdString(interpretation.m_altType));
-    record.m_protocolData.insert("alt_text", escapeText(interpretation.m_altText));
-    record.m_protocolData.insert("alt_score", interpretation.m_altScore);
+    insertAlternative(record, interpretation.m_altType, interpretation.m_altText, interpretation.m_altScore);
     // The codepage of the alphanumeric text (the type or the other candidate) and its fill codes, to decode it again
     if (message.m_rawBits > 0)
     {
@@ -1346,9 +1344,7 @@ void RadioPagingDemodSink::sendGsc(const RadioPagingGscDecoder::Message& message
         record.m_protocolData.insert("checksum_errors", message.m_checksumErrors);
         record.m_protocolData.insert("checksum_passed", message.m_checksumPassed);
         record.m_protocolData.insert("score", interpretation.m_score);
-        record.m_protocolData.insert("alt_type", QString::fromStdString(interpretation.m_altType));
-        record.m_protocolData.insert("alt_text", escapeText(interpretation.m_altText));
-        record.m_protocolData.insert("alt_score", interpretation.m_altScore);
+        insertAlternative(record, interpretation.m_altType, interpretation.m_altText, interpretation.m_altScore);
     }
     else if (message.m_type == RadioPagingGsc::Voice)
     {
@@ -1388,6 +1384,24 @@ void RadioPagingDemodSink::sendGsc(const RadioPagingGscDecoder::Message& message
     }
 
     sendRecord(record, ProtocolGsc);
+}
+
+// The other reading of a message. A long numeric one is not given: a text read as numbers is mostly digits and
+// separators of no meaning
+void RadioPagingDemodSink::insertAlternative(MessageRecord& record, const std::string& type, const std::string& text, int score)
+{
+    QString altType = QString::fromStdString(type);
+    QString altText = escapeText(text);
+
+    if (!RadioPagingRecode::alternativeGiven(altType, altText))
+    {
+        altType.clear();
+        altText.clear();
+    }
+
+    record.m_protocolData.insert("alt_type", altType);
+    record.m_protocolData.insert("alt_text", altText);
+    record.m_protocolData.insert("alt_score", score);
 }
 
 QString RadioPagingDemodSink::checkName(int check)
