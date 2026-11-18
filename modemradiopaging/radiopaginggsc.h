@@ -216,8 +216,11 @@ public:
     //!< Message bits as stored in a decoded message: packed 8 per byte, first bit in the
     //!< most significant bit of byte 0. Alphanumeric: the glyphs of the codepage (RadioPagingCharset::decode), the default
     //!< one (Table VII) without one; Null is padding and gives no character
-    static std::string decodeNumeric(const std::vector<uint8_t>& packed, int nbBits);
-    static std::string decodeAlphanumeric(const std::vector<uint8_t>& packed, int nbBits, const RadioPagingCharset::Codepage *codepage = nullptr);
+    //!< lost: bits from codewords that could not be corrected, packed as packed (none if null): the characters
+    //!< with such a bit are '?'
+    static std::string decodeNumeric(const std::vector<uint8_t>& packed, int nbBits, const std::vector<uint8_t> *lost = nullptr);
+    static std::string decodeAlphanumeric(const std::vector<uint8_t>& packed, int nbBits, const RadioPagingCharset::Codepage *codepage = nullptr,
+        const std::vector<uint8_t> *lost = nullptr);
     static int scoreNumeric(const std::vector<uint8_t>& packed, int nbBits);
     static int scoreAlphanumeric(const std::vector<uint8_t>& packed, int nbBits);
     //!< Numeric pages longer than this many characters lean heavily towards alphanumeric
@@ -225,7 +228,8 @@ public:
     //!< Taken off the numeric score for each character of the numeric text above m_longNumericChars
     static int longNumericPenalty(const std::string& numeric);
     //!< Decide between numeric and alphanumeric by content. No bits means tone only
-    static Interpretation interpret(const std::vector<uint8_t>& packed, int nbBits, const RadioPagingCharset::Codepage *codepage = nullptr);
+    static Interpretation interpret(const std::vector<uint8_t>& packed, int nbBits, const RadioPagingCharset::Codepage *codepage = nullptr,
+        const std::vector<uint8_t> *lost = nullptr);
 
     //!< Replace characters below 0x20 and 0x7f by <0xNN>
     static std::string escapeControl(const std::string& text);

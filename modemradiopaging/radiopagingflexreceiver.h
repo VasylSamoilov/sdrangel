@@ -95,10 +95,21 @@ public:
     static const int m_maxErsErrors = 8;
     //!< Blocks with a mean power this many dB below sync 1 are erased
     static constexpr float m_erasureDb = 15.0f;
+    //!< Blocks whose mean signal quality (process()) is below s_minQuality2 (2-level modes) or s_minQuality4 (4-level)
+    //!< are erased, and their words corrected in two bits or more below the Corrected ones: BCH turns words of a
+    //!< signal too weak into wrong codewords, nearly always by correcting two bits
+    static float s_minQuality2;
+    static float s_minQuality2Corrected;
+    static float s_minQuality4;
+    static float s_minQuality4Corrected;
 
     RadioPagingFlexReceiver();
 
-    void create(double sampleRate);
+    //!< Inputs of each symbol rate and number of levels, as a tone detector gives them, all with the same delay
+    enum Input { Input1600x2, Input3200x2, Input1600x4, Input3200x4, NbInputs };
+
+    //!< inputWindows: samples integrated by each input (see RadioPagingFskDemod), none for a discriminator
+    void create(double sampleRate, const int inputWindows[NbInputs] = nullptr);
     void reset();
     //!< Enable or disable the network of each polarity. There is no mode enable: the system
     //!< chooses the mode of each frame
@@ -121,6 +132,12 @@ public:
 
     //!< Process one discriminator sample with its magnitude squared (pass 1 if not known)
     void process(float sample, float magsq = 1.0f);
+    //!< Process one sample of each input: sync 1 is taken from the 1600 baud 2-level one, the data of a frame
+    //!< from the one of its mode. decisions: a symbol decided outside for each input (the strongest tone of a
+    //!< tone detector), below 0 for none: the symbol is decided from the input. qualities: a measure of the signal
+    //!< for each input that does not depend on decoding (log10 of the strongest tone over the others), NAN for none
+    void process(const float inputs[NbInputs], float magsq, const int decisions[NbInputs] = nullptr,
+        const float qualities[NbInputs] = nullptr);
 
     bool hasMessage() const { return !m_messages.empty(); }
     RadioPagingFlexDecoder::Message takeMessage();
@@ -128,6 +145,8 @@ public:
     void flush();
 
     Status getStatus() const;
+    //!< Frames decoded (frame information word valid)
+    uint32_t frames() const { return m_frames; }
     RadioPagingFlexDecoder& decoder() { return m_decoder; }
 
     //!< Hunting for sync 1 (not in a frame)
@@ -139,6 +158,9 @@ public:
 
 private:
     double m_sampleRate;
+    int m_inputWindows[NbInputs] = {1, 1, 1, 1};
+
+    Input dataInput() const;    //!< The input of the data of the frame's mode
     bool m_enabled[2];                  //!< Normal (0) and inverted (1)
 
     RadioPagingFskDemod m_syncDemod;    //!< 1600 baud, 2 levels, always running
@@ -172,6 +194,8 @@ private:
     std::vector<std::vector<uint32_t>> m_words;
     std::vector<double> m_blockPower;
     std::vector<int> m_blockSamples;
+    std::vector<double> m_blockQuality;     //!< Sum of the quality of the data symbols of each block
+    std::vector<int> m_blockQualityCount;
     double m_errorSum;
     int m_errorCount;
 

@@ -15,6 +15,9 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.          //
 ///////////////////////////////////////////////////////////////////////////////////
 
+#include <algorithm>
+#include <cmath>
+
 #include "radiopagingpocsag.h"
 #include "radiopagingpocsagreceiver.h"
 
@@ -30,10 +33,10 @@ RadioPagingPocsagReceiver::RadioPagingPocsagReceiver() :
     create(38400.0, 1200);
 }
 
-void RadioPagingPocsagReceiver::create(double sampleRate, int baud)
+void RadioPagingPocsagReceiver::create(double sampleRate, int baud, int inputWindow)
 {
     m_baud = baud;
-    m_demod.create(sampleRate, baud, 2);
+    m_demod.create(sampleRate, baud, 2, inputWindow);
     reset();
 }
 
@@ -88,7 +91,7 @@ bool RadioPagingPocsagReceiver::isSynced() const
     return (m_normalEnabled && m_normal.isSynced()) || (m_invertedEnabled && m_inverted.isSynced());
 }
 
-void RadioPagingPocsagReceiver::process(float sample)
+void RadioPagingPocsagReceiver::process(float sample, float quality)
 {
     RadioPagingFskDemod::Symbol symbol;
 
@@ -115,11 +118,14 @@ void RadioPagingPocsagReceiver::process(float sample)
     uint32_t normalSyncs = m_normal.syncWords();
     uint32_t invertedSyncs = m_inverted.syncWords();
 
+    // The reliability of the decision: the distance of the symbol from the threshold, outer levels at 1
+    float reliability = std::min(1.5f, std::fabs(symbol.m_soft));
+
     if (m_normalEnabled) {
-        m_normal.feed(symbol.m_value);
+        m_normal.feed(symbol.m_value, reliability, quality);
     }
     if (m_invertedEnabled) {
-        m_inverted.feed(symbol.m_value);
+        m_inverted.feed(symbol.m_value, reliability, quality);
     }
 
     // A sync codeword was just received (the candidate of a batch or the codeword of the

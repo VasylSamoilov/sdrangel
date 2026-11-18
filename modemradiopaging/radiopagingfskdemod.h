@@ -56,11 +56,17 @@ public:
 
     RadioPagingFskDemod();
 
-    //!< sampleRate in Hz, symbolRate in symbols/s, levels 2 or 4
-    void create(double sampleRate, double symbolRate, int levels);
+    //!< sampleRate in Hz, symbolRate in symbols/s, levels 2 or 4. inputWindow: samples the input has already
+    //!< integrated (a tone detector's window, 1 for a discriminator); the matched filter integrates the rest of
+    //!< the symbol, so the two together span one symbol and the symbol instant stays at its end
+    void create(double sampleRate, double symbolRate, int levels, int inputWindow = 1);
     void reset();
     //!< Process one discriminator sample. Returns true when a symbol has been decided
     bool process(float sample, Symbol& symbol);
+    //!< The same with a decision made outside for each sample (the strongest tone of a tone detector), taken
+    //!< for the symbol from the input sample nearest the symbol instant; the sample still drives the symbol
+    //!< clock and the levels. A decision below 0 is not used: the symbol is decided from the sample
+    bool process(float sample, int decision, Symbol& symbol);
 
     //!< Use tracking (low) timing loop gains once a sync word has been found, acquisition gains otherwise
     void setLocked(bool locked) { m_locked = locked; }
@@ -98,6 +104,7 @@ private:
 
     MovingAverageUtilVar<float, double> m_matchedFilter;
     float m_prevFiltered;           //!< Matched filter output of the previous input sample
+    int m_prevDecision = -1;        //!< Decision given with the previous input sample
     double m_timeToNext;            //!< Samples until the next half symbol instant
     bool m_nextIsSymbol;            //!< The next half symbol instant is a symbol (not a mid point)
     float m_prevSymbolValue;        //!< Matched filter value at the previous symbol instant

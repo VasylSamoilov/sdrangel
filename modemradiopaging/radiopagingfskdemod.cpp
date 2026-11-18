@@ -120,11 +120,11 @@ bool RadioPagingFskDemod::fitLevels(const std::vector<float>& known, size_t symb
     return true;
 }
 
-void RadioPagingFskDemod::create(double sampleRate, double symbolRate, int levels)
+void RadioPagingFskDemod::create(double sampleRate, double symbolRate, int levels, int inputWindow)
 {
     m_samplesPerSymbol = sampleRate / symbolRate;
     m_levels = (levels == 4) ? 4 : 2;
-    m_matchedFilter.resize(std::max(1, (int) std::lround(m_samplesPerSymbol)));
+    m_matchedFilter.resize(std::max(1, (int) std::lround(m_samplesPerSymbol) - std::max(1, inputWindow) + 1));
     reset();
 }
 
@@ -132,6 +132,7 @@ void RadioPagingFskDemod::reset()
 {
     m_matchedFilter.reset();
     m_prevFiltered = 0.0f;
+    m_prevDecision = -1;
     m_timeToNext = m_samplesPerSymbol / 2.0;
     m_nextIsSymbol = true;
     m_prevSymbolValue = 0.0f;
@@ -197,6 +198,11 @@ int RadioPagingFskDemod::decide(float normalised) const
 
 bool RadioPagingFskDemod::process(float sample, Symbol& symbol)
 {
+    return process(sample, -1, symbol);
+}
+
+bool RadioPagingFskDemod::process(float sample, int decision, Symbol& symbol)
+{
     bool produced = false;
 
     m_matchedFilter(sample);
@@ -225,6 +231,11 @@ bool RadioPagingFskDemod::process(float sample, Symbol& symbol)
 
             float normalised = value / m_deviation;
             int decided = decide(normalised);
+            // A decision from outside: that of the input sample nearest the instant
+            int given = (fraction >= 0.5f) ? decision : m_prevDecision;
+            if (given >= 0) {
+                decided = given & (m_levels - 1);
+            }
             float level = levelValue(decided, m_levels);
 
             // The symbol value with its DC offset: history for the known pattern fits, and
@@ -264,6 +275,7 @@ bool RadioPagingFskDemod::process(float sample, Symbol& symbol)
     }
 
     m_prevFiltered = filtered;
+    m_prevDecision = decision;
 
     return produced;
 }

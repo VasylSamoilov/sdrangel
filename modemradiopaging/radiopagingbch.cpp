@@ -17,9 +17,19 @@
 
 #include "radiopagingbch.h"
 
+#include <algorithm>
 #include <array>
 
 namespace {
+
+int popcountWord(uint32_t x)
+{
+    int n = 0;
+    for (; x; x &= x - 1) {
+        n++;
+    }
+    return n;
+}
 
 // Remainder of the 31-bit polynomial in bits 30-0 divided by the generator
 uint32_t remainder31(uint32_t poly)
@@ -137,6 +147,65 @@ RadioPagingBCH::Result RadioPagingBCH::decode(uint32_t word)
     }
 
     return result;
+}
+
+RadioPagingBCH::Result RadioPagingBCH::decodeSoft(uint32_t word, const float reliability[32], int chaseBits, float maxCost)
+{
+    Result hard = decode(word);
+
+    if ((hard.m_bitErrors >= 0) || (chaseBits <= 0)) {
+        return hard;
+    }
+
+    // The least reliable bits
+    int order[32];
+    for (int i = 0; i < 32; i++) {
+        order[i] = i;
+    }
+    chaseBits = std::min(chaseBits, 12);
+    std::partial_sort(order, order + chaseBits, order + 32, [reliability](int x, int y) {
+        return reliability[x] < reliability[y];
+    });
+
+    Result best = hard;
+    float bestCost = maxCost;
+    bool found = false;
+
+    for (uint32_t pattern = 1; pattern < (1u << chaseBits); pattern++)
+    {
+        uint32_t mask = 0;
+        for (int k = 0; k < chaseBits; k++)
+        {
+            if (pattern & (1u << k)) {
+                mask |= 1u << order[k];
+            }
+        }
+
+        Result r = decode(word ^ mask);
+        if (r.m_bitErrors < 0) {
+            continue;
+        }
+
+        uint32_t changed = r.m_word ^ word;
+        float cost = 0.0f;
+        for (int i = 0; i < 32; i++)
+        {
+            if (changed & (1u << i)) {
+                cost += reliability[i];
+            }
+        }
+
+        if (cost <= bestCost)
+        {
+            bestCost = cost;
+            best.m_word = r.m_word;
+            best.m_bitErrors = popcountWord(changed);
+            best.m_parityError = false;
+            found = true;
+        }
+    }
+
+    return found ? best : hard;
 }
 
 uint32_t RadioPagingBCH::reverse(uint32_t word)

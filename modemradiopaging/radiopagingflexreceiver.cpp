@@ -24,6 +24,10 @@
 
 const int RadioPagingFlexReceiver::m_maxSyncErrors;
 constexpr float RadioPagingFlexReceiver::m_erasureDb;
+float RadioPagingFlexReceiver::s_minQuality2 = 0.84f;
+float RadioPagingFlexReceiver::s_minQuality2Corrected = 0.92f;
+float RadioPagingFlexReceiver::s_minQuality4 = 0.92f;
+float RadioPagingFlexReceiver::s_minQuality4Corrected = 1.00f;
 
 namespace {
 
@@ -82,10 +86,13 @@ RadioPagingFlexReceiver::RadioPagingFlexReceiver() :
     create(m_sampleRate);
 }
 
-void RadioPagingFlexReceiver::create(double sampleRate)
+void RadioPagingFlexReceiver::create(double sampleRate, const int inputWindows[NbInputs])
 {
     m_sampleRate = sampleRate;
-    m_syncDemod.create(sampleRate, RadioPagingFlex::m_syncBaud, 2);
+    for (int i = 0; i < NbInputs; i++) {
+        m_inputWindows[i] = inputWindows ? inputWindows[i] : 1;
+    }
+    m_syncDemod.create(sampleRate, RadioPagingFlex::m_syncBaud, 2, m_inputWindows[Input1600x2]);
     reset();
 }
 
@@ -211,13 +218,30 @@ bool RadioPagingFlexReceiver::ersActive() const
 
 void RadioPagingFlexReceiver::process(float sample, float magsq)
 {
+    const float inputs[NbInputs] = {sample, sample, sample, sample};
+    process(inputs, magsq);
+}
+
+RadioPagingFlexReceiver::Input RadioPagingFlexReceiver::dataInput() const
+{
+    bool fast = RadioPagingFlex::baud(m_mode) > RadioPagingFlex::m_syncBaud;
+
+    if (RadioPagingFlex::levels(m_mode) == 4) {
+        return fast ? Input3200x4 : Input1600x4;
+    } else {
+        return fast ? Input3200x2 : Input1600x2;
+    }
+}
+
+void RadioPagingFlexReceiver::process(const float inputs[NbInputs], float magsq, const int decisions[NbInputs], const float qualities[NbInputs])
+{
     RadioPagingFskDemod::Symbol symbol;
 
     m_time += 1.0 / m_sampleRate;
 
     // The sync demodulator keeps its symbol clock running through the data part, so the
     // next frame's sync is found without a new acquisition
-    if (m_syncDemod.process(sample, symbol))
+    if (m_syncDemod.process(inputs[Input1600x2], symbol))
     {
         m_syncSymbols++;
 
@@ -228,7 +252,17 @@ void RadioPagingFlexReceiver::process(float sample, float magsq)
 
     if ((m_state == Sync2) || (m_state == Data))
     {
-        if (m_dataDemod.process(sample, symbol)) {
+        float sample = inputs[dataInput()];
+        int decision = decisions ? decisions[dataInput()] : -1;
+
+        if (m_dataDemod.process(sample, decision, symbol))
+        {
+            if ((m_state == Data) && (m_dataCount < m_dataSymbols) && qualities && !std::isnan(qualities[dataInput()]))
+            {
+                int block = std::min(m_bitIndex / (32 * RadioPagingFlex::m_wordsPerBlock), RadioPagingFlex::m_blocksPerFrame - 1);
+                m_blockQuality[block] += qualities[dataInput()];
+                m_blockQualityCount[block]++;
+            }
             dataSymbol(symbol.m_value, symbol.m_error, magsq);
         }
         if ((m_state == Data) && (m_dataCount < m_dataSymbols))
@@ -418,7 +452,7 @@ void RadioPagingFlexReceiver::startData(float offset)
     int levels = RadioPagingFlex::levels(m_mode);
     double samplesPerSymbol = m_sampleRate / baud;
 
-    m_dataDemod.create(m_sampleRate, baud, levels);
+    m_dataDemod.create(m_sampleRate, baud, levels, m_inputWindows[dataInput()]);
     m_dataDemod.setLevels(m_syncDemod.getDC(), m_syncDemod.getDeviation());
     m_dataDemod.setLocked(true);
     // The levels measured on sync 1 are kept for the frame
@@ -441,6 +475,8 @@ void RadioPagingFlexReceiver::startData(float offset)
     m_words.assign(RadioPagingFlex::phaseCount(m_mode), std::vector<uint32_t>(RadioPagingFlex::m_wordsPerFrame, 0));
     m_blockPower.assign(RadioPagingFlex::m_blocksPerFrame, 0.0);
     m_blockSamples.assign(RadioPagingFlex::m_blocksPerFrame, 0);
+    m_blockQuality.assign(RadioPagingFlex::m_blocksPerFrame, 0.0);
+    m_blockQualityCount.assign(RadioPagingFlex::m_blocksPerFrame, 0);
     m_errorSum = 0.0;
     m_errorCount = 0;
 
@@ -584,9 +620,22 @@ void RadioPagingFlexReceiver::endFrame()
     frame.m_quality = std::max(0.0, std::min(1.0, 1.0 - 1.5 * rms));
 
     std::vector<uint8_t> erased(RadioPagingFlex::m_wordsPerFrame, 0);
+    const bool fourLevel = RadioPagingFlex::levels(m_mode) == 4;
+    const float minQuality = fourLevel ? s_minQuality4 : s_minQuality2;
+    const float minQualityCorrected = fourLevel ? s_minQuality4Corrected : s_minQuality2Corrected;
+    std::vector<float> blockQuality(RadioPagingFlex::m_blocksPerFrame, NAN);
+
     for (int block = 0; block < RadioPagingFlex::m_blocksPerFrame; block++)
     {
-        if ((m_blockSamples[block] > 0) && ((m_blockPower[block] / m_blockSamples[block]) < threshold))
+        if (m_blockQualityCount[block] > 0) {
+            blockQuality[block] = (float) (m_blockQuality[block] / m_blockQualityCount[block]);
+        }
+
+        // A block too weak (power below sync 1) or of a signal too weak for the corrections to be right
+        bool weak = (m_blockSamples[block] > 0) && ((m_blockPower[block] / m_blockSamples[block]) < threshold);
+        bool poor = !std::isnan(blockQuality[block]) && (blockQuality[block] < minQuality);
+
+        if (weak || poor)
         {
             for (int w = 0; w < RadioPagingFlex::m_wordsPerBlock; w++) {
                 erased[block * RadioPagingFlex::m_wordsPerBlock + w] = 1;
@@ -600,6 +649,22 @@ void RadioPagingFlexReceiver::endFrame()
         phase.m_name = (phases == 1) ? 'A' : (phases == 2) ? names2[p] : names4[p];
         phase.m_words = m_words[p];
         phase.m_erased = erased;
+
+        // A word corrected in two bits or more is taken from a higher quality: a word of a signal too weak
+        // becomes a wrong codeword that way
+        for (int w = 0; w < RadioPagingFlex::m_wordsPerFrame; w++)
+        {
+            float quality = blockQuality[std::min(w / RadioPagingFlex::m_wordsPerBlock, RadioPagingFlex::m_blocksPerFrame - 1)];
+
+            if (!phase.m_erased[w] && !std::isnan(quality) && (quality < minQualityCorrected))
+            {
+                RadioPagingBCH::Result r = RadioPagingBCH::decode(phase.m_words[w]);
+                if ((r.m_bitErrors >= 0) && (r.m_bitErrors + (r.m_parityError ? 1 : 0) >= 2)) {
+                    phase.m_erased[w] = 1;
+                }
+            }
+        }
+
         frame.m_phases.push_back(phase);
     }
 

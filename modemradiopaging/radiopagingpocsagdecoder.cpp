@@ -17,8 +17,15 @@
 
 #include "radiopagingpocsagdecoder.h"
 
+#include <algorithm>
+
 #include "radiopagingbch.h"
 #include "radiopagingpocsag.h"
+
+int RadioPagingPocsagDecoder::s_chaseBits = 0;
+float RadioPagingPocsagDecoder::s_chaseMaxCost = 0.0f;
+float RadioPagingPocsagDecoder::s_minQuality = 0.84f;
+float RadioPagingPocsagDecoder::s_minQuality2 = 0.92f;
 
 const int RadioPagingPocsagDecoder::m_maxSyncErrors;
 const int RadioPagingPocsagDecoder::m_maxMessageBits;
@@ -106,9 +113,11 @@ void RadioPagingPocsagDecoder::startCandidate()
     m_leadingConfirmed = false;
     m_syncMissedLast = false;
     m_batch = 0;
+    m_batchQuality = 0.0;
+    m_batchQualityCount = 0;
 }
 
-void RadioPagingPocsagDecoder::feed(int symbol)
+void RadioPagingPocsagDecoder::feed(int symbol, float reliability, float quality)
 {
     // Binary 1 is a negative deviation for normal polarity
     int bit = (m_polarity == Normal) ? (symbol ? 0 : 1) : (symbol ? 1 : 0);
@@ -116,6 +125,13 @@ void RadioPagingPocsagDecoder::feed(int symbol)
     m_reg = (m_reg << 1) | (uint32_t) bit;
     if (m_regBits < 32) {
         m_regBits++;
+    }
+
+    // The quality of the symbols of a batch and of its sync codeword
+    if ((m_state != Hunting) && !std::isnan(quality))
+    {
+        m_batchQuality += quality;
+        m_batchQualityCount++;
     }
 
     switch (m_state)
@@ -136,9 +152,11 @@ void RadioPagingPocsagDecoder::feed(int symbol)
         }
 
         m_word = (m_word << 1) | (uint32_t) bit;
+        m_wordReliability[31 - m_wordBits] = reliability;   // The first bit of a codeword is bit 31
         if (++m_wordBits == 32)
         {
             m_batchWords[m_slot] = m_word;
+            std::copy(m_wordReliability, m_wordReliability + 32, m_batchReliability[m_slot]);
             m_wordBits = 0;
             m_word = 0;
             if (++m_slot == RadioPagingPocsag::m_codewordsPerBatch) {
@@ -196,6 +214,8 @@ void RadioPagingPocsagDecoder::feed(int symbol)
 
 bool RadioPagingPocsagDecoder::batchValid() const
 {
+    // Hard decisions: a batch taken without its sync codeword must decode by itself, soft decisions would
+    // make batches out of noise
     for (uint32_t word : m_batchWords)
     {
         if (RadioPagingBCH::decode(word).m_bitErrors < 0) {
@@ -206,6 +226,12 @@ bool RadioPagingPocsagDecoder::batchValid() const
     return true;
 }
 
+RadioPagingBCH::Result RadioPagingPocsagDecoder::decodeCodeword(uint32_t word, const float reliability[32]) const
+{
+    return (s_chaseBits > 0) ? RadioPagingBCH::decodeSoft(word, reliability, s_chaseBits, s_chaseMaxCost)
+        : RadioPagingBCH::decode(word);
+}
+
 void RadioPagingPocsagDecoder::decodeBatch()
 {
     if (m_batch == 0)
@@ -214,8 +240,13 @@ void RadioPagingPocsagDecoder::decodeBatch()
         m_ber.reset();
     }
 
+    // The quality of a batch of a signal too weak for its corrections to be right
+    float batchQuality = (m_batchQualityCount > 0) ? (float) (m_batchQuality / m_batchQualityCount) : NAN;
+    m_batchQuality = 0.0;
+    m_batchQualityCount = 0;
+
     for (m_slot = 0; m_slot < RadioPagingPocsag::m_codewordsPerBatch; m_slot++) {
-        processCodeword(m_batchWords[m_slot]);
+        processCodeword(m_batchWords[m_slot], m_batchReliability[m_slot], batchQuality);
     }
 
     m_batch++;
@@ -231,9 +262,12 @@ void RadioPagingPocsagDecoder::endTransmission()
     m_uncorrectableRun = 0;
 }
 
-void RadioPagingPocsagDecoder::processCodeword(uint32_t word)
+void RadioPagingPocsagDecoder::processCodeword(uint32_t word, const float reliability[32], float quality)
 {
-    RadioPagingBCH::Result result = RadioPagingBCH::decode(word);
+    RadioPagingBCH::Result result = decodeCodeword(word, reliability);
+    if (!qualityAccepts(quality, result.m_bitErrors + (result.m_parityError ? 1 : 0))) {
+        result.m_bitErrors = -1;
+    }
     m_codewords++;
     m_ber.add((result.m_bitErrors > 0 ? result.m_bitErrors : 0) + (result.m_parityError ? 1 : 0), 32, result.m_bitErrors < 0);
 

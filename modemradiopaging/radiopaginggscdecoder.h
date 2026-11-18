@@ -19,6 +19,7 @@
 #define MODEMRADIOPAGING_RADIOPAGINGGSCDECODER_H
 
 #include <bitset>
+#include <cmath>
 #include <cstdint>
 #include <deque>
 #include <string>
@@ -99,6 +100,7 @@ public:
         int m_addressNumber = 1;            //!< 1-4 (function A-D), from the complemented address words
         RadioPagingGsc::MessageType m_type = RadioPagingGsc::Tone;   //!< Tone, Voice or Data
         std::vector<uint8_t> m_rawData;     //!< Message bits, packed 8 per byte, first bit in the MSB
+        std::vector<uint8_t> m_rawLost;     //!< The bits of m_rawData from codewords that could not be corrected, packed the same way
         int m_rawBits = 0;                  //!< Number of message bits, a multiple of 48; 0 = tone only or voice
         int m_preamble = -1;                //!< Preamble value index, -1 in non battery saver mode
         int m_slot = 0;                     //!< Index of the address in the transmission, from 0 (addresses only, not 121 bit batch slots)
@@ -139,8 +141,9 @@ public:
     void setVoiceTimeout(double seconds);
     //!< Feed one hard symbol: 1 = positive deviation, 0 = negative deviation
     void feed(int symbol);
-    //!< Feed one soft symbol: positive = positive deviation, the magnitude is the confidence
-    void feedSoft(float soft);
+    //!< Feed one soft symbol: positive = positive deviation, the magnitude is the confidence; quality: a measure
+    //!< of the signal that does not depend on decoding (RadioPagingPocsagDecoder::feed()), NAN if none
+    void feedSoft(float soft, float quality = NAN);
     //!< The signal is gone: finish the transmission in progress
     void flush();
 
@@ -216,6 +219,28 @@ private:
     uint64_t m_reg;                     //!< Last 64 bits, newest in bit 0
     int m_regBits;
     float m_softRing[RadioPagingGsc::m_codewordBits];   //!< Last 46 soft symbols, oldest at m_softPos
+    //!< Quality of the last symbols: addresses and message blocks are not decoded while its mean is below
+    //!< s_minQuality (BCH and Golay turn words of noise or of a signal too weak into codewords)
+    static const int m_qualitySymbols = 256;
+    float m_qualityRing[m_qualitySymbols] = {};
+    int m_qualityPos = 0;
+    int m_qualityCount = 0;
+    double m_qualitySum = 0.0;
+    //!< A codeword corrected in this many bits (of at most maxCorrections) is taken at the mean quality of the
+    //!< last symbols: from s_minQuality, from s_minQuality2 when corrected in the most bits the code corrects
+    //!< (a word of a signal too weak becomes a wrong codeword that way). Without a quality measure, taken
+    bool qualityAccepts(int corrections, int maxCorrections) const
+    {
+        if ((m_qualityCount == 0) || (corrections < 0)) {
+            return true;
+        }
+        double quality = m_qualitySum / m_qualityCount;
+        return quality >= ((corrections >= maxCorrections) ? s_minQuality2 : s_minQuality);
+    }
+public:
+    static float s_minQuality;
+    static float s_minQuality2;
+private:
     int m_softPos;
     int8_t m_hits[2 * RadioPagingGsc::m_codewordBits + 1];  //!< Preamble hit history, ring indexed by m_hitPos
     int m_hitPos;
@@ -244,6 +269,7 @@ private:
     bool m_active;                      //!< A message is being received
     Message m_current;
     std::vector<uint8_t> m_currentBits;
+    std::vector<uint8_t> m_currentLost;     //!< 1 for each bit of m_currentBits from a codeword that could not be corrected
     int m_blocks;
 
     uint32_t m_codewords;

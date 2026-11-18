@@ -47,6 +47,12 @@ public:
     //!< after correcting at most one bit in bits 31-1 is an error of the parity bit, which is repaired
     //!< (m_parityError set). Two corrected bits and a wrong parity is uncorrectable (m_bitErrors -1)
     static Result decode(uint32_t word);
+    //!< Soft decision (Chase): the hard decision, and when it fails the codewords found by flipping
+    //!< combinations of the chaseBits least reliable bits. reliability[i] is the reliability of bit i
+    //!< (bit 31 first sent), about 1 for a clean bit and near 0 for a doubtful one. The codeword whose
+    //!< changed bits have the lowest total reliability is taken if that total is at most maxCost:
+    //!< flipping reliable bits would make codewords out of noise. m_bitErrors: the bits changed
+    static Result decodeSoft(uint32_t word, const float reliability[32], int chaseBits, float maxCost);
     //!< 21 data bits of a codeword
     static uint32_t data(uint32_t word) { return word >> 11; }
     //!< Syndrome of bits 31-1, 0 for a valid codeword
