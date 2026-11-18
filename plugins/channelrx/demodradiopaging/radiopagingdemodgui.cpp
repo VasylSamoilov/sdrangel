@@ -556,6 +556,12 @@ void RadioPagingDemodGUI::applyAddressFilter()
 
 void RadioPagingDemodGUI::on_filterAddress_editingFinished()
 {
+    // An expression that is not valid filters nothing, shown in red with its error
+    QRegularExpression regExp(ui->filterAddress->text().trimmed());
+    bool valid = ui->filterAddress->text().trimmed().isEmpty() || regExp.isValid();
+    ui->filterAddress->setStyleSheet(valid ? QString() : QString("QLineEdit { color: red; }"));
+    ui->filterAddress->setToolTip(valid ? tr("Show only the messages whose address matches this regular expression")
+        : regExp.errorString());
     applyAddressFilter();
 }
 
@@ -1701,7 +1707,8 @@ void RadioPagingDemodGUI::makeUIConnections()
     QObject::connect(ui->logEnable, &ButtonSwitch::clicked, this, &RadioPagingDemodGUI::on_logEnable_clicked);
     QObject::connect(ui->logFilename, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_logFilename_clicked);
     QObject::connect(ui->logOpen, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_logOpen_clicked);
-    QObject::connect(ui->filterAddress, &QLineEdit::editingFinished, this, &RadioPagingDemodGUI::on_filterAddress_editingFinished);
+    // The rows follow the filter as it is typed
+    QObject::connect(ui->filterAddress, &QLineEdit::textChanged, this, &RadioPagingDemodGUI::on_filterAddress_editingFinished);
     QObject::connect(ui->channel1, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingDemodGUI::on_channel1_currentIndexChanged);
     QObject::connect(ui->channel2, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingDemodGUI::on_channel2_currentIndexChanged);
 }
