@@ -46,6 +46,12 @@ SWGRadioPagingDemodSettings::SWGRadioPagingDemodSettings() {
     m_pocsag_fill_isSet = false;
     pocsag_fill_codes = nullptr;
     m_pocsag_fill_codes_isSet = false;
+    pocsag_custom_codes = nullptr;
+    m_pocsag_custom_codes_isSet = false;
+    flex_custom_codes = nullptr;
+    m_flex_custom_codes_isSet = false;
+    gsc_custom_codes = nullptr;
+    m_gsc_custom_codes_isSet = false;
     gsc_enabled = 0;
     m_gsc_enabled_isSet = false;
     gsc_deviation = 0.0f;
@@ -140,6 +146,12 @@ SWGRadioPagingDemodSettings::init() {
     m_pocsag_fill_isSet = false;
     pocsag_fill_codes = new QString("");
     m_pocsag_fill_codes_isSet = false;
+    pocsag_custom_codes = new QString("");
+    m_pocsag_custom_codes_isSet = false;
+    flex_custom_codes = new QString("");
+    m_flex_custom_codes_isSet = false;
+    gsc_custom_codes = new QString("");
+    m_gsc_custom_codes_isSet = false;
     gsc_enabled = 0;
     m_gsc_enabled_isSet = false;
     gsc_deviation = 0.0f;
@@ -222,6 +234,15 @@ SWGRadioPagingDemodSettings::cleanup() {
 
     if(pocsag_fill_codes != nullptr) { 
         delete pocsag_fill_codes;
+    }
+    if(pocsag_custom_codes != nullptr) { 
+        delete pocsag_custom_codes;
+    }
+    if(flex_custom_codes != nullptr) { 
+        delete flex_custom_codes;
+    }
+    if(gsc_custom_codes != nullptr) { 
+        delete gsc_custom_codes;
     }
 
 
@@ -313,6 +334,12 @@ SWGRadioPagingDemodSettings::fromJsonObject(QJsonObject &pJson) {
     ::SWGSDRangel::setValue(&pocsag_fill, pJson["pocsagFill"], "qint32", "");
     
     ::SWGSDRangel::setValue(&pocsag_fill_codes, pJson["pocsagFillCodes"], "QString", "QString");
+    
+    ::SWGSDRangel::setValue(&pocsag_custom_codes, pJson["pocsagCustomCodes"], "QString", "QString");
+    
+    ::SWGSDRangel::setValue(&flex_custom_codes, pJson["flexCustomCodes"], "QString", "QString");
+    
+    ::SWGSDRangel::setValue(&gsc_custom_codes, pJson["gscCustomCodes"], "QString", "QString");
     
     ::SWGSDRangel::setValue(&gsc_enabled, pJson["gscEnabled"], "qint32", "");
     
@@ -424,6 +451,15 @@ SWGRadioPagingDemodSettings::asJsonObject() {
     }
     if(pocsag_fill_codes != nullptr && *pocsag_fill_codes != QString("")){
         toJsonValue(QString("pocsagFillCodes"), pocsag_fill_codes, obj, QString("QString"));
+    }
+    if(pocsag_custom_codes != nullptr && *pocsag_custom_codes != QString("")){
+        toJsonValue(QString("pocsagCustomCodes"), pocsag_custom_codes, obj, QString("QString"));
+    }
+    if(flex_custom_codes != nullptr && *flex_custom_codes != QString("")){
+        toJsonValue(QString("flexCustomCodes"), flex_custom_codes, obj, QString("QString"));
+    }
+    if(gsc_custom_codes != nullptr && *gsc_custom_codes != QString("")){
+        toJsonValue(QString("gscCustomCodes"), gsc_custom_codes, obj, QString("QString"));
     }
     if(m_gsc_enabled_isSet){
         obj->insert("gscEnabled", QJsonValue(gsc_enabled));
@@ -619,6 +655,36 @@ void
 SWGRadioPagingDemodSettings::setPocsagFillCodes(QString* pocsag_fill_codes) {
     this->pocsag_fill_codes = pocsag_fill_codes;
     this->m_pocsag_fill_codes_isSet = true;
+}
+
+QString*
+SWGRadioPagingDemodSettings::getPocsagCustomCodes() {
+    return pocsag_custom_codes;
+}
+void
+SWGRadioPagingDemodSettings::setPocsagCustomCodes(QString* pocsag_custom_codes) {
+    this->pocsag_custom_codes = pocsag_custom_codes;
+    this->m_pocsag_custom_codes_isSet = true;
+}
+
+QString*
+SWGRadioPagingDemodSettings::getFlexCustomCodes() {
+    return flex_custom_codes;
+}
+void
+SWGRadioPagingDemodSettings::setFlexCustomCodes(QString* flex_custom_codes) {
+    this->flex_custom_codes = flex_custom_codes;
+    this->m_flex_custom_codes_isSet = true;
+}
+
+QString*
+SWGRadioPagingDemodSettings::getGscCustomCodes() {
+    return gsc_custom_codes;
+}
+void
+SWGRadioPagingDemodSettings::setGscCustomCodes(QString* gsc_custom_codes) {
+    this->gsc_custom_codes = gsc_custom_codes;
+    this->m_gsc_custom_codes_isSet = true;
 }
 
 qint32
@@ -991,6 +1057,15 @@ SWGRadioPagingDemodSettings::isSet(){
             isObjectUpdated = true; break;
         }
         if(pocsag_fill_codes && *pocsag_fill_codes != QString("")){
+            isObjectUpdated = true; break;
+        }
+        if(pocsag_custom_codes && *pocsag_custom_codes != QString("")){
+            isObjectUpdated = true; break;
+        }
+        if(flex_custom_codes && *flex_custom_codes != QString("")){
+            isObjectUpdated = true; break;
+        }
+        if(gsc_custom_codes && *gsc_custom_codes != QString("")){
             isObjectUpdated = true; break;
         }
         if(m_gsc_enabled_isSet){

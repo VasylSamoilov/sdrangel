@@ -35,6 +35,7 @@ extern const RadioPagingCharset::Table pocsagLatinPortuguese;
 extern const RadioPagingCharset::Table pocsagLatinSpanish;
 extern const RadioPagingCharset::Table pocsagLatinSwedish;
 extern const RadioPagingCharset::Table pocsagLatinSwiss;
+extern const RadioPagingCharset::Table pocsagLatinHebrew;
 extern const RadioPagingCharset::Table pocsagMotorolaAdvisorCyrillic;
 extern const RadioPagingCharset::Table pocsagMotorolaAdvisorLinguistLatinCyrillic;
 extern const RadioPagingCharset::Table pocsagMultitoneAscii;

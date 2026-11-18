@@ -16,6 +16,9 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include <cstdio>
+#include <memory>
+
+#include <QRegularExpression>
 
 #include "radiopagingpage.h"
 #include "radiopagingpocsag.h"
@@ -96,6 +99,20 @@ bool RadioPagingRecode::redecode(const MessageRecord& record, const RadioPagingC
     const std::string protocol = record.m_protocol.toStdString();
     const RadioPagingCharset::Key key = charset.empty() ? RadioPagingPage::charsetKey(record.m_protocolData.value("charset")) : charset;
     const RadioPagingCharset::Codepage *codepage = RadioPagingCharset::find(protocol, key);
+    // The custom codepage: the one the record was decoded with (its codes are kept with it)
+    std::unique_ptr<RadioPagingCustomCodepage> custom;
+
+    if (RadioPagingCustomCodepage::isCustom(key))
+    {
+        if (!record.m_protocolData.contains("custom_codes"))
+        {
+            error = QString("The record keeps no custom codepage");
+            return false;
+        }
+
+        custom.reset(new RadioPagingCustomCodepage(protocol, record.m_protocolData.value("custom_codes").toString().toStdString()));
+        codepage = &custom->codepage();
+    }
 
     if (!can.contains(as))
     {
@@ -133,6 +150,11 @@ bool RadioPagingRecode::redecode(const MessageRecord& record, const RadioPagingC
         out.m_text = pocsagText(raw, record.m_rawBits, as.toStdString(), codepage,
             record.m_protocolData.contains("fill_codes") ? fill : RadioPagingPocsag::fillMinimal(),
             record.m_protocolData.value("word_status").toString().toStdString(), charStatus);
+
+        if (codepage->m_rtl && (as == "alphanumeric")) {
+            reverseText(out.m_text, charStatus);
+        }
+
         setCharStatus(out, charStatus);
     }
     else if (record.m_protocol == "gsc")
@@ -141,6 +163,12 @@ bool RadioPagingRecode::redecode(const MessageRecord& record, const RadioPagingC
         const QByteArray lostBytes = QByteArray::fromHex(record.m_protocolData.value("lost_bits").toString().toLatin1());
         const std::vector<uint8_t> lost(lostBytes.begin(), lostBytes.end());
         setInterpretation(RadioPagingGsc::interpret(raw, record.m_rawBits, codepage, lost.empty() ? nullptr : &lost), as, out);
+
+        if (codepage->m_rtl && (out.m_msgType == "alphanumeric"))
+        {
+            QString noStatus;
+            reverseText(out.m_text, noStatus);
+        }
     }
     else if (as == "binary")
     {
@@ -172,12 +200,57 @@ bool RadioPagingRecode::redecode(const MessageRecord& record, const RadioPagingC
         QString charStatus;
         out.m_text = decodeWithStatus(std::string(codes.begin(), codes.end()), record.m_protocolData.value("code_status").toString().toStdString(),
             codepage, charStatus);
+
+        if (codepage->m_rtl) {
+            reverseText(out.m_text, charStatus);
+        }
+
         setCharStatus(out, charStatus);
     }
 
     out.m_protocolData.insert("charset", RadioPagingPage::charsetData(codepage->key()));
     out.m_protocolData.insert("redecoded", true);
     return true;
+}
+
+void RadioPagingRecode::reverseText(QString& text, QString& charStatus)
+{
+    static const QRegularExpression code("^<0x[0-9A-F]{2}>");
+    const bool withStatus = (charStatus.size() == text.size());
+    QStringList units, statuses;
+    int i = 0;
+
+    while (i < text.size())
+    {
+        int length = 1;
+
+        if (text.at(i) == '<')
+        {
+            if (text.mid(i, 5) == "<...>") {
+                length = 5;
+            } else if (code.match(text.mid(i, 6)).hasMatch()) {
+                length = 6;
+            }
+        }
+        else if (text.at(i).isHighSurrogate() && (i + 1 < text.size()) && text.at(i + 1).isLowSurrogate())
+        {
+            length = 2;
+        }
+
+        units.prepend(text.mid(i, length));
+
+        if (withStatus) {
+            statuses.prepend(charStatus.mid(i, length));
+        }
+
+        i += length;
+    }
+
+    text = units.join(QString());
+
+    if (withStatus) {
+        charStatus = statuses.join(QString());
+    }
 }
 
 QString RadioPagingRecode::escapeText(const std::string& text)

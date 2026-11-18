@@ -60,6 +60,11 @@ std::vector<uint8_t> encode(const Cs::Codepage *codepage, const std::string& tex
     return codes;
 }
 
+std::string decodeText(const Cs::Codepage& codepage, const std::string& codes)
+{
+    return Cs::decode(codepage, std::vector<uint8_t>(codes.begin(), codes.end()));
+}
+
 } // namespace
 
 int main()
@@ -75,8 +80,45 @@ int main()
         found = found && (Cs::find(c.m_protocol, c.key()) == &c) && c.m_table && c.m_label;
     }
 
-    check((Cs::codepages("pocsag").size() == 27) && (Cs::codepages("flex").size() == 17) && (Cs::codepages("gsc").size() == 1)
-        && (keys.size() == Cs::codepages().size()) && found, "45 codepages, keys unique in each protocol, each found by its key");
+    check((Cs::codepages("pocsag").size() == 28) && (Cs::codepages("flex").size() == 17) && (Cs::codepages("gsc").size() == 1)
+        && (keys.size() == Cs::codepages().size()) && found, "46 codepages, keys unique in each protocol, each found by its key");
+    check(encode(find("pocsag", "generic", "generic", "hebrew"), "\xD7\x90\xD7\xAA" "A") == std::vector<uint8_t>({0x60, 0x7A, 0x41}),
+        "POCSAG Hebrew: alef 0x60, tav 0x7A, ASCII kept");
+    {
+        QString text = "ab<0x03>c<...>", status = ".cXXXXXX.XXXXX";
+        RadioPagingRecode::reverseText(text, status);
+        check((text == "<...>c<0x03>ba") && (status == "XXXXX.XXXXXXc."), "right-to-left: codes and lost fragments kept whole, status with them");
+    }
+    {
+        RadioPagingCustomCodepage::Codes codes;
+        bool rtl;
+        std::string error;
+        check(RadioPagingCustomCodepage::parse("pocsag", "rtl 60=05d0, 41=0416", codes, rtl, error) && rtl && (codes.size() == 2)
+            && (RadioPagingCustomCodepage::text(codes, rtl) == "rtl 60=05D0 41=0416"), "custom codepage: codes and direction, as text");
+        check(!RadioPagingCustomCodepage::parse("pocsag", "80=0041", codes, rtl, error)
+            && !RadioPagingCustomCodepage::parse("gsc", "40=0041", codes, rtl, error)
+            && !RadioPagingCustomCodepage::parse("pocsag", "41=D800", codes, rtl, error)
+            && !RadioPagingCustomCodepage::parse("pocsag", "41", codes, rtl, error), "custom codepage: a code out of the protocol, not a character refused");
+        RadioPagingCustomCodepage custom("pocsag", "rtl 60=05D0");
+        check((decodeText(custom.codepage(), "`A") == "\xD7\x90" "A") && custom.codepage().m_rtl && RadioPagingCustomCodepage::isCustom(custom.codepage().key())
+            && (encode(&custom.codepage(), "\xD7\x90" "B") == std::vector<uint8_t>({0x60, 0x42})), "custom codepage: ASCII with the codes mapped, both ways");
+        RadioPagingCustomCodepage gsc("gsc", "");
+        check(gsc.codepage().codes() == 64, "custom codepage of GSC: its 6-bit table");
+
+        MessageRecord flexRx;
+        flexRx.m_direction = MessageRecord::DirectionRX;
+        flexRx.m_protocol = "flex";
+        flexRx.m_msgType = "alphanumeric";
+        flexRx.m_protocolData.insert("alpha_codes", QString("6041"));
+        flexRx.m_protocolData.insert("custom_codes", QString("rtl 60=05D0"));
+        MessageRecord out;
+        QString recodeError;
+        check(RadioPagingRecode::redecode(flexRx, RadioPagingCustomCodepage::key(), QString(), out, recodeError)
+            && (out.m_text == QString::fromUtf8("A\xD7\x90")), "decode again with the custom codepage of the record, right-to-left");
+        flexRx.m_protocolData.remove("custom_codes");
+        check(!RadioPagingRecode::redecode(flexRx, RadioPagingCustomCodepage::key(), QString(), out, recodeError),
+            "decode again: no custom codepage kept, refused");
+    }
     const Cs::Key ascii0{"generic", "generic", "ascii"};
     check((Cs::defaultFor("pocsag")->key() == ascii0) && (Cs::defaultFor("flex")->key() == ascii0)
         && (Cs::defaultFor("gsc")->key() == ascii0) && (Cs::defaultFor("ermes") == nullptr),

@@ -73,6 +73,15 @@ public:
     QString* getPocsagFillCodes();
     void setPocsagFillCodes(QString* pocsag_fill_codes);
 
+    QString* getPocsagCustomCodes();
+    void setPocsagCustomCodes(QString* pocsag_custom_codes);
+
+    QString* getFlexCustomCodes();
+    void setFlexCustomCodes(QString* flex_custom_codes);
+
+    QString* getGscCustomCodes();
+    void setGscCustomCodes(QString* gsc_custom_codes);
+
     qint32 getGscEnabled();
     void setGscEnabled(qint32 gsc_enabled);
 
@@ -205,6 +214,15 @@ private:
 
     QString* pocsag_fill_codes;
     bool m_pocsag_fill_codes_isSet;
+
+    QString* pocsag_custom_codes;
+    bool m_pocsag_custom_codes_isSet;
+
+    QString* flex_custom_codes;
+    bool m_flex_custom_codes_isSet;
+
+    QString* gsc_custom_codes;
+    bool m_gsc_custom_codes_isSet;
 
     qint32 gsc_enabled;
     bool m_gsc_enabled_isSet;

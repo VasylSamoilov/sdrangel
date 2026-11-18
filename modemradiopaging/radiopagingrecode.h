@@ -43,6 +43,9 @@ public:
     static bool alternativeGiven(const QString& type, const QString& text);
     //!< The text of a record: the codes below 0x20 and 0x7f as <0xNN>, other bytes kept (UTF-8 passes)
     static QString escapeText(const std::string& text);
+    //!< Right-to-left: the characters of the text in the reverse order, with their status (one for each character,
+    //!< or empty). A <0xNN> code, the <...> of a lost fragment and a character of two UTF-16 units stay as they are
+    static void reverseText(QString& text, QString& charStatus);
     //!< The text of codes as they were received: the codes received (status . or c) decoded with the codepage (none:
     //!< the codes are the characters), a lost code (X) as '?', a lost fragment of unknown length (G) as <...>.
     //!< charStatus: one for each character of the text, . received, c corrected, X lost; empty, and the codes decoded

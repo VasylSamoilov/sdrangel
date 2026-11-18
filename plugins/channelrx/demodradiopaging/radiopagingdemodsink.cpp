@@ -481,6 +481,8 @@ void RadioPagingDemodSink::applySettings(const QStringList& settingsKeys, const 
         m_settings.applySettings(settingsKeys, settings);
     }
 
+    makeCustomCodepages(settingsKeys, force);
+
     if (legs) {
         applyLegs();
     }
@@ -1059,6 +1061,12 @@ void RadioPagingDemodSink::sendPocsag(const RadioPagingPocsagDecoder::Message& m
             message.m_wordStatus, charStatus);
         record.m_protocolData.insert("word_status", QString::fromStdString(message.m_wordStatus));
 
+        if (charset->m_rtl && (interpretation.m_type == "alphanumeric")) {
+            RadioPagingRecode::reverseText(record.m_text, charStatus);
+        }
+
+        insertCustomCodes(record, charset, 0);
+
         if (!charStatus.isEmpty()) {
             record.m_protocolData.insert("char_status", charStatus);
         }
@@ -1131,6 +1139,10 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
             QString charStatus;
             record.m_text = RadioPagingRecode::decodeWithStatus(message.m_text, message.m_charStatus, charset, charStatus);
 
+            if (charset && charset->m_rtl) {
+                RadioPagingRecode::reverseText(record.m_text, charStatus);
+            }
+
             if (!charStatus.isEmpty()) {
                 record.m_protocolData.insert("char_status", charStatus);
             }
@@ -1140,6 +1152,7 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
             // The 7-bit characters and their status, to decode them again with another codepage
             record.m_protocolData.insert("alpha_codes", QString::fromLatin1(QByteArray(message.m_text.data(), (int) message.m_text.size()).toHex()));
             record.m_protocolData.insert("code_status", QString::fromStdString(message.m_charStatus));
+            insertCustomCodes(record, charset, 1);
         }
     }
     record.m_rawData = toByteArray(message.m_rawData);
@@ -1337,6 +1350,14 @@ void RadioPagingDemodSink::sendGsc(const RadioPagingGscDecoder::Message& message
 
         record.m_msgType = QString::fromStdString(interpretation.m_type);
         record.m_text = escapeText(interpretation.m_text);
+
+        if (charset->m_rtl && (interpretation.m_type == "alphanumeric"))
+        {
+            QString noStatus;
+            RadioPagingRecode::reverseText(record.m_text, noStatus);
+        }
+
+        insertCustomCodes(record, charset, 2);
         // The bits of the codewords that could not be corrected, their characters '?': kept for a new decoding
         if (std::any_of(message.m_rawLost.begin(), message.m_rawLost.end(), [](uint8_t b) { return b != 0; })) {
             record.m_protocolData.insert("lost_bits", QString(toByteArray(message.m_rawLost).toHex()));
@@ -1421,10 +1442,42 @@ MessageRecord::Polarity RadioPagingDemodSink::polarity(bool inverted)
     return inverted ? MessageRecord::PolarityInverted : MessageRecord::PolarityNormal;
 }
 
-const RadioPagingCharset::Codepage *RadioPagingDemodSink::codepage(const RadioPagingCharset::Key& key, const char *protocol)
+const RadioPagingCharset::Codepage *RadioPagingDemodSink::codepage(const RadioPagingCharset::Key& key, const char *protocol) const
 {
+    if (RadioPagingCustomCodepage::isCustom(key))
+    {
+        const int p = (std::string(protocol) == "pocsag") ? 0 : (std::string(protocol) == "flex") ? 1 : 2;
+
+        if (m_customCodepage[p]) {
+            return &m_customCodepage[p]->codepage();
+        }
+    }
+
     const RadioPagingCharset::Codepage *codepage = RadioPagingCharset::find(protocol, key);
     return codepage ? codepage : RadioPagingCharset::defaultFor(protocol);
+}
+
+void RadioPagingDemodSink::makeCustomCodepages(const QStringList& settingsKeys, bool force)
+{
+    const char *keys[3] = {"pocsagCustomCodes", "flexCustomCodes", "gscCustomCodes"};
+    const QString *codes[3] = {&m_settings.m_pocsagCustomCodes, &m_settings.m_flexCustomCodes, &m_settings.m_gscCustomCodes};
+    const char *protocols[3] = {"pocsag", "flex", "gsc"};
+
+    for (int p = 0; p < 3; p++)
+    {
+        if (force || settingsKeys.contains(keys[p]) || !m_customCodepage[p]) {
+            m_customCodepage[p].reset(new RadioPagingCustomCodepage(protocols[p], codes[p]->toStdString()));
+        }
+    }
+}
+
+void RadioPagingDemodSink::insertCustomCodes(MessageRecord& record, const RadioPagingCharset::Codepage *charset, int protocol) const
+{
+    const QString *codes[3] = {&m_settings.m_pocsagCustomCodes, &m_settings.m_flexCustomCodes, &m_settings.m_gscCustomCodes};
+
+    if (charset && m_customCodepage[protocol] && (charset == &m_customCodepage[protocol]->codepage())) {
+        record.m_protocolData.insert("custom_codes", *codes[protocol]);
+    }
 }
 
 bool RadioPagingDemodSink::isKanji(const RadioPagingCharset::Codepage *codepage)

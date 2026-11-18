@@ -19,6 +19,14 @@
 #include <QDebug>
 #include <QDesktopServices>
 #include <QDialog>
+#include <QDialogButtonBox>
+#include <QFile>
+#include <QHeaderView>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSignalBlocker>
+#include <QTableWidget>
+#include <QCheckBox>
 #include <QFileDialog>
 #include <QDir>
 #include <QFileInfo>
@@ -457,35 +465,299 @@ QString radioPagingLogName(const QString& pagerLog)
 
 } // namespace
 
+void RadioPagingDemodGUI::fillCodepageLists()
+{
+    QComboBox *combos[3] = {ui->pocsagCharset, ui->flexCharset, ui->gscCharset};
+    const char *protocols[3] = {"pocsag", "flex", "gsc"};
+    const RadioPagingCharset::Key keys[3] = {m_settings.m_pocsagCharset, m_settings.m_flexCharset, m_settings.m_gscCharset};
+    const RadioPagingCharset::Key custom = RadioPagingCustomCodepage::key();
+
+    for (int p = 0; p < 3; p++)
+    {
+        PagingComposer::fillCodepages(combos[p], protocols[p], false);
+        QSignalBlocker blocker(combos[p]);
+        combos[p]->addItem(tr("Custom"), QStringList({QString::fromStdString(custom.m_vendor), QString::fromStdString(custom.m_model),
+            QString::fromStdString(custom.m_codepage)}));
+        PagingComposer::selectCodepage(combos[p], keys[p]);
+    }
+}
+
+// The custom codepage of a protocol: each code of the default table of the protocol with its character, one for one
+void RadioPagingDemodGUI::editCustomCodepage(int protocol)
+{
+    const char *protocols[3] = {"pocsag", "flex", "gsc"};
+    const char *names[3] = {"POCSAG", "FLEX", "GSC"};
+    const char *codesKeys[3] = {"pocsagCustomCodes", "flexCustomCodes", "gscCustomCodes"};
+    const char *charsetKeys[3] = {"pocsagCharset", "flexCharset", "gscCharset"};
+    QString *codes[3] = {&m_settings.m_pocsagCustomCodes, &m_settings.m_flexCustomCodes, &m_settings.m_gscCustomCodes};
+    RadioPagingCharset::Key *charsets[3] = {&m_settings.m_pocsagCharset, &m_settings.m_flexCharset, &m_settings.m_gscCharset};
+    const RadioPagingCharset::Codepage *base = RadioPagingCharset::defaultFor(protocols[protocol]);
+
+    if (!base) {
+        return;
+    }
+
+    const int size = base->codes();
+    RadioPagingCustomCodepage current(protocols[protocol], codes[protocol]->toStdString());
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("%1 custom codepage").arg(names[protocol]));
+    dialog.resize(420, 560);
+    QVBoxLayout *layout = new QVBoxLayout(&dialog);
+    QLabel *intro = new QLabel(tr("The character a pager shows for each code. ASCII is the start: change the character "
+        "(or its Unicode code point in hex) of the codes the pager shows differently. A code without a character is shown as <0xNN>."),
+        &dialog);
+    intro->setWordWrap(true);
+    QTableWidget *table = new QTableWidget(size, 3, &dialog);
+    table->setHorizontalHeaderLabels({tr("Code"), tr("Character"), tr("Unicode")});
+    table->verticalHeader()->hide();
+    table->horizontalHeader()->setStretchLastSection(true);
+    QCheckBox *rtl = new QCheckBox(tr("Right-to-left: the text is shown in the reverse order of the codes"), &dialog);
+    QPushButton *ascii = new QPushButton(tr("ASCII"), &dialog);
+    ascii->setToolTip(tr("Every code back to its ASCII character"));
+    QPushButton *exportButton = new QPushButton(tr("Export..."), &dialog);
+    QPushButton *importButton = new QPushButton(tr("Import..."), &dialog);
+    QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    QHBoxLayout *tools = new QHBoxLayout();
+    tools->addWidget(ascii);
+    tools->addWidget(exportButton);
+    tools->addWidget(importButton);
+    tools->addStretch(1);
+    layout->addWidget(intro);
+    layout->addWidget(table, 1);
+    layout->addWidget(rtl);
+    layout->addLayout(tools);
+    layout->addWidget(buttons);
+
+    // A row: the character and its code point, from one or the other
+    auto setRow = [table](int code, const QString& character) {
+        QSignalBlocker blocker(table);
+        const QVector<uint> points = character.toUcs4();
+
+        if (!table->item(code, 0))
+        {
+            QTableWidgetItem *codeItem = new QTableWidgetItem(QString("%1").arg(code, 2, 16, QChar('0')).toUpper());
+            codeItem->setFlags(codeItem->flags() & ~Qt::ItemIsEditable);
+            table->setItem(code, 0, codeItem);
+            table->setItem(code, 1, new QTableWidgetItem());
+            table->setItem(code, 2, new QTableWidgetItem());
+        }
+
+        table->item(code, 1)->setText(character);
+        table->item(code, 2)->setText(points.size() == 1 ? QString("%1").arg(points[0], 4, 16, QChar('0')).toUpper() : QString());
+    };
+    auto show = [&](const RadioPagingCharset::Codepage& codepage) {
+        for (int code = 0; code < size; code++)
+        {
+            const char *glyph = codepage.glyph(code);
+            setRow(code, glyph ? QString::fromUtf8(glyph) : QString());
+        }
+
+        rtl->setChecked(codepage.m_rtl);
+    };
+
+    show(current.codepage());
+    table->resizeColumnsToContents();
+
+    connect(table, &QTableWidget::cellChanged, &dialog, [table, setRow](int row, int column) {
+        if (column == 1)
+        {
+            setRow(row, table->item(row, 1)->text());
+        }
+        else if (column == 2)
+        {
+            bool ok;
+            const uint point = table->item(row, 2)->text().trimmed().toUInt(&ok, 16);
+            setRow(row, (ok && (point > 0) && (point <= 0x10FFFF) && ((point < 0xD800) || (point > 0xDFFF)))
+                ? QString::fromUcs4(&point, 1) : QString());
+        }
+    });
+    connect(ascii, &QPushButton::clicked, &dialog, [&]() {
+        show(*base);
+        rtl->setChecked(false);
+    });
+
+    // The codes that are not those of ASCII, and the codes that are not one character
+    auto collect = [&](RadioPagingCustomCodepage::Codes& mapped, QStringList& wrong) {
+        for (int code = 0; code < size; code++)
+        {
+            const QString character = table->item(code, 1)->text();
+            const char *glyph = base->glyph(code);
+            const QVector<uint> points = character.toUcs4();
+
+            if (character == (glyph ? QString::fromUtf8(glyph) : QString())) {
+                continue;
+            }
+            if (points.size() != 1) {
+                wrong.append(QString("%1").arg(code, 2, 16, QChar('0')).toUpper());
+            } else {
+                mapped.push_back(std::make_pair(code, (uint32_t) points[0]));
+            }
+        }
+    };
+
+    // The file: every code with its character (none: empty), the protocol and the direction
+    connect(exportButton, &QPushButton::clicked, &dialog, [&]() {
+        QString fileName = QFileDialog::getSaveFileName(&dialog, tr("Export the custom codepage"), QString("%1_codepage.json").arg(protocols[protocol]),
+            tr("JSON (*.json)"));
+
+        if (fileName.isEmpty()) {
+            return;
+        }
+
+        QJsonObject map;
+
+        for (int code = 0; code < size; code++) {
+            map.insert(table->item(code, 0)->text(), table->item(code, 2)->text());
+        }
+
+        QJsonObject json;
+        json.insert("protocol", protocols[protocol]);
+        json.insert("rtl", rtl->isChecked());
+        json.insert("codes", map);
+        QFile file(fileName);
+
+        if (!file.open(QIODevice::WriteOnly) || (file.write(QJsonDocument(json).toJson()) < 0)) {
+            QMessageBox::warning(&dialog, tr("Export"), tr("%1 cannot be written").arg(fileName));
+        }
+    });
+    connect(importButton, &QPushButton::clicked, &dialog, [&]() {
+        QString fileName = QFileDialog::getOpenFileName(&dialog, tr("Import a custom codepage"), QString(), tr("JSON (*.json)"));
+
+        if (fileName.isEmpty()) {
+            return;
+        }
+
+        QFile file(fileName);
+        const QJsonObject json = file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).object() : QJsonObject();
+
+        if (!json.value("codes").isObject())
+        {
+            QMessageBox::warning(&dialog, tr("Import"), tr("%1 is not a custom codepage").arg(fileName));
+            return;
+        }
+        if (json.value("protocol").toString() != protocols[protocol]) {
+            QMessageBox::information(&dialog, tr("Import"), tr("The codepage is of %1: its codes of %2 are taken")
+                .arg(json.value("protocol").toString().toUpper(), names[protocol]));
+        }
+
+        const QJsonObject map = json.value("codes").toObject();
+        show(*base);
+
+        for (int code = 0; code < size; code++)
+        {
+            const QString key = table->item(code, 0)->text();
+
+            if (map.contains(key))
+            {
+                bool ok;
+                const uint point = map.value(key).toString().toUInt(&ok, 16);
+                setRow(code, (ok && (point > 0) && (point <= 0x10FFFF)) ? QString::fromUcs4(&point, 1) : QString());
+            }
+        }
+
+        rtl->setChecked(json.value("rtl").toBool());
+    });
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, [&]() {
+        RadioPagingCustomCodepage::Codes mapped;
+        QStringList wrong;
+        collect(mapped, wrong);
+
+        if (!wrong.isEmpty())
+        {
+            QMessageBox::warning(&dialog, dialog.windowTitle(), tr("A code is one character: %1").arg(wrong.join(" ")));
+            return;
+        }
+
+        dialog.accept();
+    });
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    // Saved, and chosen: the codepage of the protocol is its custom codepage
+    RadioPagingCustomCodepage::Codes mapped;
+    QStringList wrong;
+    collect(mapped, wrong);
+    *codes[protocol] = QString::fromStdString(RadioPagingCustomCodepage::text(mapped, rtl->isChecked()));
+    *charsets[protocol] = RadioPagingCustomCodepage::key();
+    displaySettings();
+    applySettings(QStringList({codesKeys[protocol], charsetKeys[protocol]}));
+}
+
 // The settings of a Pager demodulator taken over, after the user saw what would change
 void RadioPagingDemodGUI::importFromPager()
 {
     typedef RadioPagingDemodSettings::NotificationSettings Notification;
 
-    // The settings the Pager demodulator gives, and the keys that change
-    auto plan = [this](const PagerImport::Config& c, RadioPagingDemodSettings& s, QStringList& keys, QStringList& lines) {
+    typedef PagerImport::Change Change;
+
+    // The settings the Pager demodulator gives, and the keys that change; every setting it has is a row of the preview
+    auto plan = [this](const PagerImport::Config& c, RadioPagingDemodSettings& s, QStringList& keys, QList<Change>& rows) {
         auto change = [&](const QString& name, const QString& from, const QString& to, const char *key) {
-            if (from != to)
-            {
-                lines.append(QString("replace %1: %2 -> %3").arg(name, from, to));
+            rows.append(Change::compare(name, from, to));
+
+            if (from != to) {
                 keys.append(key);
             }
+        };
+        auto onOff = [](bool on) { return QString(on ? "on" : "off"); };
+        auto skip = [&](const QString& name, const QString& current, const QString& why) {
+            rows.append(Change::make(Change::Skip, name, current, why));
         };
 
         s = m_settings;
         bool pocsag = (c.m_modulation != PagerImport::Config::Flex);
         bool flex = (c.m_modulation != PagerImport::Config::Pocsag);
-        change("frequency shift", QString::number(s.m_inputFrequencyOffset), QString::number(c.m_inputFrequencyOffset), "inputFrequencyOffset");
+        change("Frequency shift (Hz)", QString::number(s.m_inputFrequencyOffset), QString::number(c.m_inputFrequencyOffset), "inputFrequencyOffset");
         s.m_inputFrequencyOffset = c.m_inputFrequencyOffset;
-        change("bandwidth", QString::number(s.m_rfBandwidth), QString::number(c.m_rfBandwidth), "rfBandwidth");
+        change("RF bandwidth (Hz)", QString::number(s.m_rfBandwidth), QString::number(c.m_rfBandwidth), "rfBandwidth");
         s.m_rfBandwidth = c.m_rfBandwidth;
-        change("POCSAG", s.m_pocsagEnabled ? "on" : "off", pocsag ? "on" : "off", "pocsagEnabled");
+        change("POCSAG", onOff(s.m_pocsagEnabled), onOff(pocsag), "pocsagEnabled");
         s.m_pocsagEnabled = pocsag;
-        change("FLEX", s.m_flexEnabled ? "on" : "off", flex ? "on" : "off", "flexEnabled");
+        change("FLEX", onOff(s.m_flexEnabled), onOff(flex), "flexEnabled");
         s.m_flexEnabled = flex;
-        change("POCSAG deviation", QString::number(s.m_pocsagDeviation), QString::number(c.m_fmDeviation), "pocsagDeviation");
+        change("POCSAG deviation (Hz)", QString::number(s.m_pocsagDeviation), QString::number(c.m_fmDeviation), "pocsagDeviation");
         s.m_pocsagDeviation = c.m_fmDeviation;
-        change("UDP", s.m_udpEnabled ? "on" : "off", c.m_udpEnabled ? "on" : "off", "udpEnabled");
+        skip("FLEX deviation (Hz)", QString::number(s.m_flexDeviation),
+            QString("%1: one deviation for both, FLEX keeps its outer symbol deviation").arg(c.m_fmDeviation));
+        skip("GSC", onOff(s.m_gscEnabled), "the Pager demodulator has no GSC");
+
+        // The characters of POCSAG (the Pager demodulator maps the POCSAG characters only): no mapping is ASCII, its
+        // Hebrew preset is the Hebrew codepage; another mapping, or a right-to-left text, is the custom codepage
+        const RadioPagingCharset::Codepage *current = RadioPagingCustomCodepage::isCustom(s.m_pocsagCharset) ? nullptr
+            : RadioPagingCharset::find("pocsag", s.m_pocsagCharset);
+        const QString currentName = current ? QString::fromUtf8(current->m_label)
+            : RadioPagingCustomCodepage::isCustom(s.m_pocsagCharset) ? QString("Custom") : RadioPagingPage::charsetText(s.m_pocsagCharset);
+        const RadioPagingCharset::Codepage *imported = c.m_reverse ? nullptr
+            : c.m_characters.isEmpty() ? RadioPagingCharset::find("pocsag", RadioPagingCharset::Key{"generic", "generic", "ascii"})
+            : c.hebrewCharacters() ? RadioPagingCharset::find("pocsag", RadioPagingCharset::Key{"generic", "generic", "hebrew"}) : nullptr;
+
+        if (imported)
+        {
+            change("POCSAG codepage", currentName, QString::fromUtf8(imported->m_label), "pocsagCharset");
+            s.m_pocsagCharset = imported->key();
+        }
+        else
+        {
+            RadioPagingCustomCodepage::Codes mapped;
+
+            for (const auto& m : c.m_characters)
+            {
+                if ((m.first >= 0) && (m.first < 128) && (m.second > 0)) {
+                    mapped.push_back(std::make_pair((int) m.first, (uint32_t) m.second));
+                }
+            }
+
+            const QString customCodes = QString::fromStdString(RadioPagingCustomCodepage::text(mapped, c.m_reverse));
+            change("POCSAG codepage", currentName, "Custom", "pocsagCharset");
+            s.m_pocsagCharset = RadioPagingCustomCodepage::key();
+            change("POCSAG custom codepage", s.m_pocsagCustomCodes, customCodes, "pocsagCustomCodes");
+            s.m_pocsagCustomCodes = customCodes;
+        }
+
+        change("UDP", onOff(s.m_udpEnabled), onOff(c.m_udpEnabled), "udpEnabled");
         s.m_udpEnabled = c.m_udpEnabled;
         change("UDP address", s.m_udpAddress, c.m_udpAddress, "udpAddress");
         s.m_udpAddress = c.m_udpAddress;
@@ -493,19 +765,23 @@ void RadioPagingDemodGUI::importFromPager()
         s.m_udpPort = c.m_udpPort;
         change("UDP format", s.m_udpFormat == RadioPagingDemodSettings::UdpJson ? "JSON" : "Pager", "Pager", "udpFormat");
         s.m_udpFormat = RadioPagingDemodSettings::UdpPagerDemod;
-        change("log", s.m_logEnabled ? "on" : "off", c.m_logEnabled ? "on" : "off", "logEnabled");
+        change("Log", onOff(s.m_logEnabled), onOff(c.m_logEnabled), "logEnabled");
         s.m_logEnabled = c.m_logEnabled;
         QString logName = radioPagingLogName(c.m_logFilename);
-        change("log file", s.m_logFilename, logName, "logFilename");
+        change("Log file", s.m_logFilename, logName, "logFilename");
         s.m_logFilename = logName;
 
-        if (ui->filterAddress->text() != c.m_filterAddress) {
-            lines.append(QString("replace address filter: '%1' -> '%2'").arg(ui->filterAddress->text(), c.m_filterAddress));
+        if (logName != c.m_logFilename) {
+            rows.append(Change::make(Change::Keep, "Pager log file", c.m_logFilename, "left as it is: this log has the columns of the message record"));
         }
 
+        rows.append(Change::compare("Address filter", ui->filterAddress->text(), c.m_filterAddress));
+
         // The notifications are replaced with those of the Pager demodulator
-        for (const auto& n : s.m_notificationSettings) {
-            lines.append(QString("delete notification: %1 /%2/").arg(Notification::matchFieldName(n->m_matchField), n->m_regExp));
+        for (const auto& n : s.m_notificationSettings)
+        {
+            rows.append(Change::make(Change::Delete, "Notification", QString("%1 /%2/").arg(Notification::matchFieldName(n->m_matchField), n->m_regExp),
+                QString()));
         }
 
         s.m_notificationSettings.clear();
@@ -522,49 +798,41 @@ void RadioPagingDemodGUI::importFromPager()
             notification->m_plotOnMap = n.m_plotOnMap;
             notification->updateRegularExpression();
             s.m_notificationSettings.append(notification);
-            lines.append(QString("add notification: %1 /%2/%3%4%5%6").arg(Notification::matchFieldName(notification->m_matchField), n.m_regExp,
+            QString text = QString("%1 /%2/%3%4%5%6").arg(Notification::matchFieldName(notification->m_matchField), n.m_regExp,
                 n.m_speech.isEmpty() ? QString() : QString(" speech '%1'").arg(n.m_speech),
                 n.m_command.isEmpty() ? QString() : QString(" command '%1'").arg(n.m_command),
                 n.m_highlight ? QString(" highlight %1").arg(QColor::fromRgba(n.m_highlightColor).name()) : QString(),
-                n.m_plotOnMap ? QString(" map") : QString()));
+                n.m_plotOnMap ? QString(" map") : QString());
 
             if ((n.m_column == PagerImport::Notification::Alpha) || (n.m_column == PagerImport::Notification::Numeric)) {
-                lines.append(QString("  (the %1 column of the Pager demodulator is the message here)").arg(PagerImport::columnName(n.m_column)));
+                text += QString(" (the %1 column is the message here)").arg(PagerImport::columnName(n.m_column));
             }
+
+            rows.append(Change::make(Change::Add, "Notification", QString(), text));
         }
 
         if (!c.m_notifications.isEmpty() || !m_settings.m_notificationSettings.isEmpty()) {
             keys.append("notificationSettings");
         }
-
-        lines.append(QString("keep GSC and the FLEX deviation (%1 Hz, the outer symbol): the Pager demodulator has no GSC and one deviation")
-            .arg(s.m_flexDeviation));
-
-        if (c.m_logEnabled) {
-            lines.append(QString("note: the log is %1, with the columns of the message record; the Pager log %2 is left as it is")
-                .arg(logName, c.m_logFilename));
-        }
         if (c.m_filterDuplicates) {
-            lines.append("note: duplicates are shown, flagged DUP or DUP+ (the Pager demodulator hides them)");
+            skip("Hide duplicates", "shown, flagged DUP or DUP+", "on: the duplicates are flagged here, not hidden");
         }
         if (c.m_decode != 0) {
-            lines.append("note: the decode choice of the Pager demodulator is not needed: both polarities and both readings are decoded");
-        }
-        if (c.m_customCharacters) {
-            lines.append("note: the characters mapped in the Pager demodulator are not taken over: choose a codepage instead");
+            skip("POCSAG decode", "both readings", "not needed: both readings and both polarities are decoded");
         }
     };
 
     PagerImport::Instance instance;
     PagerImport::Config config;
     bool ok = PagerImport::choose(this, tr("Import from a Pager demodulator"),
-        tr("The settings of the Pager demodulator chosen replace those of this demodulator. Its notifications replace the "
-           "notifications here."),
+        tr("The settings of the Pager demodulator chosen replace those of this demodulator (POCSAG and FLEX; GSC stays as it "
+           "is). Its notifications replace the notifications here."),
         [&plan](const PagerImport::Config& c, const PagerImport::Instance&) {
             RadioPagingDemodSettings s;
-            QStringList keys, lines;
-            plan(c, s, keys, lines);
-            return lines;
+            QStringList keys;
+            QList<Change> rows;
+            plan(c, s, keys, rows);
+            return rows;
         }, instance, config);
 
     if (!ok) {
@@ -572,8 +840,9 @@ void RadioPagingDemodGUI::importFromPager()
     }
 
     RadioPagingDemodSettings settings;
-    QStringList keys, lines;
-    plan(config, settings, keys, lines);
+    QStringList keys;
+    QList<Change> rows;
+    plan(config, settings, keys, rows);
     m_settings = settings;
     ui->filterAddress->setText(config.m_filterAddress);
     enableSpeechIfNeeded();
@@ -1072,13 +1341,8 @@ RadioPagingDemodGUI::RadioPagingDemodGUI(PluginAPI* pluginAPI, DeviceUISet *devi
         applySettings(QStringList({"pocsagFill", "pocsagFillCodes"}));
     });
 
-    PagingComposer::fillCodepages(ui->pocsagCharset, "pocsag", false);
-    PagingComposer::fillCodepages(ui->flexCharset, "flex", false);
-    PagingComposer::fillCodepages(ui->gscCharset, "gsc", false);
-    // A protocol with a single codepage has no choice
-    ui->pocsagCharset->setVisible(RadioPagingCharset::codepages("pocsag").size() > 1);
-    ui->flexCharset->setVisible(RadioPagingCharset::codepages("flex").size() > 1);
-    ui->gscCharset->setVisible(RadioPagingCharset::codepages("gsc").size() > 1);
+    // The codepages of each protocol and its custom codepage
+    fillCodepageLists();
 
     layoutProtocols();
     m_pocsagToolTip = ui->pocsagStatus->toolTip();
@@ -1557,9 +1821,16 @@ void RadioPagingDemodGUI::layoutProtocols()
         }
 
         m_codepageLabel[p] = new QLabel(tr("Codepage"), block);
-        m_codepageLabel[p]->setVisible(!charset[p]->isHidden());  // Hidden with a single codepage
         options->addWidget(m_codepageLabel[p]);
         options->addWidget(charset[p]);
+
+        // The custom codepage of the protocol: its editor
+        QToolButton *custom = new QToolButton(block);
+        custom->setText(tr("Custom..."));
+        custom->setToolTip(tr("Edit the custom codepage of %1: the character of each code and the direction of the text.\n"
+            "Choose Custom in the codepages to decode with it").arg(names[p]));
+        connect(custom, &QToolButton::clicked, this, [this, p]() { editCustomCodepage(p); });
+        options->addWidget(custom);
         options->addStretch(1);
 
         QToolButton *reset = new QToolButton(block);

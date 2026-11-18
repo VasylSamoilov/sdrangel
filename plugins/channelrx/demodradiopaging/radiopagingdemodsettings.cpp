@@ -177,6 +177,9 @@ void RadioPagingDemodSettings::resetToDefaults()
     m_gscCharset = defaultCharset("gsc");
     m_pocsagFill = FillConservative;
     m_pocsagFillCodes = "00 03 04";
+    m_pocsagCustomCodes.clear();
+    m_flexCustomCodes.clear();
+    m_gscCustomCodes.clear();
     m_pocsagDcCorrection = true;
     m_flexDcCorrection = true;
     m_gscDcCorrection = true;
@@ -253,6 +256,9 @@ QByteArray RadioPagingDemodSettings::serialize() const
     writeCharset(s, 44, m_gscCharset);
     s.writeS32(47, m_pocsagFill);
     s.writeString(48, m_pocsagFillCodes);
+    s.writeString(63, m_pocsagCustomCodes);
+    s.writeString(64, m_flexCustomCodes);
+    s.writeString(65, m_gscCustomCodes);
     s.writeBool(49, m_pocsagDcCorrection);
     s.writeBool(50, m_flexDcCorrection);
     s.writeBool(51, m_gscDcCorrection);
@@ -348,6 +354,9 @@ bool RadioPagingDemodSettings::deserialize(const QByteArray& data)
         d.readS32(47, &m_pocsagFill, FillConservative);
         m_pocsagFill = std::max((int) FillMinimal, std::min((int) FillCustom, m_pocsagFill));
         d.readString(48, &m_pocsagFillCodes, "00 03 04");
+        d.readString(63, &m_pocsagCustomCodes, "");
+        d.readString(64, &m_flexCustomCodes, "");
+        d.readString(65, &m_gscCustomCodes, "");
         d.readBool(49, &m_pocsagDcCorrection, true);
         d.readBool(50, &m_flexDcCorrection, true);
         d.readBool(51, &m_gscDcCorrection, true);
@@ -466,6 +475,15 @@ void RadioPagingDemodSettings::applySettings(const QStringList& settingsKeys, co
     }
     if (settingsKeys.contains("pocsagFillCodes")) {
         m_pocsagFillCodes = settings.m_pocsagFillCodes;
+    }
+    if (settingsKeys.contains("pocsagCustomCodes")) {
+        m_pocsagCustomCodes = settings.m_pocsagCustomCodes;
+    }
+    if (settingsKeys.contains("flexCustomCodes")) {
+        m_flexCustomCodes = settings.m_flexCustomCodes;
+    }
+    if (settingsKeys.contains("gscCustomCodes")) {
+        m_gscCustomCodes = settings.m_gscCustomCodes;
     }
     if (settingsKeys.contains("rgbColor")) {
         m_rgbColor = settings.m_rgbColor;
@@ -610,6 +628,15 @@ QString RadioPagingDemodSettings::getDebugString(const QStringList& settingsKeys
     }
     if (settingsKeys.contains("pocsagFillCodes") || force) {
         ostr << " m_pocsagFillCodes: " << m_pocsagFillCodes.toStdString();
+    }
+    if (settingsKeys.contains("pocsagCustomCodes") || force) {
+        ostr << " m_pocsagCustomCodes: " << m_pocsagCustomCodes.toStdString();
+    }
+    if (settingsKeys.contains("flexCustomCodes") || force) {
+        ostr << " m_flexCustomCodes: " << m_flexCustomCodes.toStdString();
+    }
+    if (settingsKeys.contains("gscCustomCodes") || force) {
+        ostr << " m_gscCustomCodes: " << m_gscCustomCodes.toStdString();
     }
     if (settingsKeys.contains("rgbColor") || force) {
         ostr << " m_rgbColor: " << m_rgbColor;

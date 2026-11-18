@@ -39,6 +39,7 @@ class DeviceUISet;
 class BasebandSampleSink;
 class RadioPagingDemod;
 class QLabel;
+class QCheckBox;
 class ScopeVis;
 
 namespace Ui {
@@ -158,6 +159,11 @@ private:
     int m_currentPol[3] = {0, 0, 0};    //!< The polarity of the live line of each protocol
     QLabel *m_networkLabel[3][2];       //!< The network lines of each protocol and polarity
     QLabel *m_codepageLabel[3];
+    //!< The editor of the custom codepage of a protocol (0 POCSAG, 1 FLEX, 2 GSC): a character for each code of the
+    //!< default table, the direction, export and import
+    void editCustomCodepage(int protocol);
+    //!< The codepage lists with the Custom entry of each protocol
+    void fillCodepageLists();
     QWidget *m_flexGroupBar[2] = {nullptr, nullptr};    //!< The 16 group slots of each polarity
     QLabel *m_flexGroupCell[2][16];
 

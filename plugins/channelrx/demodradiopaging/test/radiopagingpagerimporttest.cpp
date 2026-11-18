@@ -62,6 +62,7 @@ int main()
     pager.m_title = "Pager A";
     pager.m_sevenbit = {65};
     pager.m_unicode = {1040};
+    pager.m_reverse = true;
 
     for (int column : {PagerDemodSettings::MESSAGE_COL_ADDRESS, PagerDemodSettings::MESSAGE_COL_ALPHA})
     {
@@ -85,7 +86,8 @@ int main()
     check(c.m_udpEnabled && (c.m_udpAddress == "10.0.0.7") && (c.m_udpPort == 5555), "UDP");
     check(c.m_logEnabled && (c.m_logFilename == "/tmp/pager.csv"), "log");
     check(c.m_filterDuplicates && (c.m_title == "Pager A"), "duplicates and title");
-    check(c.m_customCharacters, "characters mapped by the user are seen");
+    check((c.m_characters.size() == 1) && (c.m_characters[0] == qMakePair(65, 1040)) && c.m_reverse && !c.hebrewCharacters(),
+        "characters mapped by the user and right-to-left");
     check(c.m_notifications.size() == 2, "two notifications");
 
     if (c.m_notifications.size() == 2)
@@ -102,7 +104,15 @@ int main()
     PagerDemodSettings defaults;
     PagerImport::Config d;
     check(PagerImport::parse(defaults.serialize(), d) && (d.m_modulation == PagerImport::Config::Auto) && d.m_notifications.isEmpty()
-        && !d.m_customCharacters && !d.m_udpEnabled, "the default settings");
+        && d.m_characters.isEmpty() && !d.m_reverse && !d.m_udpEnabled, "the default settings");
+
+    PagerDemodSettings hebrew;
+    for (int i = 0; i < 27; i++)
+    {
+        hebrew.m_sevenbit.append(0x60 + i);
+        hebrew.m_unicode.append(0x05D0 + i);
+    }
+    check(PagerImport::parse(hebrew.serialize(), d) && d.hebrewCharacters(), "the Hebrew preset is seen");
     check(!PagerImport::parse(QByteArray("not settings"), d), "what is not settings is refused");
 
     std::printf("%d passed, %d failed\n", passes, failures);

@@ -16,13 +16,15 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include <QApplication>
+#include <QColor>
 #include <QComboBox>
 #include <QDataStream>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QHeaderView>
 #include <QLabel>
-#include <QPlainTextEdit>
 #include <QPushButton>
+#include <QTableWidget>
 #include <QVBoxLayout>
 
 #include "channel/channelapi.h"
@@ -47,6 +49,7 @@ enum PagerTag {
     TagUdpAddress = 8,
     TagUdpPort = 9,
     TagTitle = 13,
+    TagReverse = 22,
     TagSevenBit = 23,
     TagUnicode = 24,
     TagLogFilename = 25,
@@ -157,18 +160,25 @@ bool PagerImport::parse(const QByteArray& settings, Config& config)
     d.readS32(TagModulation, &config.m_modulation, Config::Auto);
     config.m_modulation = std::max((int) Config::Auto, std::min((int) Config::Flex, config.m_modulation));
 
-    // The characters the user mapped: lists of codes, empty when there are none
-    for (int tag : {TagSevenBit, TagUnicode})
-    {
-        QList<qint32> codes;
+    // The characters the user mapped (7-bit code to Unicode code point, two lists), and the reverse reading order
+    QList<qint32> lists[2];
 
-        if (d.readBlob(tag, &blob) && !blob.isEmpty())
+    for (int i = 0; i < 2; i++)
+    {
+        if (d.readBlob(i == 0 ? TagSevenBit : TagUnicode, &blob) && !blob.isEmpty())
         {
             QDataStream stream(blob);
-            stream >> codes;
-            config.m_customCharacters = config.m_customCharacters || !codes.isEmpty();
+            stream >> lists[i];
         }
     }
+
+    const int mapped = std::min(lists[0].size(), lists[1].size());
+
+    for (int i = 0; i < mapped; i++) {
+        config.m_characters.append(qMakePair(lists[0][i], lists[1][i]));
+    }
+
+    d.readBool(TagReverse, &config.m_reverse, false);
 
     // The notifications: a list of the settings each one saves
     if (d.readBlob(TagNotifications, &blob))
@@ -216,25 +226,53 @@ QString PagerImport::modulationName(int modulation)
     return ((modulation >= 0) && (modulation < 3)) ? QString(names[modulation]) : QString();
 }
 
+bool PagerImport::Config::hebrewCharacters() const
+{
+    // The preset of the character encoding dialog of the Pager demodulator: 27 letters from 0x60
+    if (m_characters.size() != 27) {
+        return false;
+    }
+
+    for (int i = 0; i < 27; i++)
+    {
+        if (!m_characters.contains(qMakePair(0x60 + i, 0x05D0 + i))) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+QString PagerImport::Change::actionName(Action action)
+{
+    static const char *names[] = {"add", "update", "delete", "keep", "not imported"};
+    return names[action];
+}
+
 bool PagerImport::choose(QWidget *parent, const QString& title, const QString& intro,
-    const std::function<QStringList(const Config& config, const Instance& instance)>& preview, Instance& chosen, Config& config)
+    const std::function<QList<Change>(const Config& config, const Instance& instance)>& preview, Instance& chosen, Config& config)
 {
     QList<Instance> list = instances();
     QDialog dialog(parent);
     dialog.setWindowTitle(title);
-    dialog.resize(720, 460);
+    dialog.resize(900, 520);
     QVBoxLayout *layout = new QVBoxLayout(&dialog);
     QLabel *label = new QLabel(intro, &dialog);
     label->setWordWrap(true);
     QComboBox *instance = new QComboBox(&dialog);
-    QPlainTextEdit *changes = new QPlainTextEdit(&dialog);
-    changes->setReadOnly(true);
-    changes->setLineWrapMode(QPlainTextEdit::NoWrap);
+    QLabel *summary = new QLabel(&dialog);
+    QTableWidget *changes = new QTableWidget(0, 4, &dialog);
+    changes->setHorizontalHeaderLabels({"Action", "Setting", "Current", "Pager demodulator"});
+    changes->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    changes->setSelectionBehavior(QAbstractItemView::SelectRows);
+    changes->verticalHeader()->hide();
+    changes->horizontalHeader()->setStretchLastSection(true);
+    changes->setWordWrap(false);
     QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     buttons->button(QDialogButtonBox::Ok)->setText("Import");
     layout->addWidget(label);
     layout->addWidget(instance);
-    layout->addWidget(new QLabel("What would change:", &dialog));
+    layout->addWidget(summary);
     layout->addWidget(changes, 1);
     layout->addWidget(buttons);
 
@@ -245,23 +283,55 @@ bool PagerImport::choose(QWidget *parent, const QString& title, const QString& i
     auto show = [&]() {
         int index = instance->currentIndex();
         Config c;
+        changes->setRowCount(0);
 
         if ((index < 0) || (index >= list.size()))
         {
-            changes->setPlainText("There is no Pager demodulator to import from.");
+            summary->setText("There is no Pager demodulator to import from.");
             buttons->button(QDialogButtonBox::Ok)->setEnabled(false);
             return;
         }
         if (!parse(list[index].m_settings, c))
         {
-            changes->setPlainText("The settings of this Pager demodulator can not be read.");
+            summary->setText("The settings of this Pager demodulator can not be read.");
             buttons->button(QDialogButtonBox::Ok)->setEnabled(false);
             return;
         }
 
-        QStringList lines = preview(c, list[index]);
-        changes->setPlainText(lines.isEmpty() ? QString("Nothing would change.") : lines.join('\n'));
-        buttons->button(QDialogButtonBox::Ok)->setEnabled(true);
+        // The actions in muted colours: add green, update amber, delete red, keep and not imported grey
+        const QList<Change> rows = preview(c, list[index]);
+        int count[5] = {0, 0, 0, 0, 0};
+        changes->setRowCount(rows.size());
+
+        for (int r = 0; r < rows.size(); r++)
+        {
+            const Change& change = rows[r];
+            static const char *colours[] = {"#5fa860", "#c8a040", "#c86450", "#888888", "#888888"};
+            QTableWidgetItem *action = new QTableWidgetItem(Change::actionName(change.m_action));
+            action->setForeground(QColor(colours[change.m_action]));
+            changes->setItem(r, 0, action);
+            changes->setItem(r, 1, new QTableWidgetItem(change.m_item));
+            changes->setItem(r, 2, new QTableWidgetItem(change.m_current));
+            changes->setItem(r, 3, new QTableWidgetItem(change.m_imported));
+
+            for (int column = 1; column < 4; column++)
+            {
+                changes->item(r, column)->setToolTip(changes->item(r, column)->text());
+
+                if ((change.m_action == Change::Keep) || (change.m_action == Change::Skip)) {
+                    changes->item(r, column)->setForeground(QColor("#888888"));
+                }
+            }
+
+            count[change.m_action]++;
+        }
+
+        changes->resizeColumnsToContents();
+        const int changed = count[Change::Add] + count[Change::Update] + count[Change::Delete];
+        summary->setText(changed == 0 ? QString("Nothing would change.")
+            : QString("%1 to add, %2 to update, %3 to delete, %4 kept, %5 not imported.")
+                .arg(count[Change::Add]).arg(count[Change::Update]).arg(count[Change::Delete]).arg(count[Change::Keep]).arg(count[Change::Skip]));
+        buttons->button(QDialogButtonBox::Ok)->setEnabled(changed > 0);
     };
 
     QObject::connect(instance, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, [&](int) { show(); });

@@ -555,7 +555,7 @@ void MessageCenterGUI::importFromPager()
         std::vector<MessageCenterEngine::Route> m_routes;
         QList<MessageCenterFileSetting> m_sinks;
         QList<MessageCenterFileSetting> m_sources;
-        QStringList m_lines;
+        QList<PagerImport::Change> m_rows;
     };
 
     auto plan = [this](const PagerImport::Config& c, const PagerImport::Instance& instance) {
@@ -647,23 +647,22 @@ void MessageCenterGUI::importFromPager()
             p.m_sources.append(source);
         }
 
-        // What changes: by name, against the items of the same instance there are
+        // What changes: by name, against the items of the same instance there are; the current and the imported item
+        // as their JSON (empty: there is none)
+        typedef PagerImport::Change Change;
         auto compare = [&p, &prefix](const QString& what, const QStringList& oldNames, const QStringList& newNames,
             const std::function<QByteArray(const QString&, bool)>& json) {
             for (const QString& name : newNames)
             {
-                if (!oldNames.contains(name)) {
-                    p.m_lines.append(QString("add %1 %2: %3").arg(what, name, QString::fromUtf8(json(name, true))));
-                } else if (json(name, true) != json(name, false)) {
-                    p.m_lines.append(QString("replace %1 %2: %3").arg(what, name, QString::fromUtf8(json(name, true))));
-                } else {
-                    p.m_lines.append(QString("keep %1 %2").arg(what, name));
-                }
+                const QString current = oldNames.contains(name) ? QString::fromUtf8(json(name, false)) : QString();
+                const QString imported = QString::fromUtf8(json(name, true));
+                const Change::Action action = !oldNames.contains(name) ? Change::Add : (current != imported) ? Change::Update : Change::Keep;
+                p.m_rows.append(Change::make(action, QString("%1 %2").arg(what, name), current, imported));
             }
             for (const QString& name : oldNames)
             {
                 if (name.startsWith(prefix) && !newNames.contains(name)) {
-                    p.m_lines.append(QString("delete %1 %2").arg(what, name));
+                    p.m_rows.append(Change::make(Change::Delete, QString("%1 %2").arg(what, name), QString::fromUtf8(json(name, false)), QString()));
                 }
             }
         };
@@ -701,16 +700,27 @@ void MessageCenterGUI::importFromPager()
         compare("route", oldRoutes, newRoutes, [&](const QString& name, bool isNew) {
             return routeJson(isNew ? p.m_routes : m_settings.m_routes, name); });
 
-        if (hasSource) {
-            p.m_lines.append(QString("note: the source reads the rows the Pager demodulator adds to %1 from now on").arg(c.m_logFilename));
+        // What the Pager demodulator has that gives nothing here, and why
+        auto skip = [&p](const QString& item, const QString& pager, const QString& why) {
+            p.m_rows.append(Change::make(Change::Skip, item, QString(), QString("%1: %2").arg(pager, why)));
+        };
+
+        if (!c.m_udpEnabled) {
+            skip("UDP output", "off", "no UDP sink");
         }
-
-        p.m_lines.append("note: the routes act on the messages of all the sources (the Radio Paging channels and this log); "
-            "a route's Source selects one");
-
+        if (!hasSource) {
+            skip("Log", "off", "no source");
+        } else {
+            p.m_rows.append(Change::make(Change::Keep, "Pager log file", c.m_logFilename, "read from now on, the rows it gets"));
+        }
+        if (c.m_notifications.isEmpty()) {
+            skip("Notifications", "none", "no route");
+        }
         if (!c.m_filterAddress.isEmpty()) {
-            p.m_lines.append(QString("note: the address filter /%1/ is a view of the Pager demodulator: set it in the filter of the log")
-                .arg(c.m_filterAddress));
+            skip("Address filter", c.m_filterAddress, "a view of the Pager demodulator, set it in the filter of the log");
+        }
+        if (!c.m_characters.isEmpty() || c.m_reverse) {
+            skip("Characters", c.m_reverse ? "right-to-left" : "mapped", "the Pager log has the text as shown; import into a Radio Paging demodulator");
         }
 
         return p;
@@ -720,9 +730,10 @@ void MessageCenterGUI::importFromPager()
     PagerImport::Config config;
     bool ok = PagerImport::choose(this, "Import from a Pager demodulator",
         "Routes, sinks and sources that do what the Pager demodulator chosen does: its UDP output, its log (as a source) and its "
-        "notifications (a route with speech, command, highlight and map sinks each). The routes there are stay; those of an "
-        "earlier import of the same instance are replaced.",
-        [&plan](const PagerImport::Config& c, const PagerImport::Instance& i) { return plan(c, i).m_lines; }, instance, config);
+        "notifications (a route with speech, command, highlight and map sinks each). The routes act on the messages of all the "
+        "sources, the Radio Paging channels and this log. The other routes stay; those of an earlier import of the same "
+        "instance are replaced.",
+        [&plan](const PagerImport::Config& c, const PagerImport::Instance& i) { return plan(c, i).m_rows; }, instance, config);
 
     if (!ok) {
         return;

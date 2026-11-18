@@ -151,8 +151,41 @@ const Entries swiss = national({
     {0x7E, "\xC3\xBB"},     // U+00FB u circumflex
 });
 
+// Hebrew (SI 960): the letters alef to tav, with the final forms, on the codes 0x60 to 0x7A, in place of the lower
+// case letters
+const Entries hebrew = national({
+    {0x60, "\xD7\x90"},     // U+05D0 alef
+    {0x61, "\xD7\x91"},     // U+05D1 bet
+    {0x62, "\xD7\x92"},     // U+05D2 gimel
+    {0x63, "\xD7\x93"},     // U+05D3 dalet
+    {0x64, "\xD7\x94"},     // U+05D4 he
+    {0x65, "\xD7\x95"},     // U+05D5 vav
+    {0x66, "\xD7\x96"},     // U+05D6 zayin
+    {0x67, "\xD7\x97"},     // U+05D7 het
+    {0x68, "\xD7\x98"},     // U+05D8 tet
+    {0x69, "\xD7\x99"},     // U+05D9 yod
+    {0x6A, "\xD7\x9A"},     // U+05DA final kaf
+    {0x6B, "\xD7\x9B"},     // U+05DB kaf
+    {0x6C, "\xD7\x9C"},     // U+05DC lamed
+    {0x6D, "\xD7\x9D"},     // U+05DD final mem
+    {0x6E, "\xD7\x9E"},     // U+05DE mem
+    {0x6F, "\xD7\x9F"},     // U+05DF final nun
+    {0x70, "\xD7\xA0"},     // U+05E0 nun
+    {0x71, "\xD7\xA1"},     // U+05E1 samekh
+    {0x72, "\xD7\xA2"},     // U+05E2 ayin
+    {0x73, "\xD7\xA3"},     // U+05E3 final pe
+    {0x74, "\xD7\xA4"},     // U+05E4 pe
+    {0x75, "\xD7\xA5"},     // U+05E5 final tsadi
+    {0x76, "\xD7\xA6"},     // U+05E6 tsadi
+    {0x77, "\xD7\xA7"},     // U+05E7 qof
+    {0x78, "\xD7\xA8"},     // U+05E8 resh
+    {0x79, "\xD7\xA9"},     // U+05E9 shin
+    {0x7A, "\xD7\xAA"},     // U+05EA tav
+});
+
 } // namespace
 
+const RadioPagingCharset::Table RadioPagingCharsetTables::pocsagLatinHebrew = {7, hebrew.data()};
 const RadioPagingCharset::Table RadioPagingCharsetTables::pocsagLatinBritish = {7, british.data()};
 const RadioPagingCharset::Table RadioPagingCharsetTables::pocsagLatinDanishNorwegian = {7, danishNorwegian.data()};
 const RadioPagingCharset::Table RadioPagingCharsetTables::pocsagLatinFrench = {7, french.data()};

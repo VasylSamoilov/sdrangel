@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <string_view>
 
 #include "charsets/radiopagingcharsettables.h"
@@ -95,6 +96,7 @@ const std::vector<RadioPagingCharset::Codepage>& RadioPagingCharset::codepages()
         {"pocsag", "generic", "generic", "latin-spanish", "Generic - Spanish", &pocsagLatinSpanish},
         {"pocsag", "generic", "generic", "latin-swedish", "Generic - Swedish", &pocsagLatinSwedish},
         {"pocsag", "generic", "generic", "latin-swiss", "Generic - Swiss", &pocsagLatinSwiss},
+        {"pocsag", "generic", "generic", "hebrew", "Generic - Hebrew", &pocsagLatinHebrew},
         {"pocsag", "motorola", "advisor", "cyrillic", "Motorola Advisor - Cyrillic", &pocsagMotorolaAdvisorCyrillic},
         {"pocsag", "motorola", "advisor-linguist", "latin-cyrillic", "Motorola Advisor Linguist - Latin/Cyrillic (uppercase)",
             &pocsagMotorolaAdvisorLinguistLatinCyrillic},
@@ -300,4 +302,165 @@ bool RadioPagingCharset::encode(const Codepage& codepage, const std::string& use
     }
 
     return true;
+}
+
+namespace {
+
+std::string utf8(uint32_t codePoint)
+{
+    std::string out;
+
+    if (codePoint < 0x80)
+    {
+        out.push_back((char) codePoint);
+    }
+    else if (codePoint < 0x800)
+    {
+        out.push_back((char) (0xC0 | (codePoint >> 6)));
+        out.push_back((char) (0x80 | (codePoint & 0x3F)));
+    }
+    else if (codePoint < 0x10000)
+    {
+        out.push_back((char) (0xE0 | (codePoint >> 12)));
+        out.push_back((char) (0x80 | ((codePoint >> 6) & 0x3F)));
+        out.push_back((char) (0x80 | (codePoint & 0x3F)));
+    }
+    else
+    {
+        out.push_back((char) (0xF0 | (codePoint >> 18)));
+        out.push_back((char) (0x80 | ((codePoint >> 12) & 0x3F)));
+        out.push_back((char) (0x80 | ((codePoint >> 6) & 0x3F)));
+        out.push_back((char) (0x80 | (codePoint & 0x3F)));
+    }
+
+    return out;
+}
+
+} // namespace
+
+bool RadioPagingCustomCodepage::parse(const std::string& protocol, const std::string& text, Codes& codes, bool& rtl, std::string& error)
+{
+    const RadioPagingCharset::Codepage *base = RadioPagingCharset::defaultFor(protocol);
+    const int size = base ? base->codes() : 128;
+    std::string token;
+    codes.clear();
+    rtl = false;
+    error.clear();
+
+    auto take = [&]() {
+        if (token.empty()) {
+            return true;
+        }
+        if ((lower(token) == "rtl") || (lower(token) == "ltr"))
+        {
+            rtl = (lower(token) == "rtl");
+            token.clear();
+            return true;
+        }
+
+        const size_t equal = token.find('=');
+        char *end = nullptr;
+        const long code = (equal == std::string::npos) ? -1 : std::strtol(token.substr(0, equal).c_str(), &end, 16);
+        const bool codeOk = (equal != std::string::npos) && (equal > 0) && end && (*end == '\0') && (code >= 0) && (code < size);
+        const unsigned long point = codeOk ? std::strtoul(token.substr(equal + 1).c_str(), &end, 16) : 0;
+        const bool pointOk = codeOk && (equal + 1 < token.size()) && end && (*end == '\0') && (point > 0) && (point <= 0x10FFFF)
+            && ((point < 0xD800) || (point > 0xDFFF));
+
+        if (!pointOk)
+        {
+            char limit[8];
+            std::snprintf(limit, sizeof(limit), "%02X", size - 1);
+            error = "'" + token + "' is not code=character (hex code 00 to " + limit + ", hex Unicode code point)";
+            return false;
+        }
+
+        for (auto& c : codes)
+        {
+            if (c.first == (int) code)
+            {
+                c.second = (uint32_t) point;
+                token.clear();
+                return true;
+            }
+        }
+
+        codes.push_back(std::make_pair((int) code, (uint32_t) point));
+        token.clear();
+        return true;
+    };
+
+    for (char c : text)
+    {
+        if ((c == ' ') || (c == ',') || (c == '\t') || (c == '\n'))
+        {
+            if (!take()) {
+                return false;
+            }
+        }
+        else
+        {
+            token.push_back(c);
+        }
+    }
+
+    return take();
+}
+
+std::string RadioPagingCustomCodepage::text(const Codes& codes, bool rtl)
+{
+    std::string out = rtl ? "rtl" : "";
+
+    for (const auto& c : codes)
+    {
+        char pair[24];
+        std::snprintf(pair, sizeof(pair), "%s%02X=%04X", out.empty() ? "" : " ", c.first, c.second);
+        out += pair;
+    }
+
+    return out;
+}
+
+RadioPagingCustomCodepage::RadioPagingCustomCodepage(const std::string& protocol, const std::string& text) :
+    m_protocol((lower(protocol) == "golay") ? std::string("gsc") : lower(protocol))
+{
+    const RadioPagingCharset::Codepage *base = RadioPagingCharset::defaultFor(m_protocol);
+    const RadioPagingCharset::Table *table = base ? base->m_table : &RadioPagingCharsetTables::pocsagAscii;
+    const int size = 1 << table->m_codeBits;
+    Codes codes;
+    std::string error;
+    bool rtl = false;
+    parse(m_protocol, text, codes, rtl, error);   // The codes before the first not valid one
+
+    for (int code = 0; code < 128; code++)
+    {
+        for (int i = 0; i < RadioPagingCharset::m_maxGlyphs; i++) {
+            m_entries[code][i] = (code < size) ? table->m_entries[code][i] : nullptr;
+        }
+    }
+
+    // The glyphs are kept first (their storage does not move), then pointed to
+    m_glyphs.reserve(codes.size());
+
+    for (const auto& c : codes) {
+        m_glyphs.push_back(utf8(c.second));
+    }
+    for (size_t i = 0; i < codes.size(); i++)
+    {
+        for (int g = 0; g < RadioPagingCharset::m_maxGlyphs; g++) {
+            m_entries[codes[i].first][g] = nullptr;
+        }
+
+        m_entries[codes[i].first][0] = m_glyphs[i].c_str();
+    }
+
+    m_table.m_codeBits = table->m_codeBits;
+    m_table.m_entries = m_entries;
+    m_codepage.m_protocol = m_protocol.c_str();
+    m_codepage.m_vendor = "generic";
+    m_codepage.m_model = "generic";
+    m_codepage.m_codepage = "custom";
+    m_codepage.m_label = "Custom";
+    m_codepage.m_table = &m_table;
+    m_codepage.m_transcoder = nullptr;
+    m_codepage.m_rtl = rtl;
 }

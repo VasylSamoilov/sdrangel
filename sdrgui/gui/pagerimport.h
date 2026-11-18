@@ -20,6 +20,7 @@
 
 #include <QByteArray>
 #include <QList>
+#include <QPair>
 #include <QString>
 #include <QStringList>
 #include <QWidget>
@@ -62,9 +63,36 @@ public:
         bool m_logEnabled = false;
         QString m_logFilename;
         bool m_filterDuplicates = false;
-        bool m_customCharacters = false;    //!< Characters mapped by the user (not taken over)
+        QList<QPair<qint32, qint32>> m_characters;  //!< Characters mapped by the user: 7-bit code, Unicode code point
+        bool m_reverse = false;             //!< The characters in the reverse order (right-to-left)
         QString m_title;
         QList<Notification> m_notifications;
+
+        //! The characters are the Hebrew preset of the Pager demodulator: 0x60 to 0x7A, alef to tav
+        bool hebrewCharacters() const;
+    };
+
+    //! What an import does to one setting or item: the action, what it is, what there is now and what it would be
+    struct Change
+    {
+        enum Action { Add, Update, Delete, Keep, Skip };    //!< Skip: what the Pager demodulator has is not taken over
+        Action m_action = Keep;
+        QString m_item;
+        QString m_current;
+        QString m_imported;                 //!< Skip: the value of the Pager demodulator and why it is not taken
+        static Change make(Action action, const QString& item, const QString& current, const QString& imported) {
+            Change c;
+            c.m_action = action;
+            c.m_item = item;
+            c.m_current = current;
+            c.m_imported = imported;
+            return c;
+        }
+        //! Update if they differ, else keep
+        static Change compare(const QString& item, const QString& current, const QString& imported) {
+            return make((current == imported) ? Keep : Update, item, current, imported);
+        }
+        static QString actionName(Action action);
     };
 
     //! An instance of the Pager demodulator: where it is and what it saves
@@ -87,10 +115,10 @@ public:
     static QString columnName(int column);
     static QString modulationName(int modulation);
 
-    //! A dialog: the instance to take, and what would change for it (the lines of preview(), each starting with add,
-    //! replace, delete or keep). True and the instance chosen when the user accepts
+    //! A dialog: the instance to take, and what the import would do (preview(): each setting or item with its action,
+    //! its value now and its value imported). True and the instance chosen when the user accepts
     static bool choose(QWidget *parent, const QString& title, const QString& intro,
-        const std::function<QStringList(const Config& config, const Instance& instance)>& preview, Instance& chosen, Config& config);
+        const std::function<QList<Change>(const Config& config, const Instance& instance)>& preview, Instance& chosen, Config& config);
 };
 
 #endif // SDRGUI_GUI_PAGERIMPORT_H_

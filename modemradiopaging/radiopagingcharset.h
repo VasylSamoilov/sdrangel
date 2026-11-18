@@ -20,6 +20,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "export.h"
@@ -86,6 +87,7 @@ public:
         const char *m_label;                    //!< For the user
         const Table *m_table;
         const Transcoder *m_transcoder = nullptr;   //!< A special format on top of the table, nullptr for none
+        bool m_rtl = false;                     //!< Right-to-left: the text is shown in the reverse order of the codes
 
         Key key() const { return Key{m_vendor, m_model, m_codepage}; }
         int codes() const { return 1 << m_table->m_codeBits; }
@@ -113,6 +115,36 @@ public:
         std::string *warning = nullptr);
     //!< The code of the character at text[pos] (advanced past it), -1 if it has none
     static int encodeOne(const Codepage& codepage, const std::string& text, size_t& pos);
+};
+
+// The custom codepage of a protocol (generic/generic/custom): the default table of the protocol with codes mapped to
+// other characters by the user, and the direction of its text. As text: "60=05D0 61=05D1", hex code = hex Unicode code
+// point, separated by spaces or commas, with rtl for a right-to-left text. The codepage points into the object: it is
+// not copied
+class MODEMRADIOPAGING_API RadioPagingCustomCodepage
+{
+public:
+    typedef std::vector<std::pair<int, uint32_t>> Codes;
+
+    static RadioPagingCharset::Key key() { return RadioPagingCharset::Key{"generic", "generic", "custom"}; }
+    static bool isCustom(const RadioPagingCharset::Key& key) { return key == RadioPagingCustomCodepage::key(); }
+    //!< The mapping and the direction of a text; false and an error if it is not valid (a code out of the protocol, not
+    //!< a character)
+    static bool parse(const std::string& protocol, const std::string& text, Codes& codes, bool& rtl, std::string& error);
+    static std::string text(const Codes& codes, bool rtl);
+
+    //!< The codepage of a protocol with the mapping of a text (the codes not valid are left out)
+    RadioPagingCustomCodepage(const std::string& protocol, const std::string& text);
+    RadioPagingCustomCodepage(const RadioPagingCustomCodepage&) = delete;
+    RadioPagingCustomCodepage& operator=(const RadioPagingCustomCodepage&) = delete;
+    const RadioPagingCharset::Codepage& codepage() const { return m_codepage; }
+
+private:
+    std::string m_protocol;
+    std::vector<std::string> m_glyphs;      //!< The UTF-8 of each code mapped
+    RadioPagingCharset::Entry m_entries[128];
+    RadioPagingCharset::Table m_table;
+    RadioPagingCharset::Codepage m_codepage;
 };
 
 #endif // MODEMRADIOPAGING_RADIOPAGINGCHARSET_H

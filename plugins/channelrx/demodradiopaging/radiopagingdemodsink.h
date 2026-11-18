@@ -341,8 +341,13 @@ private:
     static void insertAlternative(MessageRecord& record, const std::string& type, const std::string& text, int score);
     //!< Characters below 0x20 and 0x7f as <0xNN>, other bytes kept (UTF-8 passes)
     static QString escapeText(const std::string& text);
-    //!< The codepage of the key in the protocol, else the default of the protocol
-    static const RadioPagingCharset::Codepage *codepage(const RadioPagingCharset::Key& key, const char *protocol);
+    //!< The codepage of the key in the protocol (the custom codepage of the protocol too), else the default of the protocol
+    const RadioPagingCharset::Codepage *codepage(const RadioPagingCharset::Key& key, const char *protocol) const;
+    //!< The custom codepage of each protocol (POCSAG, FLEX, GSC), made of its codes in the settings
+    std::unique_ptr<RadioPagingCustomCodepage> m_customCodepage[3];
+    void makeCustomCodepages(const QStringList& settingsKeys, bool force);
+    //!< The custom codes of a protocol for its record, when its custom codepage is used
+    void insertCustomCodes(MessageRecord& record, const RadioPagingCharset::Codepage *charset, int protocol) const;
     //!< The codepage of HEX/binary messages (FLEX Kanji, STD-43A Japanese Text Service)
     static bool isKanji(const RadioPagingCharset::Codepage *codepage);
     static QByteArray toByteArray(const std::vector<uint8_t>& data);

@@ -77,6 +77,8 @@ The decoders lock on three preamble words, then find the start code (on either o
 
 The alphanumeric messages of each protocol are shown with the glyphs of a pager codepage (vendor, model and codepage), selected per protocol. The codes without a glyph are given as &lt;0xNN&gt;. CR and LF are shown as the symbols for carriage return and line feed (U+240D, U+240A), GSC CR/LF as the symbol for carriage return, so a message is one line. FLEX Kanji messages are HEX/binary messages in Shift JIS.
 
+Each protocol has a custom codepage too, Custom in the codepages: the default table of the protocol (ASCII, GSC its Table VII) with the codes the pager shows differently mapped to other characters, one character for each code, and the direction of the text (right-to-left: the text is shown in the reverse order of the codes). Custom... opens its editor: every code with its character and Unicode code point, ASCII to start again from the default table, Export and Import of the codepage as a JSON file. OK saves it and chooses it. The custom codes are kept with each record decoded with it (custom_codes), so that the Message Center decodes it again the same way.
+
 <h3>Duplicates</h3>
 
 Nothing is dropped. A POCSAG or GSC page received again within 60 s on the same network (speed and polarity) with the same address, function, type and content is output again, tagged duplicate. FLEX retransmissions are tagged as above. Duplicates are flagged DUP (DUP+ when they repaired an earlier copy) in the info column and have duplicate set in their record.
@@ -128,7 +130,8 @@ Each protocol has a live line, a line of options and, under them, the network li
 * Options line:
   * POCSAG: Strip - the rule that strips the fill at the end of alphanumeric messages (default NUL, ETX and EOT). Right click edits the list of the custom codes.
   * GSC: Voice - voice timeout, voice audio, recording, voice files and volume (see below).
-  * Codepage - the codepage of the alphanumeric messages (shown when there are several).
+  * Codepage - the codepage of the alphanumeric messages, Custom for the custom codepage of the protocol.
+  * Custom... - the editor of the custom codepage (see Codepages).
   * Reset - see below.
 * Network lines - in a smaller font, one block per polarity received since the last reset (the normal one while none was), tagged NORM or INV once both were. The values are coloured while the polarity is being received and grey once its reception ended. Only the fields received are shown.
   * POCSAG: Bn the batches of the last transmission, then the memory.
@@ -139,7 +142,6 @@ Each protocol has a live line, a line of options and, under them, the network li
   * Memory: MEM the messages the receivers of the protocol remember for duplicate detection (FLEX: with its message history), FRAG (FLEX) the messages being reassembled, and RESET the time of the last reset (grey).
 * FLEX group slots - under the network lines of a FLEX polarity, the 16 group slots (temporary addresses 2029568 to 2029583), shown while a slot is not free. The colour of a slot is its state: blue members being assigned, amber waiting for the group message, teal the group message being received, green delivered, red missed (its frame went by without it), violet discarded (assigned again to another frame before it), orange timeout (the group message did not end), grey free. An outcome stays shown for 16 frames. The tooltip of a slot gives its state, the number of its members and the first of them, the frame of the group message, the cycle and frame of the assignment and how many frames on the group message is.
 * Reset - makes the receivers of the protocol forget what they remember: the messages for duplicate detection, and for FLEX the fragments, groups, message numbers and network time. The receivers are reset when the device starts too, so that a file played again is not taken as duplicates. Switching a protocol off resets it as well.
-* Codepage - the codepage of the alphanumeric messages of the protocol (shown when the protocol has more than one).
 
 GSC has in addition:
 
@@ -159,7 +161,7 @@ What the Pager demodulator has, for the messages of all three protocols. A messa
 * Log (record button) - writes each message to a .csv file, with the columns of the message record (header first, appended to an existing file). The folder button selects the file.
 * Load (arrow button) - reads the messages of a log written by this demodulator into the table. They are not notified again.
 * Notifications - a regular expression matched on a field of the message (address, message, protocol, type, channel or any of them), and what is done to a message that matches: its row is highlighted, the text of Speech is spoken (when the build has text to speech), the Command is run, and a position (latitude and longitude) in the message is plotted on the Map named by the address. Speech and Command replace ${address}, ${message}, ${protocol}, ${type}, ${channel} and ${0}, ${1}... (the captures of the expression). A duplicate is not notified again.
-* From Pager - takes over the settings of a Pager demodulator chosen from those there are: frequency shift, bandwidth, the POCSAG deviation, the protocols (its modulation), UDP, log, address filter and notifications (they replace those here). What would change is listed before anything is changed. The log is written next to the Pager log, as name_radiopaging.csv, with the columns of the message record.
+* From Pager - takes over the settings of a Pager demodulator chosen from those there are: frequency shift, bandwidth, the POCSAG deviation, the protocols (its modulation), its character encoding, UDP, log, address filter and notifications (they replace those here). The character encoding sets the POCSAG codepage: none is Generic - ASCII, its Hebrew preset is Generic - Hebrew, other characters or the reverse order fill the POCSAG custom codepage. A table lists each setting with what there is here, what the Pager demodulator has and the action (add, update, delete, keep, or not imported and why) before anything is changed. The log is written next to the Pager log, as name_radiopaging.csv, with the columns of the message record.
 * Address filter - only the messages whose whole address matches the regular expression are shown, as in the Pager demodulator (e.g. 12345.., 001001/.). It applies as it is typed.
 
 <h3>8: Waveforms</h3>

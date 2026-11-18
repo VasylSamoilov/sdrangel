@@ -37,6 +37,15 @@ RadioPagingDemodSettings:
     pocsagFillCodes:
       description: "pocsagFill 3: hex codes 00 to 7F separated by spaces or commas (default 00 03 04)"
       type: string
+    pocsagCustomCodes:
+      description: "POCSAG custom codepage (charset generic/generic/custom): the codes of ASCII mapped to other characters, hex code = hex Unicode code point separated by spaces, rtl for a right-to-left text, e.g. rtl 60=05D0 61=05D1"
+      type: string
+    flexCustomCodes:
+      description: "FLEX custom codepage (charset generic/generic/custom), as pocsagCustomCodes"
+      type: string
+    gscCustomCodes:
+      description: "GSC custom codepage (charset generic/generic/custom), as pocsagCustomCodes, codes 00 to 3F of the GSC table"
+      type: string
     gscEnabled:
       description: "Decode GSC (1 for yes, 0 for no)"
       type: integer

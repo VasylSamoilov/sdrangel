@@ -75,6 +75,11 @@ struct RadioPagingDemodSettings
     bool m_flexDcCorrection;
     bool m_gscDcCorrection;
     QString m_pocsagFillCodes;                  //!< FillCustom: hex codes separated by spaces or commas, e.g. "00 03 04"
+    //!< The custom codepage of each protocol (RadioPagingCustomCodepage): the default table with codes mapped to other
+    //!< characters and the direction, "rtl 60=05D0 61=05D1" (hex code = hex Unicode code point; rtl: right-to-left)
+    QString m_pocsagCustomCodes;
+    QString m_flexCustomCodes;
+    QString m_gscCustomCodes;
 
     quint32 m_rgbColor;
     QString m_title;

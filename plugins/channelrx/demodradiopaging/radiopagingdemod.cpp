@@ -474,7 +474,7 @@ int RadioPagingDemod::webapiSettingsPutPatch(
     {
         const QString error = RadioPagingPage::checkCharset(protocols[i], charsets[i]);
 
-        if (channelSettingsKeys.contains(keys[i]) && !error.isEmpty())
+        if (channelSettingsKeys.contains(keys[i]) && !error.isEmpty() && !RadioPagingCustomCodepage::isCustom(charsets[i]))
         {
             errorMessage = QString("%1: %2").arg(keys[i]).arg(error);
             return 400;
@@ -493,6 +493,24 @@ int RadioPagingDemod::webapiSettingsPutPatch(
     {
         errorMessage = "pocsagFillCodes must be hex codes 00 to 7F separated by spaces or commas";
         return 400;
+    }
+
+    const char *customKeys[3] = {"pocsagCustomCodes", "flexCustomCodes", "gscCustomCodes"};
+    const QString *customCodes[3] = {&settings.m_pocsagCustomCodes, &settings.m_flexCustomCodes, &settings.m_gscCustomCodes};
+    const char *customProtocols[3] = {"pocsag", "flex", "gsc"};
+
+    for (int i = 0; i < 3; i++)
+    {
+        RadioPagingCustomCodepage::Codes codes;
+        std::string error;
+        bool rtl;
+
+        if (channelSettingsKeys.contains(customKeys[i])
+            && !RadioPagingCustomCodepage::parse(customProtocols[i], customCodes[i]->toStdString(), codes, rtl, error))
+        {
+            errorMessage = QString("%1: %2").arg(customKeys[i]).arg(QString::fromStdString(error));
+            return 400;
+        }
     }
     if (channelSettingsKeys.contains("udpFormat")
         && ((settings.m_udpFormat < RadioPagingDemodSettings::UdpPagerDemod) || (settings.m_udpFormat > RadioPagingDemodSettings::UdpJson)))
@@ -557,6 +575,15 @@ void RadioPagingDemod::webapiUpdateChannelSettings(
     }
     if (channelSettingsKeys.contains("pocsagFillCodes") && model->getPocsagFillCodes()) {
         settings.m_pocsagFillCodes = *model->getPocsagFillCodes();
+    }
+    if (channelSettingsKeys.contains("pocsagCustomCodes") && model->getPocsagCustomCodes()) {
+        settings.m_pocsagCustomCodes = *model->getPocsagCustomCodes();
+    }
+    if (channelSettingsKeys.contains("flexCustomCodes") && model->getFlexCustomCodes()) {
+        settings.m_flexCustomCodes = *model->getFlexCustomCodes();
+    }
+    if (channelSettingsKeys.contains("gscCustomCodes") && model->getGscCustomCodes()) {
+        settings.m_gscCustomCodes = *model->getGscCustomCodes();
     }
     if (channelSettingsKeys.contains("gscEnabled")) {
         settings.m_gscEnabled = model->getGscEnabled() != 0;
@@ -685,6 +712,9 @@ void RadioPagingDemod::webapiFormatChannelSettings(SWGSDRangel::SWGChannelSettin
     model->setFlexMaxMessageNumber(settings.m_flexMaxMessageNumber);
     model->setPocsagFill(settings.m_pocsagFill);
     model->setPocsagFillCodes(new QString(settings.m_pocsagFillCodes));
+    model->setPocsagCustomCodes(new QString(settings.m_pocsagCustomCodes));
+    model->setFlexCustomCodes(new QString(settings.m_flexCustomCodes));
+    model->setGscCustomCodes(new QString(settings.m_gscCustomCodes));
     model->setGscEnabled(settings.m_gscEnabled ? 1 : 0);
     model->setGscDeviation(settings.m_gscDeviation);
     model->setGscVoiceTimeout(settings.m_gscVoiceTimeout);
@@ -867,6 +897,15 @@ void RadioPagingDemod::webapiFormatChannelSettings(
     }
     if (channelSettingsKeys.contains("pocsagFillCodes") || force) {
         model->setPocsagFillCodes(new QString(settings.m_pocsagFillCodes));
+    }
+    if (channelSettingsKeys.contains("pocsagCustomCodes") || force) {
+        model->setPocsagCustomCodes(new QString(settings.m_pocsagCustomCodes));
+    }
+    if (channelSettingsKeys.contains("flexCustomCodes") || force) {
+        model->setFlexCustomCodes(new QString(settings.m_flexCustomCodes));
+    }
+    if (channelSettingsKeys.contains("gscCustomCodes") || force) {
+        model->setGscCustomCodes(new QString(settings.m_gscCustomCodes));
     }
     if (channelSettingsKeys.contains("gscEnabled") || force) {
         model->setGscEnabled(settings.m_gscEnabled ? 1 : 0);
