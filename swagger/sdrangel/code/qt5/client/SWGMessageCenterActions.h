@@ -32,7 +32,15 @@ public:
     void setClearSent(qint32 value);
     SWGMessageCenterRedecode* getRedecode();
     void setRedecode(SWGMessageCenterRedecode* value);
+    QString* getIngest();
+    void setIngest(QString* value);
+    QString* getImportFile();
+    void setImportFile(QString* value);
 private:
+    QString* m_ingest = nullptr;
+    bool m_ingestIsSet = false;
+    QString* m_importFile = nullptr;
+    bool m_importFileIsSet = false;
     SWGMessageCenterRedecode* m_redecode = nullptr;
     bool m_redecodeIsSet = false;
     SWGMessageCenterPost* m_post = nullptr;

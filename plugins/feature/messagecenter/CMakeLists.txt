@@ -34,6 +34,9 @@ if(NOT SERVER_MODE)
     set(TARGET_NAME ${PLUGINS_PREFIX}featuremessagecenter)
     set(TARGET_LIB "Qt::Widgets")
     set(TARGET_LIB_GUI "sdrgui")
+    if(Qt${QT_DEFAULT_MAJOR_VERSION}TextToSpeech_FOUND)
+        list(APPEND TARGET_LIB_GUI Qt::TextToSpeech)
+    endif()
     set(INSTALL_FOLDER ${INSTALL_PLUGINS_DIR})
 else()
     set(TARGET_NAME ${PLUGINSSRV_PREFIX}featuremessagecentersrv)
@@ -55,6 +58,7 @@ endif()
 
 target_link_libraries(${TARGET_NAME} PRIVATE
     Qt::Core
+    Qt::Network
     ${TARGET_LIB}
     sdrbase
     modemradiopaging
@@ -74,8 +78,8 @@ if(NOT SERVER_MODE)
         test/messagecenterenginetest.cpp
         messagecenterengine.cpp
     )
-    target_include_directories(messagecenterenginetest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    target_link_libraries(messagecenterenginetest Qt::Core sdrbase)
+    target_include_directories(messagecenterenginetest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/modemradiopaging)
+    target_link_libraries(messagecenterenginetest Qt::Core Qt::Network sdrbase modemradiopaging)
 endif()
 
 # Self test of the table of paging messages (offscreen), not built by default:

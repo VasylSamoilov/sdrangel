@@ -38,11 +38,13 @@
 #include "SWGMessageCenterRedecode.h"
 #include "SWGMessageCenterReport.h"
 #include "SWGMessageCenterSettings.h"
+#include "SWGMapItem.h"
 #include "SWGRadioPagingModActions.h"
 #include "SWGRadioPagingModTx.h"
 
 #include "channel/channelapi.h"
 #include "maincore.h"
+#include "util/units.h"
 #include "radiopagingpage.h"
 #include "radiopagingrecode.h"
 
@@ -54,6 +56,10 @@ MESSAGE_CLASS_DEFINITION(MessageCenter::MsgPageAction, Message)
 MESSAGE_CLASS_DEFINITION(MessageCenter::MsgUpdated, Message)
 MESSAGE_CLASS_DEFINITION(MessageCenter::MsgRedecoded, Message)
 MESSAGE_CLASS_DEFINITION(MessageCenter::MsgClearLog, Message)
+MESSAGE_CLASS_DEFINITION(MessageCenter::MsgImportFile, Message)
+MESSAGE_CLASS_DEFINITION(MessageCenter::MsgIngestRecords, Message)
+MESSAGE_CLASS_DEFINITION(MessageCenter::MsgSpeak, Message)
+MESSAGE_CLASS_DEFINITION(MessageCenter::MsgHighlight, Message)
 
 const char* const MessageCenter::m_featureIdURI = "sdrangel.feature.messagecenter";
 const char* const MessageCenter::m_featureId = "MessageCenter";
@@ -219,6 +225,37 @@ bool MessageCenter::handleMessage(const Message& cmd)
     else if (MsgClearLog::match(cmd))
     {
         m_engine.clearLog();
+        clearMap();
+        m_dirty = true;
+        return true;
+    }
+    else if (MsgImportFile::match(cmd))
+    {
+        const MsgImportFile& msg = (const MsgImportFile&) cmd;
+        QString error;
+
+        if (importFile(msg.getPath(), error) < 0) {
+            m_errors.append(error);
+        }
+
+        m_dirty = true;
+        return true;
+    }
+    else if (MsgIngestRecords::match(cmd))
+    {
+        const MsgIngestRecords& msg = (const MsgIngestRecords&) cmd;
+
+        for (MessageRecord record : msg.getRecords())
+        {
+            // From the API: a message received, never a page for a transmitter
+            record.m_direction = MessageRecord::DirectionRX;
+            record.m_protocolData.remove("transmitter");
+
+            if (record.m_kind != MessageRecord::KindEvent) {
+                m_engine.ingest(record, "api", now);
+            }
+        }
+
         m_dirty = true;
         return true;
     }
@@ -457,21 +494,190 @@ void MessageCenter::applyEngineSettings()
 
     for (const MessageCenterFileSetting& sink : m_settings.m_sinks)
     {
-        if (!sink.m_name.isEmpty() && !sink.m_path.isEmpty() && (sink.m_name != "log") && (sink.m_name != "queue"))
-        {
-            m_engine.addSink(std::unique_ptr<MessageCenterSink>(new MessageCenterFileSink(sink.m_name, sink.m_path,
-                (MessageCenterFileSink::Format) sink.m_format)));
+        std::unique_ptr<MessageCenterSink> made = makeSink(sink);
+
+        if (made) {
+            m_engine.addSink(std::move(made));
+        } else if (!sink.m_name.isEmpty()) {
+            m_errors.append(sink.check(true));
         }
     }
     for (const MessageCenterFileSetting& source : m_settings.m_sources)
     {
-        if (!source.m_name.isEmpty() && !source.m_path.isEmpty()) {
-            m_engine.addSource(std::unique_ptr<MessageCenterSource>(new MessageCenterFileSource(source.m_name, source.m_path)));
+        std::unique_ptr<MessageCenterSource> made = makeSource(source);
+
+        if (made) {
+            m_engine.addSource(std::move(made));
+        } else if (!source.m_name.isEmpty()) {
+            m_errors.append(source.check(false));
         }
     }
 
     m_engine.setRoutes(m_settings.m_routes);
     m_dirty = true;
+}
+
+std::unique_ptr<MessageCenterSink> MessageCenter::makeSink(const MessageCenterFileSetting& setting)
+{
+    if (!setting.check(true).isEmpty()) {
+        return nullptr;
+    }
+
+    const QString type = setting.typeOrDefault();
+
+    if (type == "file")
+    {
+        return std::unique_ptr<MessageCenterSink>(new MessageCenterFileSink(setting.m_name, setting.m_path,
+            (MessageCenterFileSink::Format) std::max(0, std::min(1, setting.m_format))));
+    }
+    if (type == "udp")
+    {
+        return std::unique_ptr<MessageCenterSink>(new MessageCenterUdpSink(setting.m_name, setting.m_address, (quint16) setting.m_port,
+            (setting.m_format == 1) ? MessageCenterUdpSink::Json : MessageCenterUdpSink::PagerDemod));
+    }
+    if (type == "command") {
+        return std::unique_ptr<MessageCenterSink>(new MessageCenterCommandSink(setting.m_name, setting.m_text));
+    }
+
+    // speech, highlight and map: done by the feature, in the thread of the message center
+    return std::unique_ptr<MessageCenterSink>(new MessageCenterActionSink(setting.m_name, type, setting.m_text, setting.m_color,
+        [this](const QString& actionType, const MessageRecord& record, const QString& text, quint32 color) {
+            doAction(actionType, record, text, color);
+        }));
+}
+
+std::unique_ptr<MessageCenterSource> MessageCenter::makeSource(const MessageCenterFileSetting& setting)
+{
+    if (!setting.check(false).isEmpty()) {
+        return nullptr;
+    }
+
+    const QString type = setting.typeOrDefault();
+
+    if (type == "csv") {
+        return std::unique_ptr<MessageCenterSource>(new MessageCenterCsvSource(setting.m_name, setting.m_path));
+    }
+    if (type == "udp") {
+        return std::unique_ptr<MessageCenterSource>(new MessageCenterUdpSource(setting.m_name, setting.m_address, (quint16) setting.m_port));
+    }
+
+    return std::unique_ptr<MessageCenterSource>(new MessageCenterFileSource(setting.m_name, setting.m_path));
+}
+
+// Called with the engine locked
+void MessageCenter::doAction(const QString& type, const MessageRecord& record, const QString& text, quint32 color)
+{
+    if (type == "speech")
+    {
+        // Said by the GUI: no GUI, nobody to say it
+        if (getMessageQueueToGUI()) {
+            getMessageQueueToGUI()->push(MsgSpeak::create(text));
+        }
+    }
+    else if (type == "highlight")
+    {
+        if (getMessageQueueToGUI()) {
+            getMessageQueueToGUI()->push(MsgHighlight::create(record.m_id, color));
+        }
+    }
+    else if (type == "map")
+    {
+        float latitude;
+        float longitude;
+
+        if (Units::stringToLatitudeAndLongitude(record.m_text, latitude, longitude, false)) {
+            sendToMap(record, latitude, longitude);
+        }
+    }
+}
+
+void MessageCenter::sendToMap(const MessageRecord& record, float latitude, float longitude)
+{
+    QList<ObjectPipe*> mapPipes;
+    MainCore::instance()->getMessagePipes().getMessagePipes(this, "mapitems", mapPipes);
+    QDateTime dateTime = QDateTime::fromMSecsSinceEpoch(record.m_timestamp);
+
+    for (const auto& pipe : mapPipes)
+    {
+        MessageQueue *messageQueue = qobject_cast<MessageQueue*>(pipe->m_element);
+        SWGSDRangel::SWGMapItem *swgMapItem = new SWGSDRangel::SWGMapItem();
+        swgMapItem->setName(new QString(record.m_address));
+        swgMapItem->setLatitude(latitude);
+        swgMapItem->setLongitude(longitude);
+        swgMapItem->setAltitude(0);
+        swgMapItem->setAltitudeReference(1); // CLAMP_TO_GROUND
+        swgMapItem->setFixedPosition(false);
+        swgMapItem->setPositionDateTime(new QString(dateTime.toUTC().toString(Qt::ISODateWithMs)));
+        swgMapItem->setImageRotation(0);
+        swgMapItem->setText(new QString(record.m_text));
+        swgMapItem->setImage(new QString("pager.png"));
+        messageQueue->push(MainCore::MsgMapItem::create(this, swgMapItem));
+    }
+
+    m_mapItems.insert(record.m_address);
+}
+
+// The items of the messages leave the Map with the log
+void MessageCenter::clearMap()
+{
+    for (const QString& address : m_mapItems)
+    {
+        QList<ObjectPipe*> mapPipes;
+        MainCore::instance()->getMessagePipes().getMessagePipes(this, "mapitems", mapPipes);
+
+        for (const auto& pipe : mapPipes)
+        {
+            MessageQueue *messageQueue = qobject_cast<MessageQueue*>(pipe->m_element);
+            SWGSDRangel::SWGMapItem *swgMapItem = new SWGSDRangel::SWGMapItem();
+            swgMapItem->setName(new QString(address));
+            swgMapItem->setImage(new QString(""));
+            messageQueue->push(MainCore::MsgMapItem::create(this, swgMapItem));
+        }
+    }
+
+    m_mapItems.clear();
+}
+
+// A file read once into the log, from its start: JSON lines, or a CSV log (by its name). Returns the number of messages
+int MessageCenter::importFile(const QString& path, QString& error)
+{
+    QFileInfo info(path);
+
+    if (!info.isFile())
+    {
+        error = QString("Cannot import %1: not a file").arg(path);
+        return -1;
+    }
+
+    const bool csv = info.suffix().compare("csv", Qt::CaseInsensitive) == 0;
+    std::unique_ptr<MessageCenterSource> source = csv ? std::unique_ptr<MessageCenterSource>(new MessageCenterCsvSource("import", path))
+        : std::unique_ptr<MessageCenterSource>(new MessageCenterFileSource("import", path));
+    int count = 0;
+
+    // The source reads a number of lines at a time: until it has nothing more
+    do
+    {
+        std::vector<MessageRecord> records;
+        QString pollError;
+
+        if (!source->poll(records, pollError))
+        {
+            error = pollError;
+            return -1;
+        }
+
+        for (const MessageRecord& record : records)
+        {
+            if (record.m_kind != MessageRecord::KindEvent)
+            {
+                m_engine.importRecord(record);
+                count++;
+            }
+        }
+    }
+    while (source->more());
+
+    return count;
 }
 
 // ---------------------------------------------------------------------------
@@ -567,6 +773,57 @@ int MessageCenter::webapiSettingsGet(SWGSDRangel::SWGFeatureSettings& response, 
     return 200;
 }
 
+// What is wrong with the sinks, the sources and the routes of the settings, empty if nothing
+QString MessageCenter::checkRouting(const MessageCenterSettings& settings)
+{
+    QStringList sinkNames = {"log", "queue"};
+    QStringList sourceNames;
+
+    for (const MessageCenterFileSetting& sink : settings.m_sinks)
+    {
+        QString error = sink.check(true);
+
+        if (!error.isEmpty()) {
+            return error;
+        }
+        if (sinkNames.contains(sink.m_name)) {
+            return QString("Two sinks are named %1").arg(sink.m_name);
+        }
+
+        sinkNames.append(sink.m_name);
+    }
+    for (const MessageCenterFileSetting& source : settings.m_sources)
+    {
+        QString error = source.check(false);
+
+        if (!error.isEmpty()) {
+            return error;
+        }
+        if (sourceNames.contains(source.m_name)) {
+            return QString("Two sources are named %1").arg(source.m_name);
+        }
+
+        sourceNames.append(source.m_name);
+    }
+    for (const MessageCenterEngine::Route& route : settings.m_routes)
+    {
+        for (const QString& sink : route.m_sinks)
+        {
+            if (!sinkNames.contains(sink)) {
+                return QString("Route %1: there is no sink %2").arg(route.m_name).arg(sink);
+            }
+        }
+
+        QString error = route.m_filter.regExpError();
+
+        if (!error.isEmpty()) {
+            return QString("Route %1: the regular expression is not valid: %2").arg(route.m_name).arg(error);
+        }
+    }
+
+    return QString();
+}
+
 int MessageCenter::webapiSettingsPutPatch(bool force, const QStringList& featureSettingsKeys,
     SWGSDRangel::SWGFeatureSettings& response, QString& errorMessage)
 {
@@ -591,6 +848,16 @@ int MessageCenter::webapiSettingsPutPatch(bool force, const QStringList& feature
     }
 
     webapiUpdateFeatureSettings(settings, featureSettingsKeys, response);
+
+    // What is wrong with the sinks, the sources and the routes is said now, not later in the errors of the report
+    if (featureSettingsKeys.contains("sinks") || featureSettingsKeys.contains("sources") || featureSettingsKeys.contains("routes"))
+    {
+        errorMessage = checkRouting(settings);
+
+        if (!errorMessage.isEmpty()) {
+            return 400;
+        }
+    }
     m_inputMessageQueue.push(MsgConfigureMessageCenter::create(settings, featureSettingsKeys, force));
 
     if (getMessageQueueToGUI()) {
@@ -664,11 +931,23 @@ int MessageCenter::webapiReportGet(SWGSDRangel::SWGFeatureReport& response, QStr
         log.append(records[i].toJson());
     }
 
+    QJsonArray sinks;
+
+    for (auto it = m_engine.sinkStats().begin(); it != m_engine.sinkStats().end(); ++it)
+    {
+        QJsonObject o;
+        o["name"] = it.key();
+        o["accepted"] = it.value().m_accepted;
+        o["failed"] = it.value().m_failed;
+        sinks.append(o);
+    }
+
     swg->setLogged(m_engine.logged());
     swg->setRouted(m_engine.routed());
     swg->setEndpoints(new QString(QString::fromUtf8(QJsonDocument(endpoints).toJson(QJsonDocument::Compact))));
     swg->setPages(new QString(QString::fromUtf8(QJsonDocument(pages).toJson(QJsonDocument::Compact))));
     swg->setLog(new QString(QString::fromUtf8(QJsonDocument(log).toJson(QJsonDocument::Compact))));
+    swg->setSinks(new QString(QString::fromUtf8(QJsonDocument(sinks).toJson(QJsonDocument::Compact))));
     swg->setErrors(new QString(takeErrors().join('\n')));
     return 200;
 }
@@ -685,12 +964,66 @@ int MessageCenter::webapiActionsPost(const QStringList& featureActionsKeys, SWGS
 
     int actions = (featureActionsKeys.contains("post") ? 1 : 0) + (featureActionsKeys.contains("requeue") ? 1 : 0)
         + (featureActionsKeys.contains("cancel") ? 1 : 0) + (featureActionsKeys.contains("clearSent") ? 1 : 0)
-        + (featureActionsKeys.contains("redecode") ? 1 : 0);
+        + (featureActionsKeys.contains("redecode") ? 1 : 0) + (featureActionsKeys.contains("ingest") ? 1 : 0)
+        + (featureActionsKeys.contains("importFile") ? 1 : 0);
 
     if (actions != 1)
     {
-        errorMessage = "One action expected: post, requeue, cancel, clearSent or redecode";
+        errorMessage = "One action expected: post, requeue, cancel, clearSent, redecode, ingest or importFile";
         return 400;
+    }
+
+    // Message records from the API: a message received, as if a channel had published it
+    if (featureActionsKeys.contains("ingest"))
+    {
+        std::vector<MessageRecord> records;
+        int lines = 0;
+
+        for (const QByteArray& line : swg->getIngest() ? swg->getIngest()->toUtf8().split('\n') : QList<QByteArray>())
+        {
+            if (line.trimmed().isEmpty()) {
+                continue;
+            }
+
+            QJsonDocument document = QJsonDocument::fromJson(line.trimmed());
+            MessageRecord record;
+            lines++;
+
+            if (!document.isObject() || !MessageRecord::fromJson(document.object(), record))
+            {
+                errorMessage = QString("Line %1 is not a message record").arg(lines);
+                return 400;
+            }
+            if (record.m_kind == MessageRecord::KindEvent)
+            {
+                errorMessage = QString("Line %1: an event is not a message").arg(lines);
+                return 400;
+            }
+
+            records.push_back(record);
+        }
+
+        if (records.empty())
+        {
+            errorMessage = "No message record";
+            return 400;
+        }
+
+        m_inputMessageQueue.push(MsgIngestRecords::create(records));
+        return 202;
+    }
+    if (featureActionsKeys.contains("importFile"))
+    {
+        QString path = swg->getImportFile() ? swg->getImportFile()->trimmed() : QString();
+
+        if (!QFileInfo(path).isFile())
+        {
+            errorMessage = QString("%1 is not a file").arg(path);
+            return 400;
+        }
+
+        m_inputMessageQueue.push(MsgImportFile::create(path));
+        return 202;
     }
 
     // A received message of the log decoded again: checked here, the log changes in the thread of the feature

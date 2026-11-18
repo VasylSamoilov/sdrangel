@@ -20,9 +20,13 @@
 
 #include <QMap>
 #include <QPointer>
+#include <QSet>
 #include <QRecursiveMutex>
 #include <QTimer>
 #include <QNetworkRequest>
+
+#include <memory>
+#include <vector>
 
 class QNetworkAccessManager;
 class QNetworkReply;
@@ -143,6 +147,68 @@ public:
         MsgClearLog() : Message() { }
     };
 
+    //! Read a file once into the log (JSON lines, or a CSV log): not routed
+    class MsgImportFile : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        const QString& getPath() const { return m_path; }
+
+        static MsgImportFile* create(const QString& path) { return new MsgImportFile(path); }
+
+    private:
+        QString m_path;
+
+        MsgImportFile(const QString& path) : Message(), m_path(path) { }
+    };
+
+    //! A message record from the WebAPI, as a message received
+    class MsgIngestRecords : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        const std::vector<MessageRecord>& getRecords() const { return m_records; }
+
+        static MsgIngestRecords* create(const std::vector<MessageRecord>& records) { return new MsgIngestRecords(records); }
+
+    private:
+        std::vector<MessageRecord> m_records;
+
+        MsgIngestRecords(const std::vector<MessageRecord>& records) : Message(), m_records(records) { }
+    };
+
+    //! To the GUI: say a text
+    class MsgSpeak : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        const QString& getText() const { return m_text; }
+
+        static MsgSpeak* create(const QString& text) { return new MsgSpeak(text); }
+
+    private:
+        QString m_text;
+
+        MsgSpeak(const QString& text) : Message(), m_text(text) { }
+    };
+
+    //! To the GUI: the row of a message in the log gets a colour
+    class MsgHighlight : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        const QString& getId() const { return m_id; }
+        quint32 getColor() const { return m_color; }
+
+        static MsgHighlight* create(const QString& id, quint32 color) { return new MsgHighlight(id, color); }
+
+    private:
+        QString m_id;
+        quint32 m_color;
+
+        MsgHighlight(const QString& id, quint32 color) : Message(), m_id(id), m_color(color) { }
+    };
+
     //! To the GUI: the log, the endpoints or the queue changed
     class MsgUpdated : public Message {
         MESSAGE_CLASS_DECLARATION
@@ -223,6 +289,17 @@ private:
     void applySettings(const MessageCenterSettings& settings, const QStringList& settingsKeys, bool force = false);
     void webapiReverseSendSettings(const QList<QString>& featureSettingsKeys, const MessageCenterSettings& settings, bool force);
     void applyEngineSettings();
+    //! What is wrong with the sinks, sources and routes of the settings, empty if nothing
+    static QString checkRouting(const MessageCenterSettings& settings);
+    //! The sink of a setting (action sinks reach the GUI and the Map through the feature); null if it is not valid
+    std::unique_ptr<MessageCenterSink> makeSink(const MessageCenterFileSetting& setting);
+    std::unique_ptr<MessageCenterSource> makeSource(const MessageCenterFileSetting& setting);
+    void doAction(const QString& type, const MessageRecord& record, const QString& text, quint32 color);
+    void sendToMap(const MessageRecord& record, float latitude, float longitude);
+    void clearMap();
+    QSet<QString> m_mapItems;               //!< Names of the items sent to the Map
+    //! A file read once into the log
+    int importFile(const QString& path, QString& error);
     void applyHistory();                    //!< The history file of the settings in the engine (one owner a file)
     QString m_historyError;                 //!< Why the history is not kept, empty if it is
     static MessageCenter*& historyOwner();

@@ -64,7 +64,7 @@
 
 #include "radiopagingdemod.h"
 #include "radiopagingdemodnotificationdialog.h"
-#include "radiopagingdemodoutput.h"
+#include "radiopagingpagerformat.h"
 #include "radiopagingvoicestore.h"
 
 namespace {
@@ -608,7 +608,7 @@ QString RadioPagingDemodGUI::matchText(const MessageRecord& record, int field)
 void RadioPagingDemodGUI::checkNotifications(const MessageRecord& record)
 {
     if ((record.m_kind != MessageRecord::KindMessage) || (record.m_duplicate != MessageRecord::DuplicateNone)
-        || RadioPagingDemodOutput::isCompletion(record)) {
+        || RadioPagingPagerFormat::isCompletion(record)) {
         return;
     }
 

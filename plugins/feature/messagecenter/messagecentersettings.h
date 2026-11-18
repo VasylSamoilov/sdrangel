@@ -29,12 +29,29 @@
 
 class Serializable;
 
-// A file the message center writes records to (a sink) or reads records from (a source)
+// A sink the routes send records to, or a source records are read from. The type tells which:
+//   sinks:   "file" (default: path, format 0 JSON lines or 1 CSV), "udp" (address, port, format 0 Pager
+//            demodulator or 1 JSON), "command" (text: the command, the text of the message goes into its
+//            arguments), "speech" (text: what is said), "highlight" (color of the row in the log), "map" (the
+//            position in the text of the message on the Map)
+//   sources: "file" (default: a JSON lines file), "csv" (path: a log of this message center or of the Pager
+//            demodulator), "udp" (address and port to listen on, JSON lines or the Pager demodulator format)
 struct MessageCenterFileSetting
 {
     QString m_name;
+    QString m_type;             //!< Empty for a file
     QString m_path;
-    int m_format = 0;           //!< Sink: MessageCenterFileSink::Format
+    int m_format = 0;
+    QString m_address;          //!< udp
+    int m_port = 0;             //!< udp
+    QString m_text;             //!< command, speech
+    quint32 m_color = 0xffff0000;   //!< highlight, ARGB
+
+    static const QStringList& sinkTypes();      //!< file, udp, command, speech, highlight, map
+    static const QStringList& sourceTypes();    //!< file, csv, udp
+    QString typeOrDefault() const { return m_type.isEmpty() ? QString("file") : m_type; }
+    //!< What is wrong with the setting as a sink or source, empty if nothing
+    QString check(bool sink) const;
 };
 
 struct MessageCenterSettings

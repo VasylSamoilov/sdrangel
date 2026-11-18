@@ -119,7 +119,8 @@ The intent tools do a whole task in one call: `listen` sets up a receiver on a f
 | Features | `add_feature`, `delete_feature`, `get_feature_settings`, `set_feature_settings`, `get_feature_report`, `start_feature`, `stop_feature`, `feature_action` |
 | Presets | `list_presets`, `load_preset`, `save_preset`, `list_configurations`, `load_configuration`, `save_configuration` |
 | Workspaces (GUI only) | `add_workspace`, `delete_empty_workspaces`, `list_windows`, `set_workspace` (move, hide or show a window), `arrange_workspace` |
-| Live data | `get_packets`, `clear_packets`, `get_map_items` |
+| Live data | `get_packets`, `clear_packets`, `get_map_items`, `get_paging_messages` |
+| Message Center | `get_message_center`, `set_message_center_routing`, `message_center_post_page`, `message_center_page_action`, `message_center_ingest`, `message_center_import_file` |
 | Capture | `capture_audio`, `record_iq`, `start_iq_recording`, `stop_iq_recording` |
 | Server | `get_server_status` (open streams, capture directory and active recordings, data feed sources) |
 

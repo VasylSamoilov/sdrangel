@@ -68,6 +68,7 @@ const QStringList MapSettings::m_pipeTypes = {
     QStringLiteral("HeatMap"),
     QStringLiteral("ILSDemod"),
     QStringLiteral("InmarsatDemod"),
+    QStringLiteral("MessageCenter"),
     QStringLiteral("PagerDemod"),
     QStringLiteral("RadioPagingDemod"),
     QStringLiteral("Radiosonde"),
@@ -90,6 +91,7 @@ const QStringList MapSettings::m_pipeURIs = {
     QStringLiteral("sdrangel.channel.heatmap"),
     QStringLiteral("sdrangel.channel.ilsdemod"),
     QStringLiteral("sdrangel.channel.inmarsatdemod"),
+    QStringLiteral("sdrangel.feature.messagecenter"),
     QStringLiteral("sdrangel.channel.pagerdemod"),
     QStringLiteral("sdrangel.channel.radiopagingdemod"),
     QStringLiteral("sdrangel.feature.radiosonde"),
@@ -177,6 +179,7 @@ MapSettings::MapSettings() :
     m_itemSettings.insert("Beacons", new MapItemSettings("Beacons", true, QColor(255, 0, 0), false, true, 8));
     m_itemSettings.insert("PagerDemod", new MapItemSettings("PagerDemod", true, QColor(200, 191, 231), true, false, 11));
     m_itemSettings.insert("RadioPagingDemod", new MapItemSettings("RadioPagingDemod", true, QColor(255, 170, 0), true, false, 11));
+    m_itemSettings.insert("MessageCenter", new MapItemSettings("MessageCenter", true, QColor(0, 170, 127), true, false, 11));
     m_itemSettings.insert("Radiosonde", new MapItemSettings("Radiosonde", true, QColor(102, 0, 102), true, false, 11, modelMinPixelSize));
     m_itemSettings.insert("Radio Time Transmitters", new MapItemSettings("Radio Time Transmitters", true, QColor(255, 0, 0), false, true, 8));
     m_itemSettings.insert("WEFAX Transmitters", new MapItemSettings("WEFAX Transmitters", true, QColor(255, 0, 0), false, true, 8));

@@ -19,12 +19,16 @@
 //   cmake --build <build dir> --target messagecenterenginetest
 
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
+#include <QThread>
+#include <QUdpSocket>
 
 #include <cstdio>
 
+#include "radiopagingpagerformat.h"
 #include "messagecenterengine.h"
 
 namespace {
@@ -354,6 +358,296 @@ void testPages()
 }
 
 // Reports that come late or twice, and endpoints that share an alias
+// Waits for a datagram on the socket, up to a second
+bool waitDatagram(QUdpSocket& socket, QByteArray& datagram)
+{
+    QElapsedTimer timer;
+    timer.start();
+
+    while (timer.elapsed() < 1000)
+    {
+        QCoreApplication::processEvents();
+
+        if (socket.hasPendingDatagrams())
+        {
+            datagram.resize(socket.pendingDatagramSize());
+            socket.readDatagram(datagram.data(), datagram.size());
+            return true;
+        }
+
+        QThread::msleep(5);
+    }
+
+    return false;
+}
+
+void testRegExp()
+{
+    MessageCenterFilter f;
+    MessageRecord r = rx("a", "pocsag", "0001234A", "Fire at 12 Main St", "ch1");
+
+    f.m_regExp = "Fire at (\\d+)";
+    f.m_matchField = MessageCenterFilter::MatchMessage;
+    check(f.matches(r), "regular expression on the message matches");
+    check(f.captures(r) == QStringList({"Fire at 12", "12"}), "captures of the expression");
+    f.m_regExp = "fire";
+    check(!f.matches(r), "regular expression is case sensitive");
+    f.m_regExp = "(?i)fire";
+    check(f.matches(r), "(?i) makes it not");
+    f.m_matchField = MessageCenterFilter::MatchAddress;
+    f.m_regExp = "^0001234";
+    check(f.matches(r), "regular expression on the address");
+    f.m_matchField = MessageCenterFilter::MatchAny;
+    f.m_regExp = "pocsag.*ch1";
+    check(f.matches(r), "regular expression on any field");
+    f.m_matchField = MessageCenterFilter::MatchProtocol;
+    f.m_regExp = "^flex$";
+    check(!f.matches(r) && f.captures(r).isEmpty(), "regular expression on the protocol that does not match");
+    f.m_regExp = "([";
+    check(!f.matches(r) && !f.regExpError().isEmpty(), "a regular expression that is not valid matches nothing and says why");
+
+    f.m_regExp = "^pocsag$";
+    MessageCenterFilter g = MessageCenterFilter::fromJson(f.toJson());
+    check(g.m_regExp == f.m_regExp && g.m_matchField == f.m_matchField && g.matches(r), "regular expression in the JSON of the filter");
+    check(!MessageCenterFilter().isEmpty() || MessageCenterFilter().toJson().isEmpty(), "no regular expression, empty filter");
+
+    MessageRecord q = rx("b", "flex", "000999", "${0} text", "c");
+    check(messageCenterSubstitute("${address}: ${message} (${protocol}/${type}/${channel}) ${1} ${2}", q, QStringList({"x", "y"}))
+        == "000999: ${0} text (flex/alphanumeric/c) y ", "substitutions in one pass");
+    check(messageCenterSubstitute("${unknown} ${", q, QStringList()) == "${unknown} ${", "an unknown name stays as it is");
+}
+
+void testCommand()
+{
+    QList<QStringList> launched;
+    MessageCenterCommandSink sink("cmd", "notify --to ops --text \"${message} from ${address}\" ${1}",
+        [&](const QString& program, const QStringList& arguments) {
+            launched.append(QStringList(program) + arguments);
+            return true;
+        });
+    MessageRecord r = rx("a", "pocsag", "0001234A", "x\" -rf / ; echo $(id) ${0}", "ch1");
+    QString error;
+
+    check(sink.accept(r, QStringList({"all", "cap one"}), error), "command is run");
+    check(launched.size() == 1 && launched[0].size() == 6, "the message does not add arguments");
+
+    if (!launched.isEmpty())
+    {
+        check(launched[0][0] == "notify", "the program is the one set");
+        check(launched[0][4] == "x\" -rf / ; echo $(id) ${0} from 0001234A", "the text of the message is one argument, as it is");
+        check(launched[0][5] == "cap one", "a capture is one argument");
+    }
+
+    MessageRecord event = r;
+    event.m_kind = MessageRecord::KindEvent;
+    check(sink.accept(event, error) && launched.size() == 1, "an event is not given to the command");
+
+    for (int i = 0; i < 10; i++) {
+        sink.accept(r, QStringList({"a", "b"}), error);
+    }
+
+    check(launched.size() == MessageCenterCommandSink::m_maxPerSecond, "commands per second are limited");
+    check(!sink.accept(r, QStringList(), error) && error.contains("commands in a second"), "a command over the limit is refused");
+
+    MessageCenterCommandSink empty("none", "   ");
+    check(!empty.accept(r, error), "an empty command is refused");
+}
+
+void testActionSink()
+{
+    QString type, text;
+    quint32 color = 0;
+    int calls = 0;
+    MessageCenterActionSink sink("act", "speech", "${message} at ${address}", 0xff00ff00,
+        [&](const QString& t, const MessageRecord&, const QString& tx, quint32 c) {
+            type = t;
+            text = tx;
+            color = c;
+            calls++;
+        });
+    QString error;
+    MessageRecord r = rx("a", "pocsag", "0001234A", "hello", "ch1");
+
+    check(sink.accept(r, error) && (type == "speech") && (text == "hello at 0001234A") && (color == 0xff00ff00), "action gets the text and the color");
+
+    MessageRecord update = r;
+    update.m_text.clear();
+    update.m_protocolData.insert("voice_end", "turn_off");
+    sink.accept(update, error);
+    check(calls == 1, "the end of a voice message does not repeat the action");
+}
+
+void testRoutesWithActions()
+{
+    MessageCenterEngine engine;
+    int calls = 0;
+    QStringList seen;
+    engine.addSink(std::unique_ptr<MessageCenterSink>(new MessageCenterActionSink("alert", "speech", "${1}", 0,
+        [&](const QString&, const MessageRecord&, const QString& text, quint32) {
+            calls++;
+            seen.append(text);
+        })));
+
+    MessageCenterEngine::Route route;
+    route.m_name = "fire";
+    route.m_filter.m_regExp = "Fire (\\w+)";
+    route.m_filter.m_matchField = MessageCenterFilter::MatchMessage;
+    route.m_filter.m_hideDuplicates = true;
+    route.m_sinks = QStringList({"alert", "log"});
+    engine.setRoutes({route});
+
+    engine.ingest(rx("1", "pocsag", "1", "Fire alpha", "c"), "channels", 1);
+    engine.ingest(rx("2", "pocsag", "1", "Flood", "c"), "channels", 2);
+    MessageRecord dup = rx("3", "pocsag", "1", "Fire beta", "c");
+    dup.m_duplicate = MessageRecord::DuplicateDup;
+    engine.ingest(dup, "channels", 3);
+
+    check(calls == 1 && seen == QStringList({"alpha"}), "the route runs the action on a message that matches, with its capture");
+    // The two that the route does not select are logged too: without a route that matches, a record goes to the log
+    check(engine.log().size() == 3, "the messages the route does not select are logged");
+    check(engine.sinkStats().value("alert").m_accepted == 1 && engine.sinkStats().value("log").m_accepted == 3, "sink statistics");
+
+    engine.importRecord(rx("9", "pocsag", "1", "Fire gamma", "c"));
+    check(calls == 1 && engine.log().size() == 4, "an imported message is logged and not routed");
+}
+
+void testUdp()
+{
+    QUdpSocket receiver;
+    check(receiver.bind(QHostAddress(QHostAddress::LocalHost), 0), "a socket to receive on");
+    quint16 port = receiver.localPort();
+    QByteArray datagram;
+    QString error;
+
+    MessageRecord r = rx("a", "pocsag", "0001234A", "HELLO", "ch1");
+    r.m_timestamp = 1700000000000LL;
+    r.m_protocolData.insert("ric", (qulonglong) 1234);
+    r.m_protocolData.insert("function", 0);
+
+    MessageCenterUdpSink pager("udp", "127.0.0.1", port, MessageCenterUdpSink::PagerDemod);
+    check(pager.accept(r, error) && waitDatagram(receiver, datagram), "datagram in the Pager format is sent");
+    MessageRecord back;
+    check(RadioPagingPagerFormat::fromDatagram(datagram, 0, back) && (back.m_address == "0001234") && (back.m_text == "HELLO")
+        && (back.m_protocol == "pocsag"), "and read back");
+
+    MessageCenterUdpSink json("udpj", "127.0.0.1", port, MessageCenterUdpSink::Json);
+    check(json.accept(r, error) && waitDatagram(receiver, datagram) && datagram.endsWith('\n') && datagram.startsWith('{'), "datagram in JSON is sent");
+
+    MessageRecord update = r;
+    update.m_text.clear();
+    update.m_protocolData.insert("voice_end", "turn_off");
+    check(pager.accept(update, error) && !waitDatagram(receiver, datagram), "nothing is sent for the end of a voice message");
+
+    MessageCenterUdpSink bad("bad", "not an address", port, MessageCenterUdpSink::Json);
+    check(!bad.accept(r, error) && !error.isEmpty(), "an address that is not valid is refused");
+
+    // The source: a datagram of each format, and one that is not a message
+    QUdpSocket probe;
+    probe.bind(QHostAddress(QHostAddress::LocalHost), 0);
+    quint16 sourcePort = probe.localPort();
+    probe.close();
+
+    MessageCenterUdpSource source("in", "127.0.0.1", sourcePort);
+    QUdpSocket sender;
+    MessageRecord tx = pageRecord("tx1", "pocsag", "1234", "page");
+    tx.m_protocolData.insert("transmitter", "tx1");
+    sender.writeDatagram(tx.toJsonLine(), QHostAddress::LocalHost, sourcePort);
+    sender.writeDatagram(RadioPagingPagerFormat::datagram(r), QHostAddress::LocalHost, sourcePort);
+    sender.writeDatagram(QByteArray("garbage"), QHostAddress::LocalHost, sourcePort);
+    std::vector<MessageRecord> records;
+    QElapsedTimer timer;
+    timer.start();
+
+    while ((records.size() < 2) && (timer.elapsed() < 1000))
+    {
+        QString pollError;
+        source.poll(records, pollError);
+        QThread::msleep(5);
+    }
+
+    check(records.size() == 2, "UDP source takes the JSON and the Pager datagrams");
+    check(source.skipped() == 1, "and counts the datagram that is not a message");
+
+    if (records.size() == 2)
+    {
+        check(records[0].m_direction == MessageRecord::DirectionRX && !records[0].m_protocolData.contains("transmitter"),
+            "what comes from the network is a message received, not a page");
+        check(records[1].m_text == "HELLO" && records[1].m_address == "0001234", "Pager datagram becomes a message");
+    }
+
+    MessageCenterUdpSource inUse("busy", "127.0.0.1", sourcePort);
+    std::vector<MessageRecord> none;
+    QString first, second;
+    check(!inUse.poll(none, first) && !first.isEmpty(), "a port that cannot be listened on is reported");
+    check(inUse.poll(none, second), "once");
+}
+
+void testCsvSources()
+{
+    QTemporaryDir dir;
+    check(dir.isValid(), "a temporary directory");
+
+    // A CSV written by the sink is read back by the source: one cell has a comma, quotes and non-Latin letters
+    QString path = dir.filePath("log.csv");
+    MessageCenterFileSink sink("csv", path, MessageCenterFileSink::Csv);
+    QString error;
+    MessageRecord r = rx("a", "pocsag", "0001234A", "ALPHA, \"quoted\" \xd0\x9f\xd1\x80\xd0\xb8\xd0\xb2\xd0\xb5\xd1\x82 two  spaces", "ch1");
+    r.m_text = QString::fromUtf8("ALPHA, \"quoted\" \xd0\x9f\xd1\x80\xd0\xb8\xd0\xb2\xd0\xb5\xd1\x82 two  spaces");
+    check(sink.accept(r, error) && sink.accept(rx("b", "flex", "000999", "FLEX", "ch1"), error), "records written to a CSV");
+
+    MessageCenterCsvSource source("src", path);
+    std::vector<MessageRecord> records;
+    check(source.poll(records, error) && records.size() == 2, "the CSV source reads them");
+
+    if (records.size() == 2)
+    {
+        check(records[0].m_text == r.m_text, "text with a comma, quotes, spaces and non-Latin letters is as it was");
+        check(records[0].m_id == "a" && records[0].m_address == "0001234A" && records[1].m_protocol == "flex", "fields");
+    }
+
+    // Later rows are read by the next poll; a row being written is not
+    QFile file(path);
+    file.open(QIODevice::Append | QIODevice::Text);
+    file.write((rx("c", "gsc", "100123", "GSC", "ch1").toCSV() + "\n").toUtf8());
+    file.write(rx("d", "gsc", "100124", "PART", "ch1").toCSV().left(30).toUtf8());
+    file.close();
+    records.clear();
+    check(source.poll(records, error) && records.size() == 1 && records[0].m_id == "c", "rows added are read, a partial row waits");
+
+    // The log of the Pager demodulator
+    QString pagerPath = dir.filePath("pager.csv");
+    QFile pager(pagerPath);
+    pager.open(QIODevice::WriteOnly | QIODevice::Text);
+    pager.write("Date,Time,Address,Function Bits,Alpha,Numeric,Even Parity Errors,BCH Parity Errors,Baud,Protocol,Type,Frame\n");
+    pager.write("Tue Nov 18 2025,10:20:30,0001234,2,\"HELLO, WORLD\",,0,1,1200,POCSAG,Alpha,\n");
+    pager.write("Tue Nov 18 2025,10:20:31,000123456,,,5551234,0,0,0,FLEX,Numeric,001/A\n");
+    pager.close();
+
+    MessageCenterCsvSource pagerSource("pager", pagerPath);
+    records.clear();
+    check(pagerSource.poll(records, error) && records.size() == 2, "the log of the Pager demodulator is read");
+
+    if (records.size() == 2)
+    {
+        check(records[0].m_protocol == "pocsag" && records[0].m_address == "0001234" && records[0].m_text == "HELLO, WORLD"
+            && records[0].m_speed == 1200 && records[0].m_errorsCorrected == 1 && records[0].m_protocolData.value("function").toInt() == 2,
+            "Pager POCSAG row");
+        check(records[1].m_protocol == "flex" && records[1].m_msgType == "numeric" && records[1].m_text == "5551234", "Pager FLEX row");
+    }
+
+    // A CSV that is not a log of messages
+    QString otherPath = dir.filePath("other.csv");
+    QFile other(otherPath);
+    other.open(QIODevice::WriteOnly | QIODevice::Text);
+    other.write("a,b,c\n1,2,3\n");
+    other.close();
+    MessageCenterCsvSource otherSource("other", otherPath);
+    records.clear();
+    QString first, second;
+    check(!otherSource.poll(records, first) && !first.isEmpty() && records.empty(), "a CSV that is not a log is refused, saying so");
+    check(otherSource.poll(records, second) && records.empty(), "once");
+}
+
 void testGuards()
 {
     MessageCenterEngine engine;
@@ -510,6 +804,12 @@ int main(int argc, char **argv)
     testEndpoints();
     testPages();
     testGuards();
+    testRegExp();
+    testCommand();
+    testActionSink();
+    testRoutesWithActions();
+    testUdp();
+    testCsvSources();
     std::printf("%d passed, %d failed\n", passed, failed);
     return failed ? 1 : 0;
 }

@@ -20,6 +20,7 @@
 #include <QDialog>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QColorDialog>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -103,6 +104,9 @@ QString filterSummary(const MessageCenterFilter& f)
     if (f.m_voiceOnly) {
         parts << "voice files";
     }
+    if (!f.m_regExp.isEmpty()) {
+        parts << QString("%1 ~ /%2/").arg(MessageCenterFilter::matchFieldName(f.m_matchField).toLower()).arg(f.m_regExp);
+    }
 
     return parts.isEmpty() ? QString("everything") : parts.join(", ");
 }
@@ -135,6 +139,14 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     m_text->setPlaceholderText("text contains");
     m_hideDuplicates = new QCheckBox("Hide duplicates", this);
     m_voiceOnly = new QCheckBox("Voice files", this);
+    m_matchField = new QComboBox(this);
+
+    for (int field = MessageCenterFilter::MatchAddress; field <= MessageCenterFilter::MatchAny; field++) {
+        m_matchField->addItem(MessageCenterFilter::matchFieldName(field));
+    }
+
+    m_regExp = new QLineEdit(this);
+    m_regExp->setPlaceholderText("regular expression");
 
     m_protocol->setToolTip("Protocol of the messages: any, POCSAG, FLEX or GSC");
     m_direction->setToolTip("Received (RX), transmitted (TX) or both");
@@ -145,6 +157,10 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     m_text->setToolTip("Messages whose text contains this (case insensitive). Empty: any text");
     m_hideDuplicates->setToolTip("Hide the messages marked as duplicates (copies received again)");
     m_voiceOnly->setToolTip("Only the GSC voice pages that have a sound file");
+    m_matchField->setToolTip("Field the regular expression is matched on: address, message, protocol, type, channel,\n"
+        "or any of them (separated by spaces)");
+    m_regExp->setToolTip("Regular expression the field must match, anywhere in it (^ and $ to anchor). Case sensitive,\n"
+        "(?i) at the start for not. Its captures are ${1}, ${2}... in the texts of the actions. Empty: no expression");
 
     // The text fields with their names: a placeholder alone is hard to see
     auto labelled = [this](const QString& name, QLineEdit *edit) {
@@ -167,11 +183,24 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     layout->addWidget(labelled("Text", m_text), 1, 2, 1, 2);
     layout->addWidget(m_hideDuplicates, 2, 0, 1, 2);
     layout->addWidget(m_voiceOnly, 2, 2, 1, 2);
+    layout->addWidget(m_matchField, 3, 0);
+    layout->addWidget(m_regExp, 3, 1, 1, 3);
 
     for (QComboBox *combo : {m_protocol, m_direction, m_polarity, m_type}) {
         connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MessageCenterFilterWidget::changed);
     }
-    for (QLineEdit *edit : {m_alias, m_address, m_text}) {
+    connect(m_matchField, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MessageCenterFilterWidget::changed);
+
+    // A regular expression that is not valid is shown in red, and matches nothing
+    connect(m_regExp, &QLineEdit::textChanged, this, [this](const QString& text) {
+        MessageCenterFilter f;
+        f.m_regExp = text;
+        QString error = f.regExpError();
+        m_regExp->setStyleSheet(error.isEmpty() ? QString() : QString("QLineEdit { color: red; }"));
+        m_regExp->setToolTip(error.isEmpty() ? QString() : error);
+    });
+
+    for (QLineEdit *edit : {m_alias, m_address, m_text, m_regExp}) {
         connect(edit, &QLineEdit::editingFinished, this, &MessageCenterFilterWidget::changed);
     }
     for (QCheckBox *check : {m_hideDuplicates, m_voiceOnly}) {
@@ -203,6 +232,8 @@ MessageCenterFilter MessageCenterFilterWidget::filter() const
     f.m_text = m_text->text();
     f.m_hideDuplicates = m_hideDuplicates->isChecked();
     f.m_voiceOnly = m_voiceOnly->isChecked();
+    f.m_regExp = m_regExp->text();
+    f.m_matchField = m_matchField->currentIndex();
     return f;
 }
 
@@ -217,6 +248,8 @@ void MessageCenterFilterWidget::setFilter(const MessageCenterFilter& f)
     m_text->setText(f.m_text);
     m_hideDuplicates->setChecked(f.m_hideDuplicates);
     m_voiceOnly->setChecked(f.m_voiceOnly);
+    m_matchField->setCurrentIndex(f.m_matchField);
+    m_regExp->setText(f.m_regExp);
 }
 
 // ---------------------------------------------------------------------------
@@ -336,10 +369,15 @@ void MessageCenterGUI::buildLog(QWidget *container)
     layout->addWidget(m_logTable);
 
     QHBoxLayout *buttons = new QHBoxLayout();
+    QPushButton *import = new QPushButton("Import...", container);
+    import->setToolTip("Read the messages of a file into the log: a JSON lines file, or a CSV log of a message center\n"
+        "or of the Pager demodulator. They are not routed: no action is taken on them again");
     QPushButton *clear = new QPushButton("Clear", container);
     clear->setToolTip("Remove all the messages of the log, and of the history file when it is kept");
+    buttons->addWidget(import);
     buttons->addStretch(1);
     buttons->addWidget(clear);
+    connect(import, &QPushButton::clicked, this, &MessageCenterGUI::importFile);
     layout->addLayout(buttons);
 
     connect(clear, &QPushButton::clicked, this, [this]() {
@@ -444,8 +482,12 @@ void MessageCenterGUI::buildFiles(QWidget *container)
 {
     QVBoxLayout *layout = new QVBoxLayout(container);
     layout->setContentsMargins(2, 2, 2, 2);
-    m_sinksTable = makeTable({"Sink", "File", "Format"}, container);
-    m_sourcesTable = makeTable({"Source", "File"}, container);
+    m_sinksTable = makeTable({"Sink", "Type", "Target", "Format", "Taken", "Failed"}, container);
+    m_sinksTable->setToolTip("The sinks the routes send messages to: files, UDP, and actions on the message (command,\n"
+        "speech, highlight in the log, position on the Map). Double-click to edit");
+    m_sourcesTable = makeTable({"Source", "Type", "Target"}, container);
+    m_sourcesTable->setToolTip("The sources messages are read from, as if they came from the channels: files (read as they\n"
+        "grow) and UDP. Double-click to edit");
     m_errors = new QPlainTextEdit(container);
     m_errors->setReadOnly(true);
     m_errors->setMaximumBlockCount(200);
@@ -468,6 +510,8 @@ void MessageCenterGUI::buildFiles(QWidget *container)
     layout->addLayout(sourceButtons);
     layout->addWidget(m_errors);
 
+    connect(m_sinksTable, &QTableWidget::cellDoubleClicked, this, &MessageCenterGUI::editSelectedSink);
+    connect(m_sourcesTable, &QTableWidget::cellDoubleClicked, this, &MessageCenterGUI::editSelectedSource);
     connect(addSink, &QPushButton::clicked, this, &MessageCenterGUI::addSink);
     connect(removeSink, &QPushButton::clicked, this, &MessageCenterGUI::removeSink);
     connect(addSource, &QPushButton::clicked, this, &MessageCenterGUI::addSource);
@@ -626,6 +670,25 @@ bool MessageCenterGUI::handleMessage(const Message& message)
         refresh();
         return true;
     }
+    if (MessageCenter::MsgSpeak::match(message))
+    {
+        speak(((const MessageCenter::MsgSpeak&) message).getText());
+        return true;
+    }
+    if (MessageCenter::MsgHighlight::match(message))
+    {
+        const MessageCenter::MsgHighlight& msg = (const MessageCenter::MsgHighlight&) message;
+
+        if (m_highlights.size() >= m_maxHighlights) {
+            m_highlights.clear();
+        }
+
+        m_highlights.insert(msg.getId(), msg.getColor());
+        QColor color = QColor::fromRgba(msg.getColor());
+        color.setAlpha(110);
+        m_logTable->setRowBackground(msg.getId(), color);
+        return true;
+    }
 
     return false;
 }
@@ -636,6 +699,7 @@ void MessageCenterGUI::refresh()
     refreshEndpoints();
     refreshQueue();
     refreshComposeTransmitters();
+    refreshFiles();         // The counts of the sinks
 
     for (const QString& error : m_center->takeErrors()) {
         m_errors->appendPlainText(QString("%1 %2").arg(QDateTime::currentDateTime().toString("HH:mm:ss")).arg(error));
@@ -659,8 +723,17 @@ void MessageCenterGUI::refreshLog()
     m_logTable->setUpdatesEnabled(false);
     m_logTable->setRowCount(0);
 
-    for (size_t i = first; i < records.size(); i++) {
+    for (size_t i = first; i < records.size(); i++)
+    {
         m_logTable->addRecord(records[i]);
+        auto highlight = m_highlights.constFind(records[i].m_id);
+
+        if (highlight != m_highlights.constEnd())
+        {
+            QColor color = QColor::fromRgba(highlight.value());
+            color.setAlpha(110);
+            m_logTable->setRowBackground(records[i].m_id, color);
+        }
     }
 
     m_logTable->selectId(selected);
@@ -743,18 +816,68 @@ void MessageCenterGUI::refreshRoutes()
     }
 }
 
+namespace {
+
+// What a sink or a source works on, for its row
+QString fileTarget(const MessageCenterFileSetting& f)
+{
+    const QString type = f.typeOrDefault();
+
+    if (type == "udp") {
+        return QString("%1:%2").arg(f.m_address.isEmpty() ? QString("127.0.0.1") : f.m_address).arg(f.m_port);
+    }
+    if ((type == "command") || (type == "speech")) {
+        return f.m_text;
+    }
+    if (type == "highlight") {
+        return QColor::fromRgba(f.m_color).name(QColor::HexArgb);
+    }
+    if (type == "map") {
+        return "the position in the message";
+    }
+
+    return f.m_path;
+}
+
+QString fileFormat(const MessageCenterFileSetting& f)
+{
+    const QString type = f.typeOrDefault();
+
+    if (type == "file") {
+        return f.m_format == 0 ? "JSON lines" : "CSV";
+    }
+    if (type == "udp") {
+        return f.m_format == 0 ? "Pager" : "JSON";
+    }
+
+    return QString();
+}
+
+} // namespace
+
 void MessageCenterGUI::refreshFiles()
 {
+    const QMap<QString, MessageCenterEngine::SinkStat>& stats = m_center->engine().sinkStats();
     m_sinksTable->setRowCount(m_settings.m_sinks.size());
 
-    for (int i = 0; i < m_settings.m_sinks.size(); i++) {
-        setRow(m_sinksTable, i, {m_settings.m_sinks[i].m_name, m_settings.m_sinks[i].m_path, m_settings.m_sinks[i].m_format == 0 ? "JSON lines" : "CSV"});
+    for (int i = 0; i < m_settings.m_sinks.size(); i++)
+    {
+        const MessageCenterFileSetting& f = m_settings.m_sinks[i];
+        MessageCenterEngine::SinkStat stat = stats.value(f.m_name);
+        setRow(m_sinksTable, i, {f.m_name, f.typeOrDefault(), fileTarget(f), fileFormat(f),
+            QString::number(stat.m_accepted), QString::number(stat.m_failed)});
+
+        if (f.typeOrDefault() == "highlight") {
+            m_sinksTable->item(i, 2)->setBackground(QColor::fromRgba(f.m_color));
+        }
     }
 
     m_sourcesTable->setRowCount(m_settings.m_sources.size());
 
-    for (int i = 0; i < m_settings.m_sources.size(); i++) {
-        setRow(m_sourcesTable, i, {m_settings.m_sources[i].m_name, m_settings.m_sources[i].m_path});
+    for (int i = 0; i < m_settings.m_sources.size(); i++)
+    {
+        const MessageCenterFileSetting& f = m_settings.m_sources[i];
+        setRow(m_sourcesTable, i, {f.m_name, f.typeOrDefault(), fileTarget(f)});
     }
 }
 
@@ -827,7 +950,13 @@ void MessageCenterGUI::editRoute(int index)
     layout->addWidget(filter);
     QList<QCheckBox*> sinkChecks;
 
-    for (const QString& sink : m_center->engine().sinkNames())
+    QStringList sinks = {"log", "queue"};
+
+    for (const MessageCenterFileSetting& f : m_settings.m_sinks) {
+        sinks.append(f.m_name);
+    }
+
+    for (const QString& sink : sinks)
     {
         QCheckBox *check = new QCheckBox(QString("Send to %1").arg(sink), &dialog);
         check->setProperty("sink", sink);
@@ -906,77 +1035,245 @@ void MessageCenterGUI::removeRoute()
     }
 }
 
-// A file to write (a sink) or to read (a source)
-void MessageCenterGUI::editFile(bool sink)
+// A sink or a source: its type and what it works on
+void MessageCenterGUI::editFile(bool sink, int index)
 {
+    QList<MessageCenterFileSetting>& list = sink ? m_settings.m_sinks : m_settings.m_sources;
+    const bool isNew = (index < 0) || (index >= list.size());
+    MessageCenterFileSetting setting = isNew ? MessageCenterFileSetting() : list[index];
+    const QString oldName = setting.m_name;
+
     QDialog dialog(this);
-    dialog.setWindowTitle(sink ? "New sink" : "New source");
+    dialog.setWindowTitle(QString("%1 %2").arg(isNew ? "New" : "Edit").arg(sink ? "sink" : "source"));
     QFormLayout *layout = new QFormLayout(&dialog);
-    QLineEdit *name = new QLineEdit(&dialog);
-    QLineEdit *path = new QLineEdit(&dialog);
+    QLineEdit *name = new QLineEdit(setting.m_name, &dialog);
+    QComboBox *type = new QComboBox(&dialog);
+    type->addItems(sink ? MessageCenterFileSetting::sinkTypes() : MessageCenterFileSetting::sourceTypes());
+    type->setCurrentIndex(std::max(0, type->findText(setting.typeOrDefault())));
+    type->setToolTip(sink
+        ? "file: written as JSON lines or CSV. udp: a datagram for each message.\n"
+          "command: run for each message. speech: said for each message.\n"
+          "highlight: the row of the message in the log. map: the position in the message, on the Map"
+        : "file: a JSON lines file, read as it grows. csv: a CSV log of a message center or of the Pager\n"
+          "demodulator, read as it grows. udp: datagrams in JSON or in the format of the Pager demodulator");
+    QLineEdit *path = new QLineEdit(setting.m_path, &dialog);
     QPushButton *browse = new QPushButton("...", &dialog);
-    QHBoxLayout *pathRow = new QHBoxLayout();
-    pathRow->addWidget(path);
-    pathRow->addWidget(browse);
+    QWidget *pathRow = new QWidget(&dialog);
+    QHBoxLayout *pathLayout = new QHBoxLayout(pathRow);
+    pathLayout->setContentsMargins(0, 0, 0, 0);
+    pathLayout->addWidget(path);
+    pathLayout->addWidget(browse);
     QComboBox *format = new QComboBox(&dialog);
+    QLineEdit *address = new QLineEdit(setting.m_address, &dialog);
+    address->setPlaceholderText(sink ? "IP address to send to" : "127.0.0.1");
+    address->setToolTip(sink ? "IP address the datagrams are sent to"
+        : "IP address to listen on: 127.0.0.1 (the default) for this computer only, 0.0.0.0 for any");
+    QSpinBox *port = new QSpinBox(&dialog);
+    port->setRange(1, 65535);
+    port->setValue(setting.m_port > 0 ? setting.m_port : 9999);
+    QLineEdit *text = new QLineEdit(setting.m_text, &dialog);
+    text->setToolTip("${address}, ${message}, ${protocol}, ${type}, ${channel}, ${mode}, ${id}, ${frequency}, ${time} and\n"
+        "${0}, ${1}... (the captures of the regular expression of the route) are replaced.\n"
+        "A command is split into the program and its arguments first: the message goes into the arguments only");
+    QPushButton *color = new QPushButton(&dialog);
+    quint32 colorValue = setting.m_color;
+    auto showColor = [color, &colorValue]() {
+        color->setText(QColor::fromRgba(colorValue).name());
+        color->setStyleSheet(QString("QPushButton { background-color: %1; }").arg(QColor::fromRgba(colorValue).name()));
+    };
+    showColor();
+
+    layout->addRow("Name", name);
+    layout->addRow("Type", type);
+    layout->addRow("File", pathRow);
+    layout->addRow("Format", format);
+    layout->addRow("Address", address);
+    layout->addRow("Port", port);
+    layout->addRow("Text", text);
+    layout->addRow("Colour", color);
+
+    // The fields of the type. A row is shown or hidden with its label (QFormLayout::setRowVisible is Qt 6 only)
+    auto setRowVisible = [layout](QWidget *field, bool visible) {
+        field->setVisible(visible);
+
+        if (QWidget *label = layout->labelForField(field)) {
+            label->setVisible(visible);
+        }
+    };
+    auto showFields = [&]() {
+        const QString t = type->currentText();
+        const bool file = (t == "file") || (t == "csv");
+        const bool udp = (t == "udp");
+        const bool hasText = (t == "command") || (t == "speech");
+        setRowVisible(pathRow, file);
+        setRowVisible(format, (sink && (t == "file")) || udp);
+        setRowVisible(address, udp);
+        setRowVisible(port, udp);
+        setRowVisible(text, hasText);
+        setRowVisible(color, t == "highlight");
+        int current = format->currentIndex();
+        format->blockSignals(true);
+        format->clear();
+
+        if (udp) {
+            format->addItems({"Pager", "JSON"});
+            format->setToolTip(sink ? "Pager: the fields of the Pager demodulator, each ended by a NUL. JSON: the record as one line"
+                : "The datagrams are read in either format");
+        } else {
+            format->addItems({"JSON lines", "CSV"});
+            format->setToolTip("JSON lines: one record a line, nothing lost. CSV: the columns of the record");
+        }
+
+        format->setCurrentIndex(std::max(0, std::min(1, current)));
+        format->blockSignals(false);
+        text->setPlaceholderText(t == "command" ? "program argument ${message} ..." : "${message}");
+    };
+
     format->addItems({"JSON lines", "CSV"});
+    format->setCurrentIndex(std::max(0, std::min(1, setting.m_format)));
+    showFields();
+    format->setCurrentIndex(std::max(0, std::min(1, setting.m_format)));
+
     QPushButton *ok = new QPushButton("OK", &dialog);
     QPushButton *cancel = new QPushButton("Cancel", &dialog);
     QHBoxLayout *buttons = new QHBoxLayout();
     buttons->addStretch();
     buttons->addWidget(ok);
     buttons->addWidget(cancel);
-    layout->addRow("Name", name);
-    layout->addRow("File", pathRow);
-
-    if (sink) {
-        layout->addRow("Format", format);
-    }
-
     layout->addRow(buttons);
+
+    connect(type, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, [&]() { showFields(); });
     connect(ok, &QPushButton::clicked, &dialog, &QDialog::accept);
     connect(cancel, &QPushButton::clicked, &dialog, &QDialog::reject);
+    connect(color, &QPushButton::clicked, &dialog, [&]() {
+        QColor chosen = QColorDialog::getColor(QColor::fromRgba(colorValue), &dialog, "Highlight");
+
+        if (chosen.isValid())
+        {
+            colorValue = chosen.rgba();
+            showColor();
+        }
+    });
     connect(browse, &QPushButton::clicked, &dialog, [&]() {
-        QString file = sink ? QFileDialog::getSaveFileName(&dialog, "File", path->text()) : QFileDialog::getOpenFileName(&dialog, "File", path->text());
+        QString file = sink ? QFileDialog::getSaveFileName(&dialog, "File", path->text())
+            : QFileDialog::getOpenFileName(&dialog, "File", path->text());
 
         if (!file.isEmpty()) {
             path->setText(file);
         }
     });
 
-    if (dialog.exec() != QDialog::Accepted) {
-        return;
-    }
-
-    MessageCenterFileSetting file;
-    file.m_name = name->text().trimmed();
-    file.m_path = path->text().trimmed();
-    file.m_format = format->currentIndex();
-
-    if (file.m_name.isEmpty() || file.m_path.isEmpty() || (file.m_name == "log") || (file.m_name == "queue"))
+    for (;;)
     {
-        QMessageBox::information(this, "File", "A name (not log or queue) and a file are needed.");
-        return;
+        if (dialog.exec() != QDialog::Accepted) {
+            return;
+        }
+
+        const QString t = type->currentText();
+        setting.m_name = name->text().trimmed();
+        setting.m_type = (t == "file") ? QString() : t;
+        setting.m_path = ((t == "file") || (t == "csv")) ? path->text().trimmed() : QString();
+        setting.m_format = (((t == "file") && sink) || (t == "udp")) ? format->currentIndex() : 0;
+        setting.m_address = (t == "udp") ? address->text().trimmed() : QString();
+        setting.m_port = (t == "udp") ? port->value() : 0;
+        setting.m_text = ((t == "command") || (t == "speech")) ? text->text() : QString();
+        setting.m_color = colorValue;
+
+        QString error = setting.check(sink);
+
+        for (int i = 0; error.isEmpty() && (i < list.size()); i++)
+        {
+            if ((i != index) && (list[i].m_name == setting.m_name)) {
+                error = QString("There is a %1 named %2 already").arg(sink ? "sink" : "source").arg(setting.m_name);
+            }
+        }
+
+        if (error.isEmpty()) {
+            break;
+        }
+
+        QMessageBox::information(this, sink ? "Sink" : "Source", error);
     }
 
-    if (sink) {
-        m_settings.m_sinks.append(file);
+    if (isNew) {
+        list.append(setting);
     } else {
-        m_settings.m_sources.append(file);
+        list[index] = setting;
+    }
+
+    QStringList keys(sink ? "sinks" : "sources");
+
+    // The routes follow a sink that was renamed
+    if (sink && !isNew && (oldName != setting.m_name))
+    {
+        for (MessageCenterEngine::Route& route : m_settings.m_routes)
+        {
+            for (QString& routeSink : route.m_sinks)
+            {
+                if (routeSink == oldName) {
+                    routeSink = setting.m_name;
+                }
+            }
+        }
+
+        keys.append("routes");
+        refreshRoutes();
     }
 
     refreshFiles();
-    applySettings(QStringList(sink ? "sinks" : "sources"));
+    applySettings(keys);
 }
 
 void MessageCenterGUI::addSink()
 {
-    editFile(true);
+    editFile(true, -1);
 }
 
 void MessageCenterGUI::addSource()
 {
-    editFile(false);
+    editFile(false, -1);
+}
+
+void MessageCenterGUI::editSelectedSink()
+{
+    int row = m_sinksTable->currentRow();
+
+    if ((row >= 0) && (row < m_settings.m_sinks.size())) {
+        editFile(true, row);
+    }
+}
+
+void MessageCenterGUI::editSelectedSource()
+{
+    int row = m_sourcesTable->currentRow();
+
+    if ((row >= 0) && (row < m_settings.m_sources.size())) {
+        editFile(false, row);
+    }
+}
+
+// The speech engine takes long to start on some systems: it is made when it is first needed
+void MessageCenterGUI::speak(const QString& text)
+{
+#ifdef QT_TEXTTOSPEECH_FOUND
+    if (!m_speech) {
+        m_speech = new QTextToSpeech(this);
+    }
+
+    m_speech->say(text);
+#else
+    m_errors->appendPlainText(QString("%1 Text to speech is not in this build: %2")
+        .arg(QDateTime::currentDateTime().toString("HH:mm:ss")).arg(text));
+#endif
+}
+
+void MessageCenterGUI::importFile()
+{
+    QString path = QFileDialog::getOpenFileName(this, "Import messages", QString(), "Logs (*.jsonl *.json *.csv);;All files (*)");
+
+    if (!path.isEmpty()) {
+        m_center->getInputMessageQueue()->push(MessageCenter::MsgImportFile::create(path));
+    }
 }
 
 void MessageCenterGUI::removeSink()

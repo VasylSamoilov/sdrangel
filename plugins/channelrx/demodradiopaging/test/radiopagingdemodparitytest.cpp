@@ -29,7 +29,7 @@
 #include "util/messagerecord.h"
 
 #include "radiopagingrecode.h"
-#include "radiopagingdemodoutput.h"
+#include "radiopagingpagerformat.h"
 #include "radiopagingdemodsettings.h"
 #include "radiopagingdemodsink.h"
 
@@ -88,7 +88,7 @@ MessageRecord pocsagRecord()
 void testDatagram()
 {
     MessageRecord r = pocsagRecord();
-    QStringList f = fields(RadioPagingDemodOutput::pagerDatagram(r));
+    QStringList f = fields(RadioPagingPagerFormat::datagram(r));
 
     check(f.size() == 8, "datagram has the 8 fields of the Pager demodulator");
     check(f.value(2) == "0001234", "POCSAG address of 7 digits");
@@ -103,7 +103,7 @@ void testDatagram()
     n.m_text = "5551234";
     n.m_protocolData.insert("alt_type", "alphanumeric");
     n.m_protocolData.insert("alt_text", "UUUU");
-    f = fields(RadioPagingDemodOutput::pagerDatagram(n));
+    f = fields(RadioPagingPagerFormat::datagram(n));
     check(f.value(4) == "UUUU" && f.value(5) == "5551234", "numeric message: text in the numeric field");
 
     MessageRecord x;
@@ -112,15 +112,15 @@ void testDatagram()
     x.m_address = "000123456";
     x.m_text = "FLEX TEXT";
     x.m_protocolData.insert("capcode", (qulonglong) 123456);
-    f = fields(RadioPagingDemodOutput::pagerDatagram(x));
+    f = fields(RadioPagingPagerFormat::datagram(x));
     check(f.value(2) == "000123456", "FLEX address of 9 digits");
     check(f.value(3).isEmpty(), "FLEX has no function bits");
     check(f.value(6) == "FLEX", "FLEX protocol name");
 
     MessageRecord v;
     v.m_protocolData.insert("voice_end", "turn_off");
-    check(RadioPagingDemodOutput::isCompletion(v), "the end of a voice message completes a record");
-    check(!RadioPagingDemodOutput::isCompletion(r), "a message is not a completion");
+    check(RadioPagingPagerFormat::isCompletion(v), "the end of a voice message completes a record");
+    check(!RadioPagingPagerFormat::isCompletion(r), "a message is not a completion");
 }
 
 void testAlternative()

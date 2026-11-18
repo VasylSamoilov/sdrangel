@@ -32,6 +32,8 @@ public:
     void setLog(QString* value);
     QString* getErrors();
     void setErrors(QString* value);
+    QString* getSinks();
+    void setSinks(QString* value);
 private:
     qint32 m_logged = 0;
     bool m_loggedIsSet = false;
@@ -45,6 +47,8 @@ private:
     bool m_logIsSet = false;
     QString* m_errors = nullptr;
     bool m_errorsIsSet = false;
+    QString* m_sinks = nullptr;
+    bool m_sinksIsSet = false;
 };
 }
 #endif

@@ -16,6 +16,7 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include <QColor>
+#include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -98,6 +99,60 @@ std::vector<MessageCenterEngine::Route> MessageCenterSettings::routesFromJson(co
     return routes;
 }
 
+const QStringList& MessageCenterFileSetting::sinkTypes()
+{
+    static const QStringList types = {"file", "udp", "command", "speech", "highlight", "map"};
+    return types;
+}
+
+const QStringList& MessageCenterFileSetting::sourceTypes()
+{
+    static const QStringList types = {"file", "csv", "udp"};
+    return types;
+}
+
+QString MessageCenterFileSetting::check(bool sink) const
+{
+    const QString type = typeOrDefault();
+
+    if (m_name.isEmpty()) {
+        return "A name is needed";
+    }
+    if (sink && ((m_name == "log") || (m_name == "queue"))) {
+        return QString("%1 is the name of a sink of the message center").arg(m_name);
+    }
+    if (!(sink ? sinkTypes() : sourceTypes()).contains(type)) {
+        return QString("%1: %2 is not a type of %3").arg(m_name).arg(type).arg(sink ? "sink" : "source");
+    }
+    if (((type == "file") || (type == "csv")) && m_path.isEmpty()) {
+        return QString("%1: a file needs a path").arg(m_name);
+    }
+    if (type == "udp")
+    {
+        if ((m_port < 1) || (m_port > 65535)) {
+            return QString("%1: the port must be 1 to 65535").arg(m_name);
+        }
+        // A sink sends to an address; a source listens on one, the default is this computer
+        if (sink ? m_address.isEmpty() : false) {
+            return QString("%1: a UDP sink needs an address").arg(m_name);
+        }
+        if (!m_address.isEmpty() && QHostAddress(m_address).isNull()) {
+            return QString("%1: %2 is not an IP address").arg(m_name).arg(m_address);
+        }
+        if (m_format < 0 || m_format > 1) {
+            return QString("%1: the format must be 0 or 1").arg(m_name);
+        }
+    }
+    if ((type == "command") && m_text.trimmed().isEmpty()) {
+        return QString("%1: a command sink needs a command").arg(m_name);
+    }
+    if ((type == "speech") && m_text.trimmed().isEmpty()) {
+        return QString("%1: a speech sink needs a text").arg(m_name);
+    }
+
+    return QString();
+}
+
 QByteArray MessageCenterSettings::filesToJson(const QList<MessageCenterFileSetting>& files)
 {
     QJsonArray array;
@@ -108,6 +163,24 @@ QByteArray MessageCenterSettings::filesToJson(const QList<MessageCenterFileSetti
         o["name"] = file.m_name;
         o["path"] = file.m_path;
         o["format"] = file.m_format;
+
+        // What a file does not have is not written: the settings of the files are as they were
+        if (!file.m_type.isEmpty() && (file.m_type != "file")) {
+            o["type"] = file.m_type;
+        }
+        if (!file.m_address.isEmpty()) {
+            o["address"] = file.m_address;
+        }
+        if (file.m_port != 0) {
+            o["port"] = file.m_port;
+        }
+        if (!file.m_text.isEmpty()) {
+            o["text"] = file.m_text;
+        }
+        if (file.m_color != 0xffff0000) {
+            o["color"] = (double) file.m_color;
+        }
+
         array.append(o);
     }
 
@@ -125,6 +198,11 @@ QList<MessageCenterFileSetting> MessageCenterSettings::filesFromJson(const QByte
         file.m_name = o["name"].toString();
         file.m_path = o["path"].toString();
         file.m_format = o["format"].toInt();
+        file.m_type = o["type"].toString();
+        file.m_address = o["address"].toString();
+        file.m_port = o["port"].toInt();
+        file.m_text = o["text"].toString();
+        file.m_color = o.contains("color") ? (quint32) o["color"].toDouble() : 0xffff0000;
         files.append(file);
     }
 

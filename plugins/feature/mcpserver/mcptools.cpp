@@ -821,6 +821,7 @@ MCPTools::MCPTools(WebAPIAdapterInterface *webAPIAdapterInterface) :
     registerWorkspaceTools();
     registerCaptureTools();
     registerIntentTools();
+    registerMessageCenterTools();
 }
 
 void MCPTools::setStopping(bool stopping)
@@ -905,7 +906,7 @@ static ToolBehaviour behaviourFor(const QString& name)
     // the dedicated data feeds do: an ADS-B report, for instance, lists the aircraft heard.
     static const QStringList offAirReads = {
         "get_packets", "get_map_items", "get_channel_report",
-        "get_device_report", "get_feature_report"
+        "get_device_report", "get_feature_report", "get_paging_messages", "get_message_center"
     };
 
     // Purely additive: they create something new and overwrite nothing
@@ -6259,5 +6260,221 @@ void MCPTools::registerIntentTools()
             }
 
             return QJsonValue(lines.isEmpty() ? QString("Nothing configured") : lines.join("\n"));
+        });
+}
+
+// ---------------------------------------------------------------------------
+// Message Center
+// ---------------------------------------------------------------------------
+
+int MCPTools::messageCenterIndex()
+{
+    for (int i = 0; i < featureCount(); i++)
+    {
+        if (getFeatureSettings(i)["featureType"].toString() == "MessageCenter") {
+            return i;
+        }
+    }
+
+    throw MCPToolError("There is no Message Center: add it with add_feature (featureType MessageCenter). "
+        "A Radio Paging demodulator adds one when it starts");
+}
+
+QJsonObject MCPTools::messageCenterAction(const QJsonObject& actions)
+{
+    QJsonObject json;
+    json["featureType"] = "MessageCenter";
+    json["MessageCenterActions"] = actions;
+    QStringList keys;
+    extractKeys(actions, keys);
+
+    SWGSDRangel::SWGFeatureActions query;
+    query.init();
+    query.fromJsonObject(json);
+    SWGSDRangel::SWGSuccessResponse response;
+    SWGSDRangel::SWGErrorResponse error;
+    error.init();
+    check(m_adapter->featuresetFeatureActionsPost(0, messageCenterIndex(), keys, query, response, error), error, "Message Center action");
+    return toJson(response);
+}
+
+void MCPTools::registerMessageCenterTools()
+{
+    // The JSON texts of the settings and report as JSON
+    auto parsed = [](const QJsonValue& value) -> QJsonValue {
+        QJsonDocument document = QJsonDocument::fromJson(value.toString().toUtf8());
+        return document.isArray() ? QJsonValue(document.array()) : document.isObject() ? QJsonValue(document.object()) : value;
+    };
+
+    add("get_paging_messages",
+        "Get the paging messages (POCSAG, FLEX, GSC) the Radio Paging demodulators received and the modulators sent, as "
+        "message records: protocol, mode, address, type, text, polarity, errors, channel alias, frequency and the protocol "
+        "fields. The last 1000 are kept, whether or not a Message Center is there; use sinceSequence with the lastSequence "
+        "of a previous call to read only new ones.",
+        schema({
+            {"protocol", enumProp("Only this protocol", {"pocsag", "flex", "gsc"})},
+            {"address", strProp("Only these addresses: wildcards * and ?, e.g. 0001234* (POCSAG RIC and function letter, FLEX capcode, GSC address)")},
+            {"text", strProp("Only messages whose text contains this, not case sensitive")},
+            {"alias", strProp("Only messages of the channel with this alias")},
+            {"direction", enumProp("Received or sent", {"rx", "tx"})},
+            {"limit", bounded(intProp("Maximum number of messages, most recent. Default 50"), 1, MCPDataFeed::m_maxMessages)},
+            {"sinceSequence", intProp("Only messages with a sequence number greater than this")}
+        }),
+        [this](const QJsonObject& args)
+        {
+            return m_dataFeed.getMessages(argString(args, "protocol", false), argString(args, "address", false),
+                argString(args, "text", false), argString(args, "alias", false), argString(args, "direction", false),
+                argInt(args, "limit", false, 50), argInt64(args, "sinceSequence", false, 0));
+        });
+
+    add("get_message_center",
+        "Get the state of the Message Center: its routes, sinks and sources, the channels that announced themselves (receivers "
+        "and transmitters), the pages in the transmit queue, the records each sink took and refused, the errors since the "
+        "last call, and the newest 50 messages of its log.",
+        schema(QJsonObject()),
+        [this, parsed](const QJsonObject&)
+        {
+            int index = messageCenterIndex();
+            QJsonObject settings = getFeatureSettings(index)["MessageCenterSettings"].toObject();
+            SWGSDRangel::SWGFeatureReport response;
+            SWGSDRangel::SWGErrorResponse error;
+            error.init();
+            check(m_adapter->featuresetFeatureReportGet(0, index, response, error), error, "Get Message Center report");
+            QJsonObject report = toJson(response)["MessageCenterReport"].toObject();
+            QJsonObject result;
+            result["featureIndex"] = index;
+            result["routes"] = parsed(settings["routes"]);
+            result["sinks"] = parsed(settings["sinks"]);
+            result["sources"] = parsed(settings["sources"]);
+            result["logSize"] = settings["logSize"];
+            result["logged"] = report["logged"];
+            result["routed"] = report["routed"];
+            result["endpoints"] = parsed(report["endpoints"]);
+            result["pages"] = parsed(report["pages"]);
+            result["sinkCounts"] = parsed(report["sinks"]);
+            result["errors"] = report["errors"];
+            result["log"] = parsed(report["log"]);
+            return result;
+        });
+
+    add("set_message_center_routing",
+        "Set the routes, sinks or sources of the Message Center; the lists given replace the current ones (get_message_center "
+        "gives them). A record goes through the routes in order; a route sends the records its filter selects to its sinks "
+        "(log, queue or a sink named here), stop ends the routing; a record no route selects is logged.\n"
+        "Route: {name, enabled, stop, sinks: [names], filter: {protocols: [pocsag|flex|gsc], aliases, direction (0 rx, 1 tx), "
+        "kind, polarity (1 normal, 2 inverted), speeds, address (wildcards), text (contained), msgType, matchField (0 address, "
+        "1 message, 2 protocol, 3 type, 4 channel, 5 any), regExp (on that field), hideDuplicates, voiceOnly}}.\n"
+        "Sink: {name, type, ...}: file {path, format 0 JSON lines or 1 CSV}; udp {address, port, format 0 Pager demodulator "
+        "or 1 JSON}; command {text: the command, the message goes into its arguments: ${address} ${message} ${protocol} "
+        "${type} ${channel} ${mode} ${id} ${frequency} ${time} ${1}...}; speech {text}; highlight {color: ARGB}; map (the "
+        "position in the message on the Map).\n"
+        "Source: {name, type, ...}: file {path: JSON lines}; csv {path: a log of a message center or of the Pager "
+        "demodulator}; udp {address (default 127.0.0.1), port}.",
+        schema({
+            {"routes", prop("array", "The routes, in order")},
+            {"sinks", prop("array", "The sinks")},
+            {"sources", prop("array", "The sources")}
+        }),
+        [this, parsed](const QJsonObject& args)
+        {
+            QJsonObject partial;
+
+            for (const char *key : {"routes", "sinks", "sources"})
+            {
+                if (!hasArg(args, key)) {
+                    continue;
+                }
+
+                QJsonValue value = args[key];
+
+                if (value.isString()) {
+                    value = parsed(value);
+                }
+                if (!value.isArray()) {
+                    throw MCPToolError(QString("%1 must be an array").arg(key));
+                }
+
+                partial[key] = QString::fromUtf8(QJsonDocument(value.toArray()).toJson(QJsonDocument::Compact));
+            }
+
+            if (partial.isEmpty()) {
+                throw MCPToolError("Give routes, sinks or sources");
+            }
+
+            patchFeatureSettings(messageCenterIndex(), partial);
+            QJsonObject result;
+            QJsonObject settings = getFeatureSettings(messageCenterIndex())["MessageCenterSettings"].toObject();
+            result["routes"] = parsed(settings["routes"]);
+            result["sinks"] = parsed(settings["sinks"]);
+            result["sources"] = parsed(settings["sources"]);
+            return result;
+        });
+
+    add("message_center_post_page",
+        "Queue a page for a transmitter (a Radio Paging modulator, by its alias; get_message_center lists the transmitters). "
+        "The page has the fields of MessageCenterPost: transmitter, protocol (pocsag, flex, gsc), address, type (alphanumeric, "
+        "numeric, tone, voice...), text, function, speed, polarity, priority and the fields of the protocol. "
+        "The page goes on the air when the transmitter takes it.",
+        schema({{"page", objProp("The page: transmitter, protocol, address, type, text and the optional fields")}}, {"page"}),
+        [this](const QJsonObject& args)
+        {
+            QJsonObject actions;
+            actions["post"] = argObject(args, "page");
+            return messageCenterAction(actions);
+        });
+
+    add("message_center_page_action",
+        "Act on a page of the transmit queue: requeue a dead page (back to pending, attempts reset), cancel a page nobody "
+        "has claimed or a dead one, or clear the pages that were sent.",
+        schema({
+            {"action", enumProp("What to do", {"requeue", "cancel", "clearSent"})},
+            {"id", strProp("Id of the page (requeue and cancel)")}
+        }, {"action"}),
+        [this](const QJsonObject& args)
+        {
+            QString action = argString(args, "action");
+            QJsonObject actions;
+
+            if (action == "clearSent") {
+                actions["clearSent"] = 1;
+            } else if ((action == "requeue") || (action == "cancel")) {
+                actions[action] = argString(args, "id");
+            } else {
+                throw MCPToolError("action must be requeue, cancel or clearSent");
+            }
+
+            return messageCenterAction(actions);
+        });
+
+    add("message_center_ingest",
+        "Give message records to the Message Center as messages received: they go through its routes (log, files, UDP, "
+        "commands, map) as if a channel had published them. They are never pages to transmit.",
+        schema({{"records", prop("array", "Message records (as get_paging_messages gives them): id, timestamp, protocol, kind, address, text...")}}, {"records"}),
+        [this](const QJsonObject& args)
+        {
+            if (!args["records"].isArray() || args["records"].toArray().isEmpty()) {
+                throw MCPToolError("records must be a non empty array of message records");
+            }
+
+            QStringList lines;
+
+            for (const QJsonValue& record : args["records"].toArray()) {
+                lines.append(QString::fromUtf8(QJsonDocument(record.toObject()).toJson(QJsonDocument::Compact)));
+            }
+
+            QJsonObject actions;
+            actions["ingest"] = lines.join('\n');
+            return messageCenterAction(actions);
+        });
+
+    add("message_center_import_file",
+        "Read a file of messages into the log of the Message Center: a JSON lines file, or a CSV log of a message center or "
+        "of the Pager demodulator. The messages are logged, not routed: no action is taken on them again.",
+        schema({{"path", strProp("Path of the file on the computer that runs SDRangel")}}, {"path"}),
+        [this](const QJsonObject& args)
+        {
+            QJsonObject actions;
+            actions["importFile"] = argString(args, "path");
+            return messageCenterAction(actions);
         });
 }

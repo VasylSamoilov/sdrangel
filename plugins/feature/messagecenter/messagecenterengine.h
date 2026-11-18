@@ -19,25 +19,32 @@
 #define INCLUDE_MESSAGECENTERENGINE_H
 
 #include <QDateTime>
+#include <QHostAddress>
 #include <QJsonObject>
 #include <QMap>
+#include <QRegularExpression>
 #include <QString>
 #include <QStringList>
 
 #include <deque>
+#include <functional>
 #include <memory>
 #include <vector>
 
 #include "util/messagerecord.h"
 #include "util/messageendpoint.h"
 
+class QUdpSocket;
+
 // The message center without the user interface: where the messages come from (sources), where
 // they go (sinks) and which way (routes), the log, the endpoints (the channels that registered)
 // and the queue of the pages to transmit.
 //
 //   source ---> route (filter) ---> sink(s)
-//   sources: the channels (through the "messages" pipe, fed with ingest), a JSON lines file
-//   sinks:   the log, a JSON lines file, a CSV file, the transmit queue
+//   sources: the channels (through the "messages" pipe, fed with ingest), a JSON lines file, a CSV file (of this
+//            message center or of the Pager demodulator), UDP datagrams (JSON lines or the Pager demodulator format)
+//   sinks:   the log, a JSON lines file, a CSV file, UDP datagrams, the transmit queue, and the actions
+//            on a message that matches: a command, speech, a highlight and a position on the map
 //
 // Endpoints (demodulators and modulators) announce themselves with event records (see
 // MessageEndpoint::fromRecord). A page for transmission goes through the states
@@ -57,6 +64,17 @@ struct MessageCenterFilter
     QString m_address;                  //!< Wildcards * and ?, empty for all
     QString m_text;                     //!< Contained in the text, not case sensitive
     QString m_msgType;                  //!< Message type (alphanumeric, numeric, tone, voice, short_message, binary, secure), empty for all
+    //! A regular expression a field of the message must match (anywhere in it, case sensitive, (?i) for the other)
+    enum MatchField {
+        MatchAddress,
+        MatchMessage,
+        MatchProtocol,                  //!< pocsag, flex, gsc
+        MatchType,
+        MatchChannel,                   //!< The channel alias
+        MatchAny                        //!< Address, message, protocol, type and channel, separated by spaces
+    };
+    int m_matchField = MatchAddress;
+    QString m_regExp;                   //!< Empty for none; one that is not valid matches nothing
     qint64 m_frequencyMin = -1;         //!< Hz, -1: no lower limit
     qint64 m_frequencyMax = -1;
     qint64 m_timeFrom = -1;             //!< Milliseconds since the epoch, -1: no limit
@@ -65,10 +83,26 @@ struct MessageCenterFilter
     bool m_voiceOnly = false;           //!< Voice messages with a file
 
     bool matches(const MessageRecord& record) const;
+    //!< What the regular expression captured in the message (0 the whole match); empty if there is none or it did not match
+    QStringList captures(const MessageRecord& record) const;
     bool isEmpty() const;
     QJsonObject toJson() const;
     static MessageCenterFilter fromJson(const QJsonObject& json);
+    static QString fieldText(const MessageRecord& record, int field);
+    static QString matchFieldName(int field);
+    //!< The error of the regular expression, empty if it is valid or there is none
+    QString regExpError() const;
+
+private:
+    mutable QRegularExpression m_compiled;
+    mutable QString m_compiledPattern;
+    const QRegularExpression& compiled() const;
 };
+
+//! ${address}, ${message}, ${protocol}, ${type}, ${channel}, ${mode}, ${id}, ${frequency}, ${time} (ISO, UTC) and
+//! ${0}, ${1}... (the captures of the regular expression) replaced in a text; one pass, so that what is put in is
+//! not replaced again; an unknown name stays as it is
+QString messageCenterSubstitute(const QString& text, const MessageRecord& record, const QStringList& captures);
 
 // A sink takes the records routed to it
 class MessageCenterSink
@@ -78,6 +112,12 @@ public:
     virtual QString name() const = 0;
     //!< False and an error if the record could not be taken
     virtual bool accept(const MessageRecord& record, QString& error) = 0;
+    //!< As above, with what the regular expression of the route captured in the message
+    virtual bool accept(const MessageRecord& record, const QStringList& captures, QString& error)
+    {
+        (void) captures;
+        return accept(record, error);
+    }
 };
 
 // A source gives records when polled
@@ -88,6 +128,8 @@ public:
     virtual QString name() const = 0;
     //!< The records new since the last call. False and an error if it can not be read
     virtual bool poll(std::vector<MessageRecord>& records, QString& error) = 0;
+    //!< More is waiting after the last poll (a big file is read over several polls)
+    virtual bool more() const { return false; }
 };
 
 // Records appended to a file, one JSON object per line (lossless) or CSV (the columns of MessageRecord)
@@ -98,6 +140,7 @@ public:
 
     MessageCenterFileSink(const QString& name, const QString& path, Format format);
     QString name() const override { return m_name; }
+    using MessageCenterSink::accept;
     bool accept(const MessageRecord& record, QString& error) override;
     const QString& path() const { return m_path; }
     Format format() const { return m_format; }
@@ -115,6 +158,7 @@ public:
     MessageCenterFileSource(const QString& name, const QString& path);
     QString name() const override { return m_name; }
     bool poll(std::vector<MessageRecord>& records, QString& error) override;
+    bool more() const override { return m_more; }
     int skipped() const { return m_skipped; }       //!< Lines that were not records
     static const int m_maxLinesPerPoll = 1000;
     static const int m_maxLineLength = 1 << 20;
@@ -124,6 +168,121 @@ private:
     QString m_path;
     qint64 m_offset = 0;
     int m_skipped = 0;
+    bool m_more = false;
+};
+
+// Records read from a CSV file: the log of a message center (the columns of MessageRecord) or of the Pager
+// demodulator. The first row names the columns; the rows added later are read by the next poll
+class MessageCenterCsvSource : public MessageCenterSource
+{
+public:
+    MessageCenterCsvSource(const QString& name, const QString& path);
+    QString name() const override { return m_name; }
+    bool poll(std::vector<MessageRecord>& records, QString& error) override;
+    bool more() const override { return m_more; }
+    int skipped() const { return m_skipped; }       //!< Rows that were not messages
+    static const int m_maxLinesPerPoll = 1000;
+    static const int m_maxLineLength = 1 << 20;
+
+private:
+    QString m_name;
+    QString m_path;
+    qint64 m_offset = 0;
+    int m_skipped = 0;
+    bool m_more = false;
+    bool m_headerRead = false;
+    bool m_pagerFormat = false;
+    bool m_notReported = true;                      //!< The header is wrong, said once
+    QHash<QString, int> m_columns;
+};
+
+// Datagrams received: a message record as JSON (one or several lines) or the Pager demodulator format. What comes
+// from the network is a message received: its direction is rx and it has no transmitter, so that it cannot
+// become a page to transmit
+class MessageCenterUdpSource : public MessageCenterSource
+{
+public:
+    MessageCenterUdpSource(const QString& name, const QString& address, quint16 port);
+    ~MessageCenterUdpSource() override;
+    QString name() const override { return m_name; }
+    bool poll(std::vector<MessageRecord>& records, QString& error) override;
+    int skipped() const { return m_skipped; }       //!< Datagrams that were not messages
+    static const int m_maxDatagramsPerPoll = 1000;
+    static const int m_maxDatagramSize = 65535;
+
+private:
+    QString m_name;
+    QUdpSocket *m_socket;
+    QString m_bindError;
+    bool m_errorReported = false;
+    int m_skipped = 0;
+};
+
+// Each message as a datagram: the message record as one line of JSON, or the Pager demodulator format
+class MessageCenterUdpSink : public MessageCenterSink
+{
+public:
+    enum Format { PagerDemod, Json };
+
+    MessageCenterUdpSink(const QString& name, const QString& address, quint16 port, Format format);
+    ~MessageCenterUdpSink() override;
+    QString name() const override { return m_name; }
+    using MessageCenterSink::accept;
+    bool accept(const MessageRecord& record, QString& error) override;
+    static const int m_maxDatagramSize = 65507;
+
+private:
+    QString m_name;
+    QString m_addressText;
+    quint16 m_port;
+    Format m_format;
+    QUdpSocket *m_socket;
+    bool m_addressValid;
+    QHostAddress m_address;
+};
+
+// Runs a command for each message: the command is split into the program and its arguments first, then the text
+// of the message is put into each argument, so that a message cannot add arguments or change the program. At
+// most m_maxPerSecond are started in a second, the others are refused
+class MessageCenterCommandSink : public MessageCenterSink
+{
+public:
+    typedef std::function<bool(const QString& program, const QStringList& arguments)> Launcher;
+
+    static const int m_maxPerSecond = 5;
+
+    MessageCenterCommandSink(const QString& name, const QString& command, Launcher launcher = Launcher());
+    QString name() const override { return m_name; }
+    using MessageCenterSink::accept;
+    bool accept(const MessageRecord& record, QString& error) override { return accept(record, QStringList(), error); }
+    bool accept(const MessageRecord& record, const QStringList& captures, QString& error) override;
+
+private:
+    QString m_name;
+    QString m_command;
+    Launcher m_launcher;
+    std::deque<qint64> m_started;       //!< When the last ones started, ms since the epoch
+};
+
+// What the feature does with a message: speech, a highlight in the log, a position on the map
+class MessageCenterActionSink : public MessageCenterSink
+{
+public:
+    //! type: speech, highlight or map. text: the text with the substitutions done. color: the highlight, ARGB
+    typedef std::function<void(const QString& type, const MessageRecord& record, const QString& text, quint32 color)> Action;
+
+    MessageCenterActionSink(const QString& name, const QString& type, const QString& text, quint32 color, Action action);
+    QString name() const override { return m_name; }
+    using MessageCenterSink::accept;
+    bool accept(const MessageRecord& record, QString& error) override { return accept(record, QStringList(), error); }
+    bool accept(const MessageRecord& record, const QStringList& captures, QString& error) override;
+
+private:
+    QString m_name;
+    QString m_type;
+    QString m_text;
+    quint32 m_color;
+    Action m_action;
 };
 
 // A page to transmit
@@ -222,6 +381,15 @@ public:
     void sweep(qint64 now, qint64 silentMs);
     //!< The errors of the sinks since the last call (at most m_maxSinkErrors are kept)
     QStringList takeSinkErrors();
+    //! A message of an import (a file read once): in the log, not routed, so that no action is taken again on it
+    void importRecord(const MessageRecord& record);
+    //! The records each sink took, and those it refused, by name ("log" and "queue" too)
+    struct SinkStat
+    {
+        int m_accepted = 0;
+        int m_failed = 0;
+    };
+    const QMap<QString, SinkStat>& sinkStats() const { return m_sinkStats; }
     static QString endpointKey(MessageEndpoint::Role role, const QString& alias);
     static const int m_maxSinkErrors = 100;
     //!< Dead page back to pending with its attempts reset
@@ -250,9 +418,10 @@ private:
     QMap<QString, MessageEndpoint> m_endpoints;
     std::vector<MessageCenterPage> m_pages;
     QStringList m_sinkErrors;
+    QMap<QString, SinkStat> m_sinkStats;
 
     void store(const MessageRecord& record);
-    void deliver(const MessageRecord& record, const QString& sinkName, qint64 now);
+    void deliver(const MessageRecord& record, const QString& sinkName, const QStringList& captures, qint64 now);
     MessageCenterPage *findPage(const QString& id);
     void endpointGone(const QString& alias, qint64 now);
 };

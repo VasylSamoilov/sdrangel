@@ -12,6 +12,7 @@ void SWGMessageCenterReport::cleanup()
     delete m_pages; m_pages = nullptr;
     delete m_log; m_log = nullptr;
     delete m_errors; m_errors = nullptr;
+    delete m_sinks; m_sinks = nullptr;
 }
 void SWGMessageCenterReport::init()
 {
@@ -22,6 +23,7 @@ void SWGMessageCenterReport::init()
     m_pages = new QString(); m_pagesIsSet = false;
     m_log = new QString(); m_logIsSet = false;
     m_errors = new QString(); m_errorsIsSet = false;
+    m_sinks = new QString(); m_sinksIsSet = false;
 }
 SWGMessageCenterReport* SWGMessageCenterReport::fromJson(QString& json)
 {
@@ -35,6 +37,7 @@ void SWGMessageCenterReport::fromJsonObject(QJsonObject& json)
     if (json.contains("pages")) { ::SWGSDRangel::setValue(&m_pages,json["pages"],"QString","QString"); m_pagesIsSet = true; }
     if (json.contains("log")) { ::SWGSDRangel::setValue(&m_log,json["log"],"QString","QString"); m_logIsSet = true; }
     if (json.contains("errors")) { ::SWGSDRangel::setValue(&m_errors,json["errors"],"QString","QString"); m_errorsIsSet = true; }
+    if (json.contains("sinks")) { ::SWGSDRangel::setValue(&m_sinks,json["sinks"],"QString","QString"); m_sinksIsSet = true; }
 }
 QString SWGMessageCenterReport::asJson()
 {
@@ -49,11 +52,12 @@ QJsonObject* SWGMessageCenterReport::asJsonObject()
     if (m_pages && (m_pagesIsSet || !m_pages->isEmpty())) { toJsonValue(QString("pages"),m_pages,object,QString("QString")); }
     if (m_log && (m_logIsSet || !m_log->isEmpty())) { toJsonValue(QString("log"),m_log,object,QString("QString")); }
     if (m_errors && (m_errorsIsSet || !m_errors->isEmpty())) { toJsonValue(QString("errors"),m_errors,object,QString("QString")); }
+    if (m_sinks && (m_sinksIsSet || !m_sinks->isEmpty())) { toJsonValue(QString("sinks"),m_sinks,object,QString("QString")); }
     return object;
 }
 bool SWGMessageCenterReport::isSet()
 {
-    return m_loggedIsSet || m_routedIsSet || m_endpointsIsSet || m_pagesIsSet || m_logIsSet || m_errorsIsSet;
+    return m_loggedIsSet || m_routedIsSet || m_endpointsIsSet || m_pagesIsSet || m_logIsSet || m_errorsIsSet || m_sinksIsSet;
 }
 qint32 SWGMessageCenterReport::getLogged() { return m_logged; }
 void SWGMessageCenterReport::setLogged(qint32 value) { m_logged = value; m_loggedIsSet = true; }
@@ -67,4 +71,6 @@ QString* SWGMessageCenterReport::getLog() { return m_log; }
 void SWGMessageCenterReport::setLog(QString* value) { if (m_log != value) { delete m_log; m_log = value; } m_logIsSet = true; }
 QString* SWGMessageCenterReport::getErrors() { return m_errors; }
 void SWGMessageCenterReport::setErrors(QString* value) { if (m_errors != value) { delete m_errors; m_errors = value; } m_errorsIsSet = true; }
+QString* SWGMessageCenterReport::getSinks() { return m_sinks; }
+void SWGMessageCenterReport::setSinks(QString* value) { if (m_sinks != value) { delete m_sinks; m_sinks = value; } m_sinksIsSet = true; }
 }

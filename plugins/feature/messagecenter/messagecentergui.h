@@ -20,12 +20,16 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QHash>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QTableWidget>
 #include <QWidget>
+#ifdef QT_TEXTTOSPEECH_FOUND
+#include <QTextToSpeech>
+#endif
 
 #include "feature/featuregui.h"
 #include "gui/pagingmessagetable.h"
@@ -61,6 +65,8 @@ private:
     QLineEdit *m_text;
     QCheckBox *m_hideDuplicates;
     QCheckBox *m_voiceOnly;
+    QComboBox *m_matchField;
+    QLineEdit *m_regExp;
 };
 
 class MessageCenterGUI : public FeatureGUI
@@ -106,6 +112,11 @@ private:
     QTableWidget *m_sinksTable;
     QTableWidget *m_sourcesTable;
     QPlainTextEdit *m_errors;
+    QHash<QString, quint32> m_highlights;   //!< Colour of the rows of the log, by record id (the highlight sinks)
+    static const int m_maxHighlights = 10000;
+#ifdef QT_TEXTTOSPEECH_FOUND
+    QTextToSpeech *m_speech = nullptr;
+#endif
 
     explicit MessageCenterGUI(PluginAPI* pluginAPI, FeatureUISet *featureUISet, Feature *feature, QWidget* parent = nullptr);
     ~MessageCenterGUI() override;
@@ -131,7 +142,10 @@ private:
     void refreshFiles();
     QString selectedId(QTableWidget *table) const;
     void editRoute(int index);
-    void editFile(bool sink);
+    //! A sink or a source: index -1 for a new one
+    void editFile(bool sink, int index);
+    void speak(const QString& text);
+    void importFile();
 
 private slots:
     void handleInputMessages();
@@ -146,6 +160,8 @@ private slots:
     void removeSink();
     void addSource();
     void removeSource();
+    void editSelectedSink();
+    void editSelectedSource();
     void transmitterChanged();
 };
 

@@ -2,7 +2,6 @@ project(demodradiopaging)
 
 set(demodradiopaging_SOURCES
     radiopagingdemod.cpp
-    radiopagingdemodoutput.cpp
     radiopagingdemodsettings.cpp
     radiopagingdemodbaseband.cpp
     radiopagingdemodsink.cpp
@@ -12,7 +11,6 @@ set(demodradiopaging_SOURCES
 
 set(demodradiopaging_HEADERS
     radiopagingdemod.h
-    radiopagingdemodoutput.h
     radiopagingdemodsettings.h
     radiopagingdemodbaseband.h
     radiopagingdemodsink.h
@@ -89,7 +87,6 @@ if(NOT SERVER_MODE)
     #   cmake --build <build dir> --target radiopagingdemodparitytest
     add_executable(radiopagingdemodparitytest EXCLUDE_FROM_ALL
         test/radiopagingdemodparitytest.cpp
-        radiopagingdemodoutput.cpp
         radiopagingdemodsink.cpp
         radiopagingdemodsettings.cpp
     )

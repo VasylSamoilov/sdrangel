@@ -45,7 +45,7 @@
 #include "radiopagingcharset.h"
 #include "radiopagingpage.h"
 #include "radiopagingdemod.h"
-#include "radiopagingdemodoutput.h"
+#include "radiopagingpagerformat.h"
 
 MESSAGE_CLASS_DEFINITION(RadioPagingDemod::MsgConfigureRadioPagingDemod, Message)
 
@@ -285,8 +285,8 @@ void RadioPagingDemod::outputRecord(const MessageRecord& record)
 
         if (m_settings.m_udpFormat == RadioPagingDemodSettings::UdpJson) {
             datagram = record.toJsonLine();
-        } else if (!RadioPagingDemodOutput::isCompletion(record)) {
-            datagram = RadioPagingDemodOutput::pagerDatagram(record);
+        } else if (!RadioPagingPagerFormat::isCompletion(record)) {
+            datagram = RadioPagingPagerFormat::datagram(record);
         }
 
         if (!datagram.isEmpty()) {

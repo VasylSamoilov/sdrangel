@@ -18,12 +18,17 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QProcess>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QTextStream>
+#include <QUdpSocket>
 #include <QUuid>
 
 #include <algorithm>
 
+#include "util/csv.h"
+#include "radiopagingpagerformat.h"
 #include "messagecenterengine.h"
 
 namespace {
@@ -92,6 +97,14 @@ bool MessageCenterFilter::matches(const MessageRecord& record) const
     if (!m_text.isEmpty() && !record.m_text.contains(m_text, Qt::CaseInsensitive)) {
         return false;
     }
+    if (!m_regExp.isEmpty())
+    {
+        const QRegularExpression& expression = compiled();
+
+        if (!expression.isValid() || !expression.match(fieldText(record, m_matchField)).hasMatch()) {
+            return false;
+        }
+    }
     if ((m_frequencyMin >= 0) && (record.m_frequency < m_frequencyMin)) {
         return false;
     }
@@ -112,6 +125,125 @@ bool MessageCenterFilter::matches(const MessageRecord& record) const
     }
 
     return true;
+}
+
+const QRegularExpression& MessageCenterFilter::compiled() const
+{
+    if ((m_compiledPattern != m_regExp) || (m_compiled.pattern() != m_regExp))
+    {
+        m_compiled.setPattern(m_regExp);
+        m_compiled.optimize();
+        m_compiledPattern = m_regExp;
+    }
+
+    return m_compiled;
+}
+
+QString MessageCenterFilter::regExpError() const
+{
+    if (m_regExp.isEmpty()) {
+        return QString();
+    }
+
+    const QRegularExpression& expression = compiled();
+    return expression.isValid() ? QString() : expression.errorString();
+}
+
+QStringList MessageCenterFilter::captures(const MessageRecord& record) const
+{
+    if (m_regExp.isEmpty()) {
+        return QStringList();
+    }
+
+    const QRegularExpression& expression = compiled();
+
+    if (!expression.isValid()) {
+        return QStringList();
+    }
+
+    QRegularExpressionMatch match = expression.match(fieldText(record, m_matchField));
+    return match.hasMatch() ? match.capturedTexts() : QStringList();
+}
+
+QString MessageCenterFilter::fieldText(const MessageRecord& record, int field)
+{
+    switch (field)
+    {
+    case MatchAddress:
+        return record.m_address;
+    case MatchMessage:
+        return record.m_text;
+    case MatchProtocol:
+        return record.m_protocol;
+    case MatchType:
+        return record.m_msgType;
+    case MatchChannel:
+        return record.m_channelAlias;
+    case MatchAny:
+        return QStringList({record.m_address, record.m_text, record.m_protocol, record.m_msgType, record.m_channelAlias}).join(' ');
+    default:
+        return QString();
+    }
+}
+
+QString MessageCenterFilter::matchFieldName(int field)
+{
+    static const char *names[] = {"Address", "Message", "Protocol", "Type", "Channel", "Any"};
+    return ((field >= 0) && (field <= MatchAny)) ? QString(names[field]) : QString();
+}
+
+QString messageCenterSubstitute(const QString& text, const MessageRecord& record, const QStringList& captures)
+{
+    QString out;
+    int pos = 0;
+
+    while (pos < text.size())
+    {
+        int start = text.indexOf("${", pos);
+        int end = (start < 0) ? -1 : text.indexOf('}', start + 2);
+
+        if (end < 0)
+        {
+            out += text.mid(pos);
+            break;
+        }
+
+        out += text.mid(pos, start - pos);
+        QString name = text.mid(start + 2, end - start - 2);
+        bool isIndex;
+        int index = name.toInt(&isIndex);
+        bool known = true;
+        QString value;
+
+        if (isIndex && (index >= 0)) {
+            value = (index < captures.size()) ? captures[index] : QString();
+        } else if (name == "address") {
+            value = record.m_address;
+        } else if (name == "message") {
+            value = record.m_text;
+        } else if (name == "protocol") {
+            value = record.m_protocol;
+        } else if (name == "type") {
+            value = record.m_msgType;
+        } else if (name == "channel") {
+            value = record.m_channelAlias;
+        } else if (name == "mode") {
+            value = record.m_mode;
+        } else if (name == "id") {
+            value = record.m_id;
+        } else if (name == "frequency") {
+            value = QString::number(record.m_frequency);
+        } else if (name == "time") {
+            value = QDateTime::fromMSecsSinceEpoch(record.m_timestamp, Qt::UTC).toString(Qt::ISODate);
+        } else {
+            known = false;
+        }
+
+        out += known ? value : text.mid(start, end - start + 1);
+        pos = end + 1;
+    }
+
+    return out;
 }
 
 bool MessageCenterFilter::isEmpty() const
@@ -149,6 +281,11 @@ QJsonObject MessageCenterFilter::toJson() const
     }
     if (!m_msgType.isEmpty()) {
         json["msgType"] = m_msgType;
+    }
+    if (!m_regExp.isEmpty())
+    {
+        json["regExp"] = m_regExp;
+        json["matchField"] = m_matchField;
     }
     if (m_frequencyMin >= 0) {
         json["frequencyMin"] = (double) m_frequencyMin;
@@ -190,6 +327,8 @@ MessageCenterFilter MessageCenterFilter::fromJson(const QJsonObject& json)
     f.m_address = json["address"].toString();
     f.m_text = json["text"].toString();
     f.m_msgType = json["msgType"].toString();
+    f.m_regExp = json["regExp"].toString();
+    f.m_matchField = std::max((int) MatchAddress, std::min((int) MatchAny, json["matchField"].toInt(MatchAddress)));
     f.m_frequencyMin = json.contains("frequencyMin") ? (qint64) json["frequencyMin"].toDouble(-1) : -1;
     f.m_frequencyMax = json.contains("frequencyMax") ? (qint64) json["frequencyMax"].toDouble(-1) : -1;
     f.m_timeFrom = json.contains("timeFrom") ? (qint64) json["timeFrom"].toDouble(-1) : -1;
@@ -265,6 +404,7 @@ bool MessageCenterFileSource::poll(std::vector<MessageRecord>& records, QString&
 
     file.seek(m_offset);
     int lines = 0;
+    m_more = false;
 
     // A big file is read over several polls, and a line has a limit
     while (!file.atEnd() && (lines++ < m_maxLinesPerPoll))
@@ -307,6 +447,360 @@ bool MessageCenterFileSource::poll(std::vector<MessageRecord>& records, QString&
         }
 
         records.push_back(record);
+    }
+
+    // Stopped by the number of lines: the rest is for the next poll
+    m_more = (lines > m_maxLinesPerPoll) && !file.atEnd();
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// CSV source
+// ---------------------------------------------------------------------------
+
+MessageCenterCsvSource::MessageCenterCsvSource(const QString& name, const QString& path) :
+    m_name(name),
+    m_path(path)
+{
+}
+
+bool MessageCenterCsvSource::poll(std::vector<MessageRecord>& records, QString& error)
+{
+    QFile file(m_path);
+
+    if (!file.open(QIODevice::ReadOnly))
+    {
+        error = QString("Cannot read %1").arg(m_path);
+        return false;
+    }
+
+    if (file.size() < m_offset)
+    {
+        // The file was replaced
+        m_offset = 0;
+        m_headerRead = false;
+        m_notReported = true;
+    }
+
+    file.seek(m_offset);
+    int lines = 0;
+    m_more = false;
+
+    while (!file.atEnd() && (lines++ < m_maxLinesPerPoll))
+    {
+        qint64 start = file.pos();
+        QByteArray line = file.readLine(m_maxLineLength);
+
+        if (!line.endsWith('\n') && (line.size() >= m_maxLineLength - 1))
+        {
+            // Not a row: skip to the end of the line
+            file.readLine();
+            m_offset = file.pos();
+            m_skipped++;
+            continue;
+        }
+
+        // A line being written is read when it is complete
+        if (!line.endsWith('\n'))
+        {
+            file.seek(start);
+            break;
+        }
+
+        m_offset = file.pos();
+        QString text = QString::fromUtf8(line);
+
+        if (text.trimmed().isEmpty()) {
+            continue;
+        }
+
+        QTextStream in(&text, QIODevice::ReadOnly);
+        QStringList row;
+
+        if (!CSV::readRow(in, &row)) {
+            m_skipped++;
+            continue;
+        }
+
+        if (!m_headerRead)
+        {
+            m_columns.clear();
+
+            for (int i = 0; i < row.size(); i++) {
+                m_columns.insert(row[i].trimmed(), i);
+            }
+
+            m_headerRead = true;
+            bool recordLog = m_columns.contains("id") && m_columns.contains("timestamp") && m_columns.contains("protocol");
+            bool pagerLog = true;
+
+            for (const QString& column : RadioPagingPagerFormat::csvColumns()) {
+                pagerLog = pagerLog && m_columns.contains(column);
+            }
+
+            m_pagerFormat = !recordLog && pagerLog;
+
+            if (!recordLog && !pagerLog)
+            {
+                // Not a log: nothing is read from this file until it is replaced
+                m_columns.clear();
+                m_offset = file.size();
+
+                if (m_notReported)
+                {
+                    m_notReported = false;
+                    error = QString("%1 is not a log of messages (the first row must name the columns)").arg(m_path);
+                    return false;
+                }
+
+                return true;
+            }
+
+            continue;
+        }
+
+        if (m_columns.isEmpty()) {
+            continue;
+        }
+
+        MessageRecord record;
+        bool ok = m_pagerFormat ? RadioPagingPagerFormat::fromCsvRow(m_columns, row, record)
+            : MessageRecord::fromCSV(m_columns, row, record);
+
+        if (ok) {
+            records.push_back(record);
+        } else {
+            m_skipped++;
+        }
+    }
+
+    m_more = (lines > m_maxLinesPerPoll) && !file.atEnd();
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// UDP source and sink
+// ---------------------------------------------------------------------------
+
+MessageCenterUdpSource::MessageCenterUdpSource(const QString& name, const QString& address, quint16 port) :
+    m_name(name),
+    m_socket(new QUdpSocket())
+{
+    QHostAddress host(address.isEmpty() ? QString("127.0.0.1") : address);
+
+    if (host.isNull()) {
+        m_bindError = QString("%1 is not an IP address").arg(address);
+    } else if ((port == 0) || !m_socket->bind(host, port)) {
+        m_bindError = QString("Cannot listen on %1:%2: %3").arg(host.toString()).arg(port).arg(m_socket->errorString());
+    }
+}
+
+MessageCenterUdpSource::~MessageCenterUdpSource()
+{
+    delete m_socket;
+}
+
+bool MessageCenterUdpSource::poll(std::vector<MessageRecord>& records, QString& error)
+{
+    if (!m_bindError.isEmpty())
+    {
+        // Said once: the source stays there, nothing is received
+        if (m_errorReported) {
+            return true;
+        }
+
+        m_errorReported = true;
+        error = m_bindError;
+        return false;
+    }
+
+    qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    for (int n = 0; (n < m_maxDatagramsPerPoll) && m_socket->hasPendingDatagrams(); n++)
+    {
+        qint64 size = m_socket->pendingDatagramSize();
+
+        if ((size < 0) || (size > m_maxDatagramSize))
+        {
+            // Too big to be a message
+            QByteArray discard(1, 0);
+            m_socket->readDatagram(discard.data(), 1);
+            m_skipped++;
+            continue;
+        }
+
+        QByteArray datagram(size, 0);
+        m_socket->readDatagram(datagram.data(), size);
+        std::vector<MessageRecord> found;
+
+        if (datagram.trimmed().startsWith('{'))
+        {
+            for (const QByteArray& line : datagram.split('\n'))
+            {
+                QJsonParseError parseError;
+                QJsonDocument document = QJsonDocument::fromJson(line.trimmed(), &parseError);
+                MessageRecord record;
+
+                if ((parseError.error == QJsonParseError::NoError) && document.isObject() && MessageRecord::fromJson(document.object(), record)) {
+                    found.push_back(record);
+                } else if (!line.trimmed().isEmpty()) {
+                    m_skipped++;
+                }
+            }
+        }
+        else
+        {
+            MessageRecord record;
+
+            if (RadioPagingPagerFormat::fromDatagram(datagram, now, record)) {
+                found.push_back(record);
+            } else {
+                m_skipped++;
+            }
+        }
+
+        for (MessageRecord& record : found)
+        {
+            // Received from the network: a message received, never a page for a transmitter
+            record.m_direction = MessageRecord::DirectionRX;
+            record.m_protocolData.remove("transmitter");
+
+            if (record.m_kind == MessageRecord::KindEvent) {
+                continue;
+            }
+
+            records.push_back(record);
+        }
+    }
+
+    return true;
+}
+
+MessageCenterUdpSink::MessageCenterUdpSink(const QString& name, const QString& address, quint16 port, Format format) :
+    m_name(name),
+    m_addressText(address),
+    m_port(port),
+    m_format(format),
+    m_socket(new QUdpSocket()),
+    m_address(address)
+{
+    m_addressValid = !m_address.isNull() && (port != 0);
+}
+
+MessageCenterUdpSink::~MessageCenterUdpSink()
+{
+    delete m_socket;
+}
+
+bool MessageCenterUdpSink::accept(const MessageRecord& record, QString& error)
+{
+    if (!m_addressValid)
+    {
+        error = QString("%1: %2:%3 is not an address to send to").arg(m_name).arg(m_addressText).arg(m_port);
+        return false;
+    }
+
+    QByteArray datagram = (m_format == Json) ? record.toJsonLine() : RadioPagingPagerFormat::datagram(record);
+
+    // The end of a voice message, an event: nothing to send in the format
+    if (datagram.isEmpty()) {
+        return true;
+    }
+    if (datagram.size() > m_maxDatagramSize)
+    {
+        error = QString("%1: the message is too long for a datagram").arg(m_name);
+        return false;
+    }
+    if (m_socket->writeDatagram(datagram, m_address, m_port) != datagram.size())
+    {
+        error = QString("%1: %2").arg(m_name).arg(m_socket->errorString());
+        return false;
+    }
+
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
+
+MessageCenterCommandSink::MessageCenterCommandSink(const QString& name, const QString& command, Launcher launcher) :
+    m_name(name),
+    m_command(command),
+    m_launcher(launcher)
+{
+    if (!m_launcher)
+    {
+        m_launcher = [](const QString& program, const QStringList& arguments) {
+            return QProcess::startDetached(program, arguments);
+        };
+    }
+}
+
+bool MessageCenterCommandSink::accept(const MessageRecord& record, const QStringList& captures, QString& error)
+{
+    // The messages only: not an update that completes one, nor a diagnostic
+    if ((record.m_kind != MessageRecord::KindMessage) || RadioPagingPagerFormat::isCompletion(record)) {
+        return true;
+    }
+
+    QStringList arguments = QProcess::splitCommand(m_command);
+
+    if (arguments.isEmpty())
+    {
+        error = QString("%1: no command").arg(m_name);
+        return false;
+    }
+
+    qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    while (!m_started.empty() && (m_started.front() <= now - 1000)) {
+        m_started.pop_front();
+    }
+
+    if ((int) m_started.size() >= m_maxPerSecond)
+    {
+        error = QString("%1: more than %2 commands in a second, this one was not run").arg(m_name).arg(m_maxPerSecond);
+        return false;
+    }
+
+    // The program is the one set; the text of the message is only ever an argument
+    QString program = arguments.takeFirst();
+
+    for (QString& argument : arguments) {
+        argument = messageCenterSubstitute(argument, record, captures);
+    }
+
+    m_started.push_back(now);
+
+    if (!m_launcher(program, arguments))
+    {
+        error = QString("%1: cannot run %2").arg(m_name).arg(program);
+        return false;
+    }
+
+    return true;
+}
+
+MessageCenterActionSink::MessageCenterActionSink(const QString& name, const QString& type, const QString& text, quint32 color, Action action) :
+    m_name(name),
+    m_type(type),
+    m_text(text),
+    m_color(color),
+    m_action(action)
+{
+}
+
+bool MessageCenterActionSink::accept(const MessageRecord& record, const QStringList& captures, QString& error)
+{
+    (void) error;
+
+    if ((record.m_kind != MessageRecord::KindMessage) || RadioPagingPagerFormat::isCompletion(record)) {
+        return true;
+    }
+
+    if (m_action) {
+        m_action(m_type, record, messageCenterSubstitute(m_text, record, captures), m_color);
     }
 
     return true;
@@ -677,18 +1171,21 @@ bool MessageCenterEngine::writeHistory(QString& error)
     return true;
 }
 
-void MessageCenterEngine::deliver(const MessageRecord& record, const QString& sinkName, qint64 now)
+void MessageCenterEngine::deliver(const MessageRecord& record, const QString& sinkName, const QStringList& captures, qint64 now)
 {
     if (sinkName == "log")
     {
         store(record);
+        m_sinkStats[sinkName].m_accepted++;
         return;
     }
     if (sinkName == "queue")
     {
         // Only a message for a transmitter becomes a page
-        if ((record.m_direction == MessageRecord::DirectionTX) && !record.m_protocolData.value("transmitter").toString().isEmpty()) {
+        if ((record.m_direction == MessageRecord::DirectionTX) && !record.m_protocolData.value("transmitter").toString().isEmpty())
+        {
             addPage(record, now);
+            m_sinkStats[sinkName].m_accepted++;
         }
 
         return;
@@ -700,13 +1197,27 @@ void MessageCenterEngine::deliver(const MessageRecord& record, const QString& si
         {
             QString error;
 
-            if (!sink->accept(record, error) && (m_sinkErrors.size() < m_maxSinkErrors)) {
-                m_sinkErrors.append(error);
+            if (sink->accept(record, captures, error))
+            {
+                m_sinkStats[sinkName].m_accepted++;
+            }
+            else
+            {
+                m_sinkStats[sinkName].m_failed++;
+
+                if (m_sinkErrors.size() < m_maxSinkErrors) {
+                    m_sinkErrors.append(error);
+                }
             }
 
             return;
         }
     }
+}
+
+void MessageCenterEngine::importRecord(const MessageRecord& record)
+{
+    store(record);
 }
 
 QString MessageCenterEngine::endpointKey(MessageEndpoint::Role role, const QString& alias)
@@ -761,9 +1272,10 @@ void MessageCenterEngine::ingest(const MessageRecord& record, const QString& sou
         }
 
         matched = true;
+        QStringList captures = route.m_filter.captures(record);
 
         for (const QString& sink : route.m_sinks) {
-            deliver(record, sink, now);
+            deliver(record, sink, captures, now);
         }
 
         if (route.m_stop) {
@@ -774,7 +1286,7 @@ void MessageCenterEngine::ingest(const MessageRecord& record, const QString& sou
     if (matched) {
         m_routed++;
     } else {
-        deliver(record, "log", now);
+        deliver(record, "log", QStringList(), now);
     }
 }
 

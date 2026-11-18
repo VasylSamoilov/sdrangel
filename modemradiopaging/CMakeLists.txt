@@ -35,6 +35,7 @@ set(modemradiopaging_SOURCES
     charsets/kanji.cpp
     radiopagingvoicestore.cpp
     radiopagingpage.cpp
+    radiopagingpagerformat.cpp
 )
 
 set(modemradiopaging_HEADERS
@@ -64,6 +65,7 @@ set(modemradiopaging_HEADERS
     charsets/radiopagingcyrillic.h
     radiopagingvoicestore.h
     radiopagingpage.h
+    radiopagingpagerformat.h
 )
 
 include_directories(

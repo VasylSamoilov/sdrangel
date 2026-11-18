@@ -12,6 +12,8 @@ void SWGMessageCenterActions::cleanup()
     delete m_requeue; m_requeue = nullptr;
     delete m_cancel; m_cancel = nullptr;
     delete m_redecode; m_redecode = nullptr;
+    delete m_ingest; m_ingest = nullptr;
+    delete m_importFile; m_importFile = nullptr;
 }
 void SWGMessageCenterActions::init()
 {
@@ -21,6 +23,8 @@ void SWGMessageCenterActions::init()
     m_cancel = new QString(); m_cancelIsSet = false;
     m_clearSent = 0; m_clearSentIsSet = false;
     m_redecode = new SWGMessageCenterRedecode(); m_redecodeIsSet = false;
+    m_ingest = new QString(); m_ingestIsSet = false;
+    m_importFile = new QString(); m_importFileIsSet = false;
 }
 SWGMessageCenterActions* SWGMessageCenterActions::fromJson(QString& json)
 {
@@ -33,6 +37,8 @@ void SWGMessageCenterActions::fromJsonObject(QJsonObject& json)
     if (json.contains("cancel")) { ::SWGSDRangel::setValue(&m_cancel,json["cancel"],"QString","QString"); m_cancelIsSet = true; }
     if (json.contains("clearSent")) { ::SWGSDRangel::setValue(&m_clearSent,json["clearSent"],"qint32",""); m_clearSentIsSet = true; }
     if (json.contains("redecode")) { ::SWGSDRangel::setValue(&m_redecode,json["redecode"],"SWGMessageCenterRedecode","SWGMessageCenterRedecode"); m_redecodeIsSet = true; }
+    if (json.contains("ingest")) { ::SWGSDRangel::setValue(&m_ingest,json["ingest"],"QString","QString"); m_ingestIsSet = true; }
+    if (json.contains("importFile")) { ::SWGSDRangel::setValue(&m_importFile,json["importFile"],"QString","QString"); m_importFileIsSet = true; }
 }
 QString SWGMessageCenterActions::asJson()
 {
@@ -46,11 +52,13 @@ QJsonObject* SWGMessageCenterActions::asJsonObject()
     if (m_cancel && (m_cancelIsSet || !m_cancel->isEmpty())) { toJsonValue(QString("cancel"),m_cancel,object,QString("QString")); }
     if (m_clearSentIsSet) { object->insert("clearSent",QJsonValue(m_clearSent)); }
     if (m_redecode && (m_redecodeIsSet || m_redecode->isSet())) { toJsonValue(QString("redecode"),m_redecode,object,QString("SWGMessageCenterRedecode")); }
+    if (m_ingest && (m_ingestIsSet || !m_ingest->isEmpty())) { toJsonValue(QString("ingest"),m_ingest,object,QString("QString")); }
+    if (m_importFile && (m_importFileIsSet || !m_importFile->isEmpty())) { toJsonValue(QString("importFile"),m_importFile,object,QString("QString")); }
     return object;
 }
 bool SWGMessageCenterActions::isSet()
 {
-    return (m_post && m_post->isSet()) || m_requeueIsSet || m_cancelIsSet || m_clearSentIsSet || m_redecodeIsSet;
+    return (m_post && m_post->isSet()) || m_requeueIsSet || m_cancelIsSet || m_clearSentIsSet || m_redecodeIsSet || m_ingestIsSet || m_importFileIsSet;
 }
 SWGMessageCenterPost* SWGMessageCenterActions::getPost() { return m_post; }
 void SWGMessageCenterActions::setPost(SWGMessageCenterPost* value) { if (m_post != value) { delete m_post; m_post = value; } m_postIsSet = true; }
@@ -62,4 +70,8 @@ qint32 SWGMessageCenterActions::getClearSent() { return m_clearSent; }
 void SWGMessageCenterActions::setClearSent(qint32 value) { m_clearSent = value; m_clearSentIsSet = true; }
 SWGMessageCenterRedecode* SWGMessageCenterActions::getRedecode() { return m_redecode; }
 void SWGMessageCenterActions::setRedecode(SWGMessageCenterRedecode* value) { if (m_redecode != value) { delete m_redecode; m_redecode = value; } m_redecodeIsSet = true; }
+QString* SWGMessageCenterActions::getIngest() { return m_ingest; }
+void SWGMessageCenterActions::setIngest(QString* value) { if (m_ingest != value) { delete m_ingest; m_ingest = value; } m_ingestIsSet = true; }
+QString* SWGMessageCenterActions::getImportFile() { return m_importFile; }
+void SWGMessageCenterActions::setImportFile(QString* value) { if (m_importFile != value) { delete m_importFile; m_importFile = value; } m_importFileIsSet = true; }
 }
