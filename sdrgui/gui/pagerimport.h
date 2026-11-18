@@ -47,8 +47,8 @@ public:
         bool m_plotOnMap = false;
     };
 
-    //! The settings of an instance
-    struct Config
+    //! The settings of an instance. Exported on its own: the export of the class does not cover its nested classes
+    struct SDRGUI_API Config
     {
         enum Modulation { Auto, Pocsag, Flex };
         qint32 m_inputFrequencyOffset = 0;
@@ -73,7 +73,7 @@ public:
     };
 
     //! What an import does to one setting or item: the action, what it is, what there is now and what it would be
-    struct Change
+    struct SDRGUI_API Change
     {
         enum Action { Add, Update, Delete, Keep, Skip };    //!< Skip: what the Pager demodulator has is not taken over
         Action m_action = Keep;
