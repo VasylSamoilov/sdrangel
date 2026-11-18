@@ -131,6 +131,8 @@ public:
     }
 
     RadioPagingDemodSink::Status getStatus() const { return m_basebandSink->getStatus(); }
+    //!< Forget what the receivers of a protocol remember (0 POCSAG, 1 FLEX, 2 GSC, -1 all)
+    void resetProtocol(int protocol);
 
     uint32_t getNumberOfDeviceStreams() const;
 

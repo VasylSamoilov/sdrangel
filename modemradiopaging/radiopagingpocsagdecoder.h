@@ -120,7 +120,7 @@ private:
     uint32_t m_word;
     int m_wordBits;
     int m_slot;
-    uint32_t m_batchWords[16];          //!< Codewords of the batch being received
+    uint32_t m_batchWords[16] = {};     //!< Codewords of the batch being received
     bool m_leadingConfirmed;            //!< The sync codeword of the current batch is confirmed
     int m_batch;                        //!< Batches decoded in the current transmission
 

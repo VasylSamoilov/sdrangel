@@ -182,7 +182,8 @@ private:
     int64_t m_nowMs = 0;
 
     bool nextGroup(Group& group) const;
-    bool nextNetwork(RadioPagingTxBlock& block);
+    //!< The next block of the network: a preamble, messages or idle batches (there is always one)
+    void nextNetwork(RadioPagingTxBlock& block);
     //!< The delay of the messages queued since the last block starts now
     void startDelays();
     //!< Items of the queue that may be sent now (their delay or interval is over); the delay of new ones starts now

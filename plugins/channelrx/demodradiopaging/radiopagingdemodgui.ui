@@ -749,7 +749,7 @@
     <item>
      <widget class="PagingMessageTable" name="messages">
       <property name="toolTip">
-       <string>Received messages, newest at the bottom. Duplicates are greyed. Click the icon of a voice message to play it.&#10;Double-click a message for all its fields. Right click the header to choose the columns</string>
+       <string>Received messages, newest at the bottom. Duplicates are flagged DUP or DUP+ in the info column. Click the icon of a voice message to play it.&#10;Double-click a message for all its fields. Right click the header to choose the columns</string>
       </property>
      </widget>
     </item>

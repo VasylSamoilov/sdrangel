@@ -55,6 +55,23 @@ public:
     }
     //!< Keys kept
     size_t size() const { return m_keys.size(); }
+    //!< Messages remembered at the time now (received within the window), of a polarity (0 normal, 1 inverted) or of both (-1)
+    size_t messages(double now, int polarity = -1) const
+    {
+        size_t count = 0;
+
+        for (const Keyed& keyed : m_keys)
+        {
+            for (const Entry& e : keyed.second)
+            {
+                if (((now - e.m_time) <= m_window) && ((polarity < 0) || (e.m_polarity == polarity))) {
+                    count++;
+                }
+            }
+        }
+
+        return count;
+    }
 
     //!< True if the message is a duplicate. A message that is not is remembered. A message without payload (tone
     //!< only, a voice page) is not: a pager has nothing of it to store
@@ -103,7 +120,7 @@ public:
             entries.pop_front();
         }
 
-        entries.push_back(Entry{data, bits, time});
+        entries.push_back(Entry{data, bits, time, polarity});
         return false;
     }
 
@@ -113,6 +130,7 @@ private:
         std::vector<uint8_t> m_data;
         int m_bits;
         double m_time;
+        int m_polarity;
     };
 
     typedef std::pair<std::string, std::deque<Entry>> Keyed;

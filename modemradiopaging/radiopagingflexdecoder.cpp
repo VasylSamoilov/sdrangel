@@ -309,6 +309,27 @@ int RadioPagingFlexDecoder::reassemblies(bool inverted) const
     return count;
 }
 
+int RadioPagingFlexDecoder::historyCount(int polarity) const
+{
+    int count = 0;
+
+    for (int p = 0; p < 2; p++)
+    {
+        if ((polarity >= 0) && (p != polarity)) {
+            continue;
+        }
+
+        for (const HistoryEntry& e : m_pol[p].m_history)
+        {
+            if (e.m_active) {
+                count++;
+            }
+        }
+    }
+
+    return count;
+}
+
 void RadioPagingFlexDecoder::expireTempGroups()
 {
     uint32_t current = absFrame();

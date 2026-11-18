@@ -109,6 +109,13 @@ public:
     void setDuplicateWindow(double seconds) { m_dedup.setWindow(seconds); }
     //!< Frequency of the receiver, Hz: a pager is on one frequency (part of the duplicate key)
     void setFrequency(int64_t frequency) { m_dedup.setFrequency(frequency); }
+    //!< Messages remembered for duplicate detection: those of the receiver and the message history of the decoder,
+    //!< of a polarity (0 normal, 1 inverted) or of both (-1)
+    int remembered(int polarity = -1) const { return (int) m_dedup.messages(m_time, polarity) + m_decoder.historyCount(polarity); }
+    //!< The network of a polarity, kept by the decoder: groups in use, messages being reassembled, network time
+    std::vector<RadioPagingFlexDecoder::GroupSlot> groups(bool inverted) const { return m_decoder.groups(inverted); }
+    int reassemblies(bool inverted) const { return m_decoder.reassemblies(inverted); }
+    RadioPagingFlexDecoder::NetworkTime networkTime(bool inverted) const { return m_decoder.networkTime(inverted); }
 
     //!< Process one discriminator sample with its magnitude squared (pass 1 if not known)
     void process(float sample, float magsq = 1.0f);
@@ -146,8 +153,8 @@ private:
 
     RadioPagingFlex::Mode m_mode;
     bool m_inverted;
-    uint32_t m_fiw;
-    int m_fiwBits;
+    uint32_t m_fiw = 0;
+    int m_fiwBits = 0;
 
     int m_s2Symbols;                    //!< Nominal second sync length in symbols
     int m_s2Count;

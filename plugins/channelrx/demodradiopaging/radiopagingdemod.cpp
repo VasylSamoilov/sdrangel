@@ -164,6 +164,14 @@ void RadioPagingDemod::start()
     RadioPagingDemodBaseband::MsgConfigureRadioPagingDemodBaseband *msg =
         RadioPagingDemodBaseband::MsgConfigureRadioPagingDemodBaseband::create(QStringList(), m_settings, true);
     m_basebandSink->getInputMessageQueue()->push(msg);
+
+    // A new acquisition (the device started, a file played again) starts with nothing remembered
+    resetProtocol(-1);
+}
+
+void RadioPagingDemod::resetProtocol(int protocol)
+{
+    m_basebandSink->getInputMessageQueue()->push(RadioPagingDemodBaseband::MsgResetProtocol::create(protocol));
 }
 
 // The voice audio is labelled with the channel in the audio output dialog

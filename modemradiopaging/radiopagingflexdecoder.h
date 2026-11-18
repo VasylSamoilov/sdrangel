@@ -395,6 +395,8 @@ public:
     std::vector<GroupSlot> groups(bool inverted) const;
     //!< Fragmented messages being reassembled on the network of the polarity
     int reassemblies(bool inverted) const;
+    //!< Messages in the message history (duplicate detection), of a polarity (0 normal, 1 inverted) or of both (-1)
+    int historyCount(int polarity = -1) const;
 
     //! Report each fragment as a message too. Default off: the reassembled message only
     void setReportFragments(bool enable) { m_reportFragments = enable; }

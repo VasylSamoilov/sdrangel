@@ -446,14 +446,11 @@ void RadioPagingDemodSink::applySettings(const QStringList& settingsKeys, const 
     }
 
     // A protocol switched off starts from scratch when it is switched on again
-    if (settingsKeys.contains("pocsagEnabled") && !m_settings.m_pocsagEnabled)
-    {
-        for (auto& pocsag : m_pocsag) {
-            pocsag.reset();
-        }
+    if (settingsKeys.contains("pocsagEnabled") && !m_settings.m_pocsagEnabled) {
+        resetProtocol(0);
     }
     if (settingsKeys.contains("flexEnabled") && !m_settings.m_flexEnabled) {
-        m_flex.reset();
+        resetProtocol(1);
     }
     if ((settingsKeys.contains("gscAudio") && !m_settings.m_gscAudio && !m_settings.m_gscVoiceRecord)
         || (settingsKeys.contains("gscVoiceRecord") && !m_settings.m_gscVoiceRecord && !m_settings.m_gscAudio)
@@ -466,14 +463,60 @@ void RadioPagingDemodSink::applySettings(const QStringList& settingsKeys, const 
     if (settingsKeys.contains("gscVoiceRecord") && m_settings.m_gscVoiceRecord && m_audioOpen && !m_voiceRecorder) {
         startVoiceRecording();
     }
-    if (settingsKeys.contains("gscEnabled") && !m_settings.m_gscEnabled)
+    if (settingsKeys.contains("gscEnabled") && !m_settings.m_gscEnabled) {
+        resetProtocol(2);
+    }
+    if (settingsKeys.contains("gscVoiceTimeout") || force) {
+        m_gsc.setVoiceTimeout(m_settings.m_gscVoiceTimeout);
+    }
+}
+
+void RadioPagingDemodSink::resetProtocol(int protocol)
+{
+    qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    // The polarities received are forgotten too: the status shows one again until another is received
+    for (int p = 0; p < 3; p++)
+    {
+        if ((protocol >= 0) && (p != protocol)) {
+            continue;
+        }
+
+        for (int pol = 0; pol < 2; pol++)
+        {
+            m_polLast[p][pol] = PolarityLast();
+            QMutexLocker mutexLocker(&m_statusMutex);
+            m_polMessageSeen[p][pol] = false;
+        }
+        if (p == 1)
+        {
+            for (int pol = 0; pol < 2; pol++)
+            {
+                m_flexLastMode[pol].clear();
+                m_flexLastFrame[pol] = RadioPagingFlexDecoder::FrameReport();
+                std::fill(m_flexLastPhaseBer[pol], m_flexLastPhaseBer[pol] + 4, RadioPagingBerWindow());
+            }
+        }
+    }
+
+    if ((protocol == 0) || (protocol < 0))
+    {
+        for (auto& pocsag : m_pocsag) {
+            pocsag.reset();
+        }
+        m_resetTime[0] = now;
+    }
+    if ((protocol == 1) || (protocol < 0))
+    {
+        m_flex.reset();
+        m_resetTime[1] = now;
+    }
+    if ((protocol == 2) || (protocol < 0))
     {
         m_gsc.reset();
         m_gscVoiceId[0].clear();
         m_gscVoiceId[1].clear();
-    }
-    if (settingsKeys.contains("gscVoiceTimeout") || force) {
-        m_gsc.setVoiceTimeout(m_settings.m_gscVoiceTimeout);
+        m_resetTime[2] = now;
     }
 }
 
@@ -785,9 +828,127 @@ void RadioPagingDemodSink::updateStatus()
     status.m_enabled[1] = m_settings.m_flexEnabled;
     status.m_enabled[2] = m_settings.m_gscEnabled;
 
+    int pocsagRemembered = 0;
+    for (const auto& pocsag : m_pocsag) {
+        pocsagRemembered += pocsag.remembered();
+    }
+    status.m_remembered[0] = pocsagRemembered;
+    status.m_remembered[1] = m_flex.remembered();
+    status.m_remembered[2] = m_gsc.remembered();
+    std::copy(m_resetTime, m_resetTime + 3, status.m_resetTime);
+
+    updatePolarityStatus(status, flex, gsc);
+
     QMutexLocker mutexLocker(&m_statusMutex);
     std::copy(m_status.m_messages, m_status.m_messages + 3, status.m_messages);
+
+    for (int p = 0; p < 3; p++)
+    {
+        for (int pol = 0; pol < 2; pol++)
+        {
+            status.m_pol[p][pol].m_messages = m_polMessages[p][pol];
+            status.m_pol[p][pol].m_seen = status.m_pol[p][pol].m_seen || m_polMessageSeen[p][pol];
+        }
+    }
+
     m_status = status;
+}
+
+// The status of each polarity of each protocol: a polarity is shown once it was received (synchronised or a message)
+void RadioPagingDemodSink::updatePolarityStatus(Status& status, const RadioPagingFlexReceiver::Status& flex,
+    const RadioPagingGscReceiver::Status& gsc)
+{
+    bool sync[3][2] = {{false, false}, {false, false}, {false, false}};
+
+    for (int pol = 0; pol < 2; pol++)
+    {
+        for (int i = 0; i < RadioPagingDemodSettings::m_nbPocsagSpeeds; i++)
+        {
+            RadioPagingPocsagReceiver::Status s = m_pocsag[i].getStatus();
+            const RadioPagingPocsagDecoder::Status& d = (pol == 1) ? s.m_inverted : s.m_normal;
+            bool speedSync = d.m_state != RadioPagingPocsagDecoder::Hunting;
+            status.m_pocsagSpeedSync[pol][i] = speedSync;
+
+            if (speedSync)
+            {
+                sync[0][pol] = true;
+                if (d.m_ber.valid()) {
+                    m_polLast[0][pol].m_ber = d.m_ber;
+                }
+                m_polLast[0][pol].m_offset = m_pocsagLeg.m_shift + s.m_dc * m_settings.m_pocsagDeviation;
+                m_polLast[0][pol].m_offsetValid = true;
+            }
+        }
+
+        const RadioPagingGscDecoder::Status& g = (pol == 1) ? gsc.m_inverted : gsc.m_normal;
+        sync[2][pol] = g.m_state != RadioPagingGscDecoder::Hunting;
+        status.m_gscVoicePol[pol] = g.m_state == RadioPagingGscDecoder::Voice;
+
+        if (sync[2][pol])
+        {
+            if (g.m_ber.valid()) {
+                m_polLast[2][pol].m_ber = g.m_ber;
+            }
+            m_polLast[2][pol].m_offset = m_gscLeg.m_shift + gsc.m_dc * m_settings.m_gscDeviation;
+            m_polLast[2][pol].m_offsetValid = true;
+        }
+
+        // FLEX: the networks of both polarities are kept by the decoder
+        status.m_flexGroupsPol[pol] = m_flex.groups(pol == 1);
+        status.m_flexReassembliesPol[pol] = m_flex.reassemblies(pol == 1);
+        status.m_flexTimePol[pol] = m_flex.networkTime(pol == 1);
+    }
+
+    // FLEX: one polarity at a time, the one of the frame
+    if (status.m_flexSync)
+    {
+        int pol = flex.m_inverted ? 1 : 0;
+        sync[1][pol] = true;
+        if (flex.m_ber.valid()) {
+            m_polLast[1][pol].m_ber = flex.m_ber;
+        }
+        m_polLast[1][pol].m_offset = m_flexLeg.m_shift + flex.m_dc * m_settings.m_flexDeviation;
+        m_polLast[1][pol].m_offsetValid = true;
+        m_flexLastMode[pol] = RadioPagingFlex::modeName(flex.m_mode);
+        m_flexLastFrame[pol] = flex.m_frameReport;
+        std::copy(flex.m_phaseBer, flex.m_phaseBer + 4, m_flexLastPhaseBer[pol]);
+    }
+
+    for (int pol = 0; pol < 2; pol++)
+    {
+        status.m_flexModePol[pol] = m_flexLastMode[pol];
+        status.m_flexFramePol[pol] = m_flexLastFrame[pol];
+        std::copy(m_flexLastPhaseBer[pol], m_flexLastPhaseBer[pol] + 4, status.m_flexPhaseBerPol[pol]);
+    }
+
+    for (int p = 0; p < 3; p++)
+    {
+        for (int pol = 0; pol < 2; pol++)
+        {
+            PolarityLast& last = m_polLast[p][pol];
+            Status::Polarity& s = status.m_pol[p][pol];
+            last.m_seen = last.m_seen || sync[p][pol];
+            s.m_seen = last.m_seen;
+            s.m_sync = sync[p][pol];
+            s.m_ber = last.m_ber;
+            s.m_berLive = sync[p][pol] && last.m_ber.valid();
+            s.m_offset = last.m_offset;
+            s.m_offsetValid = last.m_offsetValid;
+        }
+    }
+
+    int pocsagRemembered[2] = {0, 0};
+    for (const auto& pocsag : m_pocsag)
+    {
+        pocsagRemembered[0] += pocsag.remembered(0);
+        pocsagRemembered[1] += pocsag.remembered(1);
+    }
+    for (int pol = 0; pol < 2; pol++)
+    {
+        status.m_pol[0][pol].m_remembered = pocsagRemembered[pol];
+        status.m_pol[1][pol].m_remembered = m_flex.remembered(pol);
+        status.m_pol[2][pol].m_remembered = m_gsc.remembered(pol);
+    }
 }
 
 void RadioPagingDemodSink::sendRecord(MessageRecord& record, int protocol)
@@ -803,6 +964,9 @@ void RadioPagingDemodSink::sendRecord(MessageRecord& record, int protocol)
     {
         QMutexLocker mutexLocker(&m_statusMutex);
         m_status.m_messages[protocol]++;
+        int pol = (record.m_polarity == MessageRecord::PolarityInverted) ? 1 : 0;
+        m_polMessages[protocol][pol]++;
+        m_polMessageSeen[protocol][pol] = true;
     }
 
     if (m_messageQueueToChannel) {

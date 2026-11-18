@@ -971,17 +971,17 @@ void testReserved()
 void testRejections()
 {
     Encoder enc;
-    bool allRejected = true;
+    int rejected = 0;
 
-    allRejected = allRejected && !enc.enqueue(makeMessage(0, Flex::Alphanumeric, "x")).m_ok;
-    allRejected = allRejected && !enc.enqueue(makeMessage(1933313, Flex::Alphanumeric, "x")).m_ok;
-    allRejected = allRejected && !enc.enqueue(makeMessage(4297068543ULL, Flex::Tone, "")).m_ok;
-    allRejected = allRejected && !enc.enqueue(makeMessage(10, Flex::Alphanumeric, "")).m_ok;
-    allRejected = allRejected && !enc.enqueue(makeMessage(10, Flex::Alphanumeric, "caf\xc3\xa9")).m_ok;
-    allRejected = allRejected && !enc.enqueue(makeMessage(10, Flex::Numeric, "")).m_ok;
-    allRejected = allRejected && !enc.enqueue(makeMessage(10, Flex::Numeric, "12a")).m_ok;
-    allRejected = allRejected && !enc.enqueue(makeMessage(10, Flex::Numeric, std::string(42, '1'))).m_ok;
-    check(allRejected && enc.pending() == 0, "enqueue: invalid capcode and text rejected with an error");
+    rejected += enc.enqueue(makeMessage(0, Flex::Alphanumeric, "x")).m_ok ? 0 : 1;
+    rejected += enc.enqueue(makeMessage(1933313, Flex::Alphanumeric, "x")).m_ok ? 0 : 1;
+    rejected += enc.enqueue(makeMessage(4297068543ULL, Flex::Tone, "")).m_ok ? 0 : 1;
+    rejected += enc.enqueue(makeMessage(10, Flex::Alphanumeric, "")).m_ok ? 0 : 1;
+    rejected += enc.enqueue(makeMessage(10, Flex::Alphanumeric, "caf\xc3\xa9")).m_ok ? 0 : 1;
+    rejected += enc.enqueue(makeMessage(10, Flex::Numeric, "")).m_ok ? 0 : 1;
+    rejected += enc.enqueue(makeMessage(10, Flex::Numeric, "12a")).m_ok ? 0 : 1;
+    rejected += enc.enqueue(makeMessage(10, Flex::Numeric, std::string(42, '1'))).m_ok ? 0 : 1;
+    check((rejected == 8) && (enc.pending() == 0), "enqueue: invalid capcode and text rejected with an error");
 
     Encoder::EnqueueResult ok = enc.enqueue(makeMessage(10, Flex::Alphanumeric, std::string(251, 'a')));
     Encoder::EnqueueResult ok2 = enc.enqueue(makeMessage(10, Flex::Tone, "ignored"));

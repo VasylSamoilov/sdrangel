@@ -25,6 +25,7 @@
 #include "radiopagingdemodbaseband.h"
 
 MESSAGE_CLASS_DEFINITION(RadioPagingDemodBaseband::MsgConfigureRadioPagingDemodBaseband, Message)
+MESSAGE_CLASS_DEFINITION(RadioPagingDemodBaseband::MsgResetProtocol, Message)
 
 RadioPagingDemodBaseband::RadioPagingDemodBaseband() :
     m_running(false)
@@ -141,6 +142,14 @@ bool RadioPagingDemodBaseband::handleMessage(const Message& cmd)
         qDebug() << "RadioPagingDemodBaseband::handleMessage: MsgConfigureRadioPagingDemodBaseband";
 
         applySettings(cfg.getSettingsKeys(), cfg.getSettings(), cfg.getForce());
+
+        return true;
+    }
+    else if (MsgResetProtocol::match(cmd))
+    {
+        QMutexLocker mutexLocker(&m_mutex);
+        const MsgResetProtocol& msg = (const MsgResetProtocol&) cmd;
+        m_sink.resetProtocol(msg.getProtocol());
 
         return true;
     }

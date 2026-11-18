@@ -73,6 +73,8 @@ public:
     void setDuplicateWindow(double seconds) { m_dedup.setWindow(seconds); }
     //!< Frequency of the receiver, Hz: a pager is on one frequency (part of the duplicate key)
     void setFrequency(int64_t frequency) { m_dedup.setFrequency(frequency); }
+    //!< Messages remembered for duplicate detection, of a polarity (0 normal, 1 inverted) or of both (-1)
+    int remembered(int polarity = -1) const { return (int) m_dedup.messages(m_time, polarity); }
 
     void process(float sample);
     //!< The signal is gone: finish the transmissions in progress

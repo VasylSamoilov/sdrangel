@@ -325,17 +325,18 @@ bool RadioPagingPocsagTxStream::next(RadioPagingTxBlock& block)
     m_inTransmission = true;
     startDelays();
 
-    bool sent = nextNetwork(block);
+    // A network always has a block to send: a preamble, messages or idle batches
+    nextNetwork(block);
 
     // The time of the next block
-    if (sent && (block.m_baud > 0.0)) {
+    if (block.m_baud > 0.0) {
         m_nowMs += (int64_t) std::llround((double) block.m_levels.size() * 1000.0 / block.m_baud);
     }
 
-    return sent;
+    return true;
 }
 
-bool RadioPagingPocsagTxStream::nextNetwork(RadioPagingTxBlock& block)
+void RadioPagingPocsagTxStream::nextNetwork(RadioPagingTxBlock& block)
 {
     if (m_preambleDue)
     {
@@ -344,7 +345,7 @@ bool RadioPagingPocsagTxStream::nextNetwork(RadioPagingTxBlock& block)
         block.m_levels = levels(preambleBits(), m_group.second);
         m_preambleDue = false;
         m_idleBatches = 0;
-        return true;
+        return;
     }
 
     std::deque<Item>& queue = m_queues[m_group];
@@ -381,7 +382,7 @@ bool RadioPagingPocsagTxStream::nextNetwork(RadioPagingTxBlock& block)
         block.m_levels = levels(result.m_bits, m_group.second);
         m_idleBatches = 0;
         m_turnBlocks++;
-        return true;
+        return;
     }
 
     // Another group: when this one is idle long enough or its turn is over; with nothing to
@@ -404,7 +405,7 @@ bool RadioPagingPocsagTxStream::nextNetwork(RadioPagingTxBlock& block)
         block.m_levels = levels(preambleBits(), m_group.second);
         m_idleBatches = 0;
         m_turnBlocks = 0;
-        return true;
+        return;
     }
 
     block.m_baud = m_group.first;
@@ -412,7 +413,6 @@ bool RadioPagingPocsagTxStream::nextNetwork(RadioPagingTxBlock& block)
     block.m_levels = levels(idleBatchBits(), m_group.second);
     m_idleBatches++;
     m_turnBlocks = 0;
-    return true;
 }
 
 // The turns count over the runs: a group refilled at every run gives way after its blocks

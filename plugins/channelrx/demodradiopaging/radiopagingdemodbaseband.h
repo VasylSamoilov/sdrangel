@@ -60,6 +60,20 @@ public:
         { }
     };
 
+    class MsgResetProtocol : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        int getProtocol() const { return m_protocol; }
+
+        static MsgResetProtocol* create(int protocol) { return new MsgResetProtocol(protocol); }
+
+    private:
+        int m_protocol;     //!< 0 POCSAG, 1 FLEX, 2 GSC, -1 all
+
+        MsgResetProtocol(int protocol) : Message(), m_protocol(protocol) { }
+    };
+
     RadioPagingDemodBaseband();
     ~RadioPagingDemodBaseband();
     void reset();

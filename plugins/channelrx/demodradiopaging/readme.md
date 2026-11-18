@@ -79,7 +79,7 @@ The alphanumeric messages of each protocol are shown with the glyphs of a pager 
 
 <h3>Duplicates</h3>
 
-Nothing is dropped. A POCSAG or GSC page received again within 60 s on the same network (speed and polarity) with the same address, function, type and content is output again, tagged duplicate. FLEX retransmissions are tagged as above. Duplicates are greyed in the table and have duplicate set in their record.
+Nothing is dropped. A POCSAG or GSC page received again within 60 s on the same network (speed and polarity) with the same address, function, type and content is output again, tagged duplicate. FLEX retransmissions are tagged as above. Duplicates are flagged DUP (DUP+ when they repaired an earlier copy) in the info column and have duplicate set in their record.
 
 <h3>Bit error rate</h3>
 
@@ -123,10 +123,13 @@ One row per protocol:
 * POCSAG: Fill - the rule for the fill at the end of alphanumeric messages. Right click edits the list of the custom codes.
 * FLEX: Max N - largest message number of the network (as the pagers are set), 0 to 63, default 63.
 * GSC: voice timeout, voice audio, recording, voice files and volume (see below).
-* Status - one line of fixed fields: HUNT (grey) while not synchronised, else SYNC (green); what is received with its polarity (NORM or INV); the bit error rate BER of the recent codewords; the carrier frequency offset &Delta;f; the number of messages in brackets. BER is green without bit errors, yellow when errors were corrected, red when there were errors the code could not correct; BER and &Delta;f are grey once the reception ended (the last values are kept). FLEX has two more lines (below). The tooltip explains the fields and gives the details of the last reception.
+* Status - one line of fixed fields: HUNT (grey) while not synchronised, else SYNC (green); what is received with its polarity (NORM or INV); the bit error rate BER of the recent codewords; the carrier frequency offset &Delta;f; the number of messages in brackets. BER is green without bit errors, yellow when errors were corrected, red when there were errors the code could not correct; BER and &Delta;f are grey once the reception ended (the last values are kept). FLEX has two more lines (below). The tooltip explains the fields and gives the details of the last reception. There are lines for each polarity received since the last reset (NORM and INV): one polarity is shown, the other is added when it is received.
   * POCSAG: the speeds being received with their polarity. Tooltip: the batches of the transmission.
   * FLEX: the mode and polarity of the frame, or ERS with its length during an emergency re-synchronization. Between the frames of a transmission SYNC stays shown until the sync of the next frame is due (1.875 s after the start of the last one). Line 2: cycle and frame (Cxx/Fxxx), collapse (cN), R when the roaming bit is set, xN for a frame repeated N times, the network date, time and time zone (DST in daylight saving time). Line 3: the BER of each phase of a frame of several phases, the system ID: LID local id, CZ coverage zone, CC country code, TMF traffic management flags. A field not received yet is blank. Tooltip: the same, the group slots in use as Gs[members]&gt;Ffff (target frame) out of 16, the members of each group, and the messages being reassembled.
   * GSC: VOICE during a voice page. Tooltip: the last page, preamble and batch or non battery saver, and slot.
+* FLEX group slots - under the FLEX status, the 16 group slots (temporary addresses 2029568 to 2029583) of each polarity shown, green when in use. The tooltip of a slot gives the number of its members and the first of them, the frame of the group message, the cycle and frame of the assignment and how many frames on the group message is.
+* Memory - the last line of the status, in grey: MEM the messages the receivers of the protocol remember for duplicate detection (FLEX: with its message history), FRAG (FLEX) the messages being reassembled, and RESET the time of the last reset.
+* Reset - makes the receivers of the protocol forget what they remember: the messages for duplicate detection, and for FLEX the fragments, groups, message numbers and network time. The receivers are reset when the device starts too, so that a file played again is not taken as duplicates. Switching a protocol off resets it as well.
 * Codepage - the codepage of the alphanumeric messages of the protocol (shown when the protocol has more than one).
 
 GSC has in addition:
@@ -145,7 +148,7 @@ Clears the table.
 
 <h3>8: Messages table</h3>
 
-The latest messages, newest at the bottom. The table follows new messages while it is scrolled to the bottom. The end of a GSC voice message updates the row of its voice page. Duplicates are greyed. Right click on the header selects the columns. A click on the icon of a voice message plays its file. Double click on a message opens a window with all the fields of its record: the common fields, protocolData and the raw payload (also as bits). Right click on a message: details, copy, voice and decode again.
+The latest messages, newest at the bottom. The table follows new messages while it is scrolled to the bottom. The end of a GSC voice message updates the row of its voice page. Duplicates are flagged DUP or DUP+ in the info column. Right click on the header selects the columns. A click on the icon of a voice message plays its file. Double click on a message opens a window with all the fields of its record: the common fields, protocolData and the raw payload (also as bits). Right click on a message: details, copy, voice and decode again.
 
 * Time - time the message was received (hover for the date)
 * Proto - POCSAG, FLEX or GSC

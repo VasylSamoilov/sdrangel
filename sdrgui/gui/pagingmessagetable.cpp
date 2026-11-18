@@ -481,20 +481,19 @@ void PagingMessageTable::recordInfo(const MessageRecord& record, QString& plain,
     }
 
     if (record.m_duplicate == MessageRecord::DuplicateDup) {
-        add("DUP", chip("DUP", "#bbbbbb", "#3a3a3a"));
+        add("DUP", chip("DUP", "#2a1f00", "#ffcc44"));
     } else if (record.m_duplicate == MessageRecord::DuplicateDupPlus) {
-        add("DUP+", chip("DUP+", "#66bb6a", "#3a3a3a"));
+        add("DUP+", chip("DUP+", "#0d2a12", "#66bb6a"));
     }
 
     plain = items.join(" ");
     html = chips.join(" ");
 }
 
-// The cells of a row from a record. Duplicates are plain grey text, the others keep their chips
+// The cells of a row from a record. A duplicate is shown like any message, with its DUP or DUP+ flag in the info
 void PagingMessageTable::fillRow(int row, const MessageRecord& record, const QString& state)
 {
     const QVariantMap& d = record.m_protocolData;
-    const bool duplicate = (record.m_duplicate != MessageRecord::DuplicateNone);
 
     auto cell = [&](int col, const QString& plain, const QString& html = QString(), const QString& tip = QString()) {
         QTableWidgetItem *item = this->item(row, col);
@@ -506,9 +505,8 @@ void PagingMessageTable::fillRow(int row, const MessageRecord& record, const QSt
         }
 
         item->setText(plain);
-        item->setData(htmlRole, (duplicate || html.isEmpty()) ? QVariant() : QVariant(html));
+        item->setData(htmlRole, html.isEmpty() ? QVariant() : QVariant(html));
         item->setToolTip(tip);
-        item->setForeground(duplicate ? QBrush(QColor("#777777")) : QBrush());
         return item;
     };
 

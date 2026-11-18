@@ -84,6 +84,31 @@ public:
         bool m_gscAudio;                //!< The voice message is being played
         bool m_gscInverted;
         quint32 m_messages[3];          //!< POCSAG, FLEX, GSC records sent since start
+        int m_remembered[3];            //!< Messages remembered for duplicate detection
+        qint64 m_resetTime[3];          //!< When the state of the protocol was last reset, ms since epoch
+
+        //! The network of one polarity of a protocol
+        struct Polarity
+        {
+            bool m_seen = false;        //!< Synchronised or a message received on the polarity since the last reset
+            bool m_sync = false;
+            RadioPagingBerWindow m_ber; //!< Of the reception in progress, or the last one
+            bool m_berLive = false;
+            float m_offset = 0.0f;      //!< Carrier frequency offset of the same reception, Hz
+            bool m_offsetValid = false;
+            quint32 m_messages = 0;     //!< Records sent since start
+            int m_remembered = 0;       //!< Messages remembered for duplicate detection
+        };
+        Polarity m_pol[3][2];           //!< POCSAG, FLEX, GSC; normal, inverted
+        bool m_pocsagSpeedSync[2][RadioPagingDemodSettings::m_nbPocsagSpeeds];     //!< By polarity, a decoder of the speed is synchronised
+        // FLEX: the network of each polarity, of its last frame
+        QString m_flexModePol[2];
+        RadioPagingFlexDecoder::FrameReport m_flexFramePol[2];
+        RadioPagingFlexDecoder::NetworkTime m_flexTimePol[2];
+        RadioPagingBerWindow m_flexPhaseBerPol[2][4];
+        std::vector<RadioPagingFlexDecoder::GroupSlot> m_flexGroupsPol[2];
+        int m_flexReassembliesPol[2];
+        bool m_gscVoicePol[2];
     };
 
     RadioPagingDemodSink();
@@ -109,6 +134,9 @@ public:
     void applyAudioSampleRate(int sampleRate);
     int getAudioSampleRate() const { return m_audioSampleRate; }
     Status getStatus() const;
+    //!< Forget what the receivers of a protocol remember (0 POCSAG, 1 FLEX, 2 GSC, -1 all): duplicates,
+    //!< fragments, groups, message numbers, network time
+    void resetProtocol(int protocol);
 
     void getMagSqLevels(double& avg, double& peak, int& nbSamples)
     {
@@ -213,6 +241,21 @@ private:
     bool m_lastGscBatch = false;
     bool m_lastGscNbs = false;
     int m_lastGscSlot = 0;
+    qint64 m_resetTime[3] = {0, 0, 0};  //!< When the state of each protocol was last reset, ms since epoch
+    //! What is kept of the reception of each polarity of each protocol between the status updates
+    struct PolarityLast
+    {
+        bool m_seen = false;
+        RadioPagingBerWindow m_ber;
+        float m_offset = 0.0f;
+        bool m_offsetValid = false;
+    };
+    PolarityLast m_polLast[3][2];
+    quint32 m_polMessages[3][2] = {{0, 0}, {0, 0}, {0, 0}};    //!< Records sent, by polarity (m_statusMutex)
+    bool m_polMessageSeen[3][2] = {{false, false}, {false, false}, {false, false}}; //!< A record sent since the reset (m_statusMutex)
+    QString m_flexLastMode[2];
+    RadioPagingFlexDecoder::FrameReport m_flexLastFrame[2];
+    RadioPagingBerWindow m_flexLastPhaseBer[2][4];
 
     // GSC voice audio: the GSC leg discriminator, DC blocked, low pass filtered and
     // resampled to the audio rate, only while a voice page is open
@@ -254,6 +297,7 @@ private:
     QString finishVoiceRecording();
     void closeAudio();
     void updateStatus();
+    void updatePolarityStatus(Status& status, const RadioPagingFlexReceiver::Status& flex, const RadioPagingGscReceiver::Status& gsc);
     void sendRecord(MessageRecord& record, int protocol);
     void sendPocsag(const RadioPagingPocsagDecoder::Message& message, int baud);
     void sendFlex(const RadioPagingFlexDecoder::Message& message);
