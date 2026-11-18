@@ -110,7 +110,8 @@ private:
     void showRecord(const MessageRecord& record);
     void checkNotifications(const MessageRecord& record);
     //!< The field of the record that a notification matches
-    static QString matchText(const MessageRecord& record, int field);
+    //!< The texts of the field of the record a notification is tried on: the address and the members of a group message
+    static QStringList matchTexts(const MessageRecord& record, int field);
     //!< ${address}, ${message}, ${protocol}, ${type}, ${channel} and ${0}, ${1}... of the match, replaced in the string
     static QString subStrings(const MessageRecord& record, const QRegularExpressionMatch& match, const QString& string);
     void enableSpeechIfNeeded();
@@ -120,7 +121,7 @@ private:
     void clearFromMap();
     //!< Hides the rows whose address does not match the filter; a row shown is hidden or not at once
     void applyAddressFilter();
-    bool addressMatchesFilter(const QString& address) const;
+    bool addressMatchesFilter(const QStringList& addresses) const;
     void leaveEvent(QEvent*);
     void enterEvent(EnterEventType*);
     void updateStatus();

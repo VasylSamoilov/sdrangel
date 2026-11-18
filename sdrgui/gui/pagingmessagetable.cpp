@@ -292,6 +292,20 @@ QString PagingMessageTable::selectedId() const
     return ((row >= 0) && item(row, ColTime)) ? item(row, ColTime)->data(Qt::UserRole).toString() : QString();
 }
 
+QStringList PagingMessageTable::rowAddresses(int row) const
+{
+    MessageRecord record;
+    const QTableWidgetItem *timeItem = item(row, ColTime);
+
+    if (!timeItem || !MessageRecord::fromJson(QJsonDocument::fromJson(timeItem->data(jsonRole).toString().toUtf8()).object(), record))
+    {
+        const QTableWidgetItem *address = item(row, ColAddress);
+        return address ? QStringList(address->text()) : QStringList();
+    }
+
+    return record.addresses();
+}
+
 void PagingMessageTable::selectId(const QString& id)
 {
     int row = findRow(id);
@@ -319,6 +333,23 @@ QString PagingMessageTable::recordText(const MessageRecord& record)
     }
     if (record.m_text.isEmpty() && ((record.m_msgType == "tone") || d.value("tone_only").toBool())) {
         return QString("(tone only)");
+    }
+    // A FLEX short instruction: what it tells the pager of the address
+    if (record.m_text.isEmpty() && d.contains("instruction_type"))
+    {
+        const int type = d.value("instruction_type").toInt();
+
+        if (type == 0)
+        {
+            const int slot = d.value("instruction_slot").toInt();
+            return QString("(added to group slot %1, temporary address %2, group message in frame %3)")
+                .arg(slot).arg(2029568 + slot).arg(d.value("instruction_frame").toInt(), 3, 10, QChar('0'));
+        }
+        if (type == 1) {
+            return QString("(system event, flags %1)").arg(d.value("event_flags").toUInt(), 3, 16, QChar('0'));
+        }
+
+        return QString("(short instruction type %1)").arg(type);
     }
 
     return record.m_text;
@@ -478,6 +509,15 @@ void PagingMessageTable::recordInfo(const MessageRecord& record, QString& plain,
             add(g, chip(g, "#80cbc4", "#103a35"));
             tip = tracked ? QString("G%1 members: %2").arg(d.value("group_slot").toInt()).arg(members.join(", "))
                           : QString("G%1: the group assignment was not received").arg(d.value("group_slot").toInt());
+        }
+        // A member added to a group: the slot and the frame of the group message
+        if (d.contains("instruction_type") && (d.value("instruction_type").toInt() == 0))
+        {
+            QString g = QString("G%1>F%2").arg(d.value("instruction_slot").toInt()).arg(d.value("instruction_frame").toInt(), 3, 10, QChar('0'));
+            add(g, chip(g, "#80cbc4", "#103a35"));
+            tip = QString("%1 added to group slot %2 (temporary address %3), group message in frame %4")
+                .arg(record.m_address).arg(d.value("instruction_slot").toInt()).arg(2029568 + d.value("instruction_slot").toInt())
+                .arg(d.value("instruction_frame").toInt(), 3, 10, QChar('0'));
         }
 
         QString k = checkChip("K", d.value("checksum").toString());

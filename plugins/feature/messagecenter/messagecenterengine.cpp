@@ -87,11 +87,14 @@ bool MessageCenterFilter::matches(const MessageRecord& record) const
     if (!m_msgType.isEmpty() && (record.m_msgType != m_msgType)) {
         return false;
     }
+    // The address, or the address of a member of the group of a group message
     if (!m_address.isEmpty())
     {
         const QRegularExpression& expression = compile(m_compiledAddress, m_address, true);
+        const QStringList addresses = record.addresses();
 
-        if (!expression.isValid() || !expression.match(record.m_address).hasMatch()) {
+        if (!expression.isValid() || std::none_of(addresses.begin(), addresses.end(),
+            [&expression](const QString& a) { return expression.match(a).hasMatch(); })) {
             return false;
         }
     }
@@ -106,8 +109,10 @@ bool MessageCenterFilter::matches(const MessageRecord& record) const
     if (!m_regExp.isEmpty())
     {
         const QRegularExpression& expression = compiled();
+        const QStringList texts = fieldTexts(record, m_matchField);
 
-        if (!expression.isValid() || !expression.match(fieldText(record, m_matchField)).hasMatch()) {
+        if (!expression.isValid() || std::none_of(texts.begin(), texts.end(),
+            [&expression](const QString& t) { return expression.match(t).hasMatch(); })) {
             return false;
         }
     }
@@ -201,8 +206,28 @@ QStringList MessageCenterFilter::captures(const MessageRecord& record) const
         return QStringList();
     }
 
-    QRegularExpressionMatch match = expression.match(fieldText(record, m_matchField));
-    return match.hasMatch() ? match.capturedTexts() : QStringList();
+    // The first text of the field that matches: the address, else a member of the group
+    for (const QString& text : fieldTexts(record, m_matchField))
+    {
+        QRegularExpressionMatch match = expression.match(text);
+
+        if (match.hasMatch()) {
+            return match.capturedTexts();
+        }
+    }
+
+    return QStringList();
+}
+
+QStringList MessageCenterFilter::fieldTexts(const MessageRecord& record, int field)
+{
+    if (field == MatchAddress)
+    {
+        const QStringList addresses = record.addresses();
+        return addresses.isEmpty() ? QStringList(QString()) : addresses;
+    }
+
+    return QStringList(fieldText(record, field));
 }
 
 QString MessageCenterFilter::fieldText(const MessageRecord& record, int field)
@@ -220,7 +245,7 @@ QString MessageCenterFilter::fieldText(const MessageRecord& record, int field)
     case MatchChannel:
         return record.m_channelAlias;
     case MatchAny:
-        return QStringList({record.m_address, record.m_text, record.m_protocol, record.m_msgType, record.m_channelAlias}).join(' ');
+        return (record.addresses() + QStringList({record.m_text, record.m_protocol, record.m_msgType, record.m_channelAlias})).join(' ');
     default:
         return QString();
     }
@@ -1301,6 +1326,32 @@ void MessageCenterEngine::ingest(const MessageRecord& record, const QString& sou
             // A receiver and a transmitter may have the same alias (the frequency): they are two endpoints
             QString key = endpointKey(endpoint.m_role, endpoint.m_alias);
 
+            // A channel whose alias changed (the alias is the frequency by default): its entry of the old alias goes
+            if ((record.m_deviceSetIndex >= 0) && (record.m_channelIndex >= 0))
+            {
+                const QString channel = QString("%1:%2").arg(record.m_deviceSetIndex).arg(record.m_channelIndex);
+
+                for (auto it = m_endpointChannels.begin(); it != m_endpointChannels.end();)
+                {
+                    if ((it.value() == channel) && (it.key() != key) && m_endpoints.contains(it.key())
+                        && (m_endpoints[it.key()].m_role == endpoint.m_role))
+                    {
+                        if (endpoint.m_role == MessageEndpoint::Transmitter) {
+                            endpointGone(m_endpoints[it.key()].m_alias, now);
+                        }
+
+                        m_endpoints.remove(it.key());
+                        it = m_endpointChannels.erase(it);
+                    }
+                    else
+                    {
+                        ++it;
+                    }
+                }
+
+                m_endpointChannels[key] = channel;
+            }
+
             // Every announcement (status too) carries the whole description: the protocols, speeds and
             // capabilities follow the settings of the channel
             m_endpoints[key] = endpoint;
@@ -1629,6 +1680,31 @@ bool MessageCenterEngine::applyEvent(const QString& id, const QString& state, co
 
 // A transmitter gone: what it had claimed and not transmitted waits for it; what it was
 // transmitting is interrupted
+int MessageCenterEngine::removeEndpoints(const QStringList& keys, bool offline, qint64 now)
+{
+    int removed = 0;
+
+    for (auto it = m_endpoints.begin(); it != m_endpoints.end();)
+    {
+        if ((offline && (it->m_status == MessageEndpoint::Offline)) || keys.contains(it.key()))
+        {
+            if (it->m_role == MessageEndpoint::Transmitter) {
+                endpointGone(it->m_alias, now);
+            }
+
+            m_endpointChannels.remove(it.key());
+            it = m_endpoints.erase(it);
+            removed++;
+        }
+        else
+        {
+            ++it;
+        }
+    }
+
+    return removed;
+}
+
 void MessageCenterEngine::endpointGone(const QString& alias, qint64 now)
 {
     for (MessageCenterPage& page : m_pages)

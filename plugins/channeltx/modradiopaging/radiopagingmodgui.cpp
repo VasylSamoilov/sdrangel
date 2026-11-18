@@ -44,6 +44,7 @@
 #include "gui/dialogpositioner.h"
 #include "gui/audioselectdialog.h"
 #include "gui/crightclickenabler.h"
+#include "gui/pagingmessagetable.h"
 #include "dsp/dspengine.h"
 #include "audio/audiodevicemanager.h"
 #include "radiopagingwav.h"
@@ -183,6 +184,7 @@ bool RadioPagingModGUI::handleMessage(const Message& message)
             }
         }
         else {
+            m_composerSent = false;
             log(QString("Refused: %1").arg(report.getError()));
         }
         return true;
@@ -191,6 +193,21 @@ bool RadioPagingModGUI::handleMessage(const Message& message)
     {
         const RadioPagingMod::MsgTxLog& entry = (const RadioPagingMod::MsgTxLog&) message;
         showTx(entry.getRecord(), entry.getStatus());
+
+        // A page that does not come from the composer (the Message Center, the API): what it is, as the composer says it
+        if (entry.getStatus() == "queued")
+        {
+            if (m_composerSent)
+            {
+                m_composerSent = false;
+            }
+            else
+            {
+                const MessageRecord& r = entry.getRecord();
+                const QString text = PagingMessageTable::recordText(r);
+                log(text.isEmpty() ? QString("%1 %2").arg(r.m_address, r.m_msgType) : QString("%1 %2: %3").arg(r.m_address, r.m_msgType, text));
+            }
+        }
 
         // A live voice page that is dropped (aborted, cleared) is over
         if ((entry.getStatus() == "dropped") && (m_liveId != 0)
@@ -711,6 +728,7 @@ void RadioPagingModGUI::send()
     }
 
     log(ui->composer->summary());
+    m_composerSent = true;
     m_radioPagingMod->getInputMessageQueue()->push(RadioPagingMod::MsgTx::create(request));
 }
 

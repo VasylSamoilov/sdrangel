@@ -94,6 +94,8 @@ struct MessageCenterFilter
     QJsonObject toJson() const;
     static MessageCenterFilter fromJson(const QJsonObject& json);
     static QString fieldText(const MessageRecord& record, int field);
+    //!< The texts of a field the expression is tried on: the address and the members of a group message, else the field
+    static QStringList fieldTexts(const MessageRecord& record, int field);
     static QString matchFieldName(int field);
     //!< The error of the regular expression, empty if it is valid or there is none
     QString regExpError() const;
@@ -390,6 +392,9 @@ public:
 
     // Endpoints
     const QMap<QString, MessageEndpoint>& endpoints() const { return m_endpoints; }
+    //!< Removes endpoints by their key (role and alias, endpointKey), or all those offline; the pages of a transmitter
+    //!< removed are given back as when it went offline. The number removed
+    int removeEndpoints(const QStringList& keys, bool offline, qint64 now);
     //!< The transmitters that could send a page
     QStringList eligible(const MessageRecord& page) const;
 
@@ -445,6 +450,7 @@ private:
     std::vector<std::unique_ptr<MessageCenterSink>> m_sinks;
     std::vector<std::unique_ptr<MessageCenterSource>> m_sources;
     QMap<QString, MessageEndpoint> m_endpoints;
+    QMap<QString, QString> m_endpointChannels;  //!< The channel (device set:channel index) of each endpoint key
     std::vector<MessageCenterPage> m_pages;
     QStringList m_sinkErrors;
     QMap<QString, SinkStat> m_sinkStats;

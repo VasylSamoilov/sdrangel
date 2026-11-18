@@ -572,6 +572,48 @@ void testRouteOrderAndSources()
     check(f.matches(rx("z", "pocsag", "1", "x", "c")), "matching without a source looks at the record only");
 }
 
+// A filter on an address also selects the group messages of which it is a member
+void testGroupMembers()
+{
+    MessageRecord group = rx("g", "flex", "0002029570", "group text", "c");
+    group.m_protocolData.insert("group_slot", 2);
+    group.m_protocolData.insert("group_capcodes", QVariantList({"0000002020", "0002101249"}));
+    MessageCenterFilter f;
+    f.m_address = "0002101249";
+    check(f.matches(group) && !f.matches(rx("o", "flex", "0002029570", "other", "c")), "an address filter selects a group message to a member");
+    MessageCenterFilter r;
+    r.m_matchField = MessageCenterFilter::MatchAddress;
+    r.m_regExp = "^0000(00)(20)20$";
+    check(f.matches(group) && r.matches(group) && (r.captures(group).value(2) == "20"), "an expression on the address tries the members, with its captures");
+}
+
+// The channels: one entry for a channel whose alias changed; removed by key or when offline
+void testEndpointRemoval()
+{
+    MessageCenterEngine engine;
+    auto announce = [&engine](const QString& alias, int channel, MessageEndpoint::Status status, qint64 now) {
+        MessageEndpoint e;
+        e.m_alias = alias;
+        e.m_role = MessageEndpoint::Receiver;
+        e.m_status = status;
+        e.m_protocols = QStringList({"pocsag"});
+        MessageRecord r = MessageEndpoint::toRecord(e, "status");
+        r.m_deviceSetIndex = 0;
+        r.m_channelIndex = channel;
+        engine.ingest(r, "channels", now);
+    };
+
+    announce("150000000", 0, MessageEndpoint::Idle, 1);
+    announce("150025000", 0, MessageEndpoint::Idle, 2);
+    check((engine.endpoints().size() == 1) && engine.endpoints().contains("rx:150025000"),
+        "a channel whose alias changed has one entry, of its new alias");
+    announce("151000000", 1, MessageEndpoint::Offline, 3);
+    announce("152000000", 2, MessageEndpoint::Idle, 4);
+    check(engine.removeEndpoints(QStringList(), true, 5) == 1, "the channels offline are removed");
+    check((engine.removeEndpoints(QStringList("rx:152000000"), false, 6) == 1) && (engine.endpoints().size() == 1),
+        "a channel is removed by its key");
+}
+
 // A route that decodes again: its sinks get the message with its codepage, the routes after it the message as received
 void testDecodingRoute()
 {
@@ -916,6 +958,8 @@ int main(int argc, char **argv)
     testRoutesWithActions();
     testRouteOrderAndSources();
     testDecodingRoute();
+    testEndpointRemoval();
+    testGroupMembers();
     testUdp();
     testCsvSources();
     std::printf("%d passed, %d failed\n", passed, failed);

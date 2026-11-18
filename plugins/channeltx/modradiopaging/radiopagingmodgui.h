@@ -120,6 +120,7 @@ private:
     quint64 m_liveId = 0;                       //!< The live voice page being sent, 0 if none
     bool m_liveSeen = false;                    //!< The transmitter has started it
     bool m_liveWaiting = false;                 //!< Its request was posted, the id is not known yet
+    bool m_composerSent = false;                //!< A page of the composer was posted: its line is in the log already
     void startMic();
     void stopMic();
     void readMic();

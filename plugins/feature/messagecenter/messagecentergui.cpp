@@ -455,7 +455,28 @@ void MessageCenterGUI::buildEndpoints(QWidget *container)
     layout->setContentsMargins(2, 2, 2, 2);
     m_endpointsTable = makeTable({"Channel", "Role", "Status", "Protocols", "Speeds", "Polarity", "Queue", "Seen"}, container);
     m_endpointsTable->setToolTip("The channels that announced themselves");
+    QHBoxLayout *buttons = new QHBoxLayout();
+    QPushButton *remove = new QPushButton("Remove", container);
+    remove->setToolTip("Remove the channel selected from the list; a channel there comes back when it announces itself.\n"
+        "The pages of a transmitter removed go back to the queue");
+    QPushButton *removeOffline = new QPushButton("Remove offline", container);
+    removeOffline->setToolTip("Remove the channels that are offline");
+    buttons->addWidget(remove);
+    buttons->addWidget(removeOffline);
+    buttons->addStretch();
     layout->addWidget(m_endpointsTable);
+    layout->addLayout(buttons);
+
+    connect(remove, &QPushButton::clicked, this, [this]() {
+        const QString key = selectedId(m_endpointsTable);
+
+        if (!key.isEmpty()) {
+            m_center->getInputMessageQueue()->push(MessageCenter::MsgRemoveEndpoints::create(QStringList(key), false));
+        }
+    });
+    connect(removeOffline, &QPushButton::clicked, this, [this]() {
+        m_center->getInputMessageQueue()->push(MessageCenter::MsgRemoveEndpoints::create(QStringList(), true));
+    });
 }
 
 void MessageCenterGUI::buildQueue(QWidget *container)
@@ -1141,11 +1162,13 @@ void MessageCenterGUI::refreshEndpoints()
 {
     static const char *statuses[] = {"offline", "idle", "busy"};
     const QMap<QString, MessageEndpoint>& endpoints = m_center->engine().endpoints();
+    const QString selected = selectedId(m_endpointsTable);
     m_endpointsTable->setRowCount(endpoints.size());
     int row = 0;
 
-    for (const MessageEndpoint& e : endpoints)
+    for (auto it = endpoints.constBegin(); it != endpoints.constEnd(); ++it)
     {
+        const MessageEndpoint& e = it.value();
         QStringList speeds, polarities;
 
         for (int s : e.m_speeds) {
@@ -1155,12 +1178,19 @@ void MessageCenterGUI::refreshEndpoints()
             polarities << ((p == (int) MessageRecord::PolarityInverted) ? "inverted" : "normal");
         }
 
-        setRow(m_endpointsTable, row++, {
+        setRow(m_endpointsTable, row, {
             e.m_alias, e.m_role == MessageEndpoint::Transmitter ? "transmitter" : "receiver", statuses[(int) e.m_status],
             e.m_protocols.join(", "), speeds.join(", "), polarities.join(", "),
             e.m_role == MessageEndpoint::Transmitter ? QString("%1/%2").arg(e.m_queueDepth).arg(e.m_capacity) : QString(),
             QDateTime::fromMSecsSinceEpoch(e.m_lastSeen).toString("HH:mm:ss")
         });
+        m_endpointsTable->item(row, 0)->setData(idRole, it.key());
+
+        if (it.key() == selected) {
+            m_endpointsTable->selectRow(row);
+        }
+
+        row++;
     }
 }
 

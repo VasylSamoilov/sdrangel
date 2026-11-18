@@ -939,7 +939,8 @@ void RadioPagingDemodGUI::on_logOpen_clicked()
     dialog.close();
 }
 
-bool RadioPagingDemodGUI::addressMatchesFilter(const QString& address) const
+// The address, or the address of a member of the group of a group message, matches the filter
+bool RadioPagingDemodGUI::addressMatchesFilter(const QStringList& addresses) const
 {
     QString pattern = ui->filterAddress->text().trimmed();
 
@@ -949,15 +950,25 @@ bool RadioPagingDemodGUI::addressMatchesFilter(const QString& address) const
 
     // As the address filter of the Pager demodulator: the whole address must match
     QRegularExpression regExp(QRegularExpression::anchoredPattern(pattern));
-    return !regExp.isValid() || regExp.match(address).hasMatch();
+
+    if (!regExp.isValid()) {
+        return true;
+    }
+
+    for (const QString& address : addresses)
+    {
+        if (regExp.match(address).hasMatch()) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 void RadioPagingDemodGUI::applyAddressFilter()
 {
-    for (int row = 0; row < ui->messages->rowCount(); row++)
-    {
-        QTableWidgetItem *item = ui->messages->item(row, PagingMessageTable::ColAddress);
-        ui->messages->setRowHidden(row, item && !addressMatchesFilter(item->text()));
+    for (int row = 0; row < ui->messages->rowCount(); row++) {
+        ui->messages->setRowHidden(row, !addressMatchesFilter(ui->messages->rowAddresses(row)));
     }
 }
 
@@ -979,7 +990,7 @@ void RadioPagingDemodGUI::showRecord(const MessageRecord& record)
 
     int row = ui->messages->findRow(record.m_id);
 
-    if ((row >= 0) && !addressMatchesFilter(record.m_address)) {
+    if ((row >= 0) && !addressMatchesFilter(record.addresses())) {
         ui->messages->setRowHidden(row, true);
     }
 
@@ -988,26 +999,26 @@ void RadioPagingDemodGUI::showRecord(const MessageRecord& record)
     }
 }
 
-QString RadioPagingDemodGUI::matchText(const MessageRecord& record, int field)
+QStringList RadioPagingDemodGUI::matchTexts(const MessageRecord& record, int field)
 {
     typedef RadioPagingDemodSettings::NotificationSettings Notification;
 
     switch (field)
     {
     case Notification::MatchAddress:
-        return record.m_address;
+        return record.addresses();
     case Notification::MatchMessage:
-        return record.m_text;
+        return QStringList(record.m_text);
     case Notification::MatchProtocol:
-        return record.m_protocol;
+        return QStringList(record.m_protocol);
     case Notification::MatchType:
-        return record.m_msgType;
+        return QStringList(record.m_msgType);
     case Notification::MatchChannel:
-        return record.m_channelAlias;
+        return QStringList(record.m_channelAlias);
     case Notification::MatchAny:
-        return QStringList({record.m_address, record.m_text, record.m_protocol, record.m_msgType, record.m_channelAlias}).join(' ');
+        return QStringList((record.addresses() + QStringList({record.m_text, record.m_protocol, record.m_msgType, record.m_channelAlias})).join(' '));
     default:
-        return QString();
+        return QStringList();
     }
 }
 
@@ -1021,13 +1032,19 @@ void RadioPagingDemodGUI::checkNotifications(const MessageRecord& record)
 
     for (const auto& notification : m_settings.m_notificationSettings)
     {
-        QString match = matchText(record, notification->m_matchField);
-
-        if (match.isEmpty() || !notification->m_regularExpression.isValid()) {
+        if (!notification->m_regularExpression.isValid()) {
             continue;
         }
 
-        QRegularExpressionMatch matchResult = notification->m_regularExpression.match(match);
+        // The first text of the field that matches: on the address, a member of a group message too
+        QRegularExpressionMatch matchResult;
+
+        for (const QString& match : matchTexts(record, notification->m_matchField))
+        {
+            if (!match.isEmpty() && (matchResult = notification->m_regularExpression.match(match)).hasMatch()) {
+                break;
+            }
+        }
 
         if (!matchResult.hasMatch()) {
             continue;
@@ -1820,9 +1837,22 @@ void RadioPagingDemodGUI::layoutProtocols()
             options->addLayout(ui->gscVoiceLayout);
         }
 
+        // GSC: its voice controls fill the line, the codepage goes on a line of its own
+        QHBoxLayout *codepageLine = options;
+
+        if (p == 2)
+        {
+            options->addStretch(1);
+            codepageLine = new QHBoxLayout();
+            codepageLine->addSpacing(indent);
+            // Its two codepages, shown whole
+            charset[p]->setMaximumWidth(QWIDGETSIZE_MAX);
+            charset[p]->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+        }
+
         m_codepageLabel[p] = new QLabel(tr("Codepage"), block);
-        options->addWidget(m_codepageLabel[p]);
-        options->addWidget(charset[p]);
+        codepageLine->addWidget(m_codepageLabel[p]);
+        codepageLine->addWidget(charset[p]);
 
         // The custom codepage of the protocol: its editor
         QToolButton *custom = new QToolButton(block);
@@ -1830,8 +1860,11 @@ void RadioPagingDemodGUI::layoutProtocols()
         custom->setToolTip(tr("Edit the custom codepage of %1: the character of each code and the direction of the text.\n"
             "Choose Custom in the codepages to decode with it").arg(names[p]));
         connect(custom, &QToolButton::clicked, this, [this, p]() { editCustomCodepage(p); });
-        options->addWidget(custom);
-        options->addStretch(1);
+        codepageLine->addWidget(custom);
+
+        if (p != 2) {
+            options->addStretch(1);
+        }
 
         QToolButton *reset = new QToolButton(block);
         reset->setIcon(QIcon(":/recycle.png"));
@@ -1841,6 +1874,12 @@ void RadioPagingDemodGUI::layoutProtocols()
         connect(reset, &QToolButton::clicked, this, [this, p]() { m_radioPagingDemod->resetProtocol(p); });
         options->addWidget(reset);
         column->addLayout(options);
+
+        if (p == 2)
+        {
+            codepageLine->addStretch(1);
+            column->addLayout(codepageLine);
+        }
 
         for (int pol = 0; pol < 2; pol++)
         {

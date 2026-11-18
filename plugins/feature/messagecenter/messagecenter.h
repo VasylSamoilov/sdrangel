@@ -147,6 +147,21 @@ public:
         MsgClearLog() : Message() { }
     };
 
+    //! Remove channels from the list: by their key (endpointKey), or all those offline
+    class MsgRemoveEndpoints : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        const QStringList& getKeys() const { return m_keys; }
+        bool getOffline() const { return m_offline; }
+        static MsgRemoveEndpoints* create(const QStringList& keys, bool offline) { return new MsgRemoveEndpoints(keys, offline); }
+
+    private:
+        QStringList m_keys;
+        bool m_offline;
+        MsgRemoveEndpoints(const QStringList& keys, bool offline) : Message(), m_keys(keys), m_offline(offline) { }
+    };
+
     //! Read a file once into the log (JSON lines, or a CSV log): not routed
     class MsgImportFile : public Message {
         MESSAGE_CLASS_DECLARATION

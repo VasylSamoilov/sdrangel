@@ -256,7 +256,10 @@ QJsonObject MCPDataFeed::getMessages(const QString& protocol, const QString& add
         if (!protocol.isEmpty() && (r.m_protocol.compare(protocol, Qt::CaseInsensitive) != 0)) {
             continue;
         }
-        if (!address.isEmpty() && !addressExpression.match(r.m_address).hasMatch()) {
+        const QStringList addresses = r.addresses();
+
+        if (!address.isEmpty() && !std::any_of(addresses.begin(), addresses.end(),
+            [&addressExpression](const QString& a) { return addressExpression.match(a).hasMatch(); })) {
             continue;
         }
         if (!text.isEmpty() && !textExpression.match(r.m_text).hasMatch()) {

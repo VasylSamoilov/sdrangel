@@ -78,6 +78,8 @@ public:
     //!< The id of the record of the selected row, empty if none; selects the row of an id
     QString selectedId() const;
     void selectId(const QString& id);
+    //!< The addresses of the record of a row: its address and the members of a group message
+    QStringList rowAddresses(int row) const;
     //!< The row of the record of an id, -1 if none
     int findRow(const QString& id) const;
     //!< The background of every cell of the row of an id (a notification that matched)

@@ -98,6 +98,9 @@ struct SDRBASE_API MessageRecord
     //!< Key identifying the same subscriber and message: protocol, address, polarity and,
     //!< when present in m_protocolData, "function" and "msgNumber"
     QString dedupKey() const;
+    //!< The addresses the record is for: its address and, for a group message, the addresses of the members of the
+    //!< group (protocolData group_capcodes)
+    QStringList addresses() const;
 
     QJsonObject toJson() const;
     static bool fromJson(const QJsonObject& json, MessageRecord& record);

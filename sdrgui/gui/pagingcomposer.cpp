@@ -590,6 +590,18 @@ void PagingComposer::display()
         m_text->setEnabled(m_shortType->currentIndex() == 0);
     }
 
+    // A type without text: the text is put aside (not shown, not sent) and comes back with a type that has one
+    if (!m_text->isEnabled() && !m_text->text().isEmpty())
+    {
+        m_keptText = m_text->text();
+        m_text->clear();
+    }
+    else if (m_text->isEnabled() && m_text->text().isEmpty() && !m_keptText.isEmpty())
+    {
+        m_text->setText(m_keptText);
+        m_keptText.clear();
+    }
+
     const bool alpha = flex && (type == "alphanumeric");
     m_binaryLabel->setVisible(binary || secure || alpha);
     m_binaryLabel->setText(secure ? tr("Type") : tr("Header"));
@@ -736,7 +748,8 @@ QString PagingComposer::summary() const
         address += tr(" priority");
     }
 
-    QString line = QString("%1 %2: %3").arg(address, typeLabel(p.m_type), text);
+    QString line = text.isEmpty() ? QString("%1 %2").arg(address, typeLabel(p.m_type))
+        : QString("%1 %2: %3").arg(address, typeLabel(p.m_type), text);
 
     if ((p.m_retransmit > 0) || (p.m_sendDelay > 0.0))
     {

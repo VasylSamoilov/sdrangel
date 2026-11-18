@@ -105,6 +105,7 @@ private:
     QComboBox *m_type;
     QLabel *m_textLabel;
     QLineEdit *m_text;
+    QString m_keptText;                 //!< The text of a type that has one, while a type without text is chosen
     QComboBox *m_charset;               //!< Alphanumeric: the codepage of the text
     QToolButton *m_codepageTable;       //!< The table of the codepage, to insert a character
     PagingCodepageTable *m_table;

@@ -103,6 +103,24 @@ QString MessageRecord::dedupKey() const
     return QString("%1|%2|%3|%4").arg(m_frequency).arg(m_protocol, polarityToString(m_polarity), m_address);
 }
 
+QStringList MessageRecord::addresses() const
+{
+    QStringList list;
+
+    if (!m_address.isEmpty()) {
+        list.append(m_address);
+    }
+
+    for (const QVariant& member : m_protocolData.value("group_capcodes").toList())
+    {
+        if (!list.contains(member.toString())) {
+            list.append(member.toString());
+        }
+    }
+
+    return list;
+}
+
 QJsonObject MessageRecord::toJson() const
 {
     QJsonObject json;

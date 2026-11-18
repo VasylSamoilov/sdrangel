@@ -56,6 +56,7 @@ MESSAGE_CLASS_DEFINITION(MessageCenter::MsgPageAction, Message)
 MESSAGE_CLASS_DEFINITION(MessageCenter::MsgUpdated, Message)
 MESSAGE_CLASS_DEFINITION(MessageCenter::MsgRedecoded, Message)
 MESSAGE_CLASS_DEFINITION(MessageCenter::MsgClearLog, Message)
+MESSAGE_CLASS_DEFINITION(MessageCenter::MsgRemoveEndpoints, Message)
 MESSAGE_CLASS_DEFINITION(MessageCenter::MsgImportFile, Message)
 MESSAGE_CLASS_DEFINITION(MessageCenter::MsgIngestRecords, Message)
 MESSAGE_CLASS_DEFINITION(MessageCenter::MsgSpeak, Message)
@@ -226,6 +227,13 @@ bool MessageCenter::handleMessage(const Message& cmd)
     {
         m_engine.clearLog();
         clearMap();
+        m_dirty = true;
+        return true;
+    }
+    else if (MsgRemoveEndpoints::match(cmd))
+    {
+        const MsgRemoveEndpoints& msg = (const MsgRemoveEndpoints&) cmd;
+        m_engine.removeEndpoints(msg.getKeys(), msg.getOffline(), QDateTime::currentMSecsSinceEpoch());
         m_dirty = true;
         return true;
     }
