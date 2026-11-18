@@ -957,6 +957,7 @@ void RadioPagingDemodSink::updatePolarityStatus(Status& status, const RadioPagin
 
         // FLEX: the networks of both polarities are kept by the decoder
         status.m_flexGroupsPol[pol] = m_flex.groups(pol == 1);
+        status.m_flexGroupStatesPol[pol] = m_flex.groupStates(pol == 1);
         status.m_flexReassembliesPol[pol] = m_flex.reassemblies(pol == 1);
         status.m_flexTimePol[pol] = m_flex.networkTime(pol == 1);
     }

@@ -1214,6 +1214,29 @@ void testGroup()
     delivery = g.decodeFrame(invertedDelivery);
     check(delivery.size() == 1 && delivery[0].m_groupTracked && (delivery[0].m_groupMembers.size() == 3) && delivery[0].m_inverted,
         "group: a frame of the other polarity 256 frames later does not expire the assignments of this one");
+
+    // The state of each slot: assigning in the frame of the assignments, delivered after the group message, missed when
+    // the assignment expired without it
+    Dec s;
+    s.decodeFrame(rxOf("group", "setup"));
+    std::vector<Dec::GroupSlotState> states = s.groupStates(false);
+    check((states.size() == 16) && (states[5].m_state == Dec::GroupAssigning) && (states[5].m_members == 3) && (states[5].m_targetFrame == 20)
+        && (states[6].m_state == Dec::GroupAssigning) && (states[0].m_state == Dec::GroupFree),
+        "group states: the slots assigned in the frame are assigning, the others free");
+    s.decodeFrame(rxOf("group", "delivery alpha"));
+    states = s.groupStates(false);
+    check((states[5].m_state == Dec::GroupDelivered) && (states[5].m_members == 3) && (states[6].m_state != Dec::GroupFree)
+        && (states[6].m_state != Dec::GroupDelivered), "group states: delivered after the group message, the other still waiting");
+    check(s.groupStates(true)[5].m_state == Dec::GroupFree, "group states: the other polarity is another network");
+
+    Dec x;
+    x.decodeFrame(rxOf("group", "setup"));
+    Dec::RxFrame after = rxOf("group", "delivery numeric");
+    after.m_cycle = (after.m_cycle + 2) % 15;
+    x.decodeFrame(after);
+    states = x.groupStates(false);
+    check(states[5].m_state == Dec::GroupMissed, "group states: missed when the assignment expires without its group message");
+    check(std::string(Dec::groupStateName(Dec::GroupDiscarded)) == "discarded", "group states: names");
 }
 
 // Multiple transmission (STD-43A 3.4.2, Fig. 3.4.2-3), 2x with collapse 1: repeat interval 2

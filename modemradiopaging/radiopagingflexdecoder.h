@@ -388,6 +388,30 @@ public:
         unsigned m_setupFrame = 0;
     };
 
+    //! What a temporary address slot is doing (STD-43A 3.8.2 short instruction, temporary address assignment)
+    enum GroupState {
+        GroupFree,
+        GroupAssigning,         //!< Members assigned in the last frame
+        GroupWaiting,           //!< Assigned, its group message not come yet
+        GroupDelivering,        //!< The group message started, more fragments to come
+        GroupDelivered,         //!< The group message ended (recently)
+        GroupMissed,            //!< The frame of the group message went by without it (recently)
+        GroupDiscarded,         //!< Assigned again to another frame before its group message (recently)
+        GroupTimeout            //!< The group message started and its last fragment did not come (recently)
+    };
+    struct GroupSlotState
+    {
+        GroupState m_state = GroupFree;
+        int m_members = 0;
+        unsigned m_targetFrame = 0;
+        int m_framesAgo = 0;            //!< Frames since the last assignment, fragment or outcome
+    };
+    //!< The 16 slots of the network of the polarity; an outcome (delivered, missed, discarded, timeout) is shown for
+    //!< m_outcomeFrames frames
+    std::vector<GroupSlotState> groupStates(bool inverted) const;
+    static const char *groupStateName(GroupState state);
+    static const int m_outcomeFrames = 16;
+
     const Status& status() const { return m_status; }
     const FrameReport& lastFrame() const { return m_report; }
     NetworkTime networkTime(bool inverted = false) const;
@@ -600,9 +624,19 @@ private:
         bool m_modeValid = false;
     };
 
+    struct TempOutcome
+    {
+        GroupState m_state = GroupFree;
+        uint32_t m_absFrame = 0;
+        int m_members = 0;
+        unsigned m_targetFrame = 0;
+    };
+
     struct PolarityState
     {
         TempSlot m_temp[16];
+        TempOutcome m_tempOutcome[16];      //!< How the last group of each slot ended
+        uint32_t m_lastAbsFrame = 0;        //!< Of the last frame of the network
         uint64_t m_tempGeneration = 0;      //!< Groups started
         std::vector<Reassembly> m_reassembly;
         std::vector<HistoryEntry> m_history;
@@ -630,6 +664,7 @@ private:
 
     PolarityState& pol() { return m_pol[m_ctx.m_pol]; }
     uint32_t absFrame() const { return m_ctx.m_cycle * 128 + m_ctx.m_frame; }
+    void setTempOutcome(int slot, GroupState state, const TempSlot& group);
 
     static Word decodeWord(uint32_t raw, bool erased);
     bool decodeFiw(const RxFrame& frame);

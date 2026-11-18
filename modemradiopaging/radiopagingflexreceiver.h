@@ -116,6 +116,7 @@ public:
     int remembered(int polarity = -1) const { return (int) m_dedup.messages(m_time, polarity) + m_decoder.historyCount(polarity); }
     //!< The network of a polarity, kept by the decoder: groups in use, messages being reassembled, network time
     std::vector<RadioPagingFlexDecoder::GroupSlot> groups(bool inverted) const { return m_decoder.groups(inverted); }
+    std::vector<RadioPagingFlexDecoder::GroupSlotState> groupStates(bool inverted) const { return m_decoder.groupStates(inverted); }
     int reassemblies(bool inverted) const { return m_decoder.reassemblies(inverted); }
     RadioPagingFlexDecoder::NetworkTime networkTime(bool inverted) const { return m_decoder.networkTime(inverted); }
 

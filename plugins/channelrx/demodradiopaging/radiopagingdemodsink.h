@@ -109,6 +109,7 @@ public:
         RadioPagingFlexDecoder::NetworkTime m_flexTimePol[2];
         RadioPagingBerWindow m_flexPhaseBerPol[2][4];
         std::vector<RadioPagingFlexDecoder::GroupSlot> m_flexGroupsPol[2];
+        std::vector<RadioPagingFlexDecoder::GroupSlotState> m_flexGroupStatesPol[2];   //!< The 16 slots of each polarity
         int m_flexReassembliesPol[2];
         bool m_gscVoicePol[2];
     };

@@ -572,7 +572,9 @@ void RadioPagingFlexDecoder::handleTemporaryAddress(const AddressContext& a, int
             {
                 t.m_lastFrame = absFrame();
 
-                if (complete) {
+                if (complete)
+                {
+                    setTempOutcome(a.m_tempSlot, GroupDelivered, t);
                     t = TempSlot();
                 }
             }
@@ -589,6 +591,7 @@ void RadioPagingFlexDecoder::handleTemporaryAddress(const AddressContext& a, int
 
         if (complete)
         {
+            setTempOutcome(a.m_tempSlot, GroupDelivered, t);
             t = TempSlot();
         }
         else
@@ -714,6 +717,11 @@ void RadioPagingFlexDecoder::decodeShortInstruction(Message& proto, const Addres
         // frame, or after the group message started, is a new group (the fragments in flight keep the old members)
         if (!t.m_active || t.m_delivering || (t.m_targetFrame != target))
         {
+            // A group waiting for its message, given another frame: the first one is discarded
+            if (t.m_active && !t.m_delivering) {
+                setTempOutcome((int) slot, GroupDiscarded, t);
+            }
+
             t = TempSlot();
             t.m_targetFrame = target;
             t.m_setupFrame = m_ctx.m_frame;

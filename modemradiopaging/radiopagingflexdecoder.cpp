@@ -256,6 +256,7 @@ std::vector<RadioPagingFlexDecoder::Message> RadioPagingFlexDecoder::decodeFrame
     m_ctx.m_transmissions = m_report.m_transmissions;
     m_ctx.m_tdCollapse = m_report.m_tdCollapse;
     m_lastFrameNumber[m_ctx.m_pol] = m_ctx.m_frame;
+    pol().m_lastAbsFrame = absFrame();
 
     expireTempGroups();
 
@@ -346,10 +347,77 @@ void RadioPagingFlexDecoder::expireTempGroups()
         uint32_t last = slot.m_lastFrame;
         uint32_t elapsed = (current >= last) ? (current - last) : (15 * 128 - last + current);
 
-        if (elapsed >= (uint32_t) m_tempTimeout) {
+        if (elapsed >= (uint32_t) m_tempTimeout)
+        {
+            // A group message that started and did not end, or one that never came
+            setTempOutcome(s, slot.m_delivering ? GroupTimeout : GroupMissed, slot);
             slot = TempSlot();
         }
     }
+}
+
+void RadioPagingFlexDecoder::setTempOutcome(int slot, GroupState state, const TempSlot& group)
+{
+    TempOutcome& outcome = pol().m_tempOutcome[slot];
+    outcome.m_state = state;
+    outcome.m_absFrame = absFrame();
+    outcome.m_members = (int) group.m_members.size();
+    outcome.m_targetFrame = group.m_targetFrame;
+}
+
+// The state of each of the 16 slots of the network of the polarity, at its last frame
+std::vector<RadioPagingFlexDecoder::GroupSlotState> RadioPagingFlexDecoder::groupStates(bool inverted) const
+{
+    const PolarityState& state = m_pol[inverted ? 1 : 0];
+    std::vector<GroupSlotState> out(m_tempSlots);
+    const uint32_t current = state.m_lastAbsFrame;
+    auto since = [current](uint32_t frame) {
+        return (int) ((current >= frame) ? (current - frame) : (15 * 128 - frame + current));
+    };
+
+    for (int s = 0; s < m_tempSlots; s++)
+    {
+        const TempSlot& slot = state.m_temp[s];
+        const TempOutcome& outcome = state.m_tempOutcome[s];
+        GroupSlotState& g = out[s];
+
+        if (slot.m_active)
+        {
+            g.m_members = (int) slot.m_members.size();
+            g.m_targetFrame = slot.m_targetFrame;
+            g.m_framesAgo = since(slot.m_lastFrame);
+
+            if (slot.m_delivering)
+            {
+                g.m_state = GroupDelivering;
+            }
+            else if (g.m_framesAgo == 0)
+            {
+                g.m_state = GroupAssigning;     // Members assigned in the last frame
+            }
+            else
+            {
+                // Waiting for the group message; once its frame went by without it, missed
+                int toTarget = ((int) slot.m_targetFrame - (int) (slot.m_lastFrame % 128) + 128) % 128;
+                g.m_state = (g.m_framesAgo > toTarget) ? GroupMissed : GroupWaiting;
+            }
+        }
+        else if ((outcome.m_state != GroupFree) && (since(outcome.m_absFrame) < m_outcomeFrames))
+        {
+            g.m_state = outcome.m_state;
+            g.m_members = outcome.m_members;
+            g.m_targetFrame = outcome.m_targetFrame;
+            g.m_framesAgo = since(outcome.m_absFrame);
+        }
+    }
+
+    return out;
+}
+
+const char *RadioPagingFlexDecoder::groupStateName(GroupState state)
+{
+    static const char *names[] = {"free", "assigning", "waiting", "delivering", "delivered", "missed", "discarded", "timeout"};
+    return names[(int) state];
 }
 
 void RadioPagingFlexDecoder::decodePhase(const RxPhase& phase)
