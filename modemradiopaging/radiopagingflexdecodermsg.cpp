@@ -1109,6 +1109,10 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
     // The first character slot of the first fragment of an alphanumeric message is the signature
     // (3.10.1.3). A secure message has none: the slot is character a0 (Fig. 3.10.1.4-1)
     const bool sigSlot = initial && !secure;
+    // Header lost: the fragment is not known, so neither is the first slot. It is the signature of a message
+    // in one piece if it is the signature of the characters received; otherwise it is shown as lost
+    const bool sigUnknown = !hdrOk && !secure;
+    int unknownSlot = -1;
     int startWord = a.m_long ? mw1 : (mw1 + 1);
 
     std::string text;
@@ -1144,6 +1148,11 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
                 if ((slot == 0) && (w == startWord) && sigSlot)
                 {
                     signature = ch;
+                    continue;
+                }
+                if ((slot == 0) && (w == startWord) && sigUnknown)
+                {
+                    unknownSlot = (int) ch;
                     continue;
                 }
 
@@ -1184,6 +1193,18 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
 
     Message msg = proto;
 
+    bool unknownIsSignature = false;
+
+    if (unknownSlot >= 0)
+    {
+        if (wordsOk && ((uint32_t) unknownSlot == ((~sum) & 0x7f))) {
+            unknownIsSignature = true;
+        } else {
+            text.insert(text.begin(), '?');
+            charStatus.insert(charStatus.begin(), 'X');
+        }
+    }
+
     msg.m_type = secure ? TypeSecure : TypeAlphanumeric;
     msg.m_text = text;
     msg.m_charStatus = charStatus;
@@ -1210,6 +1231,10 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
         if (hdrC == 0) {
             msg.m_signature = !wordsOk ? CheckIncomplete : (signature == ((~sum) & 0x7f)) ? CheckOk : CheckFailed;
         }
+    }
+    else if (unknownIsSignature)
+    {
+        msg.m_signature = CheckOk;
     }
 
     // K: checksum of the words of this fragment (the K field of the header counts as zero)

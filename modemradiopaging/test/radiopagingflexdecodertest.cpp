@@ -896,6 +896,42 @@ void testErrors()
 
         check(found && (e.status().m_codewordsErased == 1), "errors: erased codeword handled like a lost one");
 
+        // Lost alphanumeric header: the first slot is the signature when it checks, else a lost character.
+        // The header is the first word of the message field
+        int header = (int) blk->m_vectorStart + 2;
+
+        for (bool charLost : {false, true})
+        {
+            Dec::RxFrame hdr = clean;
+            hdr.m_phases[0].m_erased.assign(Flex::m_wordsPerFrame, 0);
+            hdr.m_phases[0].m_erased[header] = 1;
+            if (charLost) {
+                hdr.m_phases[0].m_erased[header + 3] = 1;
+            }
+
+            Dec h;
+            out = h.decodeFrame(hdr);
+            found = false;
+
+            for (const Dec::Message& m : out)
+            {
+                if ((m.m_typeName != "alphanumeric") || (m.m_messageNumber != -1)) {
+                    continue;
+                }
+                found = true;
+                if (!charLost) {
+                    check((m.m_text == tx.m_text) && (m.m_signature == Dec::CheckOk),
+                        "errors: lost alphanumeric header, signature slot taken as the signature it checks as");
+                } else {
+                    check((m.m_text.size() == tx.m_text.size() + 1) && (m.m_text[0] == '?') && (m.m_charStatus[0] == 'X')
+                        && (m.m_text.substr(1, 2) == tx.m_text.substr(0, 2)),
+                        "errors: lost alphanumeric header and a character word, signature slot shown as lost");
+                }
+            }
+
+            check(found, charLost ? "errors: lost header and character word, message decoded" : "errors: lost header, message decoded");
+        }
+
         // Erased address word: the message is lost, the others stay
         Dec::RxFrame addr = clean;
         addr.m_phases[0].m_erased.assign(Flex::m_wordsPerFrame, 0);
