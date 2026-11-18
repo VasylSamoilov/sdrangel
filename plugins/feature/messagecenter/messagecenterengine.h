@@ -33,6 +33,7 @@
 
 #include "util/messagerecord.h"
 #include "util/messageendpoint.h"
+#include "radiopagingcharset.h"
 
 class QUdpSocket;
 
@@ -353,6 +354,11 @@ public:
         QStringList m_sinks;            //!< Names: "log", "queue", or a sink added
         bool m_stop = false;
         bool m_enabled = true;
+        //! The message decoded again before it goes to the sinks of the route: with this codepage (none: the one of
+        //! the record) as this type (empty: the one of the record). A message that cannot be is sent as it is
+        RadioPagingCharset::Key m_decodeCharset;
+        QString m_decodeType;
+        bool decodes() const { return !m_decodeCharset.empty() || !m_decodeType.isEmpty(); }
     };
     //! The routes of a new message center: every message to the log
     static std::vector<Route> defaultRoutes();

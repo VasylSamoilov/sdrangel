@@ -572,6 +572,51 @@ void testRouteOrderAndSources()
     check(f.matches(rx("z", "pocsag", "1", "x", "c")), "matching without a source looks at the record only");
 }
 
+// A route that decodes again: its sinks get the message with its codepage, the routes after it the message as received
+void testDecodingRoute()
+{
+    MessageCenterEngine engine;
+    QStringList texts;
+    engine.addSink(std::unique_ptr<MessageCenterSink>(new MessageCenterActionSink("after", "speech", "${message}", 0,
+        [&texts](const QString&, const MessageRecord&, const QString& text, quint32) { texts.append(text); })));
+
+    const RadioPagingCharset::Codepage *cyrillic = nullptr;
+
+    for (const RadioPagingCharset::Codepage *codepage : RadioPagingCharset::codepages("flex"))
+    {
+        if (std::string(codepage->m_codepage) == "cyrillic") {
+            cyrillic = codepage;
+        }
+    }
+
+    check(cyrillic != nullptr, "a FLEX Cyrillic codepage");
+
+    if (!cyrillic) {
+        return;
+    }
+
+    MessageCenterEngine::Route decode, after;
+    decode.m_name = "flex 1 cyrillic";
+    decode.m_filter.m_protocols = QStringList({"flex"});
+    decode.m_filter.m_address = "1";
+    decode.m_sinks = QStringList({"log"});
+    decode.m_decodeCharset = cyrillic->key();
+    after.m_name = "after";
+    after.m_sinks = QStringList({"after"});
+    engine.setRoutes({decode, after});
+
+    MessageRecord flex = rx("f", "flex", "1", "AB", "c");
+    flex.m_protocolData.insert("alpha_codes", QString("4142"));
+    engine.ingest(flex, "channels", 1);
+    check(engine.find("f") && (engine.find("f")->m_text == QString::fromUtf8("\xD0\xB0\xD0\xB1"))
+        && engine.find("f")->m_protocolData.value("redecoded").toBool(), "the sinks of a decoding route get the message decoded");
+    check(texts == QStringList({"AB"}), "the routes after it get the message as received");
+
+    // A message that cannot be decoded so (no characters kept) goes as it is
+    engine.ingest(rx("g", "flex", "1", "CD", "c"), "channels", 2);
+    check(engine.find("g") && (engine.find("g")->m_text == "CD"), "a message that cannot be decoded goes as received");
+}
+
 void testUdp()
 {
     QUdpSocket receiver;
@@ -870,6 +915,7 @@ int main(int argc, char **argv)
     testActionSink();
     testRoutesWithActions();
     testRouteOrderAndSources();
+    testDecodingRoute();
     testUdp();
     testCsvSources();
     std::printf("%d passed, %d failed\n", passed, failed);

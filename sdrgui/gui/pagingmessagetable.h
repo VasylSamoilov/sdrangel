@@ -27,6 +27,7 @@
 #include "export.h"
 #include "util/messagerecord.h"
 
+class FeatureGUI;
 class QMouseEvent;
 class PagingVoicePlayer;
 
@@ -97,6 +98,12 @@ public:
     void showDetails(int row);
     //!< Shows the Message Center window, adding the feature first if there is none
     static void openMessageCenter();
+    //!< The route dialog of the Message Center filled from a message: its protocol, polarity, type and address, decoded
+    //!< as the codepage (vendor, model and codepage as in the records; empty: as received) and the type (empty: as
+    //!< received). Nothing without a Message Center
+    static void createRoute(const MessageRecord& record, const QVariantMap& charset, const QString& type);
+    //!< A window with the message decoded with every codepage of its protocol (and as numeric), a row each
+    void showAllCodepages(const MessageRecord& record);
 
 signals:
     //!< The user moved, resized, showed or hid a column
@@ -121,6 +128,7 @@ private:
     void setVoiceCell(int row);
     void displayPlayer();
     void selectAudioDevice(const QPoint& pos);
+    static FeatureGUI *messageCenterGui();
 };
 
 #endif // SDRGUI_GUI_PAGINGMESSAGETABLE_H_

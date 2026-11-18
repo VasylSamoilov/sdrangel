@@ -27,6 +27,7 @@
 #include "settings/serializable.h"
 #include "audio/audiodevicemanager.h"
 #include "messagecentersettings.h"
+#include "radiopagingpage.h"
 
 MessageCenterSettings::MessageCenterSettings() :
     m_rollupState(nullptr)
@@ -70,6 +71,14 @@ QByteArray MessageCenterSettings::routesToJson(const std::vector<MessageCenterEn
         o["stop"] = route.m_stop;
         o["sinks"] = QJsonArray::fromStringList(route.m_sinks);
         o["filter"] = route.m_filter.toJson();
+
+        if (!route.m_decodeCharset.empty()) {
+            o["decodeCharset"] = QJsonObject::fromVariantMap(RadioPagingPage::charsetData(route.m_decodeCharset));
+        }
+        if (!route.m_decodeType.isEmpty()) {
+            o["decodeType"] = route.m_decodeType;
+        }
+
         array.append(o);
     }
 
@@ -93,6 +102,8 @@ std::vector<MessageCenterEngine::Route> MessageCenterSettings::routesFromJson(co
         }
 
         route.m_filter = MessageCenterFilter::fromJson(o["filter"].toObject());
+        route.m_decodeCharset = RadioPagingPage::charsetKey(o["decodeCharset"].toObject().toVariantMap());
+        route.m_decodeType = o["decodeType"].toString();
         routes.push_back(route);
     }
 

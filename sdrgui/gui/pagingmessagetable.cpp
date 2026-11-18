@@ -792,35 +792,158 @@ void addJsonItem(QTreeWidgetItem *parent, const QString& key, const QJsonValue& 
 
 } // namespace
 
-// Every field of the record of the row, as stored (the JSON of the record): the common fields, protocolData
-// and the raw payload, also as bits
-// The window of the feature at the index of the Message Center in feature set 0; there is one feature set
-void PagingMessageTable::openMessageCenter()
+// The window of the Message Center: the feature window at its index in feature set 0 (there is one feature set),
+// nullptr if there is none
+FeatureGUI *PagingMessageTable::messageCenterGui()
 {
     int featureSetIndex = -1;
     int featureIndex = -1;
 
-    if (!FeatureWebAPIUtils::getFeature(featureSetIndex, featureIndex, "sdrangel.feature.messagecenter"))
-    {
-        // Added by the main message queue: its window shows when it is made
-        FeatureWebAPIUtils::openMessageCenter();
-        return;
+    if (!FeatureWebAPIUtils::getFeature(featureSetIndex, featureIndex, "sdrangel.feature.messagecenter")) {
+        return nullptr;
     }
 
     for (QWidget *widget : QApplication::allWidgets())
     {
         FeatureGUI *gui = qobject_cast<FeatureGUI*>(widget);
 
-        if (gui && (gui->getIndex() == featureIndex))
-        {
-            gui->show();
-            gui->showNormal();
-            gui->raise();
-            gui->activateWindow();
-            return;
+        if (gui && (gui->getIndex() == featureIndex)) {
+            return gui;
         }
     }
+
+    return nullptr;
 }
+
+void PagingMessageTable::openMessageCenter()
+{
+    FeatureGUI *gui = messageCenterGui();
+
+    if (!gui)
+    {
+        // Added by the main message queue: its window shows when it is made
+        FeatureWebAPIUtils::openMessageCenter();
+        return;
+    }
+
+    gui->show();
+    gui->showNormal();
+    gui->raise();
+    gui->activateWindow();
+}
+
+void PagingMessageTable::createRoute(const MessageRecord& record, const QVariantMap& charset, const QString& type)
+{
+    FeatureGUI *gui = messageCenterGui();
+
+    if (!gui) {
+        return;
+    }
+
+    gui->showNormal();
+    // Queued: the menu or the dialog of the table closes first
+    const QString json = QString::fromUtf8(QJsonDocument(record.toJson()).toJson(QJsonDocument::Compact));
+    QMetaObject::invokeMethod(gui, "createRouteFromRecord", Qt::QueuedConnection, Q_ARG(QString, json),
+        Q_ARG(QVariantMap, charset), Q_ARG(QString, type));
+}
+
+// Every codepage of the protocol of a received message, and its numeric reading: a row each. The right click on a
+// row makes a route of the Message Center that decodes the messages of the address so
+void PagingMessageTable::showAllCodepages(const MessageRecord& record)
+{
+    struct Reading
+    {
+        RadioPagingCharset::Key m_key;
+        QString m_type;
+        QString m_label;
+    };
+
+    const QStringList types = RadioPagingRecode::types(record);
+    const QString alphaType = types.contains("alphanumeric") ? QString("alphanumeric") : QString();
+    QList<Reading> readings;
+
+    for (const RadioPagingCharset::Codepage *codepage : RadioPagingCharset::codepages(record.m_protocol.toStdString()))
+    {
+        readings.append({codepage->key(), (alphaType != record.m_msgType) ? alphaType : QString(),
+            QString::fromUtf8(codepage->m_label)});
+    }
+    if (types.contains("numeric")) {
+        readings.append({RadioPagingCharset::Key(), QString("numeric"), tr("Numeric")});
+    }
+
+    QDialog *dialog = new QDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowTitle(tr("%1 %2 in every codepage").arg(record.m_protocol.toUpper(), record.m_address));
+    QVBoxLayout *layout = new QVBoxLayout(dialog);
+    QTableWidget *table = new QTableWidget((int) readings.size(), 2, dialog);
+    table->setHorizontalHeaderLabels({tr("Codepage"), tr("Message")});
+    table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    table->setSelectionBehavior(QAbstractItemView::SelectRows);
+    table->setSelectionMode(QAbstractItemView::SingleSelection);
+    table->verticalHeader()->hide();
+    table->horizontalHeader()->setStretchLastSection(true);
+    table->setContextMenuPolicy(Qt::CustomContextMenu);
+    const RadioPagingCharset::Key current = RadioPagingPage::charsetKey(record.m_protocolData.value("charset"));
+
+    for (int i = 0; i < (int) readings.size(); i++)
+    {
+        MessageRecord out;
+        QString error;
+        const bool done = RadioPagingRecode::redecode(record, readings[i].m_key, readings[i].m_type, out, error);
+        QTableWidgetItem *label = new QTableWidgetItem(readings[i].m_label);
+        QTableWidgetItem *text = new QTableWidgetItem(done ? out.m_text : error);
+
+        // The reading of the message as it is shown
+        if (((readings[i].m_key == current) && readings[i].m_type.isEmpty()) || (readings[i].m_type == record.m_msgType))
+        {
+            QFont bold = label->font();
+            bold.setBold(true);
+            label->setFont(bold);
+        }
+        if (!done) {
+            text->setForeground(Qt::gray);
+        }
+
+        text->setToolTip(text->text());
+        table->setItem(i, 0, label);
+        table->setItem(i, 1, text);
+    }
+
+    table->resizeColumnToContents(0);
+    const bool canRoute = messageCenterGui() != nullptr;
+
+    connect(table, &QTableWidget::customContextMenuRequested, dialog, [table, readings, record, canRoute](const QPoint& pos) {
+        QTableWidgetItem *clicked = table->itemAt(pos);
+
+        if (!clicked) {
+            return;
+        }
+
+        const Reading reading = readings[clicked->row()];
+        QMenu menu(table);
+        QAction *route = menu.addAction(tr("Create route..."));
+        route->setToolTip(tr("A route of the Message Center for the messages of this address, decoded so"));
+        route->setEnabled(canRoute);
+        connect(route, &QAction::triggered, table, [record, reading]() {
+            createRoute(record, reading.m_key.empty() ? QVariantMap() : RadioPagingPage::charsetData(reading.m_key), reading.m_type);
+        });
+        connect(menu.addAction(tr("Copy message")), &QAction::triggered, table, [table, clicked]() {
+            QApplication::clipboard()->setText(table->item(clicked->row(), 1)->text());
+        });
+        menu.exec(table->viewport()->mapToGlobal(pos));
+    });
+
+    QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::close);
+    layout->addWidget(table);
+    layout->addWidget(buttons);
+    dialog->resize(640, 400);
+    new DialogPositioner(dialog, true);
+    dialog->show();
+}
+
+// Every field of the record of the row, as stored (the JSON of the record): the common fields, protocolData
+// and the raw payload, also as bits
 
 void PagingMessageTable::showDetails(int row)
 {
@@ -984,10 +1107,22 @@ void PagingMessageTable::showRowMenu(const QPoint& pos)
     // A received message decoded again: as the other type, with another codepage of its protocol
     MessageRecord record;
     const QJsonObject json = QJsonDocument::fromJson(item(row, ColTime)->data(jsonRole).toString().toUtf8()).object();
+    const bool parsed = MessageRecord::fromJson(json, record);
 
-    if (MessageRecord::fromJson(json, record) && !RadioPagingRecode::types(record).isEmpty())
+    // A route of the Message Center filled from the message
+    if (parsed && (record.m_kind == MessageRecord::KindMessage) && !record.m_address.isEmpty())
+    {
+        QAction *route = menu.addAction(tr("Create route..."));
+        route->setToolTip(tr("A route of the Message Center for the messages of this address"));
+        route->setEnabled(messageCenterGui() != nullptr);
+        connect(route, &QAction::triggered, this, [record]() { createRoute(record, QVariantMap(), QString()); });
+    }
+
+    if (parsed && !RadioPagingRecode::types(record).isEmpty())
     {
         QMenu *decode = menu.addMenu(tr("Decode as"));
+        connect(decode->addAction(tr("All codepages...")), &QAction::triggered, this, [this, record]() { showAllCodepages(record); });
+        decode->addSeparator();
         const QString state = item(row, ColState) ? item(row, ColState)->text() : QString();
         auto redecode = [this, record, state](const RadioPagingCharset::Key& key, const QString& type) {
             MessageRecord out;

@@ -29,6 +29,7 @@
 
 #include "util/csv.h"
 #include "radiopagingpagerformat.h"
+#include "radiopagingrecode.h"
 #include "messagecenterengine.h"
 
 namespace {
@@ -1328,10 +1329,15 @@ void MessageCenterEngine::ingest(const MessageRecord& record, const QString& sou
         }
 
         matched = true;
-        QStringList captures = route.m_filter.captures(record);
+        MessageRecord decoded;
+        QString error;
+        const bool redecoded = route.decodes()
+            && RadioPagingRecode::redecode(record, route.m_decodeCharset, route.m_decodeType, decoded, error);
+        const MessageRecord& routed = redecoded ? decoded : record;
+        QStringList captures = route.m_filter.captures(routed);
 
         for (const QString& sink : route.m_sinks) {
-            deliver(record, sink, captures, now);
+            deliver(routed, sink, captures, now);
         }
 
         if (route.m_stop) {

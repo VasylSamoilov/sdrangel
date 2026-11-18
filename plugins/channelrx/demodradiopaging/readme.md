@@ -174,7 +174,7 @@ The Message Center button next to it opens the Message Center (and adds it when 
 
 <h3>10: Messages table</h3>
 
-The latest messages, newest at the bottom. The table follows new messages while it is scrolled to the bottom. The end of a GSC voice message updates the row of its voice page. Duplicates are flagged DUP or DUP+ in the info column. Right click on the header selects the columns. A click on the icon of a voice message plays its file. Double click on a message opens a window with all the fields of its record: the common fields, protocolData and the raw payload (also as bits). Right click on a message: details, copy, voice and decode again.
+The latest messages, newest at the bottom. The table follows new messages while it is scrolled to the bottom. The end of a GSC voice message updates the row of its voice page. Duplicates are flagged DUP or DUP+ in the info column. Right click on the header selects the columns. A click on the icon of a voice message plays its file. Double click on a message opens a window with all the fields of its record: the common fields, protocolData and the raw payload (also as bits). Right click on a message: details, copy, voice and decode again. Decode as, All codepages... shows the message decoded with every codepage of its protocol; Create route... (on a message, or on a row of that window) opens the route dialog of the Message Center filled from the message.
 
 * Time - time the message was received (hover for the date)
 * Proto - POCSAG, FLEX or GSC

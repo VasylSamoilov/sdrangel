@@ -820,6 +820,22 @@ QString MessageCenter::checkRouting(const MessageCenterSettings& settings)
             return QString("Route %1: a regular expression is not valid: %2").arg(route.m_name).arg(error);
         }
 
+        // The codepage a route decodes with: one of a protocol
+        if (!route.m_decodeCharset.empty())
+        {
+            bool known = false;
+
+            for (const char *protocol : {"pocsag", "flex", "gsc"}) {
+                known = known || (RadioPagingCharset::find(protocol, route.m_decodeCharset) != nullptr);
+            }
+            if (!known) {
+                return QString("Route %1: there is no codepage %2").arg(route.m_name).arg(RadioPagingPage::charsetText(route.m_decodeCharset));
+            }
+        }
+        if (!route.m_decodeType.isEmpty() && (route.m_decodeType != "alphanumeric") && (route.m_decodeType != "numeric")) {
+            return QString("Route %1: decodeType is alphanumeric or numeric").arg(route.m_name);
+        }
+
         // A source a route names: channels, api or a source of the settings
         for (const QString& source : route.m_filter.m_sources)
         {

@@ -89,6 +89,11 @@ public:
     void setGeometryBytes(const QByteArray& blob) override { m_settings.m_geometryBytes = blob; }
     QByteArray getGeometryBytes() const override { return m_settings.m_geometryBytes; }
 
+    //! The route dialog filled from a message (its JSON record): its protocol, polarity, type and address, to the log,
+    //! decoded as the codepage (charsetData; empty for none) and the type (empty for none). Called by the tables of
+    //! paging messages (PagingMessageTable::createRoute)
+    Q_INVOKABLE void createRouteFromRecord(const QString& recordJson, const QVariantMap& charset, const QString& type);
+
 private:
     MessageCenter *m_center;
     MessageCenterSettings m_settings;
@@ -147,7 +152,8 @@ private:
     void refreshRoutes();
     void refreshFiles();
     QString selectedId(QTableWidget *table) const;
-    void editRoute(int index);
+    //! A route: index -1 for a new one, filled from preset when it is given
+    void editRoute(int index, const MessageCenterEngine::Route *preset = nullptr);
     //! A sink or a source: index -1 for a new one
     void editFile(bool sink, int index);
     void speak(const QString& text);

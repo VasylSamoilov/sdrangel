@@ -1197,9 +1197,24 @@ void MessageCenterGUI::refreshRoutes()
 
     for (int i = 0; i < (int) routes.size(); i++)
     {
+        QString sinks = routes[i].m_sinks.isEmpty() ? QString("-") : routes[i].m_sinks.join(", ");
+
+        if (routes[i].decodes())
+        {
+            QStringList as;
+
+            if (!routes[i].m_decodeCharset.empty()) {
+                as.append(RadioPagingPage::charsetText(routes[i].m_decodeCharset));
+            }
+            if (!routes[i].m_decodeType.isEmpty()) {
+                as.append(routes[i].m_decodeType);
+            }
+
+            sinks += QString(", decoded as %1").arg(as.join(" "));
+        }
+
         setRow(m_routesTable, i, {QString::number(i + 1), routes[i].m_name, filterSummary(routes[i].m_filter),
-            routes[i].m_sinks.isEmpty() ? QString("-") : routes[i].m_sinks.join(", "),
-            routes[i].m_stop ? "stop" : "", routes[i].m_enabled ? "yes" : "no"});
+            sinks, routes[i].m_stop ? "stop" : "", routes[i].m_enabled ? "yes" : "no"});
     }
 
     if ((selected >= 0) && (selected < (int) routes.size())) {
@@ -1363,13 +1378,15 @@ void MessageCenterGUI::pageAction(int action)
 }
 
 // A route: a name, a filter, the sinks it sends to
-void MessageCenterGUI::editRoute(int index)
+void MessageCenterGUI::editRoute(int index, const MessageCenterEngine::Route *preset)
 {
     bool isNew = (index < 0);
     MessageCenterEngine::Route route;
 
     if (!isNew) {
         route = m_settings.m_routes[index];
+    } else if (preset) {
+        route = *preset;
     }
 
     QDialog dialog(this);
@@ -1409,6 +1426,58 @@ void MessageCenterGUI::editRoute(int index)
     stop->setChecked(route.m_stop);
     QCheckBox *enabled = new QCheckBox("Enabled", &dialog);
     enabled->setChecked(route.m_enabled);
+
+    // Decode as: the codepages of every protocol, once each; a message of a protocol without it is sent as it is
+    QFormLayout *decodeForm = new QFormLayout();
+    QComboBox *decodeCharset = new QComboBox(&dialog);
+    decodeCharset->setToolTip("The messages the route selects are decoded again with this codepage before they go to its sinks.\n"
+        "A message of a protocol that does not have it is sent as it was received");
+    decodeCharset->addItem("As received");
+    QList<RadioPagingCharset::Key> keys;
+    keys.append(RadioPagingCharset::Key());
+
+    for (const char *protocol : {"pocsag", "flex", "gsc"})
+    {
+        for (const RadioPagingCharset::Codepage *codepage : RadioPagingCharset::codepages(protocol))
+        {
+            const RadioPagingCharset::Key key = codepage->key();
+
+            if (!keys.contains(key))
+            {
+                keys.append(key);
+                decodeCharset->addItem(RadioPagingPage::charsetText(key));
+            }
+        }
+    }
+
+    decodeCharset->setCurrentIndex(std::max(0, (int) keys.indexOf(route.m_decodeCharset)));
+    QComboBox *decodeType = new QComboBox(&dialog);
+    decodeType->setToolTip("The type the messages are decoded as (POCSAG and GSC; FLEX alphanumeric only)");
+    decodeType->addItem("As received", QString());
+    decodeType->addItem("Alphanumeric", QString("alphanumeric"));
+    decodeType->addItem("Numeric", QString("numeric"));
+    decodeType->setCurrentIndex(std::max(0, decodeType->findData(route.m_decodeType)));
+    decodeForm->addRow("Decode as codepage", decodeCharset);
+    decodeForm->addRow("Decode as type", decodeType);
+
+    // A new route: where it goes, before route 1 by default
+    QComboBox *position = nullptr;
+
+    if (isNew)
+    {
+        position = new QComboBox(&dialog);
+        const std::vector<MessageCenterEngine::Route>& routes = m_settings.m_routes;
+
+        for (int i = 0; i < (int) routes.size(); i++) {
+            position->addItem(QString("Before %1 %2").arg(i + 1).arg(routes[i].m_name), i);
+        }
+
+        position->addItem(routes.empty() ? QString("First") : QString("After %1 %2").arg(routes.size()).arg(routes.back().m_name),
+            (int) routes.size());
+        position->setCurrentIndex(0);
+        decodeForm->addRow("Insert", position);
+    }
+
     QPushButton *ok = new QPushButton("OK", &dialog);
     QPushButton *cancel = new QPushButton("Cancel", &dialog);
     QHBoxLayout *buttons = new QHBoxLayout();
@@ -1417,6 +1486,7 @@ void MessageCenterGUI::editRoute(int index)
     buttons->addWidget(cancel);
     layout->addWidget(stop);
     layout->addWidget(enabled);
+    layout->addLayout(decodeForm);
     layout->addLayout(buttons);
     connect(ok, &QPushButton::clicked, &dialog, &QDialog::accept);
     connect(cancel, &QPushButton::clicked, &dialog, &QDialog::reject);
@@ -1438,6 +1508,8 @@ void MessageCenterGUI::editRoute(int index)
 
     route.m_stop = stop->isChecked();
     route.m_enabled = enabled->isChecked();
+    route.m_decodeCharset = keys.value(decodeCharset->currentIndex());
+    route.m_decodeType = decodeType->currentData().toString();
 
     // A route with an expression that is not valid would select nothing: said now
     QString error = route.m_filter.errors();
@@ -1446,19 +1518,60 @@ void MessageCenterGUI::editRoute(int index)
         QMessageBox::information(this, "Route", QString("A regular expression is not valid, the route selects nothing:\n%1").arg(error));
     }
 
-    if (isNew) {
-        m_settings.m_routes.push_back(route);
-    } else {
+    int at = index;
+
+    if (isNew)
+    {
+        at = std::min(std::max(0, position->currentData().toInt()), (int) m_settings.m_routes.size());
+        m_settings.m_routes.insert(m_settings.m_routes.begin() + at, route);
+    }
+    else
+    {
         m_settings.m_routes[index] = route;
     }
 
     refreshRoutes();
+    m_routesTable->selectRow(at);
     applySettings(QStringList("routes"));
 }
 
 void MessageCenterGUI::addRoute()
 {
     editRoute(-1);
+}
+
+void MessageCenterGUI::createRouteFromRecord(const QString& recordJson, const QVariantMap& charset, const QString& type)
+{
+    MessageRecord record;
+
+    if (!MessageRecord::fromJson(QJsonDocument::fromJson(recordJson.toUtf8()).object(), record)) {
+        return;
+    }
+
+    MessageCenterEngine::Route route;
+    route.m_decodeCharset = RadioPagingPage::charsetKey(charset);
+    route.m_decodeType = type;
+    route.m_filter.m_protocols = QStringList(record.m_protocol.toLower());
+    route.m_filter.m_polarity = (record.m_polarity == MessageRecord::PolarityUnknown) ? -1 : (int) record.m_polarity;
+    route.m_filter.m_msgType = record.m_msgType;
+    route.m_filter.m_address = QRegularExpression::escape(record.m_address);
+    route.m_sinks = QStringList("log");
+    route.m_stop = true;
+    route.m_name = QString("%1 %2").arg(record.m_protocol.toUpper(), record.m_address);
+
+    if (!route.m_decodeCharset.empty())
+    {
+        const RadioPagingCharset::Codepage *codepage = RadioPagingCharset::find(record.m_protocol.toStdString(), route.m_decodeCharset);
+        route.m_name += " " + (codepage ? QString::fromUtf8(codepage->m_label) : RadioPagingPage::charsetText(route.m_decodeCharset));
+    }
+    if (!type.isEmpty()) {
+        route.m_name += " " + type;
+    }
+
+    show();
+    raise();
+    activateWindow();
+    editRoute(-1, &route);
 }
 
 void MessageCenterGUI::editSelectedRoute()

@@ -25,6 +25,8 @@ The messages received and sent, newest at the bottom (at most the log size, the 
 * The table has the columns of the message tables of the channels: time, direction, channel, protocol, rate, polarity, address, type, message, fragment, info, errors and state. Right click on the header selects the columns.
 * A click on the icon of a voice message plays its file. Double click on a message opens a window with all the fields of its record: the common fields, protocolData (the flags and parameters of the protocol) and the raw payload, also as bits.
 * Right click on a message: details, copy the cell, the row or the record as JSON, play the voice, select the audio output, and decode a received message again as the other type or with another codepage of its protocol.
+* Decode as, All codepages...: a window with the message decoded with every codepage of its protocol (and as numeric, POCSAG and GSC), a row each; the reading shown is in bold. Right click on a row: Create route..., the route dialog filled to decode the messages of the address so.
+* Create route... (right click on a message): the route dialog filled from the message: its protocol, polarity, type and address, to the log, with Stop. The tables of the Radio Paging channels have both too, for the Message Center there is (none: they are greyed out).
 * Import: reads the messages of a file into the log: a JSON lines file, or a CSV log of a message center or of the Pager demodulator. They are logged, not routed, so no action is taken on them again.
 * Clear: removes all the messages of the log, and of the history file when it is kept, after a confirmation. The items the map sinks put on the Map are removed too.
 * A message a highlight sink took has its row in the colour of the sink.
@@ -50,6 +52,8 @@ The composer of a page, the same as in the Radio Paging modulator: transmitter (
 Every message is checked against all the routes in their number order (#), not only the first. Each route whose filter selects the message sends it to the sinks of the route: the log, the transmit queue or the sinks of Files. A route with Stop ends the check for the messages it selects, so the routes after it do not see them. The log is a sink as the others: a message no route sends to it is not logged. A new Message Center has one route, 1 "All messages to the log", without a filter. A sink takes only what a route sends to it.
 
 * Add, Edit (or double click) and Remove manage the routes; a route can be switched off. Up and Down change the order.
+* Insert: where a new route goes, before route 1 by default, or before or after another.
+* Decode as codepage and type: the messages the route selects are decoded again with the codepage and as the type before they go to its sinks; the routes after it get them as they were received. A message that cannot be decoded so (a codepage of another protocol, a transmitted message) is sent as it is.
 * Export saves the routes, the sinks and the sources to a JSON file; Import replaces them with those of a file, after a check and a confirmation.
 * From Pager makes the routes, sinks and sources that do what a Pager demodulator chosen from those there are does: a UDP sink and its route, a source that reads the rows its log gets from now on, and a route with speech, command, highlight and map sinks for each notification. Their names start with pager and the id of the instance (R0:1): an import again replaces them and deletes those no longer made; the others stay. What would be added, replaced, kept or deleted is listed first.
 
