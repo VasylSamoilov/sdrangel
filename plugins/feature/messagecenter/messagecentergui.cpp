@@ -52,6 +52,7 @@ QTableWidget *makeTable(const QStringList& headers, QWidget *parent)
     table->verticalHeader()->setVisible(false);
     table->horizontalHeader()->setStretchLastSection(true);
     table->setMinimumHeight(140);
+    table->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     return table;
 }
 
@@ -264,10 +265,16 @@ void MessageCenterGUI::setWorkspaceIndex(int index)
     m_feature->setWorkspaceIndex(index);
 }
 
-QWidget *MessageCenterGUI::makeRollup(const QString& title)
+QWidget *MessageCenterGUI::makeRollup(const QString& title, bool expanding)
 {
     QWidget *widget = new QWidget(getRollupContents());
     widget->setWindowTitle(title);
+
+    // A section with a table takes the height the window is given: the window can be resized vertically
+    if (expanding) {
+        widget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    }
+
     return widget;
 }
 
@@ -287,13 +294,14 @@ MessageCenterGUI::MessageCenterGUI(PluginAPI* pluginAPI, FeatureUISet *featureUI
     m_settings.setRollupState(&m_rollupState);
 
     RollupContents *rollupContents = getRollupContents();
-    buildLog(makeRollup("Log"));
-    buildEndpoints(makeRollup("Channels"));
-    buildQueue(makeRollup("Queue"));
-    buildCompose(makeRollup("Page"));
-    buildRoutes(makeRollup("Routes"));
-    buildFiles(makeRollup("Files"));
-    buildOptions(makeRollup("Options"));
+    buildLog(makeRollup("Log", true));
+    buildEndpoints(makeRollup("Channels", true));
+    buildQueue(makeRollup("Queue", true));
+    buildCompose(makeRollup("Page", false));
+    buildRoutes(makeRollup("Routes", true));
+    buildFiles(makeRollup("Files", true));
+    buildOptions(makeRollup("Options", false));
+    rollupContents->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     rollupContents->arrangeRollups();
     connect(rollupContents, SIGNAL(widgetRolled(QWidget*,bool)), this, SLOT(onWidgetRolled(QWidget*,bool)));
     sizeToContents();
@@ -318,6 +326,7 @@ void MessageCenterGUI::buildLog(QWidget *container)
     m_logFilter = new MessageCenterFilterWidget(container);
     m_logTable = new PagingMessageTable(container);
     m_logTable->setMinimumHeight(220);
+    m_logTable->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_logTable->setMaxRows(m_maxLogRows);
     m_logTable->setDefaultColumns({PagingMessageTable::ColTime, PagingMessageTable::ColDirection, PagingMessageTable::ColChannel,
         PagingMessageTable::ColProtocol, PagingMessageTable::ColRate, PagingMessageTable::ColPolarity, PagingMessageTable::ColAddress,
@@ -530,6 +539,7 @@ void MessageCenterGUI::onWidgetRolled(QWidget* widget, bool rollDown)
     (void) rollDown;
     getRollupContents()->saveState(m_rollupState);
     applySettings(QStringList("rollupState"));
+    sizeToContents();
 }
 
 void MessageCenterGUI::onMenuDialogCalled(const QPoint &p)

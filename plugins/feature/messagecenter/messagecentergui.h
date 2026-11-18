@@ -110,7 +110,7 @@ private:
     explicit MessageCenterGUI(PluginAPI* pluginAPI, FeatureUISet *featureUISet, Feature *feature, QWidget* parent = nullptr);
     ~MessageCenterGUI() override;
 
-    QWidget *makeRollup(const QString& title);
+    QWidget *makeRollup(const QString& title, bool expanding);
     void buildLog(QWidget *container);
     void buildEndpoints(QWidget *container);
     void buildQueue(QWidget *container);
