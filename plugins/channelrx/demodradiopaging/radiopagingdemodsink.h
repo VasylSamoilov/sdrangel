@@ -37,7 +37,6 @@
 #include "radiopagingpocsagreceiver.h"
 #include "radiopagingflexreceiver.h"
 #include "radiopaginggscreceiver.h"
-#include "radiopagingtonedetector.h"
 #include "radiopagingcharset.h"
 
 #include "radiopagingdemodsettings.h"
@@ -207,8 +206,6 @@ private:
         void setShift(double shift);
         bool takeHandover(float& delta);
         Real demod(const Complex& sample);
-        //!< The same, and the IQ the discriminator saw (shifted and filtered)
-        Real demod(const Complex& sample, Complex& filtered);
     };
 
     RadioPagingDemodSettings m_settings;
@@ -233,108 +230,6 @@ private:
     Leg m_flexLeg;
     Leg m_gscLeg;
     RadioPagingPocsagReceiver m_pocsag[RadioPagingDemodSettings::m_nbPocsagSpeeds];
-
-    //! Tone detectors of a leg and their carrier offset and deviation (see RadioPagingToneOffset)
-    struct ToneFront
-    {
-        struct Detector
-        {
-            double m_symbolRate;
-            int m_levels;
-            double m_window;            //!< Symbols
-        };
-
-        RadioPagingToneOffset m_estimator;
-        std::vector<RadioPagingToneDetector> m_detectors;
-        std::vector<int> m_windows;     //!< Samples integrated by each detector
-        //!< Signal quality of each detector at the last sample: log10 of the strongest tone over the others
-        std::vector<float> m_quality;
-        //!< The detectors get the IQ one estimator block late: the carrier and the deviation measured on a
-        //!< block are those of its samples, so a new transmission is received from its first symbol
-        std::vector<Complex> m_delayIQ;
-        std::vector<float> m_delayMagsq;
-        int m_delayPos = 0;
-        double m_phase = 0.0;
-        double m_measuredDeviation = -1.0;
-        //!< Carrier offset and deviation the detectors use: the estimate, or once a transmission has been decoded
-        //!< with it (confirm()), the estimates near it only, until none has been decoded for a while. A transmitter
-        //!< changes them slowly; a false fit of the estimator (idle fill, the 4-level alias) is far from them
-        double m_usedOffset = 0.0;
-        double m_usedDeviation = 0.0;
-        bool m_confirmed = false;
-        //!< The carrier offset and the deviation used are kept (GSC voice: the spectrum is that of the voice)
-        bool m_hold = false;
-        double m_confirmedOffset = 0.0;
-        double m_confirmedDeviation = 0.0;
-        int64_t m_sinceConfirm = 0;
-        bool m_created = false;
-
-        //!< The detectors, the levels of the tones the estimator looks for and the deviations it searches, Hz. delay:
-        //!< the detectors get the IQ one estimator block late (their symbols are decoded); without, they are on the
-        //!< time of the discriminator, whose symbols their quality goes with
-        void create(const std::vector<Detector>& detectors, int estimatorLevels, double minDeviation, double maxDeviation, bool delay);
-        //!< The output of each detector for the IQ of the leg, and its strongest tone; the magnitude squared
-        //!< returned has the same delay
-        float process(const Complex& filtered, float magsq, std::vector<float>& out, std::vector<int>& strongest);
-        //!< A sample of the leg (the voice of the discriminator) with the delay of the detectors
-        float delay(float sample)
-        {
-            if (m_delayIQ.empty()) {
-                return sample;
-            }
-            if (m_delayAudio.size() != m_delayIQ.size())
-            {
-                m_delayAudio.assign(m_delayIQ.size(), 0.0f);
-                m_delayAudioPos = 0;
-            }
-            float out = m_delayAudio[m_delayAudioPos];
-            m_delayAudio[m_delayAudioPos] = sample;
-            m_delayAudioPos = (m_delayAudioPos + 1) % (int) m_delayAudio.size();
-            return out;
-        }
-        std::vector<float> m_delayAudio;
-        int m_delayAudioPos = 0;
-        //!< A transmission has been decoded with the carrier offset and the deviation used
-        void confirm();
-        //!< The leg moved its frequency correction to shift (the signal moved down by it): the carrier used and
-        //!< confirmed move with it
-        void followLeg(double shift)
-        {
-            if (std::isnan(m_legShift))
-            {
-                m_legShift = shift;
-                return;
-            }
-            double delta = shift - m_legShift;
-            m_usedOffset -= delta;
-            m_confirmedOffset -= delta;
-            m_legShift = shift;
-        }
-        double m_legShift = NAN;
-    };
-    ToneFront m_pocsagTones;
-    ToneFront m_flexTones;
-    ToneFront m_gscTones;
-    std::vector<float> m_toneOut;
-    std::vector<int> m_toneStrongest;
-    uint32_t m_flexToneFrames = 0;      //!< Frames of the FLEX receiver when its tone estimate was last confirmed
-public:
-    //!< Experimental: symbols from tone detectors instead of the discriminator
-    static bool s_tones;
-    //!< Window of each detector, symbols: 0 for the one of each mode, else this one for all
-    static double s_toneWindow;
-    //!< 4-level symbols decided by the strongest tone (else by the level of the detector output)
-    static bool s_toneStrongest;
-    static double s_toneOffsetSeconds;
-    //!< Deviations searched, Hz
-    static double s_toneMinDeviation;
-    static double s_toneMaxDeviation;
-    //!< A confirmed estimate takes new estimates this near it only (Hz, fraction of the deviation), for this long
-    //!< after the last transmission decoded with it
-    static double s_toneConfirmedOffset;
-    static double s_toneConfirmedDeviation;
-    static double s_toneConfirmedSeconds;
-private:
     RadioPagingFlexReceiver m_flex;
     RadioPagingGscReceiver m_gsc;
     QString m_gscVoiceId[2];            //!< Record id of the voice page in progress, by polarity

@@ -113,12 +113,6 @@ bool RadioPagingDemodSink::Leg::takeHandover(float& delta)
 
 Real RadioPagingDemodSink::Leg::demod(const Complex& sample)
 {
-    Complex filtered;
-    return demod(sample, filtered);
-}
-
-Real RadioPagingDemodSink::Leg::demod(const Complex& sample, Complex& filtered)
-{
     double magsq;
     Real fmDev;
     Complex c = (m_shift != 0.0) ? sample * m_nco.nextIQ() : sample;
@@ -127,8 +121,7 @@ Real RadioPagingDemodSink::Leg::demod(const Complex& sample, Complex& filtered)
         m_pendingSamples--;
     }
 
-    filtered = m_filter.filter(c);
-    return m_discri.phaseDiscriminatorDelta(filtered, magsq, fmDev);
+    return m_discri.phaseDiscriminatorDelta(m_filter.filter(c), magsq, fmDev);
 }
 
 // The residual offset measured by a receiver moves the leg onto the carrier and narrows it
@@ -199,133 +192,6 @@ void RadioPagingDemodSink::decayHuntCentres()
         leg->setShift(leg->m_huntCentre);
     }
 }
-
-bool RadioPagingDemodSink::s_tones = true;
-double RadioPagingDemodSink::s_toneWindow = 0.0;
-bool RadioPagingDemodSink::s_toneStrongest = true;
-double RadioPagingDemodSink::s_toneOffsetSeconds = 0.25;
-double RadioPagingDemodSink::s_toneMinDeviation = 2000.0;
-double RadioPagingDemodSink::s_toneMaxDeviation = 6000.0;
-double RadioPagingDemodSink::s_toneConfirmedOffset = 300.0;
-double RadioPagingDemodSink::s_toneConfirmedDeviation = 0.1;
-double RadioPagingDemodSink::s_toneConfirmedSeconds = 5.0;
-
-namespace {
-
-// Tone detector windows, symbols, that recover the most bits at the decoding threshold of each mode with the
-// transmitter shaping: a whole symbol where the symbols are short against the shaping (FLEX, POCSAG 2400),
-// three quarters otherwise
-double toneWindow(double tuned)
-{
-    return (RadioPagingDemodSink::s_toneWindow > 0.0) ? RadioPagingDemodSink::s_toneWindow : tuned;
-}
-
-const double pocsagToneWindows[RadioPagingDemodSettings::m_nbPocsagSpeeds] = {0.75, 0.75, 1.0};    // 512, 1200, 2400
-const double flexToneWindow = 1.0;
-const double gscToneWindow = 0.75;
-
-} // namespace
-
-void RadioPagingDemodSink::ToneFront::create(const std::vector<Detector>& detectors, int estimatorLevels, double minDeviation, double maxDeviation, bool delay)
-{
-    const double rate = RadioPagingDemodSettings::m_channelSampleRate;
-    m_detectors.resize(detectors.size());
-    m_windows.resize(detectors.size());
-
-    for (size_t i = 0; i < detectors.size(); i++)
-    {
-        m_windows[i] = std::max(1, (int) std::lround(detectors[i].m_window * rate / detectors[i].m_symbolRate));
-        m_detectors[i].create(rate, 0.5 * (minDeviation + maxDeviation), m_windows[i], detectors[i].m_levels);
-    }
-
-    m_estimator.create(rate, minDeviation, maxDeviation, s_toneOffsetSeconds, 5000.0, estimatorLevels);
-    m_delayIQ.assign(delay ? RadioPagingToneOffset::m_blockSize : 0, Complex(0.0f, 0.0f));
-    m_delayMagsq.assign(delay ? RadioPagingToneOffset::m_blockSize : 0, 0.0f);
-    m_quality.assign(detectors.size(), NAN);
-    m_legShift = NAN;
-    m_delayPos = 0;
-    m_measuredDeviation = -1.0;
-    m_usedOffset = 0.0;
-    m_usedDeviation = 0.5 * (minDeviation + maxDeviation);
-    m_confirmed = false;
-    m_sinceConfirm = 0;
-    m_phase = 0.0;
-    m_created = true;
-}
-
-void RadioPagingDemodSink::ToneFront::confirm()
-{
-    m_confirmed = true;
-    m_confirmedOffset = m_usedOffset;
-    m_confirmedDeviation = m_usedDeviation;
-    m_sinceConfirm = 0;
-}
-
-float RadioPagingDemodSink::ToneFront::process(const Complex& filtered, float magsq, std::vector<float>& out, std::vector<int>& strongest)
-{
-    const double rate = RadioPagingDemodSettings::m_channelSampleRate;
-
-    // The carrier offset and the deviation from the spectrum of the leg, and the IQ brought onto the carrier
-    m_estimator.process(filtered);
-
-    // The sample one block back: the estimate is that of the block it is in
-    Complex delayed = filtered;
-    float delayedMagsq = magsq;
-
-    if (!m_delayIQ.empty())
-    {
-        delayed = m_delayIQ[m_delayPos];
-        delayedMagsq = m_delayMagsq[m_delayPos];
-        m_delayIQ[m_delayPos] = filtered;
-        m_delayMagsq[m_delayPos] = magsq;
-        m_delayPos = (m_delayPos + 1) % (int) m_delayIQ.size();
-    }
-
-    if (m_confirmed && (++m_sinceConfirm > (int64_t) (s_toneConfirmedSeconds * rate))) {
-        m_confirmed = false;
-    }
-
-    bool near = (std::abs(m_estimator.offset() - m_confirmedOffset) <= s_toneConfirmedOffset)
-        && (std::abs(m_estimator.deviation() - m_confirmedDeviation) <= s_toneConfirmedDeviation * m_confirmedDeviation);
-
-    if (!m_confirmed || near)
-    {
-        if (!m_hold)
-        {
-            m_usedOffset = m_estimator.offset();
-            m_usedDeviation = m_estimator.deviation();
-        }
-    }
-
-    if (m_usedDeviation != m_measuredDeviation)
-    {
-        m_measuredDeviation = m_usedDeviation;
-        for (auto& d : m_detectors) {
-            d.setDeviation(rate, m_measuredDeviation);
-        }
-    }
-
-    m_phase -= 2.0 * M_PI * m_usedOffset / rate;
-    if (m_phase < -M_PI) {
-        m_phase += 2.0 * M_PI;
-    } else if (m_phase > M_PI) {
-        m_phase -= 2.0 * M_PI;
-    }
-
-    Complex iq = delayed * Complex((Real) std::cos(m_phase), (Real) std::sin(m_phase));
-    out.resize(m_detectors.size());
-    strongest.resize(m_detectors.size());
-
-    for (size_t i = 0; i < m_detectors.size(); i++)
-    {
-        out[i] = m_detectors[i].process(iq);
-        strongest[i] = m_detectors[i].strongest();
-        m_quality[i] = std::log10(std::max(1e-3f, m_detectors[i].quality()));
-    }
-
-    return delayedMagsq;
-}
-
 
 RadioPagingDemodSink::RadioPagingDemodSink() :
     m_channel(nullptr),
@@ -414,37 +280,17 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
 
     if (m_settings.m_pocsagEnabled)
     {
-        Complex filtered;
-        Real fm = m_pocsagLeg.demod(ci, filtered);
+        Real fm = m_pocsagLeg.demod(ci);
         bool synced = false;
-        bool tones = s_tones;
-
-        // The tone detectors give the signal quality that gates the decoding, and with s_tones the symbols
-        if (!m_pocsagTones.m_created)
-        {
-            std::vector<ToneFront::Detector> detectors;
-            for (int i = 0; i < RadioPagingDemodSettings::m_nbPocsagSpeeds; i++) {
-                detectors.push_back({(double) RadioPagingDemodSettings::m_pocsagSpeeds[i], 2, toneWindow(pocsagToneWindows[i])});
-            }
-            m_pocsagTones.create(detectors, 2, s_toneMinDeviation, s_toneMaxDeviation, tones);
-            // The matched filter of a receiver integrates the rest of the symbol after a detector
-            for (int i = 0; i < RadioPagingDemodSettings::m_nbPocsagSpeeds; i++) {
-                m_pocsag[i].create(RadioPagingDemodSettings::m_channelSampleRate, RadioPagingDemodSettings::m_pocsagSpeeds[i],
-                    tones ? m_pocsagTones.m_windows[i] : 1);
-            }
-        }
-        m_pocsagTones.followLeg(m_pocsagLeg.m_shift);
-        m_pocsagTones.process(filtered, 1.0f, m_toneOut, m_toneStrongest);
 
         for (int i = 0; i < RadioPagingDemodSettings::m_nbPocsagSpeeds; i++)
         {
-            m_pocsag[i].process(tones ? m_toneOut[i] : fm, m_pocsagTones.m_quality[i]);
+            m_pocsag[i].process(fm);
 
             while (m_pocsag[i].hasMessage()) {
                 sendPocsag(m_pocsag[i].takeMessage(), RadioPagingDemodSettings::m_pocsagSpeeds[i]);
             }
-            // The tones give no carrier offset: the leg does not follow it (experimental)
-            if (m_pocsag[i].takeLevelsMeasured(dc) && !tones) {
+            if (m_pocsag[i].takeLevelsMeasured(dc)) {
                 legMeasured(m_pocsagLeg, ProtocolPocsag, dc);
             }
             synced = synced || m_pocsag[i].isSynced();
@@ -463,58 +309,12 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
 
     if (m_settings.m_flexEnabled)
     {
-        Complex filtered;
-        Real fm = m_flexLeg.demod(ci, filtered);
-        bool tones = s_tones;
-
-        // A detector for each symbol rate and number of levels: sync 1 is 1600 baud 2-level, the data of a
-        // frame that of its mode. They give the signal quality that gates the decoding, and with s_tones the
-        // symbols: 4-level symbols are decided by the strongest tone, the maximum likelihood decision of
-        // non-coherent orthogonal FSK, the detector output driving the symbol clock
-        if (!m_flexTones.m_created)
-        {
-            double window = toneWindow(flexToneWindow);
-            m_flexTones.create({{1600.0, 2, window}, {3200.0, 2, window}, {1600.0, 4, window}, {3200.0, 4, window}}, 4,
-                s_toneMinDeviation, s_toneMaxDeviation, tones);
-            int windows[RadioPagingFlexReceiver::NbInputs];
-            for (int i = 0; i < RadioPagingFlexReceiver::NbInputs; i++) {
-                windows[i] = tones ? m_flexTones.m_windows[i] : 1;
-            }
-            m_flex.create(RadioPagingDemodSettings::m_channelSampleRate, windows);
-            m_flexToneFrames = m_flex.frames();
-        }
-        m_flexTones.followLeg(m_flexLeg.m_shift);
-        float toneMagsq = m_flexTones.process(filtered, magsq, m_toneOut, m_toneStrongest);
-
-        if (tones)
-        {
-            float inputs[RadioPagingFlexReceiver::NbInputs];
-            int decisions[RadioPagingFlexReceiver::NbInputs];
-            for (int i = 0; i < RadioPagingFlexReceiver::NbInputs; i++)
-            {
-                bool fourLevel = (i == RadioPagingFlexReceiver::Input1600x4) || (i == RadioPagingFlexReceiver::Input3200x4);
-                inputs[i] = m_toneOut[i];
-                decisions[i] = (fourLevel && s_toneStrongest) ? m_toneStrongest[i] : -1;
-            }
-            m_flex.process(inputs, toneMagsq, decisions, m_flexTones.m_quality.data());
-        }
-        else
-        {
-            const float inputs[RadioPagingFlexReceiver::NbInputs] = {fm, fm, fm, fm};
-            m_flex.process(inputs, magsq, nullptr, m_flexTones.m_quality.data());
-        }
-
-        // A frame decoded confirms the carrier offset and the deviation of the tones
-        if (m_flex.frames() != m_flexToneFrames)
-        {
-            m_flexToneFrames = m_flex.frames();
-            m_flexTones.confirm();
-        }
+        m_flex.process(m_flexLeg.demod(ci), magsq);
 
         while (m_flex.hasMessage()) {
             sendFlex(m_flex.takeMessage());
         }
-        if (m_flex.takeLevelsMeasured(dc) && !tones) {
+        if (m_flex.takeLevelsMeasured(dc)) {
             legMeasured(m_flexLeg, ProtocolFlex, dc);
         }
         if (m_flex.isHunting() && m_flexLeg.m_tracking) {
@@ -527,28 +327,13 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
 
     if (m_settings.m_gscEnabled)
     {
-        Complex filtered;
-        Real fm = m_gscLeg.demod(ci, filtered);
-        bool tones = s_tones;
-
-        // The tone detector gives the signal quality that gates the decoding, and with s_tones the symbols
-        if (!m_gscTones.m_created)
-        {
-            m_gscTones.create({{600.0, 2, toneWindow(gscToneWindow)}}, 2, s_toneMinDeviation, s_toneMaxDeviation, tones);
-            m_gsc.create(RadioPagingDemodSettings::m_channelSampleRate, tones ? m_gscTones.m_windows[0] : 1);
-        }
-        m_gscTones.followLeg(m_gscLeg.m_shift);
-        // The voice is not FSK: the carrier and the deviation of the data before it are kept for the turn-off word
-        m_gscTones.m_hold = m_gsc.inVoice();
-        m_gscTones.process(filtered, 1.0f, m_toneOut, m_toneStrongest);
-
-        // The voice is the discriminator output; the symbols come from the tones with s_tones
-        m_gsc.process(tones ? m_toneOut[0] : fm, m_gscTones.m_quality[0]);
+        Real fm = m_gscLeg.demod(ci);
+        m_gsc.process(fm);
 
         while (m_gsc.hasMessage()) {
             sendGsc(m_gsc.takeMessage());
         }
-        if (m_gsc.takeLevelsMeasured(dc) && !tones) {
+        if (m_gsc.takeLevelsMeasured(dc)) {
             legMeasured(m_gscLeg, ProtocolGsc, dc);
         }
         if (!m_gsc.locked()) {
@@ -559,7 +344,7 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
         }
 
         if (m_settings.m_gscAudio || m_settings.m_gscVoiceRecord) {
-            processAudio(tones ? m_gscTones.delay(fm) : fm);
+            processAudio(fm);
         }
     }
 
@@ -719,20 +504,16 @@ void RadioPagingDemodSink::resetProtocol(int protocol)
         for (auto& pocsag : m_pocsag) {
             pocsag.reset();
         }
-        m_pocsagTones.m_created = false;
         m_resetTime[0] = now;
     }
     if ((protocol == 1) || (protocol < 0))
     {
         m_flex.reset();
-        m_flexTones.m_created = false;
-        m_flexToneFrames = 0;
         m_resetTime[1] = now;
     }
     if ((protocol == 2) || (protocol < 0))
     {
         m_gsc.reset();
-        m_gscTones.m_created = false;
         m_gscVoiceId[0].clear();
         m_gscVoiceId[1].clear();
         m_resetTime[2] = now;
@@ -943,10 +724,6 @@ void RadioPagingDemodSink::applyLegs()
     // GSC receives with the offset room: one measurement may place its carrier that far off
     m_gscLeg.create(gscAfc ? channel : m_settings.gscBandwidth(), gscAfc ? m_settings.gscBandwidth() : m_settings.gscCarson(),
         channel, m_settings.m_gscDeviation);
-    // The tone detectors are made again with the deviation set
-    m_pocsagTones.m_created = false;
-    m_flexTones.m_created = false;
-    m_gscTones.m_created = false;
 
     qDebug() << "RadioPagingDemodSink::applyLegs: hunting / receiving"
         << "POCSAG" << m_pocsagLeg.m_huntBandwidth << m_pocsagLeg.m_trackBandwidth
@@ -980,9 +757,9 @@ void RadioPagingDemodSink::updateStatus()
             if (ber.valid()) {
                 m_lastBer[0] = ber;
             }
-            // The carrier offset: the correction of the leg and what is left, measured by the tone estimator
-            // (s_tones) or at the discriminator (+/-1 at the deviation)
-            m_lastOffset[0] = m_pocsagLeg.m_shift + (s_tones ? m_pocsagTones.m_usedOffset : s.m_dc * m_settings.m_pocsagDeviation);
+            // The carrier offset: the correction of the leg and what is left at the
+            // discriminator (+/-1 at the deviation)
+            m_lastOffset[0] = m_pocsagLeg.m_shift + s.m_dc * m_settings.m_pocsagDeviation;
             m_lastOffsetValid[0] = true;
             m_lastPocsagBatches = inverted && !normal ? s.m_inverted.m_batches : s.m_normal.m_batches;
         }
@@ -1003,7 +780,7 @@ void RadioPagingDemodSink::updateStatus()
     }
     if (status.m_flexSync)
     {
-        m_lastOffset[1] = m_flexLeg.m_shift + (s_tones ? m_flexTones.m_usedOffset : flex.m_dc * m_settings.m_flexDeviation);
+        m_lastOffset[1] = m_flexLeg.m_shift + flex.m_dc * m_settings.m_flexDeviation;
         m_lastOffsetValid[1] = true;
     }
     status.m_flexFrame = flex.m_frameReport;
@@ -1030,7 +807,7 @@ void RadioPagingDemodSink::updateStatus()
         if (ber.valid()) {
             m_lastBer[2] = ber;
         }
-        m_lastOffset[2] = m_gscLeg.m_shift + (s_tones ? m_gscTones.m_usedOffset : gsc.m_dc * m_settings.m_gscDeviation);
+        m_lastOffset[2] = m_gscLeg.m_shift + gsc.m_dc * m_settings.m_gscDeviation;
         m_lastOffsetValid[2] = true;
     }
 
@@ -1494,15 +1271,10 @@ void RadioPagingDemodSink::sendGsc(const RadioPagingGscDecoder::Message& message
     if (message.m_type == RadioPagingGsc::Data)
     {
         const RadioPagingCharset::Codepage *charset = codepage(m_settings.m_gscCharset, "gsc");
-        RadioPagingGsc::Interpretation interpretation = RadioPagingGsc::interpret(message.m_rawData, message.m_rawBits, charset,
-            &message.m_rawLost);
+        RadioPagingGsc::Interpretation interpretation = RadioPagingGsc::interpret(message.m_rawData, message.m_rawBits, charset);
 
         record.m_msgType = QString::fromStdString(interpretation.m_type);
         record.m_text = escapeText(interpretation.m_text);
-        // The bits of the codewords that could not be corrected, their characters '?': kept for a new decoding
-        if (std::any_of(message.m_rawLost.begin(), message.m_rawLost.end(), [](uint8_t b) { return b != 0; })) {
-            record.m_protocolData.insert("lost_bits", QString(toByteArray(message.m_rawLost).toHex()));
-        }
         record.m_protocolData.insert("charset", RadioPagingPage::charsetData(charset->key()));
         record.m_protocolData.insert("checksum_errors", message.m_checksumErrors);
         record.m_protocolData.insert("checksum_passed", message.m_checksumPassed);

@@ -29,9 +29,9 @@ RadioPagingGscReceiver::RadioPagingGscReceiver() :
     create(38400.0);
 }
 
-void RadioPagingGscReceiver::create(double sampleRate, int inputWindow)
+void RadioPagingGscReceiver::create(double sampleRate)
 {
-    m_demod.create(sampleRate, m_baud, 2, inputWindow);
+    m_demod.create(sampleRate, m_baud, 2);
     reset();
 }
 
@@ -60,7 +60,7 @@ void RadioPagingGscReceiver::setVoiceTimeout(double seconds)
     m_inverted.setVoiceTimeout(seconds);
 }
 
-void RadioPagingGscReceiver::process(float sample, float quality)
+void RadioPagingGscReceiver::process(float sample)
 {
     RadioPagingFskDemod::Symbol symbol;
 
@@ -71,10 +71,10 @@ void RadioPagingGscReceiver::process(float sample, float quality)
     m_time += 1.0 / RadioPagingGsc::m_dataBitRate;
 
     if (m_normalEnabled) {
-        m_normal.feedSoft(symbol.m_soft, quality);
+        m_normal.feedSoft(symbol.m_soft);
     }
     if (m_invertedEnabled) {
-        m_inverted.feedSoft(symbol.m_soft, quality);
+        m_inverted.feedSoft(symbol.m_soft);
     }
 
     // DC offset and deviation are measured on the known patterns the decoders recognise (the

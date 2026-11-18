@@ -26,8 +26,6 @@ const int RadioPagingGscDecoder::m_maxNonBatterySaverLockMisses;
 const int RadioPagingGscDecoder::m_syncHits;
 const int RadioPagingGscDecoder::m_maxPreambleWordsAfterLock;
 const float RadioPagingGscDecoder::m_minPairAgreement = 0.5f;
-float RadioPagingGscDecoder::s_minQuality = 0.84f;
-float RadioPagingGscDecoder::s_minQuality2 = 0.92f;
 const int RadioPagingGscDecoder::m_minDamagedBlockCodewords;
 const int RadioPagingGscDecoder::m_maxCommaErrors;
 const int RadioPagingGscDecoder::m_alertSymbols;
@@ -74,10 +72,6 @@ void RadioPagingGscDecoder::reset()
     m_regBits = 0;
     std::fill(m_softRing, m_softRing + codewordBits, 0.0f);
     m_softPos = 0;
-    std::fill(m_qualityRing, m_qualityRing + m_qualitySymbols, 0.0f);
-    m_qualityPos = 0;
-    m_qualityCount = 0;
-    m_qualitySum = 0.0;
     std::fill(m_hits, m_hits + hitRing, (int8_t) -1);
     m_hitPos = 0;
     resetPattern();
@@ -89,7 +83,6 @@ void RadioPagingGscDecoder::reset()
     m_active = false;
     m_current = Message();
     m_currentBits.clear();
-    m_currentLost.clear();
     m_blocks = 0;
     m_codewords = 0;
     m_codewordsCorrected = 0;
@@ -242,22 +235,10 @@ void RadioPagingGscDecoder::feed(int symbol)
     feedSoft(symbol ? 1.0f : -1.0f);
 }
 
-void RadioPagingGscDecoder::feedSoft(float soft, float quality)
+void RadioPagingGscDecoder::feedSoft(float soft)
 {
     float s = (m_polarity == Normal) ? soft : -soft;
     int bit = (s > 0.0f) ? 1 : 0;
-
-    if (!std::isnan(quality))
-    {
-        if (m_qualityCount == m_qualitySymbols) {
-            m_qualitySum -= m_qualityRing[m_qualityPos];
-        } else {
-            m_qualityCount++;
-        }
-        m_qualityRing[m_qualityPos] = quality;
-        m_qualitySum += quality;
-        m_qualityPos = (m_qualityPos + 1) % m_qualitySymbols;
-    }
 
     m_reg = (m_reg << 1) | (uint64_t) bit;
     if (m_regBits < 64) {
@@ -535,22 +516,17 @@ void RadioPagingGscDecoder::finishMessage(bool truncated)
     m_current.m_truncated = truncated;
     m_current.m_rawBits = (int) m_currentBits.size();
     m_current.m_rawData.assign((m_currentBits.size() + 7) / 8, 0);
-    m_current.m_rawLost.assign((m_currentBits.size() + 7) / 8, 0);
 
     for (size_t i = 0; i < m_currentBits.size(); i++)
     {
         if (m_currentBits[i]) {
             m_current.m_rawData[i >> 3] |= (uint8_t) (0x80 >> (i & 7));
         }
-        if ((i < m_currentLost.size()) && m_currentLost[i]) {
-            m_current.m_rawLost[i >> 3] |= (uint8_t) (0x80 >> (i & 7));
-        }
     }
 
     m_messages.push_back(m_current);
     m_messageCount++;
     m_currentBits.clear();
-    m_currentLost.clear();
     m_active = false;
 }
 
@@ -701,10 +677,6 @@ bool RadioPagingGscDecoder::parseAddress(int pos, Message& message, int& errors1
     if (!decodeWord(pos + RadioPagingGsc::m_commaBits, r1) || !decodeWord(pos + RadioPagingGsc::m_commaBits + codewordBits + 1, r2)) {
         return false;
     }
-    // A signal too weak for the corrections to be right gives no address
-    if (!qualityAccepts(r1.m_bitErrors, 3) || !qualityAccepts(r2.m_bitErrors, 3)) {
-        return false;
-    }
 
     if (RadioPagingGsc::word1Index(r1.m_data) >= 0)
     {
@@ -787,7 +759,6 @@ bool RadioPagingGscDecoder::processNext()
         m_current = message;
         m_current.m_errorsCorrected = e1 + e2;
         m_currentBits.clear();
-        m_currentLost.clear();
         m_active = true;
         m_slot++;
         m_codewords += 2;
@@ -856,9 +827,6 @@ bool RadioPagingGscDecoder::processClassify()
     for (int k = 0; k < 8; k++)
     {
         RadioPagingGsc::BchResult b = RadioPagingGsc::bchDecode(codewords[k]);
-        if (!qualityAccepts(b.m_bitErrors, 2)) {
-            b.m_bitErrors = -1;
-        }
 
         if (b.m_bitErrors >= 0)
         {
@@ -947,7 +915,6 @@ bool RadioPagingGscDecoder::processData()
 
     uint16_t codewords[8];
     uint8_t words[8];
-    bool lost[8] = {};
     bool bad = false;
 
     RadioPagingGsc::deinterleaveBlock(&m_buf[m_pos + 1], codewords);
@@ -955,16 +922,12 @@ bool RadioPagingGscDecoder::processData()
     for (int k = 0; k < 8; k++)
     {
         RadioPagingGsc::BchResult b = RadioPagingGsc::bchDecode(codewords[k]);
-        if (!qualityAccepts(b.m_bitErrors, 2)) {
-            b.m_bitErrors = -1;
-        }
 
         m_codewords++;
         m_ber.add(b.m_bitErrors > 0 ? b.m_bitErrors : 0, 15, b.m_bitErrors < 0);
         if (b.m_bitErrors < 0)
         {
             words[k] = 0;
-            lost[k] = true;
             bad = true;
             m_current.m_errorsUncorrectable++;
             m_codewordsUncorrectable++;
@@ -996,27 +959,22 @@ bool RadioPagingGscDecoder::processData()
 
     for (int k = 0; k < 6; k++)
     {
-        for (int i = 0; i < 7; i++)
-        {
+        for (int i = 0; i < 7; i++) {
             m_currentBits.push_back((words[k] >> i) & 1);
-            m_currentLost.push_back(lost[k] ? 1 : 0);
         }
     }
-    for (int i = 0; i < 6; i++)
-    {
+    for (int i = 0; i < 6; i++) {
         m_currentBits.push_back((words[6] >> i) & 1);
-        m_currentLost.push_back(lost[6] ? 1 : 0);
     }
 
-    // The last bit of word 6 tells whether a block follows: lost, the end of the message is not known
     bool more = (words[6] & 0x40) != 0;
 
     m_pos += RadioPagingGsc::m_blockBits;
     m_blocks++;
 
-    if (lost[6] || !more || (m_blocks >= RadioPagingGsc::m_maxBlocks))
+    if (!more || (m_blocks >= RadioPagingGsc::m_maxBlocks))
     {
-        finishMessage(more || lost[6]);
+        finishMessage(more);
         m_parse = Next;
     }
 

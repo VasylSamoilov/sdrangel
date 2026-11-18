@@ -18,7 +18,6 @@
 #ifndef MODEMRADIOPAGING_RADIOPAGINGPOCSAGDECODER_H
 #define MODEMRADIOPAGING_RADIOPAGINGPOCSAGDECODER_H
 
-#include <cmath>
 #include <cstdint>
 #include <deque>
 #include <string>
@@ -26,7 +25,6 @@
 
 #include "export.h"
 #include "radiopagingberwindow.h"
-#include "radiopagingbch.h"
 
 // POCSAG bit stream decoder for one polarity. It hunts for sync on its own, using
 // nothing but the bits it is fed.
@@ -99,10 +97,8 @@ public:
 
     void reset();
     void setPolarity(Polarity polarity) { m_polarity = polarity; }
-    //!< Feed one symbol: 1 = positive deviation, 0 = negative deviation; reliability about 1 for a clean
-    //!< symbol, near 0 for a doubtful one (soft decision decoding); quality: a measure of the signal that does not
-    //!< depend on decoding (log10 of the strongest tone over the others), NAN if none
-    void feed(int symbol, float reliability = 1.0f, float quality = NAN);
+    //!< Feed one symbol: 1 = positive deviation, 0 = negative deviation
+    void feed(int symbol);
 
     bool isSynced() const { return m_state != Hunting; }
     //!< Sync codewords recognised since reset: when it changes, the last 32 symbols fed were
@@ -115,22 +111,6 @@ public:
     //!< Bit errors corrected in a sync codeword, the correction capacity of the code
     static const int m_maxSyncErrors = 2;
     static const int m_maxMessageBits = 20 * 400;
-    //!< Soft decision decoding of the codewords (RadioPagingBCH::decodeSoft): bits tried, 0 for hard decisions only,
-    //!< and the largest total reliability of the bits changed
-    static int s_chaseBits;
-    static float s_chaseMaxCost;
-    //!< The codewords of a batch are taken from a mean signal quality (feed()) of s_minQuality, and those
-    //!< corrected in two bits or more from s_minQuality2. BCH turns about a quarter of noise words into codewords,
-    //!< and a word of a signal too weak into a wrong codeword nearly always by correcting two bits: the quality
-    //!< tells a signal good enough for the corrections to be right
-    static float s_minQuality;
-    static float s_minQuality2;
-    //!< A codeword corrected in this many bits is taken at this quality (NAN: not measured, taken)
-    static bool qualityAccepts(float quality, int corrections)
-    {
-        return std::isnan(quality) || (corrections < 0)
-            || (quality >= ((corrections >= 2) ? s_minQuality2 : s_minQuality));
-    }
 
 private:
     Polarity m_polarity;
@@ -141,10 +121,6 @@ private:
     int m_wordBits;
     int m_slot;
     uint32_t m_batchWords[16] = {};     //!< Codewords of the batch being received
-    float m_wordReliability[32] = {};   //!< Of the bits of m_word, by bit position
-    float m_batchReliability[16][32] = {};
-    double m_batchQuality = 0.0;        //!< Sum of the quality of the symbols of the batch and its sync codeword
-    int m_batchQualityCount = 0;
     bool m_leadingConfirmed;            //!< The sync codeword of the current batch is confirmed
     int m_batch;                        //!< Batches decoded in the current transmission
 
@@ -170,10 +146,7 @@ private:
     bool batchValid() const;
     void decodeBatch();
     void endTransmission();
-    //!< quality: the quality of the batch, NAN if none; a codeword it does not accept (qualityAccepts()) is taken
-    //!< as uncorrectable
-    void processCodeword(uint32_t word, const float reliability[32], float quality = NAN);
-    RadioPagingBCH::Result decodeCodeword(uint32_t word, const float reliability[32]) const;
+    void processCodeword(uint32_t word);
     void appendMessageBits(uint32_t data, char status);
     void finishMessage(bool truncated);
 };

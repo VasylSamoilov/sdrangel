@@ -3,7 +3,6 @@ project(modemradiopaging)
 set(modemradiopaging_SOURCES
     radiopagingbch.cpp
     radiopagingfskdemod.cpp
-    radiopagingtonedetector.cpp
     radiopagingfskmod.cpp
     radiopagingpocsag.cpp
     radiopagingpocsagdecoder.cpp
@@ -43,7 +42,6 @@ set(modemradiopaging_HEADERS
     radiopagingberwindow.h
     radiopagingdedup.h
     radiopagingfskdemod.h
-    radiopagingtonedetector.h
     radiopagingfskmod.h
     radiopagingpocsag.h
     radiopagingpocsagdecoder.h
@@ -87,8 +85,8 @@ target_link_libraries(modemradiopaging
 install(TARGETS modemradiopaging DESTINATION ${INSTALL_LIB_DIR})
 
 # Self tests of the codecs and the demodulator, not built by default:
-#   cmake --build <build dir> --target radiopagingtest radiopaginggsctest radiopagingflextest radiopagingflexdecodertest radiopagingflexreceivertest radiopagingfskmodtest radiopagingtxstreamtest radiopagingpagetest radiopagingvoiceprocessortest radiopagingcharsettest radiopagingtonedetectortest
-foreach(radiopaging_test radiopagingtest radiopaginggsctest radiopagingflextest radiopagingflexdecodertest radiopagingflexreceivertest radiopagingfskmodtest radiopagingtxstreamtest radiopagingpagetest radiopagingvoiceprocessortest radiopagingcharsettest radiopagingtonedetectortest)
+#   cmake --build <build dir> --target radiopagingtest radiopaginggsctest radiopagingflextest radiopagingflexdecodertest radiopagingflexreceivertest radiopagingfskmodtest radiopagingtxstreamtest radiopagingpagetest radiopagingvoiceprocessortest radiopagingcharsettest
+foreach(radiopaging_test radiopagingtest radiopaginggsctest radiopagingflextest radiopagingflexdecodertest radiopagingflexreceivertest radiopagingfskmodtest radiopagingtxstreamtest radiopagingpagetest radiopagingvoiceprocessortest radiopagingcharsettest)
     add_executable(${radiopaging_test} EXCLUDE_FROM_ALL test/${radiopaging_test}.cpp)
     target_link_libraries(${radiopaging_test} modemradiopaging)
     target_include_directories(${radiopaging_test} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test)

@@ -18,7 +18,6 @@
 #ifndef MODEMRADIOPAGING_RADIOPAGINGGSCRECEIVER_H
 #define MODEMRADIOPAGING_RADIOPAGINGGSCRECEIVER_H
 
-#include <cmath>
 #include <deque>
 #include <vector>
 
@@ -62,8 +61,8 @@ public:
 
     RadioPagingGscReceiver();
 
-    //!< sampleRate in Hz; inputWindow: samples integrated by the input (see RadioPagingFskDemod)
-    void create(double sampleRate, int inputWindow = 1);
+    //!< sampleRate in Hz
+    void create(double sampleRate);
     void reset();
     void setPolarities(bool normal, bool inverted) { m_normalEnabled = normal; m_invertedEnabled = inverted; }
     //!< Enable the detection of the non battery saver pattern. Off by default
@@ -77,9 +76,7 @@ public:
     //!< Messages remembered for duplicate detection, of a polarity (0 normal, 1 inverted) or of both (-1)
     int remembered(int polarity = -1) const { return (int) m_dedup.messages(m_time, polarity); }
 
-    //!< quality: a measure of the signal that does not depend on decoding (RadioPagingGscDecoder::feedSoft()), NAN
-    //!< if none
-    void process(float sample, float quality = NAN);
+    void process(float sample);
     //!< The signal is gone: finish the transmissions in progress
     void flush();
 

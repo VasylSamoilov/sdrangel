@@ -18,7 +18,6 @@
 #ifndef MODEMRADIOPAGING_RADIOPAGINGPOCSAGRECEIVER_H
 #define MODEMRADIOPAGING_RADIOPAGINGPOCSAGRECEIVER_H
 
-#include <cmath>
 #include <deque>
 
 #include "export.h"
@@ -57,8 +56,8 @@ public:
 
     RadioPagingPocsagReceiver();
 
-    //!< sampleRate in Hz, baud 512, 1200 or 2400; inputWindow: samples integrated by the input (see RadioPagingFskDemod)
-    void create(double sampleRate, int baud, int inputWindow = 1);
+    //!< sampleRate in Hz, baud 512, 1200 or 2400
+    void create(double sampleRate, int baud);
     void reset();
     void setPolarities(bool normal, bool inverted) { m_normalEnabled = normal; m_invertedEnabled = inverted; }
     //!< Messages remembered for duplicates: the last ones of each pager, within this time (default 60 s)
@@ -69,9 +68,7 @@ public:
     int remembered(int polarity = -1) const { return (int) m_dedup.messages(m_time, polarity); }
     int getBaud() const { return m_baud; }
 
-    //!< quality: a measure of the signal that does not depend on decoding (RadioPagingPocsagDecoder::feed()), NAN
-    //!< if none
-    void process(float sample, float quality = NAN);
+    void process(float sample);
 
     bool hasMessage() const { return !m_messages.empty(); }
     RadioPagingPocsagDecoder::Message takeMessage();
