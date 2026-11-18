@@ -541,7 +541,8 @@ bool RadioPagingDemodGUI::addressMatchesFilter(const QString& address) const
         return true;
     }
 
-    QRegularExpression regExp(pattern);
+    // As the address filter of the Pager demodulator: the whole address must match
+    QRegularExpression regExp(QRegularExpression::anchoredPattern(pattern));
     return !regExp.isValid() || regExp.match(address).hasMatch();
 }
 
@@ -557,11 +558,11 @@ void RadioPagingDemodGUI::applyAddressFilter()
 void RadioPagingDemodGUI::on_filterAddress_editingFinished()
 {
     // An expression that is not valid filters nothing, shown in red with its error
-    QRegularExpression regExp(ui->filterAddress->text().trimmed());
+    QRegularExpression regExp(QRegularExpression::anchoredPattern(ui->filterAddress->text().trimmed()));
     bool valid = ui->filterAddress->text().trimmed().isEmpty() || regExp.isValid();
     ui->filterAddress->setStyleSheet(valid ? QString() : QString("QLineEdit { color: red; }"));
-    ui->filterAddress->setToolTip(valid ? tr("Show only the messages whose address matches this regular expression")
-        : regExp.errorString());
+    ui->filterAddress->setToolTip(valid ? tr("Show only the messages whose whole address matches this regular expression,\n"
+        "e.g. 1234567A, 12345.., 001001/. Empty: all") : regExp.errorString());
     applyAddressFilter();
 }
 
@@ -1699,6 +1700,7 @@ void RadioPagingDemodGUI::makeUIConnections()
     QObject::connect(ui->channelAlias, &QLineEdit::editingFinished, this, &RadioPagingDemodGUI::on_channelAlias_editingFinished);
     QObject::connect(ui->volume, &QDial::valueChanged, this, &RadioPagingDemodGUI::on_volume_valueChanged);
     QObject::connect(ui->clearTable, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_clearTable_clicked);
+    QObject::connect(ui->openMessageCenter, &QPushButton::clicked, this, []() { PagingMessageTable::openMessageCenter(); });
     QObject::connect(ui->udpEnabled, &QCheckBox::clicked, this, &RadioPagingDemodGUI::on_udpEnabled_clicked);
     QObject::connect(ui->udpAddress, &QLineEdit::editingFinished, this, &RadioPagingDemodGUI::on_udpAddress_editingFinished);
     QObject::connect(ui->udpPort, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingDemodGUI::on_udpPort_valueChanged);

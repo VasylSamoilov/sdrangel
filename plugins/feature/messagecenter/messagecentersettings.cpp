@@ -43,7 +43,7 @@ void MessageCenterSettings::resetToDefaults()
     m_historyMaxMB = MessageCenterEngine::m_defaultHistoryMB;
     m_claimTimeoutSec = 10;
     m_silentSec = 20;
-    m_routes.clear();
+    m_routes = MessageCenterEngine::defaultRoutes();
     m_sinks.clear();
     m_sources.clear();
     m_useReverseAPI = false;
@@ -238,6 +238,7 @@ QByteArray MessageCenterSettings::serialize() const
     s.writeString(19, m_voicePlaybackDeviceName);
     s.writeBool(20, m_historyEnabled);
     s.writeS32(21, m_historyMaxMB);
+    s.writeS32(22, 2);      // Routing: the log is a sink
 
     return s.final();
 }
@@ -299,6 +300,18 @@ bool MessageCenterSettings::deserialize(const QByteArray& data)
         d.readString(19, &m_voicePlaybackDeviceName, AudioDeviceManager::m_defaultDeviceName);
         d.readBool(20, &m_historyEnabled, true);
         d.readS32(21, &m_historyMaxMB, MessageCenterEngine::m_defaultHistoryMB);
+
+        // Settings of before the log was a sink: a record no route selected was logged. The default route at the top
+        // keeps logging every message
+        qint32 routingVersion;
+        d.readS32(22, &routingVersion, 1);
+
+        if (routingVersion < 2)
+        {
+            std::vector<MessageCenterEngine::Route> routes = MessageCenterEngine::defaultRoutes();
+            routes.insert(routes.end(), m_routes.begin(), m_routes.end());
+            m_routes = routes;
+        }
         m_historyMaxMB = std::max(1, std::min(10000, m_historyMaxMB));
         return true;
     }

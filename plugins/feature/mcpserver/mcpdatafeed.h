@@ -75,7 +75,7 @@ public:
     void clearPackets();
     QJsonObject getMapItems(const QString& source, const QString& name, int limit, bool includeTrack);
     //! The paging messages the channels published (the "messages" pipe), most recent last. Filters are optional: protocol,
-    //! address (wildcards * and ?), text contained (not case sensitive), channel alias, direction (rx or tx)
+    //! address and text (regular expressions the whole field must match), channel alias, direction (rx or tx)
     QJsonObject getMessages(const QString& protocol, const QString& address, const QString& text, const QString& alias,
         const QString& direction, int limit, qint64 sinceSequence);
     static constexpr int m_maxMessages = 1000;

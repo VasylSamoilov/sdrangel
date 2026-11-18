@@ -51,6 +51,8 @@ public:
     explicit MessageCenterFilterWidget(QWidget *parent = nullptr);
     MessageCenterFilter filter() const;
     void setFilter(const MessageCenterFilter& filter);
+    //!< The source of the messages can be chosen too (routes): channels, api and these sources
+    void showSources(const QStringList& sources);
 
 signals:
     void changed();
@@ -67,6 +69,8 @@ private:
     QCheckBox *m_voiceOnly;
     QComboBox *m_matchField;
     QLineEdit *m_regExp;
+    QComboBox *m_source;
+    bool m_sourcesShown = false;
 };
 
 class MessageCenterGUI : public FeatureGUI
@@ -93,6 +97,8 @@ private:
     bool m_doApplySettings;
     int m_shownLogged;                  //!< Records of the log when the table was made
     static const int m_maxLogRows = 1000;
+    static const int m_builtInSinks = 2;      //!< log and queue, first in the table of the sinks
+    static const int m_builtInSources = 2;    //!< channels and api, first in the table of the sources
 
     // The log
     MessageCenterFilterWidget *m_logFilter;
@@ -162,6 +168,9 @@ private slots:
     void removeSource();
     void editSelectedSink();
     void editSelectedSource();
+    void moveRoute(int step);
+    void exportRouting();
+    void importRouting();
     void transmitterChanged();
 };
 

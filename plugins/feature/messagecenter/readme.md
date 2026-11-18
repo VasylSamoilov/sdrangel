@@ -4,12 +4,12 @@
 
 The Message Center collects the messages of the radio paging channels (Radio Paging demodulator and modulator) in one log, routes them to files, and queues pages to the transmitters. It is the place where messages, events and voice messages are exchanged between the decoders and the encoders.
 
-The channels publish their messages as message records on the "messages" pipe, and announce themselves with event records: the Message Center knows the receivers and transmitters without configuration. It is added to feature set 0 when the first paging channel announces itself and there is none.
+The channels publish their messages as message records on the "messages" pipe, and announce themselves with event records: the Message Center knows the receivers and transmitters without configuration. It is added like any feature, or with the Message Center button of the Radio Paging demodulator and modulator, which opens it (and adds it when there is none).
 
 ```
-  source ---> route (filter) ---> sink(s)
-  sources: the channels, a JSON lines file, a CSV log, UDP datagrams
-  sinks:   the log, a JSON lines file, a CSV file, UDP datagrams, the transmit queue,
+  source ---> routes 1, 2, 3... (filter) ---> sink(s)
+  sources: the channels, the API, a JSON lines file, a CSV log, UDP datagrams
+  sinks:   the log, the transmit queue, a JSON lines file, a CSV file, UDP datagrams,
            a command, speech, a highlight in the log, a position on the Map
 ```
 
@@ -21,7 +21,7 @@ The window is in sections that can be rolled up.
 
 The messages received and sent, newest at the bottom (at most the log size, the oldest go first).
 
-* Filters: protocol, direction (RX, TX or both), polarity, message type, channel alias, address (wildcards * and ?), text (contained, not case sensitive), hide duplicates, voice pages with a file only. Only the messages the filters select are shown.
+* Filters: protocol, direction (RX, TX or both), polarity, message type, channel alias, address and text, hide duplicates, voice pages with a file only, and a regular expression on a field (see Routes). Address and text are regular expressions the whole field must match, as the filters of the other plugins of SDRangel: 12345.. for the addresses 1234500 to 1234599, .*FIRE.* for a text that contains FIRE, (?i) at the start for not case sensitive. An expression that is not valid is shown in red and selects nothing. Only the messages the filters select are shown.
 * The table has the columns of the message tables of the channels: time, direction, channel, protocol, rate, polarity, address, type, message, fragment, info, errors and state. Right click on the header selects the columns.
 * A click on the icon of a voice message plays its file. Double click on a message opens a window with all the fields of its record: the common fields, protocolData (the flags and parameters of the protocol) and the raw payload, also as bits.
 * Right click on a message: details, copy the cell, the row or the record as JSON, play the voice, select the audio output, and decode a received message again as the other type or with another codepage of its protocol.
@@ -47,13 +47,16 @@ The composer of a page, the same as in the Radio Paging modulator: transmitter (
 
 <h3>Routes</h3>
 
-The records go through the routes in order. A route sends the records its filter selects to its sinks (log, queue or a file); stop: no route after it. A record no route selects is logged. Add, Edit (or double click) and Remove manage the routes; a route can be switched off.
+Every message is checked against all the routes in their number order (#), not only the first. Each route whose filter selects the message sends it to the sinks of the route: the log, the transmit queue or the sinks of Files. A route with Stop ends the check for the messages it selects, so the routes after it do not see them. The log is a sink as the others: a message no route sends to it is not logged. A new Message Center has one route, 1 "All messages to the log", without a filter. A sink takes only what a route sends to it.
 
-The filter of a route has the fields of the filter of the log, and a regular expression on a field of the message: address, message, protocol, type, channel, or any of them separated by spaces. It matches anywhere in the field (^ and $ to anchor) and is case sensitive ((?i) at the start for not). An expression that is not valid matches nothing. Its captures are ${1}, ${2}... in the texts of the sinks the route sends to.
+* Add, Edit (or double click) and Remove manage the routes; a route can be switched off. Up and Down change the order.
+* Export saves the routes, the sinks and the sources to a JSON file; Import replaces them with those of a file, after a check and a confirmation.
+
+The filter of a route has the fields of the filter of the log, and the source of the message: the channels, the API (ingest) or a source of Files. Its regular expression on a field of the message (address, message, protocol, type, channel, or any of them separated by spaces) matches anywhere in the field (^ and $ to anchor), as the notifications of the other plugins, and is case sensitive ((?i) at the start for not). Its captures are ${1}, ${2}... in the texts of the sinks the route sends to.
 
 <h3>Files</h3>
 
-The sinks and sources, each with a name and a type. Double click to edit; a sink renamed is renamed in the routes too. The table of the sinks gives the records each took and refused; the errors of the sinks and sources are below.
+The sinks and sources, each with a name and a type. The built in ones come first: the sinks log and queue, the sources channels and api. Double click to edit; a sink renamed is renamed in the routes too. The editor of a sink also chooses the routes that send to it, and can add a route that sends every message to it. The table of the sinks gives the records each took and refused and the routes that send to it (none: it takes nothing); the errors of the sinks and sources are below.
 
 Sinks:
 

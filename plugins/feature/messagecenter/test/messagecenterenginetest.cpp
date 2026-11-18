@@ -101,11 +101,15 @@ void testFilter()
     f.m_protocols = QStringList({"pocsag"});
     check(f.matches(a) && !f.matches(b), "Filter: protocol");
     f = MessageCenterFilter();
-    f.m_address = "0001*";
-    check(f.matches(a) && !f.matches(b), "Filter: address with a wildcard");
+    f.m_address = "0001.*";
+    check(f.matches(a) && !f.matches(b), "Filter: address, a regular expression on the whole address");
+    f.m_address = "0001";
+    check(!f.matches(a), "Filter: the expression must match the whole address");
+    f.m_address = "([";
+    check(!f.matches(a) && !f.errors().isEmpty(), "Filter: an address expression that is not valid matches nothing");
     f = MessageCenterFilter();
-    f.m_text = "hello";
-    check(f.matches(a) && !f.matches(b), "Filter: text, not case sensitive");
+    f.m_text = "(?i).*hello.*";
+    check(f.matches(a) && !f.matches(b), "Filter: text, a regular expression on the whole text");
     f = MessageCenterFilter();
     f.m_polarity = (int) MessageRecord::PolarityInverted;
     f.m_speeds = {3200, 6400};
@@ -142,7 +146,8 @@ void testLogAndRoutes()
     engine.addSink(std::unique_ptr<MessageCenterSink>(new MessageCenterFileSink("json", jsonPath, MessageCenterFileSink::JsonLines)));
     engine.addSink(std::unique_ptr<MessageCenterSink>(new MessageCenterFileSink("csv", csvPath, MessageCenterFileSink::Csv)));
 
-    // No route: the log. Routes: flex to the csv file only (stop), everything else to the log and the json file
+    // The default route: the log. Routes: flex to the csv file and stop (not logged); everything else to the log and the
+    // json file
     MessageCenterEngine::Route flex;
     flex.m_name = "flex to csv";
     flex.m_filter.m_protocols = QStringList({"flex"});
@@ -152,8 +157,9 @@ void testLogAndRoutes()
     all.m_name = "the rest";
     all.m_sinks = QStringList({"log", "json"});
 
+    engine.setRoutes(MessageCenterEngine::defaultRoutes());
     engine.ingest(rx("1", "pocsag", "1", "no route", "A"), "channels", 1);
-    check((engine.log().size() == 1) && !QFile::exists(jsonPath), "Engine: without a route a record is logged");
+    check((engine.log().size() == 1) && !QFile::exists(jsonPath), "Engine: the default route logs a record");
 
     engine.setRoutes({flex, all});
     engine.ingest(rx("2", "flex", "2", "to csv", "A", 3200), "channels", 2);
@@ -165,7 +171,7 @@ void testLogAndRoutes()
     QList<QByteArray> csvLines = csv.readAll().split('\n');
     QList<QByteArray> jsonLines = json.readAll().split('\n');
     check((engine.log().size() == 2) && !engine.find("2") && engine.find("3") && (csvLines.size() == 3) && (jsonLines.size() == 2),
-        "Engine: routes send a record to their sinks, a route can stop the others");
+        "Engine: routes send a record to their sinks, a route can stop the others and keep it out of the log");
 
     // A record decoded again replaces the one of its id in the log, and the log tells it changed
     MessageRecord again = *engine.find("3");
@@ -493,8 +499,8 @@ void testRoutesWithActions()
     route.m_filter.m_regExp = "Fire (\\w+)";
     route.m_filter.m_matchField = MessageCenterFilter::MatchMessage;
     route.m_filter.m_hideDuplicates = true;
-    route.m_sinks = QStringList({"alert", "log"});
-    engine.setRoutes({route});
+    route.m_sinks = QStringList({"alert"});
+    engine.setRoutes({MessageCenterEngine::defaultRoutes()[0], route});
 
     engine.ingest(rx("1", "pocsag", "1", "Fire alpha", "c"), "channels", 1);
     engine.ingest(rx("2", "pocsag", "1", "Flood", "c"), "channels", 2);
@@ -503,12 +509,67 @@ void testRoutesWithActions()
     engine.ingest(dup, "channels", 3);
 
     check(calls == 1 && seen == QStringList({"alpha"}), "the route runs the action on a message that matches, with its capture");
-    // The two that the route does not select are logged too: without a route that matches, a record goes to the log
+    // All three are logged by the default route
     check(engine.log().size() == 3, "the messages the route does not select are logged");
     check(engine.sinkStats().value("alert").m_accepted == 1 && engine.sinkStats().value("log").m_accepted == 3, "sink statistics");
 
     engine.importRecord(rx("9", "pocsag", "1", "Fire gamma", "c"));
     check(calls == 1 && engine.log().size() == 4, "an imported message is logged and not routed");
+}
+
+// All the routes that select a message act on it, in their order, until one that stops; the source is part of the filter
+void testRouteOrderAndSources()
+{
+    MessageCenterEngine engine;
+    QStringList order;
+    auto recorder = [&order](const QString& name) {
+        return std::unique_ptr<MessageCenterSink>(new MessageCenterActionSink(name, "speech", name, 0,
+            [&order](const QString&, const MessageRecord&, const QString& text, quint32) { order.append(text); }));
+    };
+    engine.addSink(recorder("first"));
+    engine.addSink(recorder("second"));
+    engine.addSink(recorder("third"));
+    engine.addSink(recorder("udp only"));
+
+    MessageCenterEngine::Route r1, r2, r3, r4;
+    r1.m_name = "1";
+    r1.m_sinks = QStringList({"first"});
+    r2.m_name = "2";
+    r2.m_filter.m_protocols = QStringList({"flex"});
+    r2.m_sinks = QStringList({"second"});
+    r2.m_stop = true;
+    r3.m_name = "3";
+    r3.m_sinks = QStringList({"third"});
+    r4.m_name = "4";
+    r4.m_filter.m_sources = QStringList({"udp in"});
+    r4.m_sinks = QStringList({"udp only"});
+    engine.setRoutes({r1, r2, r3, r4});
+
+    engine.ingest(rx("p", "pocsag", "1", "x", "c"), "channels", 1);
+    check(order == QStringList({"first", "third"}), "every route that selects a message acts, in order");
+    order.clear();
+    engine.ingest(rx("f", "flex", "1", "x", "c"), "channels", 2);
+    check(order == QStringList({"first", "second"}), "a route that stops ends the check");
+    order.clear();
+    engine.ingest(rx("u", "pocsag", "1", "x", "c"), "udp in", 3);
+    check(order == QStringList({"first", "third", "udp only"}), "a route can select the source");
+    check(engine.log().empty(), "without a route to the log nothing is logged");
+
+    // The log is a sink: the routes stopped before it keep a message out of it
+    r3.m_sinks = QStringList({"third", "log"});
+    engine.setRoutes({r1, r2, r3, r4});
+    engine.ingest(rx("q", "pocsag", "1", "x", "c"), "channels", 4);
+    engine.ingest(rx("g", "flex", "1", "x", "c"), "channels", 5);
+    check(engine.find("q") && !engine.find("g"), "a message goes to the log through a route; one stopped before it is not logged");
+
+    engine.setRoutes(MessageCenterEngine::defaultRoutes());
+    engine.ingest(rx("d", "gsc", "1", "x", "c"), "channels", 6);
+    check(engine.find("d") && (engine.routes().size() == 1) && (engine.routes()[0].m_sinks == QStringList("log"))
+        && engine.routes()[0].m_filter.isEmpty(), "the default route sends every message to the log");
+
+    MessageCenterFilter f = MessageCenterFilter::fromJson(r4.m_filter.toJson());
+    check(f.m_sources == QStringList({"udp in"}), "the sources of a filter in its JSON");
+    check(f.matches(rx("z", "pocsag", "1", "x", "c")), "matching without a source looks at the record only");
 }
 
 void testUdp()
@@ -808,6 +869,7 @@ int main(int argc, char **argv)
     testCommand();
     testActionSink();
     testRoutesWithActions();
+    testRouteOrderAndSources();
     testUdp();
     testCsvSources();
     std::printf("%d passed, %d failed\n", passed, failed);

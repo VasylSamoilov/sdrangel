@@ -720,10 +720,10 @@
       <item>
        <widget class="QLineEdit" name="filterAddress">
         <property name="toolTip">
-         <string>Show only the messages whose address matches this regular expression</string>
+         <string>Show only the messages whose whole address matches this regular expression,&#10;e.g. 1234567A, 12345.., 001001/. Empty: all</string>
         </property>
         <property name="placeholderText">
-         <string>Address filter</string>
+         <string>Address filter (regular expression)</string>
         </property>
        </widget>
       </item>
@@ -739,6 +739,16 @@
          </size>
         </property>
        </spacer>
+      </item>
+      <item>
+       <widget class="QPushButton" name="openMessageCenter">
+        <property name="toolTip">
+         <string>Open the Message Center: the log of the messages of all the paging channels, its routes, sinks and sources, and the pages to transmit (it is added if there is none)</string>
+        </property>
+        <property name="text">
+         <string>Message Center</string>
+        </property>
+       </widget>
       </item>
       <item>
        <widget class="QToolButton" name="clearTable">

@@ -270,6 +270,8 @@ public:
     const MessageCenterSettings& settings() const { return m_settings; }
     //! Errors of the sinks and sources since the last call
     QStringList takeErrors();
+    //! What is wrong with the sinks, sources and routes of the settings, empty if nothing
+    static QString checkRouting(const MessageCenterSettings& settings);
 
     static const char* const m_featureIdURI;
     static const char* const m_featureId;
@@ -289,8 +291,6 @@ private:
     void applySettings(const MessageCenterSettings& settings, const QStringList& settingsKeys, bool force = false);
     void webapiReverseSendSettings(const QList<QString>& featureSettingsKeys, const MessageCenterSettings& settings, bool force);
     void applyEngineSettings();
-    //! What is wrong with the sinks, sources and routes of the settings, empty if nothing
-    static QString checkRouting(const MessageCenterSettings& settings);
     //! The sink of a setting (action sinks reach the GUI and the Map through the feature); null if it is not valid
     std::unique_ptr<MessageCenterSink> makeSink(const MessageCenterFileSetting& setting);
     std::unique_ptr<MessageCenterSource> makeSource(const MessageCenterFileSetting& setting);

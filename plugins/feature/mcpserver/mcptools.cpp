@@ -6313,8 +6313,8 @@ void MCPTools::registerMessageCenterTools()
         "of a previous call to read only new ones.",
         schema({
             {"protocol", enumProp("Only this protocol", {"pocsag", "flex", "gsc"})},
-            {"address", strProp("Only these addresses: wildcards * and ?, e.g. 0001234* (POCSAG RIC and function letter, FLEX capcode, GSC address)")},
-            {"text", strProp("Only messages whose text contains this, not case sensitive")},
+            {"address", strProp("Only these addresses: a regular expression the whole address must match, e.g. 0001234. (POCSAG RIC and function letter), 0012345.. (FLEX capcode), 001001/. (GSC)")},
+            {"text", strProp("Only these texts: a regular expression the whole text must match, e.g. (?i).*fire.* for a text that contains fire")},
             {"alias", strProp("Only messages of the channel with this alias")},
             {"direction", enumProp("Received or sent", {"rx", "tx"})},
             {"limit", bounded(intProp("Maximum number of messages, most recent. Default 50"), 1, MCPDataFeed::m_maxMessages)},
@@ -6359,11 +6359,13 @@ void MCPTools::registerMessageCenterTools()
 
     add("set_message_center_routing",
         "Set the routes, sinks or sources of the Message Center; the lists given replace the current ones (get_message_center "
-        "gives them). A record goes through the routes in order; a route sends the records its filter selects to its sinks "
-        "(log, queue or a sink named here), stop ends the routing; a record no route selects is logged.\n"
-        "Route: {name, enabled, stop, sinks: [names], filter: {protocols: [pocsag|flex|gsc], aliases, direction (0 rx, 1 tx), "
-        "kind, polarity (1 normal, 2 inverted), speeds, address (wildcards), text (contained), msgType, matchField (0 address, "
-        "1 message, 2 protocol, 3 type, 4 channel, 5 any), regExp (on that field), hideDuplicates, voiceOnly}}.\n"
+        "gives them). Each message is checked against all the routes in their order; every route whose filter selects it sends it "
+        "to that route's sinks (log, queue or a sink named here); a route with stop ends the check. The log is a sink: a "
+        "message no route sends to it is not logged (the default route 'All messages to the log' does).\n"
+        "Route: {name, enabled, stop, sinks: [names], filter: {protocols: [pocsag|flex|gsc], aliases, sources (channels, "
+        "api or source names), direction (0 rx, 1 tx), kind, polarity (1 normal, 2 inverted), speeds, address and text (regular "
+        "expressions on the whole field), msgType, matchField (0 address, 1 message, 2 protocol, 3 type, 4 channel, 5 any), "
+        "regExp (anywhere in that field, its captures are ${1}... in the sinks), hideDuplicates, voiceOnly}}.\n"
         "Sink: {name, type, ...}: file {path, format 0 JSON lines or 1 CSV}; udp {address, port, format 0 Pager demodulator "
         "or 1 JSON}; command {text: the command, the message goes into its arguments: ${address} ${message} ${protocol} "
         "${type} ${channel} ${mode} ${id} ${frequency} ${time} ${1}...}; speech {text}; highlight {color: ARGB}; map (the "

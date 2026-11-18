@@ -1546,6 +1546,7 @@ void RadioPagingModGUI::makeUIConnections()
     QObject::connect(ui->channelAlias, &QLineEdit::editingFinished, this, &RadioPagingModGUI::on_channelAlias_editingFinished);
     QObject::connect(ui->voiceFiles, &QToolButton::clicked, this, &RadioPagingModGUI::on_voiceFiles_clicked);
     QObject::connect(ui->clear, &QPushButton::clicked, this, &RadioPagingModGUI::on_clear_clicked);
+    QObject::connect(ui->openMessageCenter, &QPushButton::clicked, this, []() { PagingMessageTable::openMessageCenter(); });
     QObject::connect(ui->abort, &QPushButton::clicked, this, &RadioPagingModGUI::on_abort_clicked);
 }
 

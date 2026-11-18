@@ -61,8 +61,9 @@ struct MessageCenterFilter
     int m_kind = -1;                    //!< MessageRecord::Kind, -1 for all
     int m_polarity = -1;                //!< MessageRecord::Polarity, -1 for all
     QList<int> m_speeds;                //!< Bits per second, empty for all
-    QString m_address;                  //!< Wildcards * and ?, empty for all
-    QString m_text;                     //!< Contained in the text, not case sensitive
+    QString m_address;                  //!< Regular expression the whole address must match (as the filters of SDRangel), empty for all
+    QString m_text;                     //!< Regular expression the whole text must match, . matches line ends too, empty for all
+    QStringList m_sources;              //!< Where the record comes from: channels, api or the name of a source; empty for all
     QString m_msgType;                  //!< Message type (alphanumeric, numeric, tone, voice, short_message, binary, secure), empty for all
     //! A regular expression a field of the message must match (anywhere in it, case sensitive, (?i) for the other)
     enum MatchField {
@@ -82,7 +83,10 @@ struct MessageCenterFilter
     bool m_hideDuplicates = false;
     bool m_voiceOnly = false;           //!< Voice messages with a file
 
+    //!< The record matches, wherever it comes from (the sources of the filter are not looked at)
     bool matches(const MessageRecord& record) const;
+    //!< The record from a source matches: source is channels, api or the name of a source
+    bool matches(const MessageRecord& record, const QString& source) const;
     //!< What the regular expression captured in the message (0 the whole match); empty if there is none or it did not match
     QStringList captures(const MessageRecord& record) const;
     bool isEmpty() const;
@@ -92,11 +96,24 @@ struct MessageCenterFilter
     static QString matchFieldName(int field);
     //!< The error of the regular expression, empty if it is valid or there is none
     QString regExpError() const;
+    //!< The errors of the regular expressions of the address, the text and the match, empty if they are all valid
+    QString errors() const;
 
 private:
-    mutable QRegularExpression m_compiled;
-    mutable QString m_compiledPattern;
+    // The expressions, compiled when they are first used after a change (a filter is copied around: they are
+    // compiled again in the copy)
+    struct Compiled
+    {
+        QString m_pattern;
+        bool m_done = false;
+        QRegularExpression m_expression;
+    };
+    mutable Compiled m_compiled;            //!< m_regExp, anywhere in the field
+    mutable Compiled m_compiledAddress;     //!< m_address, the whole address
+    mutable Compiled m_compiledText;        //!< m_text, the whole text
     const QRegularExpression& compiled() const;
+    static const QRegularExpression& compile(Compiled& compiled, const QString& pattern, bool anchored,
+        QRegularExpression::PatternOptions options = QRegularExpression::NoPatternOption);
 };
 
 //! ${address}, ${message}, ${protocol}, ${type}, ${channel}, ${mode}, ${id}, ${frequency}, ${time} (ISO, UTC) and
@@ -323,8 +340,9 @@ public:
     //!< Poll the sources and ingest what they give; returns the records taken, errors are collected
     int pollSources(QStringList& errors);
 
-    // Routes: the first matching routes in order; a route sends the record to its sinks. stop: no
-    // route after it. Without a route that matches, a record goes to the log
+    // Routes: every message is checked against all the routes in their order; each route that selects it sends it to
+    // its sinks; stop: the routes after it do not see it. The log is a sink: a message no route sends to it is not
+    // logged (the default route sends everything to the log)
     struct Route
     {
         QString m_name;
@@ -333,6 +351,8 @@ public:
         bool m_stop = false;
         bool m_enabled = true;
     };
+    //! The routes of a new message center: every message to the log
+    static std::vector<Route> defaultRoutes();
     void setRoutes(const std::vector<Route>& routes) { m_routes = routes; }
     const std::vector<Route>& routes() const { return m_routes; }
 

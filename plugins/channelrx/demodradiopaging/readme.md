@@ -150,7 +150,7 @@ What the Pager demodulator has, for the messages of all three protocols. A messa
 * Log (record button) - writes each message to a .csv file, with the columns of the message record (header first, appended to an existing file). The folder button selects the file.
 * Load (arrow button) - reads the messages of a log written by this demodulator into the table. They are not notified again.
 * Notifications - a regular expression matched on a field of the message (address, message, protocol, type, channel or any of them), and what is done to a message that matches: its row is highlighted, the text of Speech is spoken (when the build has text to speech), the Command is run, and a position (latitude and longitude) in the message is plotted on the Map named by the address. Speech and Command replace ${address}, ${message}, ${protocol}, ${type}, ${channel} and ${0}, ${1}... (the captures of the expression). A duplicate is not notified again.
-* Address filter - only the messages whose address matches the regular expression are shown.
+* Address filter - only the messages whose whole address matches the regular expression are shown, as in the Pager demodulator (e.g. 12345.., 001001/.). It applies as it is typed.
 
 <h3>8: Waveforms</h3>
 
@@ -159,6 +159,8 @@ The scope shows two of the signals of the receiver, at the channel sample rate o
 <h3>9: Clear messages from table</h3>
 
 Clears the table.
+
+The Message Center button next to it opens the Message Center (and adds it when there is none).
 
 <h3>10: Messages table</h3>
 

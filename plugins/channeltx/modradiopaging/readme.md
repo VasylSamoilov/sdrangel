@@ -94,6 +94,7 @@ The composer of a message:
 
 * State (idle, ramp up, transmitting, ramp down), the message being sent, the messages waiting and sent.
 * Clear drops the messages waiting. Abort drops them and, in one-shot mode, ends the transmission being sent.
+* Message Center opens the Message Center (and adds it when there is none).
 * The table of the last messages transmitted: queued, sent or dropped, with the message number, fragments and copies of FLEX messages. A click on the icon of a voice message plays the voice sent. Double click on a message opens all the fields of its record. Right click on the header selects the columns.
 * The log of the messages queued and of the requests refused.
 

@@ -231,7 +231,17 @@ void MCPDataFeed::handleMessageRecord(const Message& message)
 QJsonObject MCPDataFeed::getMessages(const QString& protocol, const QString& address, const QString& text, const QString& alias,
     const QString& direction, int limit, qint64 sinceSequence)
 {
-    QRegularExpression addressExpression(QRegularExpression::anchoredPattern(QRegularExpression::wildcardToRegularExpression(address)));
+    // Regular expressions on the whole field, as the filters of the channels and of the Message Center
+    QRegularExpression addressExpression(QRegularExpression::anchoredPattern(address));
+    QRegularExpression textExpression(QRegularExpression::anchoredPattern(text), QRegularExpression::DotMatchesEverythingOption);
+
+    if (!address.isEmpty() && !addressExpression.isValid()) {
+        return QJsonObject{{"error", QString("address is not a valid regular expression: %1").arg(addressExpression.errorString())}};
+    }
+    if (!text.isEmpty() && !textExpression.isValid()) {
+        return QJsonObject{{"error", QString("text is not a valid regular expression: %1").arg(textExpression.errorString())}};
+    }
+
     QMutexLocker locker(&m_mutex);
     QJsonArray messages;
 
@@ -249,7 +259,7 @@ QJsonObject MCPDataFeed::getMessages(const QString& protocol, const QString& add
         if (!address.isEmpty() && !addressExpression.match(r.m_address).hasMatch()) {
             continue;
         }
-        if (!text.isEmpty() && !r.m_text.contains(text, Qt::CaseInsensitive)) {
+        if (!text.isEmpty() && !textExpression.match(r.m_text).hasMatch()) {
             continue;
         }
         if (!alias.isEmpty() && (r.m_channelAlias != alias)) {

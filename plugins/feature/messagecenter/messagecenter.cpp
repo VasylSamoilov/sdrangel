@@ -814,10 +814,18 @@ QString MessageCenter::checkRouting(const MessageCenterSettings& settings)
             }
         }
 
-        QString error = route.m_filter.regExpError();
+        QString error = route.m_filter.errors();
 
         if (!error.isEmpty()) {
-            return QString("Route %1: the regular expression is not valid: %2").arg(route.m_name).arg(error);
+            return QString("Route %1: a regular expression is not valid: %2").arg(route.m_name).arg(error);
+        }
+
+        // A source a route names: channels, api or a source of the settings
+        for (const QString& source : route.m_filter.m_sources)
+        {
+            if ((source != "channels") && (source != "api") && !sourceNames.contains(source)) {
+                return QString("Route %1: there is no source %2").arg(route.m_name).arg(source);
+            }
         }
     }
 

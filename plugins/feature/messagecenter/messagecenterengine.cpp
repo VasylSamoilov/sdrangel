@@ -88,14 +88,19 @@ bool MessageCenterFilter::matches(const MessageRecord& record) const
     }
     if (!m_address.isEmpty())
     {
-        QRegularExpression expression(QRegularExpression::anchoredPattern(QRegularExpression::wildcardToRegularExpression(m_address)));
+        const QRegularExpression& expression = compile(m_compiledAddress, m_address, true);
 
-        if (!expression.match(record.m_address).hasMatch()) {
+        if (!expression.isValid() || !expression.match(record.m_address).hasMatch()) {
             return false;
         }
     }
-    if (!m_text.isEmpty() && !record.m_text.contains(m_text, Qt::CaseInsensitive)) {
-        return false;
+    if (!m_text.isEmpty())
+    {
+        const QRegularExpression& expression = compile(m_compiledText, m_text, true, QRegularExpression::DotMatchesEverythingOption);
+
+        if (!expression.isValid() || !expression.match(record.m_text).hasMatch()) {
+            return false;
+        }
     }
     if (!m_regExp.isEmpty())
     {
@@ -127,16 +132,33 @@ bool MessageCenterFilter::matches(const MessageRecord& record) const
     return true;
 }
 
-const QRegularExpression& MessageCenterFilter::compiled() const
+bool MessageCenterFilter::matches(const MessageRecord& record, const QString& source) const
 {
-    if ((m_compiledPattern != m_regExp) || (m_compiled.pattern() != m_regExp))
-    {
-        m_compiled.setPattern(m_regExp);
-        m_compiled.optimize();
-        m_compiledPattern = m_regExp;
+    if (!m_sources.isEmpty() && !m_sources.contains(source)) {
+        return false;
     }
 
-    return m_compiled;
+    return matches(record);
+}
+
+// Anchored: the whole text must match, as the filters of the other plugins
+const QRegularExpression& MessageCenterFilter::compile(Compiled& compiled, const QString& pattern, bool anchored,
+    QRegularExpression::PatternOptions options)
+{
+    if (!compiled.m_done || (compiled.m_pattern != pattern))
+    {
+        compiled.m_expression = QRegularExpression(anchored ? QRegularExpression::anchoredPattern(pattern) : pattern, options);
+        compiled.m_expression.optimize();
+        compiled.m_pattern = pattern;
+        compiled.m_done = true;
+    }
+
+    return compiled.m_expression;
+}
+
+const QRegularExpression& MessageCenterFilter::compiled() const
+{
+    return compile(m_compiled, m_regExp, false);
 }
 
 QString MessageCenterFilter::regExpError() const
@@ -147,6 +169,23 @@ QString MessageCenterFilter::regExpError() const
 
     const QRegularExpression& expression = compiled();
     return expression.isValid() ? QString() : expression.errorString();
+}
+
+QString MessageCenterFilter::errors() const
+{
+    QStringList errors;
+
+    if (!m_address.isEmpty() && !compile(m_compiledAddress, m_address, true).isValid()) {
+        errors.append(QString("address: %1").arg(compile(m_compiledAddress, m_address, true).errorString()));
+    }
+    if (!m_text.isEmpty() && !compile(m_compiledText, m_text, true, QRegularExpression::DotMatchesEverythingOption).isValid()) {
+        errors.append(QString("text: %1").arg(compile(m_compiledText, m_text, true, QRegularExpression::DotMatchesEverythingOption).errorString()));
+    }
+    if (!regExpError().isEmpty()) {
+        errors.append(QString("match: %1").arg(regExpError()));
+    }
+
+    return errors.join("; ");
 }
 
 QStringList MessageCenterFilter::captures(const MessageRecord& record) const
@@ -261,6 +300,9 @@ QJsonObject MessageCenterFilter::toJson() const
     if (!m_aliases.isEmpty()) {
         json["aliases"] = QJsonArray::fromStringList(m_aliases);
     }
+    if (!m_sources.isEmpty()) {
+        json["sources"] = QJsonArray::fromStringList(m_sources);
+    }
     if (m_direction >= 0) {
         json["direction"] = m_direction;
     }
@@ -318,6 +360,9 @@ MessageCenterFilter MessageCenterFilter::fromJson(const QJsonObject& json)
     }
     for (const QJsonValue& v : json["aliases"].toArray()) {
         f.m_aliases.append(v.toString());
+    }
+    for (const QJsonValue& v : json["sources"].toArray()) {
+        f.m_sources.append(v.toString());
     }
 
     f.m_direction = json.contains("direction") ? json["direction"].toInt(-1) : -1;
@@ -824,7 +869,8 @@ QString MessageCenterPage::stateName(State state)
 // ---------------------------------------------------------------------------
 
 MessageCenterEngine::MessageCenterEngine() :
-    m_logSize(m_defaultLogSize)
+    m_logSize(m_defaultLogSize),
+    m_routes(defaultRoutes())
 {
 }
 
@@ -1262,12 +1308,13 @@ void MessageCenterEngine::ingest(const MessageRecord& record, const QString& sou
         }
     }
 
-    // The messages: routed. Without a route that matches they are logged
+    // The messages: each route that selects it sends it to its sinks, in the order of the routes, until one that
+    // stops. The log is a sink as the others: the default route sends every message to it
     bool matched = false;
 
     for (const Route& route : m_routes)
     {
-        if (!route.m_enabled || !route.m_filter.matches(record)) {
+        if (!route.m_enabled || !route.m_filter.matches(record, source)) {
             continue;
         }
 
@@ -1285,9 +1332,15 @@ void MessageCenterEngine::ingest(const MessageRecord& record, const QString& sou
 
     if (matched) {
         m_routed++;
-    } else {
-        deliver(record, "log", QStringList(), now);
     }
+}
+
+std::vector<MessageCenterEngine::Route> MessageCenterEngine::defaultRoutes()
+{
+    Route all;
+    all.m_name = "All messages to the log";
+    all.m_sinks = QStringList("log");
+    return {all};
 }
 
 std::vector<MessageRecord> MessageCenterEngine::select(const MessageCenterFilter& filter) const

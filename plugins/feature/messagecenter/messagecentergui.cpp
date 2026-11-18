@@ -21,6 +21,11 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QColorDialog>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QRegularExpression>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -90,13 +95,16 @@ QString filterSummary(const MessageCenterFilter& f)
         parts << "alias " + f.m_aliases.join(",");
     }
     if (!f.m_address.isEmpty()) {
-        parts << "address " + f.m_address;
+        parts << "address /" + f.m_address + "/";
     }
     if (!f.m_msgType.isEmpty()) {
         parts << f.m_msgType;
     }
     if (!f.m_text.isEmpty()) {
-        parts << "text '" + f.m_text + "'";
+        parts << "text /" + f.m_text + "/";
+    }
+    if (!f.m_sources.isEmpty()) {
+        parts << "from " + f.m_sources.join(",");
     }
     if (f.m_hideDuplicates) {
         parts << "no duplicates";
@@ -134,9 +142,12 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     m_alias = new QLineEdit(this);
     m_alias->setPlaceholderText("channel alias");
     m_address = new QLineEdit(this);
-    m_address->setPlaceholderText("address (* ?)");
+    m_address->setPlaceholderText("regular expression");
     m_text = new QLineEdit(this);
-    m_text->setPlaceholderText("text contains");
+    m_text->setPlaceholderText("regular expression");
+    m_source = new QComboBox(this);
+    m_source->addItems({"Any source", "channels", "api"});
+    m_source->setVisible(false);
     m_hideDuplicates = new QCheckBox("Hide duplicates", this);
     m_voiceOnly = new QCheckBox("Voice files", this);
     m_matchField = new QComboBox(this);
@@ -153,8 +164,11 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     m_polarity->setToolTip("Polarity the message was received or sent with");
     m_type->setToolTip("Message type as the decoder or encoder names it");
     m_alias->setToolTip("Alias of the channel, or the transmitter of a page (exact). Empty: any channel");
-    m_address->setToolTip("Address: RIC, capcode or GSC address; * matches any characters, ? one. Empty: any address");
-    m_text->setToolTip("Messages whose text contains this (case insensitive). Empty: any text");
+    m_address->setToolTip("Regular expression the whole address must match, as the filters of the other channels:\n"
+        "e.g. 1234567 for that RIC, 12345.. for 1234500 to 1234599, 001001/. for a GSC cap code. Empty: any address");
+    m_text->setToolTip("Regular expression the whole text must match: e.g. .*FIRE.* for a text that contains FIRE,\n"
+        "(?i).*fire.* not case sensitive. Empty: any text");
+    m_source->setToolTip("Where the message comes from: the channels, the API (ingest), or a source of Files");
     m_hideDuplicates->setToolTip("Hide the messages marked as duplicates (copies received again)");
     m_voiceOnly->setToolTip("Only the GSC voice pages that have a sound file");
     m_matchField->setToolTip("Field the regular expression is matched on: address, message, protocol, type, channel,\n"
@@ -182,23 +196,30 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     layout->addWidget(labelled("Address", m_address), 1, 1);
     layout->addWidget(labelled("Text", m_text), 1, 2, 1, 2);
     layout->addWidget(m_hideDuplicates, 2, 0, 1, 2);
-    layout->addWidget(m_voiceOnly, 2, 2, 1, 2);
+    layout->addWidget(m_voiceOnly, 2, 2);
+    layout->addWidget(m_source, 2, 3);
     layout->addWidget(m_matchField, 3, 0);
     layout->addWidget(m_regExp, 3, 1, 1, 3);
 
-    for (QComboBox *combo : {m_protocol, m_direction, m_polarity, m_type}) {
+    for (QComboBox *combo : {m_protocol, m_direction, m_polarity, m_type, m_source}) {
         connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MessageCenterFilterWidget::changed);
     }
     connect(m_matchField, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MessageCenterFilterWidget::changed);
 
-    // A regular expression that is not valid is shown in red, and matches nothing
-    connect(m_regExp, &QLineEdit::textChanged, this, [this](const QString& text) {
-        MessageCenterFilter f;
-        f.m_regExp = text;
-        QString error = f.regExpError();
-        m_regExp->setStyleSheet(error.isEmpty() ? QString() : QString("QLineEdit { color: red; }"));
-        m_regExp->setToolTip(error.isEmpty() ? QString() : error);
-    });
+    // A regular expression that is not valid is shown in red with its error, and matches nothing
+    auto validate = [](QLineEdit *edit, bool anchored, const QString& help) {
+        QRegularExpression expression(anchored ? QRegularExpression::anchoredPattern(edit->text()) : edit->text());
+        bool valid = edit->text().isEmpty() || expression.isValid();
+        edit->setStyleSheet(valid ? QString() : QString("QLineEdit { color: red; }"));
+        edit->setToolTip(valid ? help : expression.errorString());
+    };
+
+    for (QLineEdit *edit : {m_address, m_text, m_regExp})
+    {
+        const QString help = edit->toolTip();
+        const bool anchored = (edit != m_regExp);
+        connect(edit, &QLineEdit::textChanged, this, [validate, edit, anchored, help]() { validate(edit, anchored, help); });
+    }
 
     for (QLineEdit *edit : {m_alias, m_address, m_text, m_regExp}) {
         connect(edit, &QLineEdit::editingFinished, this, &MessageCenterFilterWidget::changed);
@@ -230,6 +251,11 @@ MessageCenterFilter MessageCenterFilterWidget::filter() const
 
     f.m_address = m_address->text().trimmed();
     f.m_text = m_text->text();
+
+    if (m_sourcesShown && (m_source->currentIndex() > 0)) {
+        f.m_sources = QStringList(m_source->currentText());
+    }
+
     f.m_hideDuplicates = m_hideDuplicates->isChecked();
     f.m_voiceOnly = m_voiceOnly->isChecked();
     f.m_regExp = m_regExp->text();
@@ -250,6 +276,24 @@ void MessageCenterFilterWidget::setFilter(const MessageCenterFilter& f)
     m_voiceOnly->setChecked(f.m_voiceOnly);
     m_matchField->setCurrentIndex(f.m_matchField);
     m_regExp->setText(f.m_regExp);
+
+    if (!f.m_sources.isEmpty() && (m_source->findText(f.m_sources.first()) < 0)) {
+        m_source->addItem(f.m_sources.first());
+    }
+
+    m_source->setCurrentIndex(f.m_sources.isEmpty() ? 0 : std::max(0, m_source->findText(f.m_sources.first())));
+}
+
+void MessageCenterFilterWidget::showSources(const QStringList& sources)
+{
+    m_source->blockSignals(true);
+    QString current = m_source->currentText();
+    m_source->clear();
+    m_source->addItems(QStringList({"Any source", "channels", "api"}) + sources);
+    m_source->setCurrentIndex(std::max(0, m_source->findText(current)));
+    m_source->blockSignals(false);
+    m_source->setVisible(true);
+    m_sourcesShown = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -456,18 +500,32 @@ void MessageCenterGUI::buildRoutes(QWidget *container)
 {
     QVBoxLayout *layout = new QVBoxLayout(container);
     layout->setContentsMargins(2, 2, 2, 2);
-    QLabel *help = new QLabel("The records go through the routes in order. A route sends the records its filter selects to its sinks "
-        "(log, queue or a file); stop: no route after it. A record no route selects is logged.", container);
+    QLabel *help = new QLabel("Every message is checked against all the routes, in their number order (#), not only the first. "
+        "Each route whose filter selects it sends it to the route's sinks: the log, the queue or the sinks of Files. A route "
+        "with Stop ends the check for the messages it selects. The log is a sink too: a message no route sends to it is not "
+        "logged (route 1, All messages to the log, does it by default). A sink takes only what a route sends to it.", container);
     help->setWordWrap(true);
-    m_routesTable = makeTable({"Route", "Filter", "Sinks", "Stop", "On"}, container);
+    m_routesTable = makeTable({"#", "Route", "Filter", "Sinks", "Stop", "On"}, container);
     QHBoxLayout *buttons = new QHBoxLayout();
     QPushButton *add = new QPushButton("Add...", container);
     QPushButton *edit = new QPushButton("Edit...", container);
     QPushButton *remove = new QPushButton("Remove", container);
+    QPushButton *up = new QPushButton("Up", container);
+    up->setToolTip("Move the route up: it is checked earlier");
+    QPushButton *down = new QPushButton("Down", container);
+    down->setToolTip("Move the route down: it is checked later");
+    QPushButton *exportRouting = new QPushButton("Export...", container);
+    exportRouting->setToolTip("Save the routes, the sinks and the sources to a JSON file");
+    QPushButton *importRouting = new QPushButton("Import...", container);
+    importRouting->setToolTip("Replace the routes, the sinks and the sources with those of a JSON file");
     buttons->addWidget(add);
     buttons->addWidget(edit);
     buttons->addWidget(remove);
+    buttons->addWidget(up);
+    buttons->addWidget(down);
     buttons->addStretch();
+    buttons->addWidget(exportRouting);
+    buttons->addWidget(importRouting);
     layout->addWidget(help);
     layout->addWidget(m_routesTable);
     layout->addLayout(buttons);
@@ -475,14 +533,101 @@ void MessageCenterGUI::buildRoutes(QWidget *container)
     connect(add, &QPushButton::clicked, this, &MessageCenterGUI::addRoute);
     connect(edit, &QPushButton::clicked, this, &MessageCenterGUI::editSelectedRoute);
     connect(remove, &QPushButton::clicked, this, &MessageCenterGUI::removeRoute);
+    connect(up, &QPushButton::clicked, this, [this]() { moveRoute(-1); });
+    connect(down, &QPushButton::clicked, this, [this]() { moveRoute(1); });
+    connect(exportRouting, &QPushButton::clicked, this, &MessageCenterGUI::exportRouting);
+    connect(importRouting, &QPushButton::clicked, this, &MessageCenterGUI::importRouting);
     connect(m_routesTable, &QTableWidget::cellDoubleClicked, this, &MessageCenterGUI::editSelectedRoute);
+}
+
+void MessageCenterGUI::moveRoute(int step)
+{
+    int row = m_routesTable->currentRow();
+    int to = row + step;
+
+    if ((row < 0) || (row >= (int) m_settings.m_routes.size()) || (to < 0) || (to >= (int) m_settings.m_routes.size())) {
+        return;
+    }
+
+    std::swap(m_settings.m_routes[row], m_settings.m_routes[to]);
+    refreshRoutes();
+    m_routesTable->selectRow(to);
+    applySettings(QStringList("routes"));
+}
+
+// The routing as one JSON object: routes, sinks and sources, as the WebAPI has them
+void MessageCenterGUI::exportRouting()
+{
+    QString path = QFileDialog::getSaveFileName(this, "Export the routing", "messagecenter.json", "JSON (*.json)");
+
+    if (path.isEmpty()) {
+        return;
+    }
+
+    QJsonObject json;
+    json["routes"] = QJsonDocument::fromJson(MessageCenterSettings::routesToJson(m_settings.m_routes)).array();
+    json["sinks"] = QJsonDocument::fromJson(MessageCenterSettings::filesToJson(m_settings.m_sinks)).array();
+    json["sources"] = QJsonDocument::fromJson(MessageCenterSettings::filesToJson(m_settings.m_sources)).array();
+    QFile file(path);
+
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || (file.write(QJsonDocument(json).toJson()) < 0)) {
+        QMessageBox::warning(this, "Export the routing", QString("Cannot write %1").arg(path));
+    }
+}
+
+void MessageCenterGUI::importRouting()
+{
+    QString path = QFileDialog::getOpenFileName(this, "Import the routing", QString(), "JSON (*.json);;All files (*)");
+
+    if (path.isEmpty()) {
+        return;
+    }
+
+    QFile file(path);
+    QJsonParseError parseError;
+    QJsonDocument document = file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll(), &parseError) : QJsonDocument();
+
+    if (!document.isObject())
+    {
+        QMessageBox::warning(this, "Import the routing", QString("%1 is not a routing file").arg(path));
+        return;
+    }
+
+    QJsonObject json = document.object();
+    MessageCenterSettings settings = m_settings;
+    auto text = [&json](const char *key) { return QJsonDocument(json[key].toArray()).toJson(QJsonDocument::Compact); };
+    settings.m_routes = MessageCenterSettings::routesFromJson(text("routes"));
+    settings.m_sinks = MessageCenterSettings::filesFromJson(text("sinks"));
+    settings.m_sources = MessageCenterSettings::filesFromJson(text("sources"));
+    QString error = MessageCenter::checkRouting(settings);
+
+    if (!error.isEmpty())
+    {
+        QMessageBox::warning(this, "Import the routing", error);
+        return;
+    }
+
+    QString question = QString("Replace %1 routes, %2 sinks and %3 sources with %4 routes, %5 sinks and %6 sources?")
+        .arg(m_settings.m_routes.size()).arg(m_settings.m_sinks.size()).arg(m_settings.m_sources.size())
+        .arg(settings.m_routes.size()).arg(settings.m_sinks.size()).arg(settings.m_sources.size());
+
+    if (QMessageBox::question(this, "Import the routing", question, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
+        return;
+    }
+
+    m_settings.m_routes = settings.m_routes;
+    m_settings.m_sinks = settings.m_sinks;
+    m_settings.m_sources = settings.m_sources;
+    refreshRoutes();
+    refreshFiles();
+    applySettings({"routes", "sinks", "sources"});
 }
 
 void MessageCenterGUI::buildFiles(QWidget *container)
 {
     QVBoxLayout *layout = new QVBoxLayout(container);
     layout->setContentsMargins(2, 2, 2, 2);
-    m_sinksTable = makeTable({"Sink", "Type", "Target", "Format", "Taken", "Failed"}, container);
+    m_sinksTable = makeTable({"Sink", "Type", "Target", "Format", "Taken", "Failed", "Routes"}, container);
     m_sinksTable->setToolTip("The sinks the routes send messages to: files, UDP, and actions on the message (command,\n"
         "speech, highlight in the log, position on the Map). Double-click to edit");
     m_sourcesTable = makeTable({"Source", "Type", "Target"}, container);
@@ -807,12 +952,18 @@ void MessageCenterGUI::refreshComposeTransmitters()
 void MessageCenterGUI::refreshRoutes()
 {
     const std::vector<MessageCenterEngine::Route>& routes = m_settings.m_routes;
+    int selected = m_routesTable->currentRow();
     m_routesTable->setRowCount((int) routes.size());
 
     for (int i = 0; i < (int) routes.size(); i++)
     {
-        setRow(m_routesTable, i, {routes[i].m_name, filterSummary(routes[i].m_filter), routes[i].m_sinks.join(", "),
+        setRow(m_routesTable, i, {QString::number(i + 1), routes[i].m_name, filterSummary(routes[i].m_filter),
+            routes[i].m_sinks.isEmpty() ? QString("-") : routes[i].m_sinks.join(", "),
             routes[i].m_stop ? "stop" : "", routes[i].m_enabled ? "yes" : "no"});
+    }
+
+    if ((selected >= 0) && (selected < (int) routes.size())) {
+        m_routesTable->selectRow(selected);
     }
 }
 
@@ -855,29 +1006,67 @@ QString fileFormat(const MessageCenterFileSetting& f)
 
 } // namespace
 
+// The built in sinks (log, queue) and sources (channels, api) come first: they are always there
 void MessageCenterGUI::refreshFiles()
 {
     const QMap<QString, MessageCenterEngine::SinkStat>& stats = m_center->engine().sinkStats();
-    m_sinksTable->setRowCount(m_settings.m_sinks.size());
+    auto routesTo = [this](const QString& sink) {
+        QStringList routes;
+
+        for (int r = 0; r < (int) m_settings.m_routes.size(); r++)
+        {
+            if (m_settings.m_routes[r].m_sinks.contains(sink)) {
+                routes.append(QString("%1 %2").arg(r + 1).arg(m_settings.m_routes[r].m_name));
+            }
+        }
+
+        return routes;
+    };
+    auto setSinkRow = [&](int row, const QStringList& cells, const QStringList& routes, bool builtIn) {
+        setRow(m_sinksTable, row, cells + QStringList(routes.isEmpty() ? QString("none: takes nothing") : routes.join(", ")));
+        m_sinksTable->item(row, 6)->setForeground(routes.isEmpty() ? QBrush(QColor(255, 120, 80)) : QBrush());
+
+        for (int c = 0; c < m_sinksTable->columnCount(); c++) {
+            m_sinksTable->item(row, c)->setForeground(builtIn && (c != 6) ? QBrush(QColor(150, 150, 150)) : m_sinksTable->item(row, c)->foreground());
+        }
+    };
+
+    m_sinksTable->setRowCount(m_builtInSinks + m_settings.m_sinks.size());
+    MessageCenterEngine::SinkStat logStat = stats.value("log");
+    MessageCenterEngine::SinkStat queueStat = stats.value("queue");
+    setSinkRow(0, {"log", "built in", "the log of the Message Center", "", QString::number(logStat.m_accepted),
+        QString::number(logStat.m_failed)}, routesTo("log"), true);
+    setSinkRow(1, {"queue", "built in", "the pages to transmit (messages for a transmitter)", "", QString::number(queueStat.m_accepted),
+        QString::number(queueStat.m_failed)}, routesTo("queue"), true);
 
     for (int i = 0; i < m_settings.m_sinks.size(); i++)
     {
         const MessageCenterFileSetting& f = m_settings.m_sinks[i];
         MessageCenterEngine::SinkStat stat = stats.value(f.m_name);
-        setRow(m_sinksTable, i, {f.m_name, f.typeOrDefault(), fileTarget(f), fileFormat(f),
-            QString::number(stat.m_accepted), QString::number(stat.m_failed)});
+        int row = m_builtInSinks + i;
+        setSinkRow(row, {f.m_name, f.typeOrDefault(), fileTarget(f), fileFormat(f),
+            QString::number(stat.m_accepted), QString::number(stat.m_failed)}, routesTo(f.m_name), false);
 
         if (f.typeOrDefault() == "highlight") {
-            m_sinksTable->item(i, 2)->setBackground(QColor::fromRgba(f.m_color));
+            m_sinksTable->item(row, 2)->setBackground(QColor::fromRgba(f.m_color));
         }
     }
 
-    m_sourcesTable->setRowCount(m_settings.m_sources.size());
+    m_sourcesTable->setRowCount(m_builtInSources + m_settings.m_sources.size());
+    setRow(m_sourcesTable, 0, {"channels", "built in", "the Radio Paging demodulators and modulators"});
+    setRow(m_sourcesTable, 1, {"api", "built in", "the ingest action of the WebAPI and of the MCP server"});
+
+    for (int r = 0; r < m_builtInSources; r++)
+    {
+        for (int c = 0; c < m_sourcesTable->columnCount(); c++) {
+            m_sourcesTable->item(r, c)->setForeground(QBrush(QColor(150, 150, 150)));
+        }
+    }
 
     for (int i = 0; i < m_settings.m_sources.size(); i++)
     {
         const MessageCenterFileSetting& f = m_settings.m_sources[i];
-        setRow(m_sourcesTable, i, {f.m_name, f.typeOrDefault(), fileTarget(f)});
+        setRow(m_sourcesTable, m_builtInSources + i, {f.m_name, f.typeOrDefault(), fileTarget(f)});
     }
 }
 
@@ -945,6 +1134,13 @@ void MessageCenterGUI::editRoute(int index)
     QLineEdit *name = new QLineEdit(route.m_name, &dialog);
     name->setPlaceholderText("name");
     MessageCenterFilterWidget *filter = new MessageCenterFilterWidget(&dialog);
+    QStringList sources;
+
+    for (const MessageCenterFileSetting& f : m_settings.m_sources) {
+        sources.append(f.m_name);
+    }
+
+    filter->showSources(sources);
     filter->setFilter(route.m_filter);
     layout->addWidget(name);
     layout->addWidget(filter);
@@ -960,12 +1156,12 @@ void MessageCenterGUI::editRoute(int index)
     {
         QCheckBox *check = new QCheckBox(QString("Send to %1").arg(sink), &dialog);
         check->setProperty("sink", sink);
-        check->setChecked(route.m_sinks.contains(sink) || (isNew && (sink == "log")));
+        check->setChecked(route.m_sinks.contains(sink));
         layout->addWidget(check);
         sinkChecks.append(check);
     }
 
-    QCheckBox *stop = new QCheckBox("Stop: no route after this one", &dialog);
+    QCheckBox *stop = new QCheckBox("Stop: the routes after this one are not checked for the messages it selects", &dialog);
     stop->setChecked(route.m_stop);
     QCheckBox *enabled = new QCheckBox("Enabled", &dialog);
     enabled->setChecked(route.m_enabled);
@@ -998,6 +1194,13 @@ void MessageCenterGUI::editRoute(int index)
 
     route.m_stop = stop->isChecked();
     route.m_enabled = enabled->isChecked();
+
+    // A route with an expression that is not valid would select nothing: said now
+    QString error = route.m_filter.errors();
+
+    if (!error.isEmpty()) {
+        QMessageBox::information(this, "Route", QString("A regular expression is not valid, the route selects nothing:\n%1").arg(error));
+    }
 
     if (isNew) {
         m_settings.m_routes.push_back(route);
@@ -1140,6 +1343,37 @@ void MessageCenterGUI::editFile(bool sink, int index)
     buttons->addStretch();
     buttons->addWidget(ok);
     buttons->addWidget(cancel);
+
+    // A sink takes only what routes send to it: the routes are chosen here too. With no route, one that sends
+    // every message to it can be made
+    QList<QCheckBox*> routeChecks;
+    QCheckBox *newRoute = nullptr;
+
+    if (sink)
+    {
+        QWidget *routesBox = new QWidget(&dialog);
+        QVBoxLayout *routesLayout = new QVBoxLayout(routesBox);
+        routesLayout->setContentsMargins(0, 0, 0, 0);
+
+        for (int r = 0; r < (int) m_settings.m_routes.size(); r++)
+        {
+            const MessageCenterEngine::Route& route = m_settings.m_routes[r];
+            QCheckBox *check = new QCheckBox(QString("%1 (%2)").arg(route.m_name).arg(filterSummary(route.m_filter)), routesBox);
+            check->setChecked(!isNew && route.m_sinks.contains(oldName));
+            check->setProperty("route", r);
+            routesLayout->addWidget(check);
+            routeChecks.append(check);
+        }
+
+        newRoute = new QCheckBox("New route: every message to this sink", routesBox);
+        newRoute->setToolTip("Adds a route without a filter that sends every message to this sink.\n"
+            "Edit it in Routes to select the messages");
+        newRoute->setChecked(m_settings.m_routes.empty() && isNew);
+        routesLayout->addWidget(newRoute);
+        routesBox->setToolTip("The routes that send messages to this sink. A sink no route sends to takes nothing");
+        layout->addRow("Routes", routesBox);
+    }
+
     layout->addRow(buttons);
 
     connect(type, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, [&]() { showFields(); });
@@ -1203,21 +1437,39 @@ void MessageCenterGUI::editFile(bool sink, int index)
 
     QStringList keys(sink ? "sinks" : "sources");
 
-    // The routes follow a sink that was renamed
-    if (sink && !isNew && (oldName != setting.m_name))
+    // The routes that send to the sink, as chosen; a sink renamed keeps its routes
+    if (sink)
     {
-        for (MessageCenterEngine::Route& route : m_settings.m_routes)
+        bool routesChanged = false;
+
+        for (QCheckBox *check : routeChecks)
         {
-            for (QString& routeSink : route.m_sinks)
-            {
-                if (routeSink == oldName) {
-                    routeSink = setting.m_name;
-                }
+            MessageCenterEngine::Route& route = m_settings.m_routes[check->property("route").toInt()];
+            const QStringList before = route.m_sinks;
+            route.m_sinks.removeAll(oldName);
+            route.m_sinks.removeAll(setting.m_name);
+
+            if (check->isChecked()) {
+                route.m_sinks.append(setting.m_name);
             }
+
+            routesChanged = routesChanged || (before != route.m_sinks);
         }
 
-        keys.append("routes");
-        refreshRoutes();
+        if (newRoute && newRoute->isChecked())
+        {
+            MessageCenterEngine::Route route;
+            route.m_name = QString("to %1").arg(setting.m_name);
+            route.m_sinks = QStringList(setting.m_name);
+            m_settings.m_routes.push_back(route);
+            routesChanged = true;
+        }
+
+        if (routesChanged)
+        {
+            keys.append("routes");
+            refreshRoutes();
+        }
     }
 
     refreshFiles();
@@ -1236,7 +1488,7 @@ void MessageCenterGUI::addSource()
 
 void MessageCenterGUI::editSelectedSink()
 {
-    int row = m_sinksTable->currentRow();
+    int row = m_sinksTable->currentRow() - m_builtInSinks;
 
     if ((row >= 0) && (row < m_settings.m_sinks.size())) {
         editFile(true, row);
@@ -1245,7 +1497,7 @@ void MessageCenterGUI::editSelectedSink()
 
 void MessageCenterGUI::editSelectedSource()
 {
-    int row = m_sourcesTable->currentRow();
+    int row = m_sourcesTable->currentRow() - m_builtInSources;
 
     if ((row >= 0) && (row < m_settings.m_sources.size())) {
         editFile(false, row);
@@ -1278,7 +1530,7 @@ void MessageCenterGUI::importFile()
 
 void MessageCenterGUI::removeSink()
 {
-    int row = m_sinksTable->currentRow();
+    int row = m_sinksTable->currentRow() - m_builtInSinks;
 
     if ((row >= 0) && (row < m_settings.m_sinks.size()))
     {
@@ -1298,7 +1550,7 @@ void MessageCenterGUI::removeSink()
 
 void MessageCenterGUI::removeSource()
 {
-    int row = m_sourcesTable->currentRow();
+    int row = m_sourcesTable->currentRow() - m_builtInSources;
 
     if ((row >= 0) && (row < m_settings.m_sources.size()))
     {

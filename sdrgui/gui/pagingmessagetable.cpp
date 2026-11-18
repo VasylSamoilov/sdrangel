@@ -42,6 +42,9 @@
 #include <algorithm>
 
 #include "dsp/dspengine.h"
+#include "feature/feature.h"
+#include "feature/featuregui.h"
+#include "feature/featurewebapiutils.h"
 #include "gui/audioselectdialog.h"
 #include "gui/dialogpositioner.h"
 #include "radiopagingpage.h"
@@ -791,6 +794,34 @@ void addJsonItem(QTreeWidgetItem *parent, const QString& key, const QJsonValue& 
 
 // Every field of the record of the row, as stored (the JSON of the record): the common fields, protocolData
 // and the raw payload, also as bits
+// The window of the feature at the index of the Message Center in feature set 0; there is one feature set
+void PagingMessageTable::openMessageCenter()
+{
+    int featureSetIndex = -1;
+    int featureIndex = -1;
+
+    if (!FeatureWebAPIUtils::getFeature(featureSetIndex, featureIndex, "sdrangel.feature.messagecenter"))
+    {
+        // Added by the main message queue: its window shows when it is made
+        FeatureWebAPIUtils::openMessageCenter();
+        return;
+    }
+
+    for (QWidget *widget : QApplication::allWidgets())
+    {
+        FeatureGUI *gui = qobject_cast<FeatureGUI*>(widget);
+
+        if (gui && (gui->getIndex() == featureIndex))
+        {
+            gui->show();
+            gui->showNormal();
+            gui->raise();
+            gui->activateWindow();
+            return;
+        }
+    }
+}
+
 void PagingMessageTable::showDetails(int row)
 {
     QTableWidgetItem *timeItem = item(row, ColTime);

@@ -95,6 +95,8 @@ public:
     void toggleVoice(int row);
     //!< A window with every field of the record of a row: the common fields, protocolData and the raw payload
     void showDetails(int row);
+    //!< Shows the Message Center window, adding the feature first if there is none
+    static void openMessageCenter();
 
 signals:
     //!< The user moved, resized, showed or hid a column

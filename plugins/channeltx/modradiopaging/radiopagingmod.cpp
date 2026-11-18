@@ -45,7 +45,6 @@
 #include "dsp/wavfilerecord.h"
 #include "util/db.h"
 #include "maincore.h"
-#include "feature/featurewebapiutils.h"
 #include "util/messageendpoint.h"
 #include "radiopagingwav.h"
 #include "radiopagingkanji.h"
@@ -183,16 +182,10 @@ RadioPagingMod::RadioPagingMod(DeviceAPI *deviceAPI) :
     m_deviceAPI->addChannelSource(this);
     m_deviceAPI->addChannelSourceAPI(this);
 
-    // The message center learns this transmitter at the next announcement, whenever it starts. The first
-    // announcement adds a Message Center if there is none: the messages are logged
+    // The message center learns this transmitter at the next announcement, whenever it starts. It is not added
+    // here: the Message Center button of the GUI opens one
     m_announceTimer = new QTimer(this);
     QObject::connect(m_announceTimer, &QTimer::timeout, this, [this]() {
-        if (!m_messageCenterChecked)
-        {
-            m_messageCenterChecked = true;
-            FeatureWebAPIUtils::openMessageCenter();
-        }
-
         announce("status");
     });
     m_announceTimer->start(5000);
