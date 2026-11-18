@@ -2,6 +2,7 @@ project(demodradiopaging)
 
 set(demodradiopaging_SOURCES
     radiopagingdemod.cpp
+    radiopagingdemodoutput.cpp
     radiopagingdemodsettings.cpp
     radiopagingdemodbaseband.cpp
     radiopagingdemodsink.cpp
@@ -11,6 +12,7 @@ set(demodradiopaging_SOURCES
 
 set(demodradiopaging_HEADERS
     radiopagingdemod.h
+    radiopagingdemodoutput.h
     radiopagingdemodsettings.h
     radiopagingdemodbaseband.h
     radiopagingdemodsink.h
@@ -28,15 +30,21 @@ if(NOT SERVER_MODE)
         ${demodradiopaging_SOURCES}
         radiopagingdemodgui.cpp
         radiopagingdemodgui.ui
+        radiopagingdemodnotificationdialog.cpp
+        radiopagingdemodnotificationdialog.ui
     )
     set(demodradiopaging_HEADERS
         ${demodradiopaging_HEADERS}
         radiopagingdemodgui.h
+        radiopagingdemodnotificationdialog.h
     )
 
     set(TARGET_NAME ${PLUGINS_PREFIX}demodradiopaging)
     set(TARGET_LIB "Qt::Widgets")
     set(TARGET_LIB_GUI "sdrgui")
+    if(Qt${QT_DEFAULT_MAJOR_VERSION}TextToSpeech_FOUND)
+        list(APPEND TARGET_LIB_GUI Qt::TextToSpeech)
+    endif()
     set(INSTALL_FOLDER ${INSTALL_PLUGINS_DIR})
 else()
     set(TARGET_NAME ${PLUGINSSRV_PREFIX}demodradiopagingsrv)
@@ -76,6 +84,17 @@ if(NOT SERVER_MODE)
     )
     target_include_directories(radiopagingdemodsinktest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(radiopagingdemodsinktest Qt::Core sdrbase modemradiopaging)
+
+    # Self test of the output (UDP datagram, log) and the settings, not built by default:
+    #   cmake --build <build dir> --target radiopagingdemodparitytest
+    add_executable(radiopagingdemodparitytest EXCLUDE_FROM_ALL
+        test/radiopagingdemodparitytest.cpp
+        radiopagingdemodoutput.cpp
+        radiopagingdemodsink.cpp
+        radiopagingdemodsettings.cpp
+    )
+    target_include_directories(radiopagingdemodparitytest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(radiopagingdemodparitytest Qt::Core sdrbase modemradiopaging)
 endif()
 
 # Install debug symbols

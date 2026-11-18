@@ -43,6 +43,7 @@
 
 class ChannelAPI;
 class MessageQueue;
+class ScopeVis;
 
 // Channel IQ at 38400 Hz is shared by one leg per protocol. Each leg has its own filter at
 // the protocol's Carson bandwidth (skipped when not narrower than the channel filter) and
@@ -113,6 +114,25 @@ public:
 
     RadioPagingDemodSink();
     ~RadioPagingDemodSink();
+
+    //! Signals the scope shows (RadioPagingDemodSettings::m_scopeCh1 and m_scopeCh2), at the channel rate
+    enum ScopeSignal {
+        ScopeI,                         //!< Channel IQ, full scale 1
+        ScopeQ,
+        ScopeMagSq,                     //!< Channel power, full scale 1
+        ScopePocsagFm,                  //!< Discriminator of each leg, 1 at the deviation of the protocol
+        ScopeFlexFm,
+        ScopeGscFm,
+        ScopePocsagShift,               //!< Carrier offset correction of each leg, kHz
+        ScopeFlexShift,
+        ScopeGscShift,
+        ScopePocsagSync,                //!< 1 while a receiver of the protocol is synchronised
+        ScopeFlexSync,
+        ScopeGscSync,
+        ScopeSignalCount
+    };
+    static QString scopeSignalName(int signal);
+    void setScopeSink(ScopeVis *scopeSink) { m_scopeSink = scopeSink; }
 
     virtual void feed(const SampleVector::const_iterator& begin, const SampleVector::const_iterator& end);
 
@@ -281,6 +301,13 @@ private:
     int m_statusCount;
 
     void processOneSample(Complex& ci);
+    // Scope: the two signals selected, in blocks
+    static const int m_scopeBufferSize = 1000;
+    ScopeVis *m_scopeSink = nullptr;
+    ComplexVector m_scopeBuffer;
+    int m_scopeBufferIndex = 0;
+    Real scopeValue(int signal, const Complex& ci, Real magsq, const Real fm[3], const bool sync[3]) const;
+    void sampleToScope(const Complex& sample);
     void applyLegs();
     //!< A receiver measured the DC offset dc on a known pattern: the leg absorbs it
     void legMeasured(Leg& leg, int protocol, float dc);

@@ -77,6 +77,10 @@ public:
     //!< The id of the record of the selected row, empty if none; selects the row of an id
     QString selectedId() const;
     void selectId(const QString& id);
+    //!< The row of the record of an id, -1 if none
+    int findRow(const QString& id) const;
+    //!< The background of every cell of the row of an id (a notification that matched)
+    void setRowBackground(const QString& id, const QColor& color);
     //!< Plain text of the record and the chips of its protocol fields (HTML), and the tool tip of the chips
     static void recordInfo(const MessageRecord& record, QString& plain, QString& html, QString& tip);
     //!< The text of the row of the record
@@ -109,7 +113,6 @@ private:
     QMenu *m_columnMenu;
     PagingVoicePlayer *m_player;
 
-    int findRow(const QString& id) const;
     void fillRow(int row, const MessageRecord& record, const QString& state);
     void showColumnMenu(const QPoint& pos);
     void showRowMenu(const QPoint& pos);

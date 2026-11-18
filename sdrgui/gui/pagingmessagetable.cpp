@@ -267,6 +267,22 @@ int PagingMessageTable::findRow(const QString& id) const
     return -1;
 }
 
+void PagingMessageTable::setRowBackground(const QString& id, const QColor& color)
+{
+    int row = findRow(id);
+
+    if (row < 0) {
+        return;
+    }
+
+    for (int col = 0; col < columnCount(); col++)
+    {
+        if (QTableWidgetItem *cellItem = item(row, col)) {
+            cellItem->setBackground(QBrush(color));
+        }
+    }
+}
+
 QString PagingMessageTable::selectedId() const
 {
     int row = currentRow();

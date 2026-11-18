@@ -22,12 +22,15 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QBuffer>
+#include <QDateTime>
+#include <QHostAddress>
 #include <QTimer>
 
 #include "SWGChannelSettings.h"
 #include "SWGWorkspaceInfo.h"
 #include "SWGRadioPagingDemodSettings.h"
 #include "SWGChannelReport.h"
+#include "SWGGLScope.h"
 #include "SWGRadioPagingDemodReport.h"
 
 #include "dsp/dspcommands.h"
@@ -42,6 +45,7 @@
 #include "radiopagingcharset.h"
 #include "radiopagingpage.h"
 #include "radiopagingdemod.h"
+#include "radiopagingdemodoutput.h"
 
 MESSAGE_CLASS_DEFINITION(RadioPagingDemod::MsgConfigureRadioPagingDemod, Message)
 
@@ -258,6 +262,10 @@ void RadioPagingDemod::publishRecord(MessageRecord record)
         getMessageQueueToGUI()->push(MainCore::MsgMessageRecord::create(this, record));
     }
 
+    if (record.m_kind == MessageRecord::KindMessage) {
+        outputRecord(record);
+    }
+
     QList<ObjectPipe*> pipes;
     MainCore::instance()->getMessagePipes().getMessagePipes(this, MessageRecord::m_pipeName, pipes);
 
@@ -265,6 +273,62 @@ void RadioPagingDemod::publishRecord(MessageRecord record)
     {
         MessageQueue *messageQueue = qobject_cast<MessageQueue*>(pipe->m_element);
         messageQueue->push(MainCore::MsgMessageRecord::create(this, record));
+    }
+}
+
+// Each message received: a UDP datagram and a line of the log
+void RadioPagingDemod::outputRecord(const MessageRecord& record)
+{
+    if (m_settings.m_udpEnabled && !m_settings.m_udpAddress.isEmpty())
+    {
+        QByteArray datagram;
+
+        if (m_settings.m_udpFormat == RadioPagingDemodSettings::UdpJson) {
+            datagram = record.toJsonLine();
+        } else if (!RadioPagingDemodOutput::isCompletion(record)) {
+            datagram = RadioPagingDemodOutput::pagerDatagram(record);
+        }
+
+        if (!datagram.isEmpty()) {
+            m_udpSocket.writeDatagram(datagram, QHostAddress(m_settings.m_udpAddress), m_settings.m_udpPort);
+        }
+    }
+
+    if (m_logFile.isOpen())
+    {
+        m_logStream << record.toCSV() << "\n";
+        m_logStream.flush();
+    }
+}
+
+void RadioPagingDemod::openLog(const RadioPagingDemodSettings& settings)
+{
+    if (m_logFile.isOpen())
+    {
+        m_logStream.flush();
+        m_logFile.close();
+    }
+
+    if (!settings.m_logEnabled || settings.m_logFilename.isEmpty()) {
+        return;
+    }
+
+    m_logFile.setFileName(settings.m_logFilename);
+
+    if (m_logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+    {
+        qDebug() << "RadioPagingDemod::openLog: logging to" << settings.m_logFilename;
+        m_logStream.setDevice(&m_logFile);
+
+        if (m_logFile.size() == 0)
+        {
+            m_logStream << MessageRecord::csvHeader().join(',') << "\n";
+            m_logStream.flush();
+        }
+    }
+    else
+    {
+        qWarning() << "RadioPagingDemod::openLog: unable to open" << settings.m_logFilename;
     }
 }
 
@@ -316,6 +380,10 @@ void RadioPagingDemod::applySettings(const QStringList& settingsKeys, const Radi
         m_settings = settings;
     } else {
         m_settings.applySettings(settingsKeys, settings);
+    }
+
+    if (force || settingsKeys.contains("logEnabled") || settingsKeys.contains("logFilename")) {
+        openLog(m_settings);
     }
 
     // A new alias or frequency offset is announced at once
@@ -431,6 +499,17 @@ int RadioPagingDemod::webapiSettingsPutPatch(
     if (channelSettingsKeys.contains("pocsagFillCodes") && !RadioPagingDemodSettings::parseFillCodes(settings.m_pocsagFillCodes, fillCodes))
     {
         errorMessage = "pocsagFillCodes must be hex codes 00 to 7F separated by spaces or commas";
+        return 400;
+    }
+    if (channelSettingsKeys.contains("udpFormat")
+        && ((settings.m_udpFormat < RadioPagingDemodSettings::UdpPagerDemod) || (settings.m_udpFormat > RadioPagingDemodSettings::UdpJson)))
+    {
+        errorMessage = "udpFormat must be 0 (Pager demodulator fields) or 1 (JSON)";
+        return 400;
+    }
+    if (channelSettingsKeys.contains("udpPort") && (settings.m_udpPort == 0))
+    {
+        errorMessage = "udpPort must be 1 to 65535";
         return 400;
     }
 
@@ -567,6 +646,27 @@ void RadioPagingDemod::webapiUpdateChannelSettings(
     if (settings.m_rollupState && channelSettingsKeys.contains("rollupState") && model->getRollupState()) {
         settings.m_rollupState->updateFrom(channelSettingsKeys, model->getRollupState());
     }
+    if (settings.m_scopeGUI && channelSettingsKeys.contains("scopeConfig") && model->getScopeConfig()) {
+        settings.m_scopeGUI->updateFrom(channelSettingsKeys, model->getScopeConfig());
+    }
+    if (channelSettingsKeys.contains("udpEnabled")) {
+        settings.m_udpEnabled = model->getUdpEnabled() != 0;
+    }
+    if (channelSettingsKeys.contains("udpAddress") && model->getUdpAddress()) {
+        settings.m_udpAddress = *model->getUdpAddress();
+    }
+    if (channelSettingsKeys.contains("udpPort")) {
+        settings.m_udpPort = model->getUdpPort();
+    }
+    if (channelSettingsKeys.contains("udpFormat")) {
+        settings.m_udpFormat = model->getUdpFormat();
+    }
+    if (channelSettingsKeys.contains("logEnabled")) {
+        settings.m_logEnabled = model->getLogEnabled() != 0;
+    }
+    if (channelSettingsKeys.contains("logFilename") && model->getLogFilename()) {
+        settings.m_logFilename = *model->getLogFilename();
+    }
 }
 
 int RadioPagingDemod::webapiReportGet(
@@ -634,6 +734,36 @@ void RadioPagingDemod::webapiFormatChannelSettings(SWGSDRangel::SWGChannelSettin
     model->setReverseApiPort(settings.m_reverseAPIPort);
     model->setReverseApiDeviceIndex(settings.m_reverseAPIDeviceIndex);
     model->setReverseApiChannelIndex(settings.m_reverseAPIChannelIndex);
+    model->setUdpEnabled(settings.m_udpEnabled ? 1 : 0);
+    model->setUdpPort(settings.m_udpPort);
+    model->setUdpFormat(settings.m_udpFormat);
+    model->setLogEnabled(settings.m_logEnabled ? 1 : 0);
+
+    if (model->getUdpAddress()) {
+        *model->getUdpAddress() = settings.m_udpAddress;
+    } else {
+        model->setUdpAddress(new QString(settings.m_udpAddress));
+    }
+
+    if (model->getLogFilename()) {
+        *model->getLogFilename() = settings.m_logFilename;
+    } else {
+        model->setLogFilename(new QString(settings.m_logFilename));
+    }
+
+    if (settings.m_scopeGUI)
+    {
+        if (model->getScopeConfig())
+        {
+            settings.m_scopeGUI->formatTo(model->getScopeConfig());
+        }
+        else
+        {
+            SWGSDRangel::SWGGLScope *swgGLScope = new SWGSDRangel::SWGGLScope();
+            settings.m_scopeGUI->formatTo(swgGLScope);
+            model->setScopeConfig(swgGLScope);
+        }
+    }
 
     if (settings.m_channelMarker)
     {
@@ -804,6 +934,31 @@ void RadioPagingDemod::webapiFormatChannelSettings(
     }
     if (channelSettingsKeys.contains("streamIndex") || force) {
         model->setStreamIndex(settings.m_streamIndex);
+    }
+    if (channelSettingsKeys.contains("udpEnabled") || force) {
+        model->setUdpEnabled(settings.m_udpEnabled ? 1 : 0);
+    }
+    if (channelSettingsKeys.contains("udpAddress") || force) {
+        model->setUdpAddress(new QString(settings.m_udpAddress));
+    }
+    if (channelSettingsKeys.contains("udpPort") || force) {
+        model->setUdpPort(settings.m_udpPort);
+    }
+    if (channelSettingsKeys.contains("udpFormat") || force) {
+        model->setUdpFormat(settings.m_udpFormat);
+    }
+    if (channelSettingsKeys.contains("logEnabled") || force) {
+        model->setLogEnabled(settings.m_logEnabled ? 1 : 0);
+    }
+    if (channelSettingsKeys.contains("logFilename") || force) {
+        model->setLogFilename(new QString(settings.m_logFilename));
+    }
+
+    if (settings.m_scopeGUI && (channelSettingsKeys.contains("scopeConfig") || force))
+    {
+        SWGSDRangel::SWGGLScope *swgGLScope = new SWGSDRangel::SWGGLScope();
+        settings.m_scopeGUI->formatTo(swgGLScope);
+        model->setScopeConfig(swgGLScope);
     }
 
     if (settings.m_channelMarker && (channelSettingsKeys.contains("channelMarker") || force))

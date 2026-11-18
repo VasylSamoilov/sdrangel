@@ -142,11 +142,25 @@ GSC has in addition:
 
 The voice is the GSC discriminator output, with the DC removed, low pass filtered at 3 kHz and resampled to the audio output rate. It is processed only while a voice page is open.
 
-<h3>7: Clear messages from table</h3>
+<h3>7: Output of the messages</h3>
+
+What the Pager demodulator has, for the messages of all three protocols. A message is output once, when it is received. The end of a GSC voice message, which only completes the record of its voice page, is not output again.
+
+* UDP - sends each message to the address and port set. Format Pager: the fields of the Pager demodulator, each ended by a NUL: date, time, address, function bits, alphanumeric, numeric, protocol and type. The address has 7 digits for POCSAG and 9 for FLEX, the function bits are only for POCSAG; a numeric message is in the numeric field and its alphanumeric interpretation is in the alphanumeric field, and the other way round. Format JSON: the message record as one line of JSON.
+* Log (record button) - writes each message to a .csv file, with the columns of the message record (header first, appended to an existing file). The folder button selects the file.
+* Load (arrow button) - reads the messages of a log written by this demodulator into the table. They are not notified again.
+* Notifications - a regular expression matched on a field of the message (address, message, protocol, type, channel or any of them), and what is done to a message that matches: its row is highlighted, the text of Speech is spoken (when the build has text to speech), the Command is run, and a position (latitude and longitude) in the message is plotted on the Map named by the address. Speech and Command replace ${address}, ${message}, ${protocol}, ${type}, ${channel} and ${0}, ${1}... (the captures of the expression). A duplicate is not notified again.
+* Address filter - only the messages whose address matches the regular expression are shown.
+
+<h3>8: Waveforms</h3>
+
+The scope shows two of the signals of the receiver, at the channel sample rate of 38400 Hz: I, Q and the power of the channel, the discriminator of each protocol (1 is the deviation set), the carrier offset correction of each protocol in kHz, and 1 while a receiver of the protocol is synchronised.
+
+<h3>9: Clear messages from table</h3>
 
 Clears the table.
 
-<h3>8: Messages table</h3>
+<h3>10: Messages table</h3>
 
 The latest messages, newest at the bottom. The table follows new messages while it is scrolled to the bottom. The end of a GSC voice message updates the row of its voice page. Duplicates are flagged DUP or DUP+ in the info column. Right click on the header selects the columns. A click on the icon of a voice message plays its file. Double click on a message opens a window with all the fields of its record: the common fields, protocolData and the raw payload (also as bits). Right click on a message: details, copy, voice and decode again.
 

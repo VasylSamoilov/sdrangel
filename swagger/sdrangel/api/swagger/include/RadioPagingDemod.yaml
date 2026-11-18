@@ -89,6 +89,30 @@ RadioPagingDemodSettings:
       format: float
     audioDeviceName:
       type: string
+    udpEnabled:
+      description: "Send each message received to a UDP address (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    udpAddress:
+      description: "UDP address the messages are sent to"
+      type: string
+    udpPort:
+      description: "UDP port the messages are sent to"
+      type: integer
+      format: int32
+    udpFormat:
+      description: "Format of the UDP datagrams: 0 the fields of the Pager demodulator (date, time, address, function bits, alphanumeric, numeric, protocol, type, each ended by a NUL), 1 the message record as one line of JSON"
+      type: integer
+      format: int32
+    logEnabled:
+      description: "Write each message received to a CSV log file, the columns of the message record (1 for yes, 0 for no)"
+      type: integer
+      format: int32
+    logFilename:
+      description: "Log file name or path"
+      type: string
+    scopeConfig:
+      $ref: "http://swgserver:8081/api/swagger/include/GLScope.yaml#/GLScope"
     pocsagCharset:
       description: "Codepage of the POCSAG alphanumeric messages (default generic, generic, ascii)"
       $ref: "http://swgserver:8081/api/swagger/include/RadioPagingCharset.yaml#/RadioPagingCharset"

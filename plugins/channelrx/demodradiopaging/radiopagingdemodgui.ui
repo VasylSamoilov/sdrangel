@@ -709,11 +709,144 @@
      <number>3</number>
     </property>
     <item>
+     <layout class="QHBoxLayout" name="outputLayout">
+      <item>
+       <widget class="QCheckBox" name="udpEnabled">
+        <property name="toolTip">
+         <string>Send each message received to a UDP address</string>
+        </property>
+        <property name="text">
+         <string>UDP</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="udpAddress">
+        <property name="minimumSize">
+         <size>
+          <width>90</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="toolTip">
+         <string>Destination UDP address</string>
+        </property>
+        <property name="text">
+         <string>127.0.0.1</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QSpinBox" name="udpPort">
+        <property name="toolTip">
+         <string>Destination UDP port</string>
+        </property>
+        <property name="minimum">
+         <number>1</number>
+        </property>
+        <property name="maximum">
+         <number>65535</number>
+        </property>
+        <property name="value">
+         <number>9999</number>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="udpFormat">
+        <property name="toolTip">
+         <string>Format of the datagrams. Pager: the fields of the Pager demodulator (date, time, address, function bits,&#10;alphanumeric, numeric, protocol, type, each ended by a NUL). JSON: the message record as one line of JSON</string>
+        </property>
+        <item>
+         <property name="text">
+          <string>Pager</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>JSON</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item>
+       <spacer name="outputSpacer">
+        <property name="orientation">
+         <enum>Qt::Orientation::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>20</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+      <item>
+       <widget class="QToolButton" name="notifications">
+        <property name="toolTip">
+         <string>Notifications: highlight, speak, run a command or plot on the Map the messages that match a regular expression</string>
+        </property>
+        <property name="icon">
+         <iconset resource="../../../sdrgui/resources/res.qrc">
+          <normaloff>:/mono.png</normaloff>:/mono.png</iconset>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="ButtonSwitch" name="logEnable">
+        <property name="toolTip">
+         <string>Start/stop logging the messages received to a .csv file (the columns of the message record)</string>
+        </property>
+        <property name="icon">
+         <iconset resource="../../../sdrgui/resources/res.qrc">
+          <normaloff>:/record_off.png</normaloff>:/record_off.png</iconset>
+        </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="logFilename">
+        <property name="toolTip">
+         <string>Set the .csv log file</string>
+        </property>
+        <property name="icon">
+         <iconset resource="../../../sdrgui/resources/res.qrc">
+          <normaloff>:/save.png</normaloff>:/save.png</iconset>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="logOpen">
+        <property name="toolTip">
+         <string>Read the messages of a .csv log file into the table</string>
+        </property>
+        <property name="icon">
+         <iconset resource="../../../sdrgui/resources/res.qrc">
+          <normaloff>:/load.png</normaloff>:/load.png</iconset>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+    <item>
      <layout class="QHBoxLayout" name="messagesToolsLayout">
       <item>
        <widget class="QLabel" name="messagesInfo">
         <property name="text">
          <string>Latest messages</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="filterAddress">
+        <property name="toolTip">
+         <string>Show only the messages whose address matches this regular expression</string>
+        </property>
+        <property name="placeholderText">
+         <string>Address filter</string>
         </property>
        </widget>
       </item>
@@ -755,8 +888,120 @@
     </item>
    </layout>
   </widget>
+  <widget class="QWidget" name="scopeContainer" native="true">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>670</y>
+     <width>390</width>
+     <height>330</height>
+    </rect>
+   </property>
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
+   <property name="windowTitle">
+    <string>Waveforms</string>
+   </property>
+   <layout class="QVBoxLayout" name="verticalLayoutScope">
+    <property name="spacing">
+     <number>2</number>
+    </property>
+    <property name="leftMargin">
+     <number>3</number>
+    </property>
+    <property name="topMargin">
+     <number>3</number>
+    </property>
+    <property name="rightMargin">
+     <number>3</number>
+    </property>
+    <property name="bottomMargin">
+     <number>3</number>
+    </property>
+    <item>
+     <layout class="QHBoxLayout" name="scopeChannelsLayout">
+      <item>
+       <widget class="QLabel" name="channel1Label">
+        <property name="text">
+         <string>Real</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="channel1">
+        <property name="toolTip">
+         <string>Signal shown as the real part of the scope input</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="channel2Label">
+        <property name="text">
+         <string>Imag</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="channel2">
+        <property name="toolTip">
+         <string>Signal shown as the imaginary part of the scope input</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="scopeSpacer">
+        <property name="orientation">
+         <enum>Qt::Orientation::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>20</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+     </layout>
+    </item>
+    <item>
+     <widget class="GLScope" name="glScope" native="true">
+      <property name="minimumSize">
+       <size>
+        <width>200</width>
+        <height>250</height>
+       </size>
+      </property>
+      <property name="font">
+       <font>
+        <family>Liberation Mono</family>
+        <pointsize>8</pointsize>
+       </font>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="GLScopeGUI" name="scopeGUI" native="true"/>
+    </item>
+   </layout>
+  </widget>
  </widget>
  <customwidgets>
+  <customwidget>
+   <class>GLScope</class>
+   <extends>QWidget</extends>
+   <header>gui/glscope.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>GLScopeGUI</class>
+   <extends>QWidget</extends>
+   <header>gui/glscopegui.h</header>
+   <container>1</container>
+  </customwidget>
   <customwidget>
    <class>RollupContents</class>
    <extends>QWidget</extends>

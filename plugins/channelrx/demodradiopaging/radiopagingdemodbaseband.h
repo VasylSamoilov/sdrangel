@@ -22,6 +22,7 @@
 #include <QRecursiveMutex>
 
 #include "dsp/samplesinkfifo.h"
+#include "dsp/scopevis.h"
 #include "util/message.h"
 #include "util/messagequeue.h"
 
@@ -91,6 +92,7 @@ public:
     double getMagSq() const { return m_sink.getMagSq(); }
     RadioPagingDemodSink::Status getStatus() const { return m_sink.getStatus(); }
     void setAudioFifoLabel(const QString& label) { m_sink.setAudioFifoLabel(label); }
+    ScopeVis *getScopeSink() { return &m_scopeSink; }
     bool isRunning() const { return m_running; }
     void setFifoLabel(const QString& label) { m_sampleFifo.setLabel(label); }
 
@@ -98,6 +100,7 @@ private:
     SampleSinkFifo m_sampleFifo;
     DownChannelizer *m_channelizer;
     RadioPagingDemodSink m_sink;
+    ScopeVis m_scopeSink;           //!< The waveforms of the scope of the GUI
     MessageQueue m_inputMessageQueue; //!< Queue for asynchronous inbound communication
     RadioPagingDemodSettings m_settings;
     bool m_running;

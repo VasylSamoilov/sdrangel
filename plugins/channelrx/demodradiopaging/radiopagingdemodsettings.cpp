@@ -16,6 +16,8 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include <QColor>
+#include <QDataStream>
+#include <QDebug>
 #include <QRegularExpression>
 #include <QStandardPaths>
 
@@ -144,7 +146,8 @@ std::string charsetText(const RadioPagingCharset::Key& key)
 
 RadioPagingDemodSettings::RadioPagingDemodSettings() :
     m_channelMarker(nullptr),
-    m_rollupState(nullptr)
+    m_rollupState(nullptr),
+    m_scopeGUI(nullptr)
 {
     resetToDefaults();
 }
@@ -189,6 +192,15 @@ void RadioPagingDemodSettings::resetToDefaults()
     m_workspaceIndex = 0;
     m_hidden = false;
     m_messageColumns.clear();
+    m_udpEnabled = false;
+    m_udpAddress = "127.0.0.1";
+    m_udpPort = 9999;
+    m_udpFormat = UdpPagerDemod;
+    m_logEnabled = false;
+    m_logFilename = "radiopaging_log.csv";
+    m_notificationSettings.clear();
+    m_scopeCh1 = 3;                     // POCSAG FM and FLEX FM (RadioPagingDemodSink::ScopeSignal)
+    m_scopeCh2 = 4;
 }
 
 // Tags 12 to 20 and 27 to 30 are the usual channel tags, 21 the audio device. New tags are only appended
@@ -244,6 +256,19 @@ QByteArray RadioPagingDemodSettings::serialize() const
     s.writeBool(49, m_pocsagDcCorrection);
     s.writeBool(50, m_flexDcCorrection);
     s.writeBool(51, m_gscDcCorrection);
+    s.writeBool(52, m_udpEnabled);
+    s.writeString(53, m_udpAddress);
+    s.writeU32(54, m_udpPort);
+    s.writeS32(55, m_udpFormat);
+    s.writeBool(56, m_logEnabled);
+    s.writeString(57, m_logFilename);
+    s.writeList(58, m_notificationSettings);
+    s.writeS32(59, m_scopeCh1);
+    s.writeS32(60, m_scopeCh2);
+
+    if (m_scopeGUI) {
+        s.writeBlob(61, m_scopeGUI->serialize());
+    }
 
     return s.final();
 }
@@ -326,6 +351,30 @@ bool RadioPagingDemodSettings::deserialize(const QByteArray& data)
         d.readBool(49, &m_pocsagDcCorrection, true);
         d.readBool(50, &m_flexDcCorrection, true);
         d.readBool(51, &m_gscDcCorrection, true);
+        d.readBool(52, &m_udpEnabled, false);
+        d.readString(53, &m_udpAddress, "127.0.0.1");
+        d.readU32(54, &utmp, 9999);
+
+        if ((utmp > 0) && (utmp < 65536)) {
+            m_udpPort = utmp;
+        } else {
+            m_udpPort = 9999;
+        }
+
+        d.readS32(55, &m_udpFormat, UdpPagerDemod);
+        m_udpFormat = std::max((int) UdpPagerDemod, std::min((int) UdpJson, m_udpFormat));
+        d.readBool(56, &m_logEnabled, false);
+        d.readString(57, &m_logFilename, "radiopaging_log.csv");
+        d.readList(58, &m_notificationSettings);
+        d.readS32(59, &m_scopeCh1, 3);
+        d.readS32(60, &m_scopeCh2, 4);
+
+        if (m_scopeGUI)
+        {
+            d.readBlob(61, &bytetmp);
+            m_scopeGUI->deserialize(bytetmp);
+        }
+
         m_gscVoiceKeepDays = std::max(0, std::min(3650, m_gscVoiceKeepDays));
         m_gscVoiceKeepMin = std::max(0, std::min(100000, m_gscVoiceKeepMin));
 
@@ -451,6 +500,33 @@ void RadioPagingDemodSettings::applySettings(const QStringList& settingsKeys, co
     if (settingsKeys.contains("messageColumns")) {
         m_messageColumns = settings.m_messageColumns;
     }
+    if (settingsKeys.contains("udpEnabled")) {
+        m_udpEnabled = settings.m_udpEnabled;
+    }
+    if (settingsKeys.contains("udpAddress")) {
+        m_udpAddress = settings.m_udpAddress;
+    }
+    if (settingsKeys.contains("udpPort")) {
+        m_udpPort = settings.m_udpPort;
+    }
+    if (settingsKeys.contains("udpFormat")) {
+        m_udpFormat = settings.m_udpFormat;
+    }
+    if (settingsKeys.contains("logEnabled")) {
+        m_logEnabled = settings.m_logEnabled;
+    }
+    if (settingsKeys.contains("logFilename")) {
+        m_logFilename = settings.m_logFilename;
+    }
+    if (settingsKeys.contains("notificationSettings")) {
+        m_notificationSettings = settings.m_notificationSettings;
+    }
+    if (settingsKeys.contains("scopeCh1")) {
+        m_scopeCh1 = settings.m_scopeCh1;
+    }
+    if (settingsKeys.contains("scopeCh2")) {
+        m_scopeCh2 = settings.m_scopeCh2;
+    }
 }
 
 QString RadioPagingDemodSettings::getDebugString(const QStringList& settingsKeys, bool force) const
@@ -565,6 +641,33 @@ QString RadioPagingDemodSettings::getDebugString(const QStringList& settingsKeys
     if (settingsKeys.contains("hidden") || force) {
         ostr << " m_hidden: " << m_hidden;
     }
+    if (settingsKeys.contains("udpEnabled") || force) {
+        ostr << " m_udpEnabled: " << m_udpEnabled;
+    }
+    if (settingsKeys.contains("udpAddress") || force) {
+        ostr << " m_udpAddress: " << m_udpAddress.toStdString();
+    }
+    if (settingsKeys.contains("udpPort") || force) {
+        ostr << " m_udpPort: " << m_udpPort;
+    }
+    if (settingsKeys.contains("udpFormat") || force) {
+        ostr << " m_udpFormat: " << m_udpFormat;
+    }
+    if (settingsKeys.contains("logEnabled") || force) {
+        ostr << " m_logEnabled: " << m_logEnabled;
+    }
+    if (settingsKeys.contains("logFilename") || force) {
+        ostr << " m_logFilename: " << m_logFilename.toStdString();
+    }
+    if (settingsKeys.contains("notificationSettings") || force) {
+        ostr << " m_notificationSettings: " << m_notificationSettings.size();
+    }
+    if (settingsKeys.contains("scopeCh1") || force) {
+        ostr << " m_scopeCh1: " << m_scopeCh1;
+    }
+    if (settingsKeys.contains("scopeCh2") || force) {
+        ostr << " m_scopeCh2: " << m_scopeCh2;
+    }
 
     return QString(ostr.str().c_str());
 }
@@ -600,4 +703,94 @@ double RadioPagingDemodSettings::flexBandwidth() const
 double RadioPagingDemodSettings::gscBandwidth() const
 {
     return 2.0 * (m_gscDeviation + gscRate + m_legOffsetAllowance);
+}
+
+RadioPagingDemodSettings::NotificationSettings::NotificationSettings() :
+    m_matchField(MatchAddress),
+    m_highlight(false),
+    m_highlightColor(QColor(Qt::red).rgba()),
+    m_plotOnMap(false)
+{
+}
+
+void RadioPagingDemodSettings::NotificationSettings::updateRegularExpression()
+{
+    m_regularExpression.setPattern(m_regExp);
+    m_regularExpression.optimize();
+
+    if (!m_regularExpression.isValid()) {
+        qDebug() << "RadioPagingDemodSettings::NotificationSettings: regular expression not valid:" << m_regExp;
+    }
+}
+
+QByteArray RadioPagingDemodSettings::NotificationSettings::serialize() const
+{
+    SimpleSerializer s(1);
+
+    s.writeS32(1, m_matchField);
+    s.writeString(2, m_regExp);
+    s.writeString(3, m_speech);
+    s.writeString(4, m_command);
+    s.writeBool(5, m_highlight);
+    s.writeS32(6, m_highlightColor);
+    s.writeBool(7, m_plotOnMap);
+
+    return s.final();
+}
+
+bool RadioPagingDemodSettings::NotificationSettings::deserialize(const QByteArray& data)
+{
+    SimpleDeserializer d(data);
+
+    if (!d.isValid() || (d.getVersion() != 1)) {
+        return false;
+    }
+
+    d.readS32(1, &m_matchField, MatchAddress);
+    m_matchField = std::max((int) MatchAddress, std::min((int) MatchAny, m_matchField));
+    d.readString(2, &m_regExp);
+    d.readString(3, &m_speech);
+    d.readString(4, &m_command);
+    d.readBool(5, &m_highlight, false);
+    d.readS32(6, &m_highlightColor, QColor(Qt::red).rgba());
+    d.readBool(7, &m_plotOnMap, false);
+    updateRegularExpression();
+
+    return true;
+}
+
+QString RadioPagingDemodSettings::NotificationSettings::matchFieldName(int field)
+{
+    switch (field)
+    {
+    case MatchAddress:
+        return "Address";
+    case MatchMessage:
+        return "Message";
+    case MatchProtocol:
+        return "Protocol";
+    case MatchType:
+        return "Type";
+    case MatchChannel:
+        return "Channel";
+    case MatchAny:
+        return "Any";
+    default:
+        return "";
+    }
+}
+
+QDataStream& operator<<(QDataStream& out, const QSharedPointer<RadioPagingDemodSettings::NotificationSettings>& settings)
+{
+    out << settings->serialize();
+    return out;
+}
+
+QDataStream& operator>>(QDataStream& in, QSharedPointer<RadioPagingDemodSettings::NotificationSettings>& settings)
+{
+    settings = QSharedPointer<RadioPagingDemodSettings::NotificationSettings>::create();
+    QByteArray data;
+    in >> data;
+    settings->deserialize(data);
+    return in;
 }

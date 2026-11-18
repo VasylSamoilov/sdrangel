@@ -62,6 +62,7 @@ static const QStringList mapURIs = {
     QStringLiteral("sdrangel.channel.ilsdemod"),
     QStringLiteral("sdrangel.channel.inmarsatdemod"),
     QStringLiteral("sdrangel.channel.pagerdemod"),
+    QStringLiteral("sdrangel.channel.radiopagingdemod"),
     QStringLiteral("sdrangel.feature.radiosonde"),
     QStringLiteral("sdrangel.feature.startracker"),
     QStringLiteral("sdrangel.feature.satellitetracker"),

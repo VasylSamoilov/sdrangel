@@ -18,8 +18,11 @@
 #ifndef INCLUDE_RADIOPAGINGDEMOD_H
 #define INCLUDE_RADIOPAGINGDEMOD_H
 
+#include <QFile>
 #include <QNetworkRequest>
+#include <QTextStream>
 #include <QThread>
+#include <QUdpSocket>
 
 #include "dsp/basebandsamplesink.h"
 #include "channel/channelapi.h"
@@ -32,6 +35,7 @@ class QNetworkAccessManager;
 class QNetworkReply;
 class QTimer;
 class DeviceAPI;
+class ScopeVis;
 
 // Radio paging demodulator: POCSAG, FLEX and GSC, all speeds and polarities at the same
 // time. Every decoded message is published as a MessageRecord on the "messages" pipe
@@ -133,6 +137,7 @@ public:
     RadioPagingDemodSink::Status getStatus() const { return m_basebandSink->getStatus(); }
     //!< Forget what the receivers of a protocol remember (0 POCSAG, 1 FLEX, 2 GSC, -1 all)
     void resetProtocol(int protocol);
+    ScopeVis *getScopeSink() { return m_basebandSink->getScopeSink(); }
 
     uint32_t getNumberOfDeviceStreams() const;
 
@@ -148,9 +153,14 @@ private:
     qint64 m_centerFrequency;
     QNetworkAccessManager *m_networkManager;
     QNetworkRequest m_networkRequest;
+    QUdpSocket m_udpSocket;
+    QFile m_logFile;
+    QTextStream m_logStream;
 
     virtual bool handleMessage(const Message& cmd);
     void applySettings(const QStringList& settingsKeys, const RadioPagingDemodSettings& settings, bool force = false);
+    void openLog(const RadioPagingDemodSettings& settings);
+    void outputRecord(const MessageRecord& record);
     void sendSampleRateToDemodAnalyzer();
     void publishRecord(MessageRecord record);
     void announce(const QString& event);

@@ -19,6 +19,11 @@
 #define INCLUDE_RADIOPAGINGDEMODGUI_H
 
 #include <QElapsedTimer>
+#include <QRegularExpressionMatch>
+#include <QSet>
+#ifdef QT_TEXTTOSPEECH_FOUND
+#include <QTextToSpeech>
+#endif
 
 #include "channel/channelgui.h"
 #include "dsp/channelmarker.h"
@@ -34,6 +39,7 @@ class DeviceUISet;
 class BasebandSampleSink;
 class RadioPagingDemod;
 class QLabel;
+class ScopeVis;
 
 namespace Ui {
     class RadioPagingDemodGUI;
@@ -83,6 +89,12 @@ private:
     RadioPagingDemod* m_radioPagingDemod;
     uint32_t m_tickCount;
     MessageQueue m_inputMessageQueue;
+    ScopeVis *m_scopeVis;
+    bool m_loadingData = false;         //!< A log is being read: its messages are shown, not notified again
+    QSet<QString> m_mapItems;           //!< Names of the items sent to the Map
+#ifdef QT_TEXTTOSPEECH_FOUND
+    QTextToSpeech *m_speech = nullptr;
+#endif
 
     explicit RadioPagingDemodGUI(PluginAPI* pluginAPI, DeviceUISet *deviceUISet, BasebandSampleSink *rxChannel, QWidget* parent = nullptr);
     virtual ~RadioPagingDemodGUI();
@@ -93,6 +105,21 @@ private:
     bool handleMessage(const Message& message);
     void makeUIConnections();
     void updateAbsoluteCenterFrequency();
+    //!< The message is shown and given to the notifications (not when loading a log)
+    void showRecord(const MessageRecord& record);
+    void checkNotifications(const MessageRecord& record);
+    //!< The field of the record that a notification matches
+    static QString matchText(const MessageRecord& record, int field);
+    //!< ${address}, ${message}, ${protocol}, ${type}, ${channel} and ${0}, ${1}... of the match, replaced in the string
+    static QString subStrings(const MessageRecord& record, const QRegularExpressionMatch& match, const QString& string);
+    void enableSpeechIfNeeded();
+    void speechNotification(const QString& speech);
+    void commandNotification(const QString& command);
+    void sendToMap(const MessageRecord& record, float latitude, float longitude);
+    void clearFromMap();
+    //!< Hides the rows whose address does not match the filter; a row shown is hidden or not at once
+    void applyAddressFilter();
+    bool addressMatchesFilter(const QString& address) const;
     void leaveEvent(QEvent*);
     void enterEvent(EnterEventType*);
     void updateStatus();
@@ -150,6 +177,17 @@ private slots:
     void on_volume_valueChanged(int value);
     void audioSelect(const QPoint& p);
     void on_clearTable_clicked();
+    void on_udpEnabled_clicked(bool checked);
+    void on_udpAddress_editingFinished();
+    void on_udpPort_valueChanged(int value);
+    void on_udpFormat_currentIndexChanged(int index);
+    void on_notifications_clicked();
+    void on_logEnable_clicked(bool checked);
+    void on_logFilename_clicked();
+    void on_logOpen_clicked();
+    void on_filterAddress_editingFinished();
+    void on_channel1_currentIndexChanged(int index);
+    void on_channel2_currentIndexChanged(int index);
     void onWidgetRolled(QWidget* widget, bool rollDown);
     void onMenuDialogCalled(const QPoint& p);
     void handleInputMessages();

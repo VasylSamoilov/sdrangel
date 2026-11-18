@@ -27,6 +27,7 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QProcess>
 #include <QSpinBox>
 #include <QVBoxLayout>
 #include <QPainter>
@@ -54,9 +55,16 @@
 #include "gui/audioselectdialog.h"
 #include "gui/pagingcomposer.h"
 #include "dsp/dspengine.h"
+#include "dsp/scopevis.h"
 #include "maincore.h"
+#include "util/csv.h"
+#include "util/units.h"
+#include "gui/messagedialog.h"
+#include "SWGMapItem.h"
 
 #include "radiopagingdemod.h"
+#include "radiopagingdemodnotificationdialog.h"
+#include "radiopagingdemodoutput.h"
 #include "radiopagingvoicestore.h"
 
 namespace {
@@ -123,6 +131,7 @@ bool RadioPagingDemodGUI::handleMessage(const Message& message)
         const RadioPagingDemod::MsgConfigureRadioPagingDemod& cfg = (const RadioPagingDemod::MsgConfigureRadioPagingDemod&) message;
         m_settings = cfg.getSettings();
         blockApplySettings(true);
+        ui->scopeGUI->updateSettings();
         m_channelMarker.updateSettings(static_cast<const ChannelMarker*>(m_settings.m_channelMarker));
         displaySettings();
         blockApplySettings(false);
@@ -131,7 +140,7 @@ bool RadioPagingDemodGUI::handleMessage(const Message& message)
     else if (MainCore::MsgMessageRecord::match(message))
     {
         const MainCore::MsgMessageRecord& msg = (const MainCore::MsgMessageRecord&) message;
-        ui->messages->addRecord(msg.getRecord());
+        showRecord(msg.getRecord());
         return true;
     }
     else if (DSPSignalNotification::match(message))
@@ -384,6 +393,372 @@ void RadioPagingDemodGUI::audioSelect(const QPoint& p)
 void RadioPagingDemodGUI::on_clearTable_clicked()
 {
     ui->messages->setRowCount(0);
+    clearFromMap();
+}
+
+void RadioPagingDemodGUI::on_udpEnabled_clicked(bool checked)
+{
+    m_settings.m_udpEnabled = checked;
+    applySettings(QStringList("udpEnabled"));
+}
+
+void RadioPagingDemodGUI::on_udpAddress_editingFinished()
+{
+    m_settings.m_udpAddress = ui->udpAddress->text();
+    applySettings(QStringList("udpAddress"));
+}
+
+void RadioPagingDemodGUI::on_udpPort_valueChanged(int value)
+{
+    m_settings.m_udpPort = value;
+    applySettings(QStringList("udpPort"));
+}
+
+void RadioPagingDemodGUI::on_udpFormat_currentIndexChanged(int index)
+{
+    m_settings.m_udpFormat = index;
+    applySettings(QStringList("udpFormat"));
+}
+
+void RadioPagingDemodGUI::on_channel1_currentIndexChanged(int index)
+{
+    m_settings.m_scopeCh1 = index;
+    applySettings(QStringList("scopeCh1"));
+}
+
+void RadioPagingDemodGUI::on_channel2_currentIndexChanged(int index)
+{
+    m_settings.m_scopeCh2 = index;
+    applySettings(QStringList("scopeCh2"));
+}
+
+void RadioPagingDemodGUI::on_notifications_clicked()
+{
+    RadioPagingDemodNotificationDialog dialog(&m_settings);
+    new DialogPositioner(&dialog, true);
+
+    if (dialog.exec() == QDialog::Accepted)
+    {
+        enableSpeechIfNeeded();
+        applySettings(QStringList("notificationSettings"));
+    }
+}
+
+void RadioPagingDemodGUI::on_logEnable_clicked(bool checked)
+{
+    m_settings.m_logEnabled = checked;
+    applySettings(QStringList("logEnabled"));
+}
+
+void RadioPagingDemodGUI::on_logFilename_clicked()
+{
+    QFileDialog fileDialog(nullptr, tr("Select the file to log the messages received to"), "", "*.csv");
+    fileDialog.setDefaultSuffix("csv");
+    fileDialog.setAcceptMode(QFileDialog::AcceptSave);
+
+    if (fileDialog.exec())
+    {
+        QStringList fileNames = fileDialog.selectedFiles();
+
+        if (fileNames.size() > 0)
+        {
+            m_settings.m_logFilename = fileNames[0];
+            ui->logFilename->setToolTip(tr(".csv log file: %1").arg(m_settings.m_logFilename));
+            applySettings(QStringList("logFilename"));
+        }
+    }
+}
+
+// The messages of a log written by this demodulator, shown in the table. They are not notified again: they were
+// when they were received, and running the commands of a long log again could be a lot
+void RadioPagingDemodGUI::on_logOpen_clicked()
+{
+    QFileDialog fileDialog(nullptr, tr("Select the .csv log file to read"), "", "*.csv");
+
+    if (!fileDialog.exec()) {
+        return;
+    }
+
+    QStringList fileNames = fileDialog.selectedFiles();
+
+    if (fileNames.isEmpty()) {
+        return;
+    }
+
+    QFile file(fileNames[0]);
+
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        MessageDialog::critical(this, "Radio Paging Demod", tr("Failed to open file %1").arg(fileNames[0]));
+        return;
+    }
+
+    QTextStream in(&file);
+    QString error;
+    QHash<QString, int> columns = CSV::readHeader(in, {"id", "timestamp", "protocol", "kind"}, error);
+
+    if (!error.isEmpty())
+    {
+        MessageDialog::critical(this, "Radio Paging Demod", error);
+        return;
+    }
+
+    QMessageBox dialog(this);
+    dialog.setText(tr("Reading messages"));
+    dialog.addButton(QMessageBox::Cancel);
+    dialog.show();
+    QApplication::processEvents();
+
+    int count = 0;
+    bool cancelled = false;
+    QStringList row;
+    m_loadingData = true;
+
+    while (!cancelled && CSV::readRow(in, &row))
+    {
+        MessageRecord record;
+
+        if (MessageRecord::fromCSV(columns, row, record) && (record.m_kind == MessageRecord::KindMessage)) {
+            showRecord(record);
+        }
+
+        if ((++count % 500) == 0)
+        {
+            QApplication::processEvents();
+            cancelled = (dialog.clickedButton() != nullptr);
+        }
+    }
+
+    m_loadingData = false;
+    dialog.close();
+}
+
+bool RadioPagingDemodGUI::addressMatchesFilter(const QString& address) const
+{
+    QString pattern = ui->filterAddress->text().trimmed();
+
+    if (pattern.isEmpty()) {
+        return true;
+    }
+
+    QRegularExpression regExp(pattern);
+    return !regExp.isValid() || regExp.match(address).hasMatch();
+}
+
+void RadioPagingDemodGUI::applyAddressFilter()
+{
+    for (int row = 0; row < ui->messages->rowCount(); row++)
+    {
+        QTableWidgetItem *item = ui->messages->item(row, PagingMessageTable::ColAddress);
+        ui->messages->setRowHidden(row, item && !addressMatchesFilter(item->text()));
+    }
+}
+
+void RadioPagingDemodGUI::on_filterAddress_editingFinished()
+{
+    applyAddressFilter();
+}
+
+// A message goes in the table; a new one is given to the notifications too
+void RadioPagingDemodGUI::showRecord(const MessageRecord& record)
+{
+    ui->messages->addRecord(record);
+
+    int row = ui->messages->findRow(record.m_id);
+
+    if ((row >= 0) && !addressMatchesFilter(record.m_address)) {
+        ui->messages->setRowHidden(row, true);
+    }
+
+    if (!m_loadingData) {
+        checkNotifications(record);
+    }
+}
+
+QString RadioPagingDemodGUI::matchText(const MessageRecord& record, int field)
+{
+    typedef RadioPagingDemodSettings::NotificationSettings Notification;
+
+    switch (field)
+    {
+    case Notification::MatchAddress:
+        return record.m_address;
+    case Notification::MatchMessage:
+        return record.m_text;
+    case Notification::MatchProtocol:
+        return record.m_protocol;
+    case Notification::MatchType:
+        return record.m_msgType;
+    case Notification::MatchChannel:
+        return record.m_channelAlias;
+    case Notification::MatchAny:
+        return QStringList({record.m_address, record.m_text, record.m_protocol, record.m_msgType, record.m_channelAlias}).join(' ');
+    default:
+        return QString();
+    }
+}
+
+// Only a message received for the first time is notified: a duplicate was, and the end of a voice message is not one
+void RadioPagingDemodGUI::checkNotifications(const MessageRecord& record)
+{
+    if ((record.m_kind != MessageRecord::KindMessage) || (record.m_duplicate != MessageRecord::DuplicateNone)
+        || RadioPagingDemodOutput::isCompletion(record)) {
+        return;
+    }
+
+    for (const auto& notification : m_settings.m_notificationSettings)
+    {
+        QString match = matchText(record, notification->m_matchField);
+
+        if (match.isEmpty() || !notification->m_regularExpression.isValid()) {
+            continue;
+        }
+
+        QRegularExpressionMatch matchResult = notification->m_regularExpression.match(match);
+
+        if (!matchResult.hasMatch()) {
+            continue;
+        }
+
+        if (notification->m_highlight)
+        {
+            QColor color = QColor::fromRgba(notification->m_highlightColor);
+            color.setAlpha(110);
+            ui->messages->setRowBackground(record.m_id, color);
+        }
+        if (!notification->m_speech.isEmpty()) {
+            speechNotification(subStrings(record, matchResult, notification->m_speech));
+        }
+        if (!notification->m_command.isEmpty()) {
+            commandNotification(subStrings(record, matchResult, notification->m_command));
+        }
+        if (notification->m_plotOnMap)
+        {
+            float latitude;
+            float longitude;
+
+            if (Units::stringToLatitudeAndLongitude(record.m_text, latitude, longitude, false)) {
+                sendToMap(record, latitude, longitude);
+            }
+        }
+    }
+}
+
+QString RadioPagingDemodGUI::subStrings(const MessageRecord& record, const QRegularExpressionMatch& match, const QString& string)
+{
+    QString s = string;
+
+    s.replace("${address}", record.m_address);
+    s.replace("${message}", record.m_text);
+    s.replace("${protocol}", record.m_protocol);
+    s.replace("${type}", record.m_msgType);
+    s.replace("${channel}", record.m_channelAlias);
+
+    for (int i = 0; i < match.capturedTexts().size(); i++) {
+        s.replace(QString("${%1}").arg(i), match.capturedTexts()[i]);
+    }
+
+    return s;
+}
+
+// The text to speech engine takes 10 seconds to start on some versions of Linux: only started if a
+// notification speaks
+void RadioPagingDemodGUI::enableSpeechIfNeeded()
+{
+#ifdef QT_TEXTTOSPEECH_FOUND
+    if (m_speech) {
+        return;
+    }
+
+    for (const auto& notification : m_settings.m_notificationSettings)
+    {
+        if (!notification->m_speech.isEmpty())
+        {
+            qDebug() << "RadioPagingDemodGUI: enabling text to speech";
+            m_speech = new QTextToSpeech(this);
+            return;
+        }
+    }
+#endif
+}
+
+void RadioPagingDemodGUI::speechNotification(const QString& speech)
+{
+#ifdef QT_TEXTTOSPEECH_FOUND
+    if (m_speech) {
+        m_speech->say(speech);
+    } else {
+        qWarning() << "RadioPagingDemodGUI::speechNotification: unable to say" << speech;
+    }
+#else
+    qWarning() << "RadioPagingDemodGUI::speechNotification: text to speech not supported, unable to say" << speech;
+#endif
+}
+
+void RadioPagingDemodGUI::commandNotification(const QString& command)
+{
+#if QT_CONFIG(process)
+    QStringList allArgs = QProcess::splitCommand(command);
+
+    if (allArgs.size() > 0)
+    {
+        QString program = allArgs[0];
+        allArgs.pop_front();
+        QProcess::startDetached(program, allArgs);
+    }
+#else
+    qWarning() << "RadioPagingDemodGUI::commandNotification: QProcess not supported, can't run" << command;
+#endif
+}
+
+void RadioPagingDemodGUI::sendToMap(const MessageRecord& record, float latitude, float longitude)
+{
+    QList<ObjectPipe*> mapPipes;
+    MainCore::instance()->getMessagePipes().getMessagePipes(m_radioPagingDemod, "mapitems", mapPipes);
+    QDateTime dateTime = QDateTime::fromMSecsSinceEpoch(record.m_timestamp);
+
+    for (const auto& pipe : mapPipes)
+    {
+        MessageQueue *messageQueue = qobject_cast<MessageQueue*>(pipe->m_element);
+        SWGSDRangel::SWGMapItem *swgMapItem = new SWGSDRangel::SWGMapItem();
+        swgMapItem->setName(new QString(record.m_address));
+        swgMapItem->setLatitude(latitude);
+        swgMapItem->setLongitude(longitude);
+        swgMapItem->setAltitude(0);
+        swgMapItem->setAltitudeReference(1); // CLAMP_TO_GROUND
+        swgMapItem->setFixedPosition(false);
+        swgMapItem->setPositionDateTime(new QString(dateTime.toUTC().toString(Qt::ISODateWithMs)));
+        swgMapItem->setImageRotation(0);
+        swgMapItem->setText(new QString(record.m_text));
+        swgMapItem->setImage(new QString("pager.png"));
+
+        MainCore::MsgMapItem *msg = MainCore::MsgMapItem::create(m_radioPagingDemod, swgMapItem);
+        messageQueue->push(msg);
+    }
+
+    m_mapItems.insert(record.m_address);
+}
+
+void RadioPagingDemodGUI::clearFromMap()
+{
+    for (const auto& address : m_mapItems)
+    {
+        QList<ObjectPipe*> mapPipes;
+        MainCore::instance()->getMessagePipes().getMessagePipes(m_radioPagingDemod, "mapitems", mapPipes);
+
+        for (const auto& pipe : mapPipes)
+        {
+            MessageQueue *messageQueue = qobject_cast<MessageQueue*>(pipe->m_element);
+            SWGSDRangel::SWGMapItem *swgMapItem = new SWGSDRangel::SWGMapItem();
+            swgMapItem->setName(new QString(address));
+            swgMapItem->setImage(new QString(""));
+
+            MainCore::MsgMapItem *msg = MainCore::MsgMapItem::create(m_radioPagingDemod, swgMapItem);
+            messageQueue->push(msg);
+        }
+    }
+
+    m_mapItems.clear();
 }
 
 void RadioPagingDemodGUI::onWidgetRolled(QWidget* widget, bool rollDown)
@@ -453,7 +828,8 @@ RadioPagingDemodGUI::RadioPagingDemodGUI(PluginAPI* pluginAPI, DeviceUISet *devi
     m_deviceCenterFrequency(0),
     m_basebandSampleRate(1),
     m_doApplySettings(true),
-    m_tickCount(0)
+    m_tickCount(0),
+    m_scopeVis(nullptr)
 {
     setAttribute(Qt::WA_DeleteOnClose, true);
     m_helpURL = "plugins/channelrx/demodradiopaging/readme.md";
@@ -468,6 +844,19 @@ RadioPagingDemodGUI::RadioPagingDemodGUI(PluginAPI* pluginAPI, DeviceUISet *devi
     m_radioPagingDemod->setMessageQueueToGUI(getInputMessageQueue());
 
     connect(&MainCore::instance()->getMasterTimer(), SIGNAL(timeout()), this, SLOT(tick())); // 50 ms
+
+    m_scopeVis = m_radioPagingDemod->getScopeSink();
+    m_scopeVis->setGLScope(ui->glScope);
+    m_scopeVis->setLiveRate(RadioPagingDemodSettings::m_channelSampleRate);
+    ui->glScope->connectTimer(MainCore::instance()->getMasterTimer());
+    ui->scopeGUI->setBuddies(m_scopeVis->getInputMessageQueue(), m_scopeVis, ui->glScope);
+    ui->scopeGUI->setSampleRate(RadioPagingDemodSettings::m_channelSampleRate);
+
+    for (int signal = 0; signal < RadioPagingDemodSink::ScopeSignalCount; signal++)
+    {
+        ui->channel1->addItem(RadioPagingDemodSink::scopeSignalName(signal));
+        ui->channel2->addItem(RadioPagingDemodSink::scopeSignalName(signal));
+    }
 
     ui->deltaFrequencyLabel->setText(QString("%1f").arg(QChar(0x94, 0x03)));
     ui->deltaFrequency->setColorMapper(ColorMapper(ColorMapper::GrayGold));
@@ -484,6 +873,7 @@ RadioPagingDemodGUI::RadioPagingDemodGUI(PluginAPI* pluginAPI, DeviceUISet *devi
 
     setTitleColor(m_channelMarker.getColor());
     m_settings.setChannelMarker(&m_channelMarker);
+    m_settings.setScopeGUI(ui->scopeGUI);
     m_settings.setRollupState(&m_rollupState);
 
     m_deviceUISet->addChannelMarker(&m_channelMarker);
@@ -687,6 +1077,15 @@ void RadioPagingDemodGUI::displaySettings()
     }
 
     ui->messages->setAudioDevice(m_settings.m_audioDeviceName);
+    ui->udpEnabled->setChecked(m_settings.m_udpEnabled);
+    ui->udpAddress->setText(m_settings.m_udpAddress);
+    ui->udpPort->setValue(m_settings.m_udpPort);
+    ui->udpFormat->setCurrentIndex(m_settings.m_udpFormat);
+    ui->logEnable->setChecked(m_settings.m_logEnabled);
+    ui->logFilename->setToolTip(tr(".csv log file: %1").arg(m_settings.m_logFilename));
+    ui->channel1->setCurrentIndex(m_settings.m_scopeCh1);
+    ui->channel2->setCurrentIndex(m_settings.m_scopeCh2);
+    enableSpeechIfNeeded();
     updateIndexLabel();
 
     getRollupContents()->restoreState(m_rollupState);
@@ -1288,6 +1687,17 @@ void RadioPagingDemodGUI::makeUIConnections()
     QObject::connect(ui->channelAlias, &QLineEdit::editingFinished, this, &RadioPagingDemodGUI::on_channelAlias_editingFinished);
     QObject::connect(ui->volume, &QDial::valueChanged, this, &RadioPagingDemodGUI::on_volume_valueChanged);
     QObject::connect(ui->clearTable, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_clearTable_clicked);
+    QObject::connect(ui->udpEnabled, &QCheckBox::clicked, this, &RadioPagingDemodGUI::on_udpEnabled_clicked);
+    QObject::connect(ui->udpAddress, &QLineEdit::editingFinished, this, &RadioPagingDemodGUI::on_udpAddress_editingFinished);
+    QObject::connect(ui->udpPort, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingDemodGUI::on_udpPort_valueChanged);
+    QObject::connect(ui->udpFormat, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingDemodGUI::on_udpFormat_currentIndexChanged);
+    QObject::connect(ui->notifications, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_notifications_clicked);
+    QObject::connect(ui->logEnable, &ButtonSwitch::clicked, this, &RadioPagingDemodGUI::on_logEnable_clicked);
+    QObject::connect(ui->logFilename, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_logFilename_clicked);
+    QObject::connect(ui->logOpen, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_logOpen_clicked);
+    QObject::connect(ui->filterAddress, &QLineEdit::editingFinished, this, &RadioPagingDemodGUI::on_filterAddress_editingFinished);
+    QObject::connect(ui->channel1, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingDemodGUI::on_channel1_currentIndexChanged);
+    QObject::connect(ui->channel2, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingDemodGUI::on_channel2_currentIndexChanged);
 }
 
 void RadioPagingDemodGUI::updateAbsoluteCenterFrequency()

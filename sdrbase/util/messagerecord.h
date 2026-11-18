@@ -21,6 +21,7 @@
 #include <QString>
 #include <QStringList>
 #include <QByteArray>
+#include <QHash>
 #include <QVariantMap>
 #include <QJsonObject>
 
@@ -107,6 +108,9 @@ struct SDRBASE_API MessageRecord
     static QStringList csvHeader();
     //!< One CSV line without a trailing newline. protocolData is written as compact JSON
     QString toCSV() const;
+    //!< The record of a row read with CSV::readRow, the columns as found by CSV::readHeader (csvHeader() names);
+    //!< false if the row has no id, timestamp or protocol
+    static bool fromCSV(const QHash<QString, int>& columns, const QStringList& row, MessageRecord& record);
 
     static QString directionToString(Direction direction);
     static Direction directionFromString(const QString& string);

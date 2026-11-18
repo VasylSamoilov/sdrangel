@@ -26,6 +26,7 @@
 #include <limits>
 
 #include "dsp/dspengine.h"
+#include "dsp/scopevis.h"
 #include "channel/channelapi.h"
 #include "util/messagequeue.h"
 #include "maincore.h"
@@ -214,6 +215,7 @@ RadioPagingDemodSink::RadioPagingDemodSink() :
     m_statusCount(0)
 {
     m_audioBuffer.resize(audioBufferSize);
+    m_scopeBuffer.resize(m_scopeBufferSize);
     m_audioInterpolator.create(16, RadioPagingDemodSettings::m_channelSampleRate, voiceCutoff);
 
     for (int i = 0; i < RadioPagingDemodSettings::m_nbPocsagSpeeds; i++) {
@@ -261,6 +263,51 @@ void RadioPagingDemodSink::feed(const SampleVector::const_iterator& begin, const
     }
 }
 
+QString RadioPagingDemodSink::scopeSignalName(int signal)
+{
+    static const char *names[ScopeSignalCount] = {
+        "I", "Q", "MagSq",
+        "POCSAG FM", "FLEX FM", "GSC FM",
+        "POCSAG offset", "FLEX offset", "GSC offset",
+        "POCSAG sync", "FLEX sync", "GSC sync"
+    };
+
+    return ((signal >= 0) && (signal < ScopeSignalCount)) ? QString(names[signal]) : QString();
+}
+
+Real RadioPagingDemodSink::scopeValue(int signal, const Complex& ci, Real magsq, const Real fm[3], const bool sync[3]) const
+{
+    switch (signal)
+    {
+    case ScopeI: return ci.real() / SDR_RX_SCALEF;
+    case ScopeQ: return ci.imag() / SDR_RX_SCALEF;
+    case ScopeMagSq: return magsq;
+    case ScopePocsagFm: return fm[ProtocolPocsag];
+    case ScopeFlexFm: return fm[ProtocolFlex];
+    case ScopeGscFm: return fm[ProtocolGsc];
+    case ScopePocsagShift: return m_pocsagLeg.m_shift / 1000.0;
+    case ScopeFlexShift: return m_flexLeg.m_shift / 1000.0;
+    case ScopeGscShift: return m_gscLeg.m_shift / 1000.0;
+    case ScopePocsagSync: return sync[ProtocolPocsag] ? 1.0f : 0.0f;
+    case ScopeFlexSync: return sync[ProtocolFlex] ? 1.0f : 0.0f;
+    case ScopeGscSync: return sync[ProtocolGsc] ? 1.0f : 0.0f;
+    default: return 0.0f;
+    }
+}
+
+void RadioPagingDemodSink::sampleToScope(const Complex& sample)
+{
+    m_scopeBuffer[m_scopeBufferIndex++] = sample;
+
+    if (m_scopeBufferIndex == m_scopeBufferSize)
+    {
+        std::vector<ComplexVector::const_iterator> vbegin;
+        vbegin.push_back(m_scopeBuffer.begin());
+        m_scopeSink->feed(vbegin, m_scopeBufferSize);
+        m_scopeBufferIndex = 0;
+    }
+}
+
 void RadioPagingDemodSink::processOneSample(Complex& ci)
 {
     Real magsq = (ci.real() * ci.real() + ci.imag() * ci.imag()) / (SDR_RX_SCALED * SDR_RX_SCALED);
@@ -277,11 +324,14 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
     // the legs follow the carrier offsets the receivers measure (see Leg)
     float dc;
     float delta;
+    Real fms[3] = {0.0f, 0.0f, 0.0f};
+    bool syncs[3] = {false, false, false};
 
     if (m_settings.m_pocsagEnabled)
     {
         Real fm = m_pocsagLeg.demod(ci);
         bool synced = false;
+        fms[ProtocolPocsag] = fm;
 
         for (int i = 0; i < RadioPagingDemodSettings::m_nbPocsagSpeeds; i++)
         {
@@ -299,6 +349,7 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
         if (!synced) {
             legReleased(m_pocsagLeg, ProtocolPocsag, false);
         }
+        syncs[ProtocolPocsag] = synced;
         if (m_pocsagLeg.takeHandover(delta))
         {
             for (auto& pocsag : m_pocsag) {
@@ -309,7 +360,9 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
 
     if (m_settings.m_flexEnabled)
     {
-        m_flex.process(m_flexLeg.demod(ci), magsq);
+        fms[ProtocolFlex] = m_flexLeg.demod(ci);
+        m_flex.process(fms[ProtocolFlex], magsq);
+        syncs[ProtocolFlex] = !m_flex.isHunting();
 
         while (m_flex.hasMessage()) {
             sendFlex(m_flex.takeMessage());
@@ -329,6 +382,8 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
     {
         Real fm = m_gscLeg.demod(ci);
         m_gsc.process(fm);
+        fms[ProtocolGsc] = fm;
+        syncs[ProtocolGsc] = m_gsc.locked();
 
         while (m_gsc.hasMessage()) {
             sendGsc(m_gsc.takeMessage());
@@ -346,6 +401,13 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
         if (m_settings.m_gscAudio || m_settings.m_gscVoiceRecord) {
             processAudio(fm);
         }
+    }
+
+    if (m_scopeSink)
+    {
+        sampleToScope(Complex(
+            scopeValue(m_settings.m_scopeCh1, ci, magsq, fms, syncs),
+            scopeValue(m_settings.m_scopeCh2, ci, magsq, fms, syncs)));
     }
 
     if (++m_statusCount >= statusPeriodSamples)

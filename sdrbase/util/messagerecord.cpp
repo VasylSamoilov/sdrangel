@@ -234,6 +234,67 @@ QString MessageRecord::toCSV() const
     return fields.join(',');
 }
 
+bool MessageRecord::fromCSV(const QHash<QString, int>& columns, const QStringList& row, MessageRecord& record)
+{
+    // An empty field is what toCSV() writes for null: the same record as fromJson() makes from a JSON null
+    auto field = [&](const char *name) {
+        int col = columns.value(name, -1);
+        return ((col >= 0) && (col < row.size())) ? row[col] : QString();
+    };
+    auto stringValue = [&](const char *name) {
+        QString s = field(name);
+        return s.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(s);
+    };
+    auto intValue = [&](const char *name) {
+        bool ok;
+        qint64 v = field(name).toLongLong(&ok);
+        return ok ? QJsonValue(v) : QJsonValue(QJsonValue::Null);
+    };
+
+    QJsonObject json;
+
+    if (field("id").isEmpty() || field("timestamp").isEmpty() || field("protocol").isEmpty()) {
+        return false;
+    }
+
+    json.insert("id", stringValue("id"));
+    json.insert("timestamp", intValue("timestamp"));
+    json.insert("direction", field("direction"));
+    json.insert("protocol", stringValue("protocol"));
+    json.insert("mode", stringValue("mode"));
+    json.insert("kind", field("kind"));
+    json.insert("msgType", stringValue("msgType"));
+    json.insert("address", stringValue("address"));
+    json.insert("polarity", field("polarity"));
+    json.insert("speed", intValue("speed"));
+    json.insert("text", stringValue("text"));
+    json.insert("rawData", stringValue("rawData"));
+    json.insert("rawBits", intValue("rawBits"));
+    json.insert("errorsCorrected", intValue("errorsCorrected"));
+    json.insert("errorsUncorrectable", intValue("errorsUncorrectable"));
+
+    bool ok;
+    double ber = field("ber").toDouble(&ok);
+    json.insert("ber", ok ? QJsonValue(ber) : QJsonValue(QJsonValue::Null));
+
+    json.insert("charStatus", stringValue("charStatus"));
+    json.insert("frequency", intValue("frequency"));
+    json.insert("channelAlias", stringValue("channelAlias"));
+    json.insert("deviceSetIndex", intValue("deviceSetIndex"));
+    json.insert("channelIndex", intValue("channelIndex"));
+    json.insert("centerFrequency", intValue("centerFrequency"));
+
+    qint64 offset = field("channelOffset").toLongLong(&ok);
+    json.insert("channelOffset", ok ? QJsonValue(offset) : QJsonValue(QJsonValue::Null));
+
+    json.insert("duplicate", field("duplicate"));
+    json.insert("partial", field("partial") == "1");
+    json.insert("protocolData",
+        QJsonDocument::fromJson(field("protocolData").toUtf8()).object());
+
+    return fromJson(json, record);
+}
+
 QString MessageRecord::directionToString(Direction direction)
 {
     return direction == DirectionTX ? "tx" : "rx";

@@ -19,6 +19,9 @@
 #define INCLUDE_RADIOPAGINGDEMODSETTINGS_H
 
 #include <QByteArray>
+#include <QList>
+#include <QRegularExpression>
+#include <QSharedPointer>
 #include <QString>
 #include <QStringList>
 
@@ -88,6 +91,54 @@ struct RadioPagingDemodSettings
     bool m_hidden;
     QByteArray m_messageColumns;            //!< The columns of the table of messages: order, sizes, hidden
 
+    // Output of each message received, besides the Message Center: UDP datagrams and a CSV log file
+    enum UdpFormat {
+        UdpPagerDemod,                      //!< The fields of the Pager demodulator, each ended by a NUL: date, time, address,
+                                            //!< function bits, alphanumeric, numeric, protocol, type
+        UdpJson                             //!< The message record as one line of JSON (MessageRecord::toJsonLine())
+    };
+    bool m_udpEnabled;
+    QString m_udpAddress;
+    uint16_t m_udpPort;
+    int m_udpFormat;                        //!< UdpFormat
+    bool m_logEnabled;
+    QString m_logFilename;                  //!< CSV of the message records (MessageRecord::toCSV()), header first
+
+    //! A rule run on each message received: a regular expression matched on a field of the message; when it
+    //! matches the message is highlighted, spoken, given to a command and plotted on the Map
+    struct NotificationSettings
+    {
+        enum MatchField {
+            MatchAddress,
+            MatchMessage,
+            MatchProtocol,                  //!< pocsag, flex, gsc
+            MatchType,                      //!< alphanumeric, numeric, tone, voice...
+            MatchChannel,                   //!< The channel alias
+            MatchAny                        //!< Address, message, protocol, type and channel, separated by spaces
+        };
+        int m_matchField;
+        QString m_regExp;
+        QString m_speech;                   //!< Text to speak, with the substitutions of substitute()
+        QString m_command;                  //!< Command to run, with the substitutions of substitute()
+        bool m_highlight;
+        qint32 m_highlightColor;
+        bool m_plotOnMap;                   //!< A position in the message (latitude and longitude) is plotted on the Map
+
+        QRegularExpression m_regularExpression;
+
+        NotificationSettings();
+        void updateRegularExpression();
+        QByteArray serialize() const;
+        bool deserialize(const QByteArray& data);
+        static QString matchFieldName(int field);
+    };
+    QList<QSharedPointer<NotificationSettings>> m_notificationSettings;
+
+    // Scope of the receiver signals (see RadioPagingDemodSink::ScopeSignal)
+    int m_scopeCh1;
+    int m_scopeCh2;
+    Serializable *m_scopeGUI;
+
     static const int m_channelSampleRate = 38400;   //!< Multiple of 512, 1200, 2400, 1600, 3200 and 600 baud
     static double m_legOffsetAllowance;             //!< Offset room each side of a leg, Hz
 
@@ -95,6 +146,7 @@ struct RadioPagingDemodSettings
     void resetToDefaults();
     void setChannelMarker(Serializable *channelMarker) { m_channelMarker = channelMarker; }
     void setRollupState(Serializable *rollupState) { m_rollupState = rollupState; }
+    void setScopeGUI(Serializable *scopeGUI) { m_scopeGUI = scopeGUI; }
     QByteArray serialize() const;
     bool deserialize(const QByteArray& data);
     void applySettings(const QStringList& settingsKeys, const RadioPagingDemodSettings& settings);
@@ -120,5 +172,8 @@ struct RadioPagingDemodSettings
     //!< The codes of a list of hex codes (00 to 7F, separated by spaces or commas); false if one is not
     static bool parseFillCodes(const QString& text, std::vector<uint8_t>& codes);
 };
+
+QDataStream& operator<<(QDataStream& out, const QSharedPointer<RadioPagingDemodSettings::NotificationSettings>& settings);
+QDataStream& operator>>(QDataStream& in, QSharedPointer<RadioPagingDemodSettings::NotificationSettings>& settings);
 
 #endif // INCLUDE_RADIOPAGINGDEMODSETTINGS_H
