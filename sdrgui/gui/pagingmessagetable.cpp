@@ -77,12 +77,15 @@ public:
         opt.text.clear();
         opt.widget->style()->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
 
-        // The text beside the icon, if the cell has one
+        // The text beside the icon, if the cell has one. The message wraps to the width of its column
         QRect textRect = opt.widget->style()->subElementRect(QStyle::SE_ItemViewItemText, &opt, opt.widget);
         QTextDocument doc;
         doc.setDocumentMargin(1);
         doc.setDefaultFont(opt.font);
         doc.setHtml(html);
+        if (index.column() == PagingMessageTable::ColMessage) {
+            doc.setTextWidth(textRect.width());
+        }
         painter->save();
         painter->translate(textRect.left(), opt.rect.top() + (opt.rect.height() - doc.size().height()) / 2);
         doc.drawContents(painter, QRectF(0, 0, textRect.width(), opt.rect.height()));
@@ -101,7 +104,15 @@ public:
         doc.setDocumentMargin(1);
         doc.setDefaultFont(option.font);
         doc.setHtml(html);
-        return QSize((int) doc.idealWidth() + 4, std::max((int) doc.size().height(), QStyledItemDelegate::sizeHint(option, index).height()));
+        int width = (int) doc.idealWidth() + 4;
+
+        // The message: as high as its text wrapped to the width of its column
+        const QTableView *view = qobject_cast<const QTableView *>(parent());
+        if (view && (index.column() == PagingMessageTable::ColMessage)) {
+            doc.setTextWidth(std::max(20, view->columnWidth(index.column()) - 8));
+        }
+
+        return QSize(width, std::max((int) doc.size().height(), QStyledItemDelegate::sizeHint(option, index).height()));
     }
 };
 
@@ -180,6 +191,12 @@ PagingMessageTable::PagingMessageTable(QWidget *parent) :
     connect(horizontalHeader(), &QHeaderView::customContextMenuRequested, this, &PagingMessageTable::showColumnMenu);
     connect(horizontalHeader(), &QHeaderView::sectionMoved, this, &PagingMessageTable::columnsChanged);
     connect(horizontalHeader(), &QHeaderView::sectionResized, this, &PagingMessageTable::columnsChanged);
+    // The messages wrap to the width of their column: the rows follow it
+    connect(horizontalHeader(), &QHeaderView::sectionResized, this, [this](int logicalIndex, int, int) {
+        if (logicalIndex == ColMessage) {
+            resizeRowsToContents();
+        }
+    });
     connect(this, &QWidget::customContextMenuRequested, this, &PagingMessageTable::showRowMenu);
     connect(this, &QTableWidget::cellDoubleClicked, this, [this](int row, int) { showDetails(row); });
     connect(m_player, &PagingVoicePlayer::stateChanged, this, &PagingMessageTable::displayPlayer);
@@ -627,6 +644,7 @@ void PagingMessageTable::addRecord(const MessageRecord& record, const QString& s
         }
 
         fillRow(row, record, state);
+        resizeRowToContents(row);
         return;
     }
 
@@ -635,6 +653,7 @@ void PagingMessageTable::addRecord(const MessageRecord& record, const QString& s
     row = rowCount();
     setRowCount(row + 1);
     fillRow(row, record, state);
+    resizeRowToContents(row);
 
     while (rowCount() > m_maxRows) {
         removeRow(0);
