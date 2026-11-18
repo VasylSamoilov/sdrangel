@@ -340,22 +340,22 @@
         </property>
         <item>
          <property name="text">
-          <string>Strip NUL</string>
+          <string>NUL</string>
          </property>
         </item>
         <item>
          <property name="text">
-          <string>Strip NUL ETX EOT</string>
+          <string>NUL ETX EOT</string>
          </property>
         </item>
         <item>
          <property name="text">
-          <string>Strip no glyph</string>
+          <string>No glyph</string>
          </property>
         </item>
         <item>
          <property name="text">
-          <string>Strip custom</string>
+          <string>Custom</string>
          </property>
         </item>
        </widget>

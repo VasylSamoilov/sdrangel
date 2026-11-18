@@ -123,18 +123,20 @@ private:
     void leaveEvent(QEvent*);
     void enterEvent(EnterEventType*);
     void updateStatus();
-    //!< One fixed-width line of a polarity: polarity, state, what is received, quality, carrier offset, messages
+    //!< The rows of each protocol: the live line, the options and the network lines of each polarity
+    void layoutProtocols();
+    //!< The polarity of the network being received by a protocol (in sync, else received last)
+    int currentPolarity(const RadioPagingDemodSink::Status& status, int protocol);
+    //!< The live line of a protocol: state, what is received, polarity, quality, carrier offset, messages
     static QString statusLine(const RadioPagingDemodSink::Status& status, int protocol, int pol, bool sync,
         const QString& state, const QString& detail);
-    static int statusWidth(const QLabel *label);
-    //!< FLEX: the lines of the network of the last frame of a polarity, and the height of the status of a polarity
+    //!< FLEX: the lines of the network of the last frame of a polarity
     static QString flexNetworkLines(const RadioPagingDemodSink::Status& status, int pol);
-    static int statusHeight(const QLabel *label, int lines);
-    //!< The last line of the status of a polarity: what its receivers remember and when they were reset
+    //!< What the receivers of a polarity remember and when they were reset
     static QString memoryLine(const RadioPagingDemodSink::Status& status, int protocol, int pol);
     //!< The polarities shown: those received since the reset, the normal one when none was
     static void shownPolarities(const RadioPagingDemodSink::Status& status, int protocol, bool shown[2]);
-    //!< The group slot bars of FLEX, one for each polarity shown
+    //!< The group slot bars of FLEX, one for each polarity shown, with the state of each slot
     void updateGroupBars(const RadioPagingDemodSink::Status& status, const bool shown[2]);
     static QString groupSlotToolTip(const RadioPagingFlexDecoder::GroupSlot& slot, int pol, const RadioPagingDemodSink::Status& status);
     static QString polarityHtml(bool inverted);
@@ -153,7 +155,9 @@ private:
     QElapsedTimer m_statusClock;
     qint64 m_flexFrameStart = -1;       //!< m_statusClock when the last frame was first seen, -1 none
     bool m_flexWasSync = false;
-    int m_statusPolarities[3] = {1, 1, 1};  //!< Polarities shown by each status label (its height)
+    int m_currentPol[3] = {0, 0, 0};    //!< The polarity of the live line of each protocol
+    QLabel *m_networkLabel[3][2];       //!< The network lines of each protocol and polarity
+    QLabel *m_codepageLabel[3];
     QWidget *m_flexGroupBar[2] = {nullptr, nullptr};    //!< The 16 group slots of each polarity
     QLabel *m_flexGroupCell[2][16];
 

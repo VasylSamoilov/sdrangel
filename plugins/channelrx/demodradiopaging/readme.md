@@ -58,7 +58,7 @@ A demodulator at 1600 baud, 2 levels, hunts for sync 1 all the time, in both pol
 The address is the capcode in 10 digits. Short, long and temporary addresses, and the message types alphanumeric, secure, numeric, special numeric, numbered numeric, binary, short message and short instruction are decoded. A short message with the tone only payload (every digit a space) is a tone only page. An address without a vector at the end of the address field (a tone only address, allowed by the standard) is not decoded: noise and damaged frames end their address field the same way. Priority, maildrop and retrieval are flags of the message.
 
 * Long messages are sent in fragments over several frames. Each fragment is output as it is received, then the reassembled message; a message with lost fragments is output as incomplete.
-* Message numbers: the messages with R = 1 of an address are checked for skipped numbers, up to the largest message number of the network (Max N).
+* Message numbers: the messages with R = 1 of an address are checked for skipped numbers, up to the largest message number of the network, 63 (the WebAPI setting flexMaxMessageNumber sets another).
 * Retransmissions of a message are recognised by their message number. A retransmission is output again, tagged duplicate; when its words replaced lost words of an earlier copy it is tagged DUP+.
 * Group messages: a short instruction assigns a member capcode to a temporary address (group slot) and the frame of the group message. The instruction is output to the member capcode, the group message once to the temporary address, with its group slot and members (when the assignments were received).
 * The network information of the block information words is kept: date, time and time zone, roaming system ID (local id, coverage zone, country code, traffic management flags), collapse.
@@ -115,20 +115,29 @@ Bandwidth of the channel filter, from 10 to 25 kHz in 100 Hz steps (default 20 k
 
 <h3>6: Protocol rows</h3>
 
-One row per protocol:
+Each protocol has a live line, a line of options and, under them, the network lines of each polarity received:
 
-* Protocol button - decode the protocol. A protocol switched off is reset and shows OFF.
-* Dev - frequency deviation in Hz: POCSAG 4500, FLEX 4800 (outer symbol), GSC 4500 by default. It sets the filter of the protocol and the scale of its discriminator.
-* DC - DC offset correction of the protocol (see Signal processing), on by default.
-* POCSAG: Strip - the rule that strips the fill at the end of alphanumeric messages (default NUL, ETX and EOT). Right click edits the list of the custom codes.
-* FLEX: Max N - largest message number of the network (as the pagers are set), 0 to 63, default 63.
-* GSC: voice timeout, voice audio, recording, voice files and volume (see below).
-* Status - one line of fixed fields: HUNT (grey) while not synchronised, else SYNC (green); what is received with its polarity (NORM or INV); the bit error rate BER of the recent codewords; the carrier frequency offset &Delta;f; the number of messages in brackets. BER is green without bit errors, yellow when errors were corrected, red when there were errors the code could not correct; BER and &Delta;f are grey once the reception ended (the last values are kept). FLEX has two more lines (below). The tooltip explains the fields and gives the details of the last reception. There are lines for each polarity received since the last reset (NORM and INV): one polarity is shown, the other is added when it is received.
-  * POCSAG: the speeds being received with their polarity. Tooltip: the batches of the transmission.
-  * FLEX: the mode and polarity of the frame, or ERS with its length during an emergency re-synchronization. Between the frames of a transmission SYNC stays shown until the sync of the next frame is due (1.875 s after the start of the last one). Line 2: cycle and frame (Cxx/Fxxx), collapse (cN), R when the roaming bit is set, xN for a frame repeated N times, the network date, time and time zone (DST in daylight saving time). Line 3: the BER of each phase of a frame of several phases, the system ID: LID local id, CZ coverage zone, CC country code, TMF traffic management flags. A field not received yet is blank. Tooltip: the same, the group slots in use as Gs[members]&gt;Ffff (target frame) out of 16, the members of each group, and the messages being reassembled.
-  * GSC: VOICE during a voice page. Tooltip: the last page, preamble and batch or non battery saver, and slot.
-* FLEX group slots - under the FLEX status, the 16 group slots (temporary addresses 2029568 to 2029583) of each polarity shown, green when in use. The tooltip of a slot gives the number of its members and the first of them, the frame of the group message, the cycle and frame of the assignment and how many frames on the group message is.
-* Memory - the last line of the status, in grey: MEM the messages the receivers of the protocol remember for duplicate detection (FLEX: with its message history), FRAG (FLEX) the messages being reassembled, and RESET the time of the last reset.
+* Live line:
+  * Protocol button - decode the protocol. A protocol switched off is reset and shows OFF.
+  * Dev - frequency deviation in Hz: POCSAG 4500, FLEX 4800 (outer symbol), GSC 4500 by default. It sets the filter of the protocol and the scale of its discriminator.
+  * DC - DC offset correction of the protocol (see Signal processing), on by default.
+  * Status - the network being received (the polarity in sync, else the one received last): HUNT (grey) while not synchronised, else SYNC (green); what is received; its polarity (NORM or INV) once both were received; the bit error rate BER of the recent codewords; the carrier frequency offset &Delta;f; the number of messages in brackets. BER is green without bit errors, yellow when errors were corrected, red when there were errors the code could not correct; BER and &Delta;f are grey once the reception ended (the last values are kept). The tooltip explains the fields and gives the details of the last reception.
+    * POCSAG: the speeds being received. Tooltip: the batches of the transmission.
+    * FLEX: the mode of the frame, or ERS with its length during an emergency re-synchronization. Between the frames of a transmission SYNC stays shown until the sync of the next frame is due (1.875 s after the start of the last one). Tooltip: the group slots in use as Gs[members]&gt;Ffff (target frame) out of 16, the members of each group, and the messages being reassembled.
+    * GSC: VOICE during a voice page. Tooltip: the last page, preamble and batch or non battery saver, and slot.
+* Options line:
+  * POCSAG: Strip - the rule that strips the fill at the end of alphanumeric messages (default NUL, ETX and EOT). Right click edits the list of the custom codes.
+  * GSC: Voice - voice timeout, voice audio, recording, voice files and volume (see below).
+  * Codepage - the codepage of the alphanumeric messages (shown when there are several).
+  * Reset - see below.
+* Network lines - in a smaller font, one block per polarity received since the last reset (the normal one while none was), tagged NORM or INV once both were. The values are coloured while the polarity is being received and grey once its reception ended. Only the fields received are shown.
+  * POCSAG: Bn the batches of the last transmission, then the memory.
+  * FLEX line 1: cycle and frame (Cxx/Fxxx), collapse (cN), R when the roaming bit is set, xN for a frame repeated N times, the network date, time and time zone (DST in daylight saving time).
+  * FLEX line 2: the system ID: LID local id, CZ coverage zone, CC country code, TMF traffic management flags, and the BER of each phase of a frame of several phases.
+  * FLEX line 3: the memory.
+  * GSC: the last page, P preamble or NBS non battery saver, BATCH, Sn slot, then the memory.
+  * Memory: MEM the messages the receivers of the protocol remember for duplicate detection (FLEX: with its message history), FRAG (FLEX) the messages being reassembled, and RESET the time of the last reset (grey).
+* FLEX group slots - under the network lines of a FLEX polarity, the 16 group slots (temporary addresses 2029568 to 2029583), shown while a slot is not free. The colour of a slot is its state: blue members being assigned, amber waiting for the group message, teal the group message being received, green delivered, red missed (its frame went by without it), violet discarded (assigned again to another frame before it), orange timeout (the group message did not end), grey free. An outcome stays shown for 16 frames. The tooltip of a slot gives its state, the number of its members and the first of them, the frame of the group message, the cycle and frame of the assignment and how many frames on the group message is.
 * Reset - makes the receivers of the protocol forget what they remember: the messages for duplicate detection, and for FLEX the fragments, groups, message numbers and network time. The receivers are reset when the device starts too, so that a file played again is not taken as duplicates. Switching a protocol off resets it as well.
 * Codepage - the codepage of the alphanumeric messages of the protocol (shown when the protocol has more than one).
 
