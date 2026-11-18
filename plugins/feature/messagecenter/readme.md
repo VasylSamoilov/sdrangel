@@ -52,7 +52,7 @@ The pages to transmit, with the transmitter (alias), protocol, address, text, st
 
 ![Message Center page composer and codepage table](../../../doc/img/MessageCenter_plugin_page.png)
 
-The composer of a page, the same as in the Radio Paging modulator: transmitter (alias), protocol, address, type, text and the fields of the protocol. Send queues the page for the transmitter.
+The composer of a page, the same as in the Radio Paging modulator: transmitter (alias), protocol, address, type, text and the fields of the protocol. Table opens the codepage table of the text. Post the page queues the page for the transmitter.
 
 <h3>Routes</h3>
 

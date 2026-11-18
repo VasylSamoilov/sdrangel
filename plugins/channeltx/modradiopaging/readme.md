@@ -67,7 +67,7 @@ The window is in four sections that can be rolled up.
 * Protocol of the channel and mode (one-shot or network). A change of protocol or mode ends the transmission and drops the messages waiting.
 * Deviation of the outer symbol (Hz), default 4500.
 * Codepage of the alphanumeric messages of the protocol, for the pages that have none.
-* Gain (dB) and output level.
+* Gain (dB) and output level. The red end of the meter is its scale above 100%, not a level reached.
 
 <h3>Network</h3>
 
@@ -102,7 +102,7 @@ The composer of a message:
 * Clear drops the messages waiting. Abort drops them and, in one-shot mode, ends the transmission being sent.
 * Message Center opens the Message Center (and adds it when there is none).
 * The table of the last messages transmitted: queued, sent or dropped, with the message number, fragments and copies of FLEX messages. A click on the icon of a voice message plays the voice sent. Double click on a message opens all the fields of its record. Right click on the header selects the columns.
-* The log of the messages queued and of the requests refused.
+* The log of the messages queued and of the requests refused. A page from the Message Center or the API is logged with its address, type and text.
 
 <h2>Message records</h2>
 
