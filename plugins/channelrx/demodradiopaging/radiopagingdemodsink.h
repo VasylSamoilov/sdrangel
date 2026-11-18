@@ -21,6 +21,7 @@
 #include <QMutex>
 #include <QString>
 
+#include <atomic>
 #include <memory>
 #include <vector>
 
@@ -133,6 +134,8 @@ public:
     };
     static QString scopeSignalName(int signal);
     void setScopeSink(ScopeVis *scopeSink) { m_scopeSink = scopeSink; }
+    //! The scope costs time for each sample: it is fed only while it is shown (any thread)
+    void setScopeEnabled(bool enabled) { m_scopeEnabled.store(enabled, std::memory_order_relaxed); }
 
     virtual void feed(const SampleVector::const_iterator& begin, const SampleVector::const_iterator& end);
 
@@ -304,6 +307,7 @@ private:
     // Scope: the two signals selected, in blocks
     static const int m_scopeBufferSize = 1000;
     ScopeVis *m_scopeSink = nullptr;
+    std::atomic<bool> m_scopeEnabled{false};
     ComplexVector m_scopeBuffer;
     int m_scopeBufferIndex = 0;
     Real scopeValue(int signal, const Complex& ci, Real magsq, const Real fm[3], const bool sync[3]) const;

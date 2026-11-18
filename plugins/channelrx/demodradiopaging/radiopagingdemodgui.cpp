@@ -763,8 +763,10 @@ void RadioPagingDemodGUI::clearFromMap()
 
 void RadioPagingDemodGUI::onWidgetRolled(QWidget* widget, bool rollDown)
 {
-    (void) widget;
-    (void) rollDown;
+    // The waveforms are computed only while they are shown
+    if (widget == ui->scopeContainer) {
+        m_radioPagingDemod->setScopeEnabled(rollDown);
+    }
 
     getRollupContents()->saveState(m_rollupState);
     applySettings(QStringList());
@@ -836,6 +838,9 @@ RadioPagingDemodGUI::RadioPagingDemodGUI(PluginAPI* pluginAPI, DeviceUISet *devi
     RollupContents *rollupContents = getRollupContents();
     ui->setupUi(rollupContents);
     setSizePolicy(rollupContents->sizePolicy());
+    // Output and waveforms are rolled up until the user opens them (a state saved before wins)
+    ui->outputContainer->hide();
+    ui->scopeContainer->hide();
     rollupContents->arrangeRollups();
     connect(rollupContents, SIGNAL(widgetRolled(QWidget*,bool)), this, SLOT(onWidgetRolled(QWidget*,bool)));
     connect(this, SIGNAL(customContextMenuRequested(const QPoint &)), this, SLOT(onMenuDialogCalled(const QPoint &)));
@@ -1004,6 +1009,7 @@ RadioPagingDemodGUI::RadioPagingDemodGUI(PluginAPI* pluginAPI, DeviceUISet *devi
     m_statusClock.start();
 
     displaySettings();
+    m_radioPagingDemod->setScopeEnabled(!ui->scopeContainer->isHidden());
     makeUIConnections();
     applySettings(QStringList(), true);
     m_resizer.enableChildMouseTracking();

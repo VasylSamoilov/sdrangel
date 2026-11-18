@@ -138,6 +138,8 @@ public:
     //!< Forget what the receivers of a protocol remember (0 POCSAG, 1 FLEX, 2 GSC, -1 all)
     void resetProtocol(int protocol);
     ScopeVis *getScopeSink() { return m_basebandSink->getScopeSink(); }
+    //! The scope is fed while it is shown
+    void setScopeEnabled(bool enabled) { m_basebandSink->setScopeEnabled(enabled); }
 
     uint32_t getNumberOfDeviceStreams() const;
 

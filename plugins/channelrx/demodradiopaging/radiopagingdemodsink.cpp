@@ -403,7 +403,7 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
         }
     }
 
-    if (m_scopeSink)
+    if (m_scopeSink && m_scopeEnabled.load(std::memory_order_relaxed))
     {
         sampleToScope(Complex(
             scopeValue(m_settings.m_scopeCh1, ci, magsq, fms, syncs),

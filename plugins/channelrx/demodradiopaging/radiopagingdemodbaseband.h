@@ -93,6 +93,7 @@ public:
     RadioPagingDemodSink::Status getStatus() const { return m_sink.getStatus(); }
     void setAudioFifoLabel(const QString& label) { m_sink.setAudioFifoLabel(label); }
     ScopeVis *getScopeSink() { return &m_scopeSink; }
+    void setScopeEnabled(bool enabled) { m_sink.setScopeEnabled(enabled); }
     bool isRunning() const { return m_running; }
     void setFifoLabel(const QString& label) { m_sampleFifo.setLabel(label); }
 

@@ -709,6 +709,97 @@
      <number>3</number>
     </property>
     <item>
+     <layout class="QHBoxLayout" name="messagesToolsLayout">
+      <item>
+       <widget class="QLabel" name="messagesInfo">
+        <property name="text">
+         <string>Latest messages</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="filterAddress">
+        <property name="toolTip">
+         <string>Show only the messages whose address matches this regular expression</string>
+        </property>
+        <property name="placeholderText">
+         <string>Address filter</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="messagesSpacer">
+        <property name="orientation">
+         <enum>Qt::Orientation::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>20</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+      <item>
+       <widget class="QToolButton" name="clearTable">
+        <property name="toolTip">
+         <string>Clear messages from table</string>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="icon">
+         <iconset resource="../../../sdrgui/resources/res.qrc">
+          <normaloff>:/bin.png</normaloff>:/bin.png</iconset>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+    <item>
+     <widget class="PagingMessageTable" name="messages">
+      <property name="toolTip">
+       <string>Received messages, newest at the bottom. Duplicates are flagged DUP or DUP+ in the info column. Click the icon of a voice message to play it.&#10;Double-click a message for all its fields. Right click the header to choose the columns</string>
+      </property>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QWidget" name="outputContainer" native="true">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>660</y>
+     <width>390</width>
+     <height>40</height>
+    </rect>
+   </property>
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
+   <property name="windowTitle">
+    <string>Output</string>
+   </property>
+   <layout class="QVBoxLayout" name="verticalLayoutOutput">
+    <property name="spacing">
+     <number>2</number>
+    </property>
+    <property name="leftMargin">
+     <number>3</number>
+    </property>
+    <property name="topMargin">
+     <number>3</number>
+    </property>
+    <property name="rightMargin">
+     <number>3</number>
+    </property>
+    <property name="bottomMargin">
+     <number>3</number>
+    </property>
+    <item>
      <layout class="QHBoxLayout" name="outputLayout">
       <item>
        <widget class="QCheckBox" name="udpEnabled">
@@ -830,61 +921,6 @@
        </widget>
       </item>
      </layout>
-    </item>
-    <item>
-     <layout class="QHBoxLayout" name="messagesToolsLayout">
-      <item>
-       <widget class="QLabel" name="messagesInfo">
-        <property name="text">
-         <string>Latest messages</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QLineEdit" name="filterAddress">
-        <property name="toolTip">
-         <string>Show only the messages whose address matches this regular expression</string>
-        </property>
-        <property name="placeholderText">
-         <string>Address filter</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <spacer name="messagesSpacer">
-        <property name="orientation">
-         <enum>Qt::Orientation::Horizontal</enum>
-        </property>
-        <property name="sizeHint" stdset="0">
-         <size>
-          <width>20</width>
-          <height>20</height>
-         </size>
-        </property>
-       </spacer>
-      </item>
-      <item>
-       <widget class="QToolButton" name="clearTable">
-        <property name="toolTip">
-         <string>Clear messages from table</string>
-        </property>
-        <property name="text">
-         <string/>
-        </property>
-        <property name="icon">
-         <iconset resource="../../../sdrgui/resources/res.qrc">
-          <normaloff>:/bin.png</normaloff>:/bin.png</iconset>
-        </property>
-       </widget>
-      </item>
-     </layout>
-    </item>
-    <item>
-     <widget class="PagingMessageTable" name="messages">
-      <property name="toolTip">
-       <string>Received messages, newest at the bottom. Duplicates are flagged DUP or DUP+ in the info column. Click the icon of a voice message to play it.&#10;Double-click a message for all its fields. Right click the header to choose the columns</string>
-      </property>
-     </widget>
     </item>
    </layout>
   </widget>
