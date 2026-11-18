@@ -1393,8 +1393,11 @@ void RadioPagingFlexDecoder::decodeNumeric(Message& proto, const AddressContext&
         }
     }
 
-    // Digits: a continuous bit stream, 4 bits each, after the overhead bits of the first word
+    // Digits: a continuous bit stream, 4 bits each, after the overhead bits of the first word. The status of a
+    // digit (one for each character of digits): lost 'X', from a corrected word 'c', else '.'
     std::string digits;
+    std::string digitStatus;
+    char nibbleStatus = '.';
     std::vector<int> words;
     std::vector<uint32_t> raw;
     int bitCount = 0;
@@ -1420,11 +1423,13 @@ void RadioPagingFlexDecoder::decodeNumeric(Message& proto, const AddressContext&
             }
 
             digits.append(lostBits / 4, '?');
+            digitStatus.append(lostBits / 4, 'X');
             bitCount += 21;
             continue;
         }
 
         uint32_t dw = m_w[w].m_data;
+        const bool corrected = (m_w[w].m_status == WordCorrected);
 
         for (int b = 0; b < 21; b++)
         {
@@ -1436,14 +1441,21 @@ void RadioPagingFlexDecoder::decodeNumeric(Message& proto, const AddressContext&
 
             int pos = (bitCount - skipBits) % 4;
 
-            if (pos == 0) {
+            if (pos == 0)
+            {
                 nibble = 0;
+                nibbleStatus = '.';
             }
 
             nibble |= ((dw >> b) & 1) << pos;
+            if (corrected) {
+                nibbleStatus = 'c';
+            }
 
-            if (pos == 3) {
+            if (pos == 3)
+            {
                 digits += bcdChars[nibble & 0xf];
+                digitStatus += nibbleStatus;
             }
 
             bitCount++;
@@ -1505,6 +1517,7 @@ void RadioPagingFlexDecoder::decodeNumeric(Message& proto, const AddressContext&
     }
 
     msg.m_text = digits;
+    msg.m_charStatus = digitStatus;
     msg.m_messageNumber = number;
     msg.m_retrieval = (retrieval != 0);
     msg.m_special = (special != 0) || (vecType == 4);
