@@ -36,7 +36,8 @@ int popcount32(uint32_t x)
 } // namespace
 
 RadioPagingPocsagDecoder::RadioPagingPocsagDecoder(Polarity polarity) :
-    m_polarity(polarity)
+    m_polarity(polarity),
+    m_batchWords{}
 {
     reset();
 }
