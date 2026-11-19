@@ -1115,7 +1115,7 @@ RadioPagingModGUI::RadioPagingModGUI(PluginAPI* pluginAPI, DeviceUISet *deviceUI
     m_settings.setRollupState(&m_rollupState);
 
     ui->txLog->setMaxRows(100);
-    ui->txLog->setDefaultColumns({PagingMessageTable::ColTime, PagingMessageTable::ColProtocol, PagingMessageTable::ColAddress,
+    ui->txLog->setDefaultColumns({PagingMessageTable::ColDate, PagingMessageTable::ColTime, PagingMessageTable::ColProtocol, PagingMessageTable::ColAddress,
         PagingMessageTable::ColType, PagingMessageTable::ColMessage, PagingMessageTable::ColInfo, PagingMessageTable::ColState});
     connect(ui->txLog, &PagingMessageTable::columnsChanged, this, [this]() {
         m_settings.m_messageColumns = ui->txLog->columns();

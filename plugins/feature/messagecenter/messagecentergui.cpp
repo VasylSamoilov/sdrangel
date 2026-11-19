@@ -406,7 +406,7 @@ void MessageCenterGUI::buildLog(QWidget *container)
     m_logTable->setMinimumHeight(220);
     m_logTable->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_logTable->setMaxRows(m_maxLogRows);
-    m_logTable->setDefaultColumns({PagingMessageTable::ColTime, PagingMessageTable::ColDirection, PagingMessageTable::ColChannel,
+    m_logTable->setDefaultColumns({PagingMessageTable::ColDate, PagingMessageTable::ColTime, PagingMessageTable::ColDirection, PagingMessageTable::ColChannel,
         PagingMessageTable::ColProtocol, PagingMessageTable::ColRate, PagingMessageTable::ColPolarity, PagingMessageTable::ColAddress,
         PagingMessageTable::ColType, PagingMessageTable::ColMessage, PagingMessageTable::ColInfo});
     m_logTable->setToolTip("The messages the routes put in the log. Click the icon of a voice message to play it.\nDouble-click a message for all its fields. Right click the header to choose the columns");

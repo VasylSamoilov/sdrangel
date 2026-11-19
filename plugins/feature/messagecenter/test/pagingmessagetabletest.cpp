@@ -18,6 +18,7 @@
 // Self test of the table of paging messages: rows, updates by id, chips, columns. Run with
 // QT_QPA_PLATFORM=offscreen. Prints one line per check and returns non-zero if any check fails.
 
+#include <QHeaderView>
 #include <QApplication>
 #include <QTemporaryDir>
 #include <QTreeWidget>
@@ -132,7 +133,7 @@ int main(int argc, char **argv)
     flexTx.m_protocolData.insert("retransmission", 2);
     QString plain, html, tip;
     PagingMessageTable::recordInfo(flexTx, plain, html, tip);
-    check((plain == "PRI COPY 2") && html.contains("COPY 2"), "a transmitted FLEX message: priority and copy, no decode fields");
+    check((plain == "PRI COPY:2") && html.contains("COPY:2"), "a transmitted FLEX message: priority and copy, no decode fields");
 
     MessageRecord flexRx = record("g", "flex", "0001234567", "X");
     flexRx.m_protocolData.insert("phase", "A");
@@ -142,7 +143,30 @@ int main(int argc, char **argv)
     flexRx.m_protocolData.insert("retrieval", true);
     flexRx.m_protocolData.insert("checksum", "ok");
     PagingMessageTable::recordInfo(flexRx, plain, html, tip);
-    check(plain == "PH:A C03/F031 #1 R K:ok", "a received FLEX message: phase, number as shown by pagers, R, checksum");
+    check(plain == "PH:A C:3 F:31 N:1 R K:ok", "a received FLEX message: phase, cycle, frame, number as shown by pagers, R, checksum");
+
+    // Each chip has its own tool tip, saying what it is and its value
+    QStringList chipTexts, chipHtml, chipTips;
+    PagingMessageTable::recordChips(flexRx, chipTexts, chipHtml, chipTips);
+    bool tipsOk = (chipTexts.size() == 6) && (chipTips.size() == 6) && (chipHtml.size() == 6);
+    for (const QString& t : chipTips) {
+        tipsOk = tipsOk && !t.isEmpty();
+    }
+    check(tipsOk && chipTips[0].contains("Phase A") && chipTips[1].contains("Cycle 3") && chipTips[2].contains("Frame 31")
+        && chipTips[3].contains("Message number 1") && chipTips[5].contains("Checksum"), "a tool tip for each chip, with its value");
+
+    MessageRecord pocsagRx = record("p", "pocsag", "1234567D", "X");
+    pocsagRx.m_protocolData.insert("batch", 1);
+    pocsagRx.m_protocolData.insert("truncated", true);
+    chipTexts.clear(); chipHtml.clear(); chipTips.clear();
+    PagingMessageTable::recordChips(pocsagRx, chipTexts, chipHtml, chipTips);
+    check((chipTexts == QStringList({"B:2", "TRUNC"})) && chipTips[0].contains("Batch 2"), "POCSAG: batch counted from 1, truncated");
+
+    MessageRecord gscRx = record("q", "gsc", "123456", "X");
+    gscRx.m_protocolData.insert("slot", 0);
+    chipTexts.clear(); chipHtml.clear(); chipTips.clear();
+    PagingMessageTable::recordChips(gscRx, chipTexts, chipHtml, chipTips);
+    check(chipTexts == QStringList({"SLOT:1"}), "GSC: the address slot is SLOT, not S as the FLEX signature");
 
     // Columns: hidden ones, saved and restored
     table.setDefaultColumns({PagingMessageTable::ColTime, PagingMessageTable::ColMessage});
@@ -154,6 +178,25 @@ int main(int argc, char **argv)
     check(other.setColumns(saved) && !other.isColumnHidden(PagingMessageTable::ColAddress)
         && other.isColumnHidden(PagingMessageTable::ColState), "the columns are restored");
     check(!other.setColumns(QByteArray()), "no saved columns: false, the defaults stay");
+
+    // Date column and row numbers, as in the Pager demodulator: the date before the time
+    PagingMessageTable dated;
+    dated.addRecord(record("d", "pocsag", "1234567D", "X"));
+    check((cell(dated, 0, PagingMessageTable::ColDate) == QDateTime::fromMSecsSinceEpoch(1000000).date().toString(Qt::TextDate))
+        && !dated.isColumnHidden(PagingMessageTable::ColDate)
+        && (dated.horizontalHeader()->visualIndex(PagingMessageTable::ColDate) < dated.horizontalHeader()->visualIndex(PagingMessageTable::ColTime))
+        && !dated.verticalHeader()->isHidden(), "the date, shown before the time, and row numbers");
+
+    // Columns saved before the date column (13 columns): restored, the date column shown after them
+    QTableWidget old(0, 13);
+    old.horizontalHeader()->hideSection(PagingMessageTable::ColState);
+    old.horizontalHeader()->resizeSection(PagingMessageTable::ColMessage, 345);
+    PagingMessageTable upgraded;
+    check(upgraded.setColumns(old.horizontalHeader()->saveState()) && upgraded.isColumnHidden(PagingMessageTable::ColState)
+        && (upgraded.columnWidth(PagingMessageTable::ColMessage) == 345) && !upgraded.isColumnHidden(PagingMessageTable::ColDate),
+        qPrintable(QString("columns saved by the 13 column table restored (hidden %1, width %2, date hidden %3)")
+            .arg(upgraded.isColumnHidden(PagingMessageTable::ColState)).arg(upgraded.columnWidth(PagingMessageTable::ColMessage))
+            .arg(upgraded.isColumnHidden(PagingMessageTable::ColDate))));
 
     // Details: every field of the record, protocolData and the raw payload as bits
     MessageRecord detailed = record("h", "pocsag", "1234567D", "HI");

@@ -58,6 +58,7 @@ public:
         ColInfo,
         ColErrors,
         ColState,
+        ColDate,            //!< Last in the enumeration so saved column states keep their indexes; shown before Time
         ColumnCount
     };
 
@@ -86,6 +87,8 @@ public:
     void setRowBackground(const QString& id, const QColor& color);
     //!< Plain text of the record and the chips of its protocol fields (HTML), and the tool tip of the chips
     static void recordInfo(const MessageRecord& record, QString& plain, QString& html, QString& tip);
+    //!< The chips of the protocol fields of a record: the label, the HTML and the tool tip of each
+    static void recordChips(const MessageRecord& record, QStringList& texts, QStringList& chips, QStringList& tips);
     //!< The text of the row of the record
     static QString recordText(const MessageRecord& record);
     //!< The text as HTML, coloured by the status of each character (. received, c corrected, X lost); escaped only
@@ -121,6 +124,8 @@ signals:
 
 protected:
     void mousePressEvent(QMouseEvent *event) override;
+    //!< The tool tip of the chip under the mouse in the info column
+    bool viewportEvent(QEvent *event) override;
 
 private:
     int m_maxRows = 1000;
