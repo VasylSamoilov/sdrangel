@@ -426,10 +426,8 @@ void RadioPagingFlexReceiver::startData(float offset)
     m_dataDemod.create(m_sampleRate, baud, levels);
     m_dataDemod.setLevels(m_syncDemod.getDC(), m_syncDemod.getDeviation());
     m_dataDemod.setLocked(true);
-    // The levels measured on sync 1 are kept for the frame; 4-level data follows them from its decisions: the
-    // shaping of the transmitter lowers the outer symbols at the data rate below the deviation of the 2-level sync
+    // The levels measured on sync 1 are kept for the frame
     m_dataDemod.setHoldLevels(true);
-    m_dataDemod.setTrackDecided(levels == 4);
     // The first symbol of the second sync ends one symbol after the end of the frame
     // information word. Its matched filter fills during that symbol
     m_dataDemod.startSymbols(samplesPerSymbol - offset);
