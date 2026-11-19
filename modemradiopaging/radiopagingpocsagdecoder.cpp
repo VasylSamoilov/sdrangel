@@ -17,6 +17,9 @@
 
 #include "radiopagingpocsagdecoder.h"
 
+#include <algorithm>
+#include <cmath>
+
 #include "radiopagingbch.h"
 #include "radiopagingpocsag.h"
 
@@ -37,7 +40,17 @@ int popcount32(uint32_t x)
 
 RadioPagingPocsagDecoder::RadioPagingPocsagDecoder(Polarity polarity) :
     m_polarity(polarity),
-    m_batchWords{}
+    m_batchWords{},
+    m_batchQuality{},
+    m_wordError2(0.0f),
+    m_wordQualityKnown(false),
+    m_recentQuality{},
+    m_recentPos(0),
+    m_recentCount(0),
+    m_batchWindow{},
+    m_wordNoiseQuality(1e9f),
+    m_noiseQuality(1e9f),
+    m_preambleBefore(false)
 {
     reset();
 }
@@ -50,6 +63,11 @@ void RadioPagingPocsagDecoder::reset()
     m_word = 0;
     m_wordBits = 0;
     m_slot = 0;
+    m_wordError2 = 0.0f;
+    m_wordQualityKnown = false;
+    m_recentPos = 0;
+    m_recentCount = 0;
+    m_preambleBefore = false;
     m_leadingConfirmed = false;
     m_batch = 0;
     m_active = false;
@@ -104,9 +122,45 @@ void RadioPagingPocsagDecoder::startCandidate()
     m_slot = 0;
     m_word = 0;
     m_wordBits = 0;
+    m_wordError2 = 0.0f;
+    m_recentCount = 0;
+    m_preambleBefore = false;
     m_leadingConfirmed = false;
     m_syncMissedLast = false;
     m_batch = 0;
+}
+
+// A codeword of the batch is complete: kept with its quality and the quality of the last four codewords
+void RadioPagingPocsagDecoder::storeWord(int slot, uint32_t word)
+{
+    m_batchWords[slot] = word;
+    m_batchQuality[slot] = m_wordQualityKnown ? std::sqrt(m_wordError2 / 32.0f) : -1.0f;
+    m_batchWindow[slot] = -1.0f;
+
+    if (m_wordQualityKnown)
+    {
+        m_recentQuality[m_recentPos] = m_batchQuality[slot];
+        m_recentPos = (m_recentPos + 1) % 4;
+        m_recentCount = std::min(m_recentCount + 1, 4);
+
+        if (m_recentCount == 4)
+        {
+            float sum2 = 0.0f;
+            for (float q : m_recentQuality) {
+                sum2 += q * q;
+            }
+            m_batchWindow[slot] = std::sqrt(sum2 / 4.0f);
+        }
+    }
+
+    m_wordError2 = 0.0f;
+}
+
+void RadioPagingPocsagDecoder::feed(int symbol, float error)
+{
+    m_wordQualityKnown = true;
+    m_wordError2 += error * error;
+    feed(symbol);
 }
 
 void RadioPagingPocsagDecoder::feed(int symbol)
@@ -139,7 +193,7 @@ void RadioPagingPocsagDecoder::feed(int symbol)
         m_word = (m_word << 1) | (uint32_t) bit;
         if (++m_wordBits == 32)
         {
-            m_batchWords[m_slot] = m_word;
+            storeWord(m_slot, m_word);
             m_wordBits = 0;
             m_word = 0;
             if (++m_slot == RadioPagingPocsag::m_codewordsPerBatch) {
@@ -156,6 +210,7 @@ void RadioPagingPocsagDecoder::feed(int symbol)
 
             m_wordBits = 0;
             m_word = 0;
+            m_wordError2 = 0.0f;
 
             if (sync)
             {
@@ -169,22 +224,31 @@ void RadioPagingPocsagDecoder::feed(int symbol)
             }
             else if ((m_leadingConfirmed || batchValid()) && !m_syncMissedLast)
             {
-                // The batch is received (after a confirmed sync codeword, or all its codewords decode): decoded.
-                // Its following sync codeword was missed (a fade): reception goes on at the expected position,
-                // as a pager decoder does, and the next batch is decoded when the sync codeword after it
-                // confirms it (or all its codewords decode). Two batches in a row without their sync codeword
-                // end the transmission (sync loss)
-                decodeBatch();
-                m_syncMissed++;
-                m_syncMissedLast = true;
-                m_leadingConfirmed = false;
-                m_slot = 0;
-                m_state = InBatch;
+                // The batch is received (after a confirmed sync codeword, or all its codewords decode): decoded up
+                // to a codeword that does not belong to the transmission, which ends it. Otherwise its following
+                // sync codeword was missed (a fade): reception goes on at the expected position, as a pager
+                // decoder does, and the next batch is decoded when the sync codeword after it confirms it (or all
+                // its codewords decode). Two batches in a row without their sync codeword end the transmission
+                // (sync loss)
+                if (decodeUnconfirmedBatch())
+                {
+                    endTransmission();
+                }
+                else
+                {
+                    m_syncMissed++;
+                    m_syncMissedLast = true;
+                    m_leadingConfirmed = false;
+                    m_slot = 0;
+                    m_state = InBatch;
+                }
             }
             else
             {
-                if (batchValid()) {
-                    decodeBatch();
+                // A batch valid by itself, or the first batch after a preamble, is decoded up to a codeword that
+                // does not belong to the transmission
+                if (batchValid() || (m_preambleBefore && (m_batch == 0) && !m_syncMissedLast)) {
+                    decodeUnconfirmedBatch();
                 } else {
                     m_candidatesDropped++;
                 }
@@ -222,6 +286,78 @@ void RadioPagingPocsagDecoder::decodeBatch()
     m_batch++;
 }
 
+// A codeword of a batch no sync codeword follows is decipherable when it decodes and its symbols are better than
+// noise gives (noise passes the code a quarter of the time)
+bool RadioPagingPocsagDecoder::decipherable(int slot) const
+{
+    return (RadioPagingBCH::decode(m_batchWords[slot]).m_bitErrors >= 0) && (m_batchQuality[slot] < m_wordNoiseQuality);
+}
+
+// Decodes the codewords of the batch up to the first one that does not belong to the transmission: the second of
+// two indecipherable codewords in a row (the first one is then not taken either), or one whose last four codewords
+// are as poor as noise. A single indecipherable codeword is a lost codeword of the message in progress, never an
+// address. True if the batch has such a codeword: the message in progress ends truncated and the transmission is over
+bool RadioPagingPocsagDecoder::decodeUnconfirmedBatch()
+{
+    int cut = RadioPagingPocsag::m_codewordsPerBatch;
+
+    for (int slot = 0; slot < RadioPagingPocsag::m_codewordsPerBatch; slot++)
+    {
+        if (m_batchWindow[slot] > m_noiseQuality)
+        {
+            cut = slot;
+            break;
+        }
+        if (!decipherable(slot) && (slot + 1 < RadioPagingPocsag::m_codewordsPerBatch) && !decipherable(slot + 1))
+        {
+            cut = slot;
+            break;
+        }
+    }
+
+    // The codeword the signal was lost in is partly the transmission's, partly noise or another signal: the code
+    // corrects it to some other codeword. Codewords before the cut that needed a correction are not taken
+    while ((cut < RadioPagingPocsag::m_codewordsPerBatch) && (cut > 0))
+    {
+        RadioPagingBCH::Result result = RadioPagingBCH::decode(m_batchWords[cut - 1]);
+
+        if ((result.m_bitErrors == 0) && !result.m_parityError) {
+            break;
+        }
+
+        cut--;
+    }
+
+    if (cut == 0)
+    {
+        if (m_batch == 0) {
+            m_candidatesDropped++;
+        }
+        finishMessage(true);
+        return true;
+    }
+
+    if (m_batch == 0)
+    {
+        m_transmissions++;
+        m_ber.reset();
+    }
+
+    for (m_slot = 0; m_slot < cut; m_slot++) {
+        processCodeword(m_batchWords[m_slot], !decipherable(m_slot));
+    }
+
+    m_batch++;
+
+    if (cut < RadioPagingPocsag::m_codewordsPerBatch)
+    {
+        finishMessage(true);
+        return true;
+    }
+
+    return false;
+}
+
 void RadioPagingPocsagDecoder::endTransmission()
 {
     finishMessage(true);
@@ -232,13 +368,15 @@ void RadioPagingPocsagDecoder::endTransmission()
     m_uncorrectableRun = 0;
 }
 
-void RadioPagingPocsagDecoder::processCodeword(uint32_t word)
+// lost: the codeword is taken as undecodable (a codeword of a batch no sync codeword follows that needs two corrected
+// bits)
+void RadioPagingPocsagDecoder::processCodeword(uint32_t word, bool lost)
 {
     RadioPagingBCH::Result result = RadioPagingBCH::decode(word);
     m_codewords++;
     m_ber.add((result.m_bitErrors > 0 ? result.m_bitErrors : 0) + (result.m_parityError ? 1 : 0), 32, result.m_bitErrors < 0);
 
-    if (result.m_bitErrors < 0)
+    if ((result.m_bitErrors < 0) || lost)
     {
         m_codewordsUncorrectable++;
         m_uncorrectableRun++;

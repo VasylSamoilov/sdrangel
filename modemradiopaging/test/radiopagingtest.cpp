@@ -18,6 +18,7 @@
 // Self test of the modemradiopaging primitives. Prints one line per check and
 // returns non-zero if any check fails.
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <random>
@@ -611,6 +612,74 @@ void testPocsagSyncLoss()
     check((messages.size() == 1) && (messages[0].m_address == 1000), "POCSAG: noise after a transmission gives no message");
 }
 
+// The signal lost in the last batch of a transmission (no sync codeword follows it) and noise after: for each cut,
+// in the middle of each codeword of the batch, the messages decoded have only the addresses sent and each text, up to
+// a codeword marked lost, is the start of the text sent. Symbols are fed with their error: small for the transmission,
+// as noise gives after the cut
+void testPocsagSignalLost()
+{
+    RadioPagingPocsag::TxMessage a, n;
+    a.m_address = 1234567;
+    a.m_function = 3;
+    a.m_type = RadioPagingPocsag::Alphanumeric;
+    a.m_text = "POCSAG SWEEP 0123456789";
+    n.m_address = 7654;
+    n.m_function = 0;
+    n.m_type = RadioPagingPocsag::Numeric;
+    n.m_text = "0123456789";
+    std::vector<uint8_t> sent = RadioPagingPocsag::encode({ a, n }).m_bits;
+    const int lastBatch = RadioPagingPocsag::m_preambleBits + 2 * 32 + RadioPagingPocsag::m_codewordsPerBatch * 32;
+    int foreign = 0, wrongText = 0, received = 0;
+
+    for (int seed = 0; seed < 4; seed++)
+    {
+        for (int word = 0; word < RadioPagingPocsag::m_codewordsPerBatch; word++)
+        {
+            const int cut = lastBatch + 32 * word + 16;
+            std::mt19937 rng(100 * seed + word);
+            std::uniform_real_distribution<float> noiseError(0.7f, 1.2f);
+            RadioPagingPocsagDecoder decoder(RadioPagingPocsagDecoder::Normal);
+            decoder.setNoiseQuality(0.59f, 0.69f);
+            std::vector<RadioPagingPocsagDecoder::Message> messages;
+
+            for (int i = 0; i < cut + 32 * 17 * 3; i++)
+            {
+                if (i < cut) {
+                    decoder.feed(sent[i] ? 0 : 1, 0.05f);
+                } else {
+                    decoder.feed((int) (rng() & 1), noiseError(rng));
+                }
+                while (decoder.hasMessage()) {
+                    messages.push_back(decoder.takeMessage());
+                }
+            }
+
+            for (const auto& m : messages)
+            {
+                // The text of the codewords up to the first one marked lost (X)
+                size_t lost = m.m_wordStatus.find('X');
+                int bits = (lost == std::string::npos) ? m.m_rawBits : std::min(m.m_rawBits, (int) lost * 20);
+                std::vector<uint8_t> raw(m.m_rawData.begin(), m.m_rawData.begin() + (bits + 7) / 8);
+                std::string text = RadioPagingPocsag::interpret(raw, bits).m_text;
+
+                if (m.m_address == a.m_address) {
+                    wrongText += (a.m_text.compare(0, text.size(), text) != 0) ? 1 : 0;
+                } else if (m.m_address == n.m_address) {
+                    wrongText += (n.m_text.compare(0, text.size(), text) != 0) ? 1 : 0;
+                } else {
+                    foreign++;
+                }
+                received++;
+            }
+        }
+    }
+
+    std::printf("      signal lost in the last batch: %d messages, %d foreign, %d with a wrong text\n", received, foreign, wrongText);
+    check(foreign == 0, "POCSAG: signal lost in the last batch, noise gives no address");
+    check(wrongText == 0, "POCSAG: signal lost in the last batch, noise adds nothing to a message");
+    check(received >= 4 * RadioPagingPocsag::m_codewordsPerBatch, "POCSAG: signal lost in the last batch, the message started is received");
+}
+
 void testPocsagStandardRules()
 {
     // Encoder: an idle or address codeword between a message and the next message's address,
@@ -863,6 +932,7 @@ int main()
     testPocsagLink();
     testPocsagStandardRules();
     testPocsagSyncLoss();
+    testPocsagSignalLost();
     testPocsagLongNumeric();
     testPocsagPreambleLock();
     testFsk();

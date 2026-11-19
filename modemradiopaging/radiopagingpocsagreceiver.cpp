@@ -34,6 +34,15 @@ void RadioPagingPocsagReceiver::create(double sampleRate, int baud)
 {
     m_baud = baud;
     m_demod.create(sampleRate, baud, 2);
+
+    // Quality limits of the codewords of a batch no sync codeword follows (rms symbol error, outer levels
+    // +/-1), measured per speed with the FSK modulator through noise: the lowest value of one codeword and
+    // of four codewords of noise only, less a margin
+    float wordNoise = (baud <= 512) ? 0.72f : (baud <= 1200) ? 0.59f : 0.50f;
+    float noise = (baud <= 512) ? 0.78f : (baud <= 1200) ? 0.69f : 0.60f;
+    m_normal.setNoiseQuality(wordNoise, noise);
+    m_inverted.setNoiseQuality(wordNoise, noise);
+
     reset();
 }
 
@@ -116,17 +125,27 @@ void RadioPagingPocsagReceiver::process(float sample)
     uint32_t invertedSyncs = m_inverted.syncWords();
 
     if (m_normalEnabled) {
-        m_normal.feed(symbol.m_value);
+        m_normal.feed(symbol.m_value, symbol.m_error);
     }
     if (m_invertedEnabled) {
-        m_inverted.feed(symbol.m_value);
+        m_inverted.feed(symbol.m_value, symbol.m_error);
     }
 
     // A sync codeword was just received (the candidate of a batch or the codeword of the
-    // next batch): DC offset and deviation are measured on it and held for the batch
-    if (m_normalEnabled && (m_normal.syncWords() != normalSyncs)) {
+    // next batch): DC offset and deviation are measured on it and held for the batch. A
+    // candidate that follows the preamble is marked so
+    if (m_normalEnabled && (m_normal.syncWords() != normalSyncs))
+    {
+        if (m_preambleLocked && !m_normal.getStatus().m_confirmed) {
+            m_normal.setPreambleBefore();
+        }
         fitSyncCodeword(false);
-    } else if (m_invertedEnabled && (m_inverted.syncWords() != invertedSyncs)) {
+    }
+    else if (m_invertedEnabled && (m_inverted.syncWords() != invertedSyncs))
+    {
+        if (m_preambleLocked && !m_inverted.getStatus().m_confirmed) {
+            m_inverted.setPreambleBefore();
+        }
         fitSyncCodeword(true);
     }
 
