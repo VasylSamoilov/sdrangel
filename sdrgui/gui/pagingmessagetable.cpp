@@ -96,6 +96,8 @@ public:
             doc.setTextWidth(textRect.width());
         }
         painter->save();
+        // Never over the next cells: a text higher than its row (until the row is sized again) is cut
+        painter->setClipRect(opt.rect);
         painter->translate(textRect.left(), opt.rect.top() + (opt.rect.height() - doc.size().height()) / 2);
         doc.drawContents(painter, QRectF(0, 0, textRect.width(), opt.rect.height()));
         painter->restore();
@@ -787,6 +789,9 @@ void PagingMessageTable::fillRow(int row, const MessageRecord& record, const QSt
     }
 
     cell(ColState, state);
+
+    // The height of the row follows its cells (a message decoded again may need more or fewer lines)
+    resizeRowToContents(row);
 }
 
 void PagingMessageTable::addRecord(const MessageRecord& record, const QString& state)
@@ -813,7 +818,6 @@ void PagingMessageTable::addRecord(const MessageRecord& record, const QString& s
         }
 
         fillRow(row, record, state);
-        resizeRowToContents(row);
         return;
     }
 
@@ -822,7 +826,6 @@ void PagingMessageTable::addRecord(const MessageRecord& record, const QString& s
     row = rowCount();
     setRowCount(row + 1);
     fillRow(row, record, state);
-    resizeRowToContents(row);
 
     while (rowCount() > m_maxRows) {
         removeRow(0);
