@@ -135,9 +135,9 @@ const char *RadioPagingFlexDecoder::messageTypeName(MessageType type)
     return "unknown";
 }
 
-// Codeword decoding. Up to two bit errors in bits 31-1 are corrected. A wrong parity bit alone is
-// corrected. A word whose parity is still wrong after the correction of bits 31-1 has three or more
-// errors and is rejected
+// Codeword decoding (RadioPagingBCH::decode): up to two bit errors are corrected, the parity bit counted:
+// two in bits 31-1, or one there and the parity bit. A wrong parity after correcting two bits in bits
+// 31-1 means three or more errors: rejected
 RadioPagingFlexDecoder::Word RadioPagingFlexDecoder::decodeWord(uint32_t raw, bool erased)
 {
     Word word;
@@ -147,6 +147,10 @@ RadioPagingFlexDecoder::Word RadioPagingFlexDecoder::decodeWord(uint32_t raw, bo
     if (erased) {
         return word;
     }
+
+    // Kept for the text of a word that cannot be corrected: shown as received, marked uncertain
+    word.m_received = RadioPagingFlex::wordData(raw);
+    word.m_hasReceived = true;
 
     RadioPagingBCH::Result result = RadioPagingBCH::decode(raw);
 
@@ -169,12 +173,8 @@ RadioPagingFlexDecoder::Word RadioPagingFlexDecoder::decodeWord(uint32_t raw, bo
     }
     else
     {
-        if (result.m_parityError) {
-            return word;
-        }
-
         word.m_status = WordCorrected;
-        word.m_bits = (uint8_t) result.m_bitErrors;
+        word.m_bits = (uint8_t) (result.m_bitErrors + (result.m_parityError ? 1 : 0));
     }
 
     word.m_data = RadioPagingFlex::wordData(result.m_word);

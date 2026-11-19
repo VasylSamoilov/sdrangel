@@ -280,7 +280,7 @@ namespace {
 
 char worse(char a, char b)
 {
-    auto rank = [](char s) { return (s == 'X') ? 2 : (s == 'c') ? 1 : 0; };
+    auto rank = [](char s) { return (s == 'X') ? 3 : (s == 'u') ? 2 : (s == 'c') ? 1 : 0; };
     return (rank(b) > rank(a)) ? b : a;
 }
 
@@ -334,6 +334,21 @@ QString RadioPagingRecode::decodeWithStatus(const std::string& codes, const std:
             flush();
             text += '?';
             charStatus += 'X';
+        }
+        else if (s == 'u')
+        {
+            // A code of a word that could not be corrected, as received: shown alone, an unprintable one as '?',
+            // so the text keeps one character a code
+            flush();
+            const unsigned char u = (unsigned char) codes[i];
+            QString piece = ((u < 0x20) || (u == 0x7f)) ? QString() : decode(std::string(1, codes[i]));
+
+            if (piece.isEmpty() || piece.contains("<0x")) {
+                piece = "?";
+            }
+
+            text += piece;
+            charStatus += QString(piece.size(), QChar('u'));
         }
         else if (s == 'G')
         {

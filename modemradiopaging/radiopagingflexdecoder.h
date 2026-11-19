@@ -209,9 +209,10 @@ public:
         // A short message and a short instruction have no message words: their payload is the vector word(s)
         std::vector<uint8_t> m_rawData;
         int m_rawBits = 0;
-        //! Alphanumeric: 7-bit characters (the default charset), lost characters are '?', unprintable characters
-        //! stay. Numeric: digits 0-9 . U space - ] [,
-        //! lost digits '?'. Binary, and secure messages of type t = 01, 10, 11: hex digits of the data bits (see
+        //! Alphanumeric: 7-bit characters (the default charset), lost characters are '?', the characters of a
+        //! received word that could not be corrected are its received bits, unprintable characters stay.
+        //! Numeric: digits 0-9 . U space - ] [, lost digits '?', the digits of a received word that could not be
+        //! corrected are its received bits. Binary, and secure messages of type t = 01, 10, 11: hex digits of the data bits (see
         //! m_hexNibbleBits). Short message: digits. Else empty
         std::string m_text;
         //! m_text is hex: the data bits as one stream in transmission order (d0 of each word first), this many bits
@@ -221,7 +222,7 @@ public:
         bool m_payloadUnknown = false;      //!< The layout of the payload is not published
         std::string m_wordMap;              //!< One character for each message word: . clean, c corrected, X lost; fragments split by |
         //! Alphanumeric and secure characters: one for each byte of m_text, . received, c in a word that was corrected,
-        //! X lost ('?'), G a lost fragment of unknown length (its byte in m_text is m_gapCode, not a character). Empty
+        //! u in a received word that could not be corrected (its received bits), X lost ('?'), G a lost fragment of unknown length (its byte in m_text is m_gapCode, not a character). Empty
         //! otherwise
         std::string m_charStatus;
 
@@ -463,6 +464,8 @@ private:
     struct Word
     {
         uint32_t m_data = 0;                //!< 21 data bits d0-d20 (d0 in bit 0)
+        uint32_t m_received = 0;            //!< Data bits as received, for a word that could not be corrected
+        bool m_hasReceived = false;         //!< m_received holds the bits of a received (not erased) word
         uint8_t m_status = WordNotReceived;
         uint8_t m_bits = 0;                 //!< Bits corrected
         bool m_parity = false;              //!< Only the parity bit was wrong

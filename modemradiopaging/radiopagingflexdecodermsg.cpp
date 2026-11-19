@@ -1134,6 +1134,20 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
     {
         for (int w = startWord; (w <= mw2) && (w < wordsPerFrame); w++)
         {
+            if ((m_w[w].m_status == WordUncorrectable) && m_w[w].m_hasReceived)
+            {
+                // Received but not corrected: its characters as received, marked 'u' (the signature slot and
+                // the slot of an unknown first character are not shown, as for a lost word)
+                wordsOk = false;
+
+                for (int slot = ((w == startWord) && sigSlot) ? 1 : 0; slot < 3; slot++)
+                {
+                    text += (char) ((m_w[w].m_received >> (7 * slot)) & 0x7f);
+                    charStatus += 'u';
+                    chars.push_back(0xff);  // Neither NUL nor ETX
+                }
+                continue;
+            }
             if ((m_w[w].m_status == WordUncorrectable) || (m_w[w].m_status == WordNotReceived))
             {
                 wordsOk = false;
@@ -1402,7 +1416,8 @@ void RadioPagingFlexDecoder::decodeNumeric(Message& proto, const AddressContext&
     }
 
     // Digits: a continuous bit stream, 4 bits each, after the overhead bits of the first word. The status of a
-    // digit (one for each character of digits): lost 'X', from a corrected word 'c', else '.'
+    // digit (one for each character of digits): lost 'X', with a bit of a received word that could not be
+    // corrected 'u' (its received bits), from a corrected word 'c', else '.'
     std::string digits;
     std::string digitStatus;
     char nibbleStatus = '.';
@@ -1422,7 +1437,9 @@ void RadioPagingFlexDecoder::decodeNumeric(Message& proto, const AddressContext&
     {
         raw.push_back(m_w[w].m_data);
 
-        if ((m_w[w].m_status == WordUncorrectable) || (m_w[w].m_status == WordNotReceived))
+        const bool uncertain = (m_w[w].m_status == WordUncorrectable) && m_w[w].m_hasReceived;
+
+        if (!uncertain && ((m_w[w].m_status == WordUncorrectable) || (m_w[w].m_status == WordNotReceived)))
         {
             int lostBits = 21;
 
@@ -1436,7 +1453,7 @@ void RadioPagingFlexDecoder::decodeNumeric(Message& proto, const AddressContext&
             continue;
         }
 
-        uint32_t dw = m_w[w].m_data;
+        uint32_t dw = uncertain ? m_w[w].m_received : m_w[w].m_data;
         const bool corrected = (m_w[w].m_status == WordCorrected);
 
         for (int b = 0; b < 21; b++)
@@ -1456,7 +1473,9 @@ void RadioPagingFlexDecoder::decodeNumeric(Message& proto, const AddressContext&
             }
 
             nibble |= ((dw >> b) & 1) << pos;
-            if (corrected) {
+            if (uncertain) {
+                nibbleStatus = 'u';
+            } else if (corrected && (nibbleStatus != 'u')) {
                 nibbleStatus = 'c';
             }
 

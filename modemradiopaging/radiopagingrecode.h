@@ -47,8 +47,9 @@ public:
     //!< or empty). A <0xNN> code, the <...> of a lost fragment and a character of two UTF-16 units stay as they are
     static void reverseText(QString& text, QString& charStatus);
     //!< The text of codes as they were received: the codes received (status . or c) decoded with the codepage (none:
-    //!< the codes are the characters), a lost code (X) as '?', a lost fragment of unknown length (G) as <...>.
-    //!< charStatus: one for each character of the text, . received, c corrected, X lost; empty, and the codes decoded
+    //!< the codes are the characters), a lost code (X) as '?', a lost fragment of unknown length (G) as <...>, a code
+    //!< of a word that could not be corrected (u) as received, alone, an unprintable one as '?'.
+    //!< charStatus: one for each character of the text, . received, c corrected, u uncertain, X lost; empty, and the codes decoded
     //!< as one, when codeStatus is not one for each code
     static QString decodeWithStatus(const std::string& codes, const std::string& codeStatus,
         const RadioPagingCharset::Codepage *codepage, QString& charStatus);

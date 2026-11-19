@@ -378,6 +378,8 @@ QString PagingMessageTable::statusHtml(const QString& text, const QString& charS
 
         if (s == 'X') {
             html += QString("<span style=\"color:#ff5252;font-weight:bold;background-color:rgba(255,82,82,0.18)\">%1</span>").arg(run);
+        } else if (s == 'u') {
+            html += QString("<span style=\"color:#ff5252\">%1</span>").arg(run);
         } else if (s == 'c') {
             html += QString("<span style=\"color:#ffca28\">%1</span>").arg(run);
         } else {

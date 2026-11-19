@@ -831,6 +831,31 @@ void testErrors()
         check(ok, "errors: wrong parity bit alone is corrected and counted as parity");
     }
 
+    // Two bit errors, one of them the parity bit: within the correction power of the code (a wrong parity after
+    // correcting one bit in bits 31-1 is the second error)
+    {
+        Dec::RxFrame bad = clean;
+        std::vector<std::pair<int, uint32_t>> xors;
+
+        for (int w = 0; w < used; w++) {
+            xors.push_back({w, 1u | (1u << (1 + (w % 31)))});
+        }
+
+        editWords(bad.m_phases[0], xors);
+
+        Dec d;
+        std::vector<Dec::Message> out = d.decodeFrame(bad);
+        bool ok = (out.size() == 2);
+
+        for (const Dec::Message& m : out)
+        {
+            ok = ok && m.m_complete && (m.m_wordsUncorrectable == 0) && (m.m_checksum == Dec::CheckOk);
+            ok = ok && (m.m_text == ((m.m_typeName == "alphanumeric") ? tx.m_text : tx2.m_text));
+        }
+
+        check(ok && (d.status().m_codewordsUncorrectable == 0), "errors: a bit error and a wrong parity bit in every codeword corrected");
+    }
+
     // Three bit errors in one word: not corrected, the text shows lost characters
     {
         Dec::RxFrame bad = clean;
@@ -851,7 +876,7 @@ void testErrors()
         {
             RadioPagingBCH::Result r = RadioPagingBCH::decode(cw[target] ^ mask);
 
-            if ((r.m_bitErrors < 0) || ((r.m_bitErrors > 0) && r.m_parityError)) {
+            if (r.m_bitErrors < 0) {
                 break;
             }
 
@@ -870,9 +895,22 @@ void testErrors()
             if (m.m_typeName == "alphanumeric")
             {
                 found = true;
-                check((m.m_wordsUncorrectable == 1) && (m.m_text.find('?') != std::string::npos) && (m.m_signature != Dec::CheckOk)
+                // The characters of the word are its received bits, marked uncertain ('u')
+                const uint32_t received = RadioPagingFlex::wordData(cw[target] ^ mask);
+                const size_t first = m.m_charStatus.find('u');
+                const size_t end = (first == std::string::npos) ? first : m.m_charStatus.find_first_not_of('u', first);
+                const size_t count = (first == std::string::npos) ? 0 : (end == std::string::npos ? m.m_charStatus.size() : end) - first;
+                bool asReceived = (count == 2) || (count == 3);
+
+                for (size_t k = 0; asReceived && (k < count); k++)
+                {
+                    const int slot = 3 - (int) count + (int) k;
+                    asReceived = (m.m_text[first + k] == (char) ((received >> (7 * slot)) & 0x7f));
+                }
+
+                check((m.m_wordsUncorrectable == 1) && asReceived && (m.m_signature != Dec::CheckOk)
                     && (m.m_checksum == Dec::CheckIncomplete) && (m.m_wordMap.find('X') != std::string::npos),
-                    "errors: uncorrectable word reported, lost characters marked");
+                    "errors: uncorrectable word reported, its characters as received, marked uncertain");
             }
         }
 

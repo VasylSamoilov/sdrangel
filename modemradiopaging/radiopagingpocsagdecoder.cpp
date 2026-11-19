@@ -396,7 +396,9 @@ void RadioPagingPocsagDecoder::processCodeword(uint32_t word, bool lost)
             if (m_uncorrectableRun >= 2) {
                 finishMessage(true);
             } else {
-                appendMessageBits(RadioPagingBCH::data(word) & 0xfffff, 'X');
+                // Received but not corrected: kept as received, marked uncertain ('u'); a word taken for
+                // noise after the transmission is lost ('X')
+                appendMessageBits(RadioPagingBCH::data(word) & 0xfffff, lost ? 'X' : 'u');
             }
         }
         return;
