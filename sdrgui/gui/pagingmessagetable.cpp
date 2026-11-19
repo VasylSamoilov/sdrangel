@@ -268,7 +268,7 @@ bool PagingMessageTable::setColumns(const QByteArray& state)
     return restored;
 }
 
-// The columns of one character (direction, polarity) are as wide as their content, whatever was saved
+// The narrow columns (direction, polarity) are as wide as their content, whatever was saved
 void PagingMessageTable::fitNarrowColumns()
 {
     horizontalHeader()->setSectionResizeMode(ColDirection, QHeaderView::ResizeToContents);
@@ -713,9 +713,7 @@ void PagingMessageTable::fillRow(int row, const MessageRecord& record, const QSt
     timeItem->setData(jsonRole, QString::fromUtf8(QJsonDocument(record.toJson()).toJson(QJsonDocument::Compact)));
 
     bool transmitted = (record.m_direction == MessageRecord::DirectionTX);
-    // Direction as an arrow: down received, up transmitted
-    cell(ColDirection, transmitted ? QString(QChar(0x2191)) : QString(QChar(0x2193)), QString(),
-        transmitted ? tr("Transmitted") : tr("Received"));
+    cell(ColDirection, transmitted ? "TX" : "RX", QString(), transmitted ? tr("Transmitted") : tr("Received"));
     cell(ColChannel, record.m_channelAlias);
     cell(ColProtocol, record.m_protocol.toUpper());
     cell(ColRate, record.m_mode);
