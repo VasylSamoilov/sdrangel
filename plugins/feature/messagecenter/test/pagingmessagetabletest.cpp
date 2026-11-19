@@ -83,9 +83,9 @@ int main(int argc, char **argv)
     check(table.rowCount() == 2, "two records are two rows");
     table.addRecord(a, "sent");
     check((table.rowCount() == 2) && (cell(table, 0, PagingMessageTable::ColState) == "sent")
-        && (cell(table, 0, PagingMessageTable::ColDirection) == "TX") && cell(table, 0, PagingMessageTable::ColErrors).isEmpty(),
+        && (cell(table, 0, PagingMessageTable::ColDirection) == QString(QChar(0x2191))) && cell(table, 0, PagingMessageTable::ColErrors).isEmpty(),
         "the same id updates its row: the state, and no errors for a message that was transmitted");
-    check((cell(table, 1, PagingMessageTable::ColErrors) == "ok") && (cell(table, 1, PagingMessageTable::ColDirection) == "RX"),
+    check((cell(table, 1, PagingMessageTable::ColErrors) == "ok") && (cell(table, 1, PagingMessageTable::ColDirection) == QString(QChar(0x2193))),
         "a received message shows its errors");
 
     // The oldest rows go first

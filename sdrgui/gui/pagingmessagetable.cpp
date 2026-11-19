@@ -238,6 +238,7 @@ PagingMessageTable::PagingMessageTable(QWidget *parent) :
     connect(m_player, &PagingVoicePlayer::stateChanged, this, &PagingMessageTable::displayPlayer);
 
     m_defaultColumns = {ColDate, ColTime, ColProtocol, ColAddress, ColType, ColMessage, ColInfo};
+    fitNarrowColumns();
     setDefaultColumns(m_defaultColumns);
 }
 
@@ -262,7 +263,16 @@ bool PagingMessageTable::setColumns(const QByteArray& state)
     }
 
     QSignalBlocker blocker(horizontalHeader());
-    return horizontalHeader()->restoreState(state);
+    bool restored = horizontalHeader()->restoreState(state);
+    fitNarrowColumns();
+    return restored;
+}
+
+// The columns of one character (direction, polarity) are as wide as their content, whatever was saved
+void PagingMessageTable::fitNarrowColumns()
+{
+    horizontalHeader()->setSectionResizeMode(ColDirection, QHeaderView::ResizeToContents);
+    horizontalHeader()->setSectionResizeMode(ColPolarity, QHeaderView::ResizeToContents);
 }
 
 // The columns sized to the usual content: a row of the longest values, taken out again
@@ -703,7 +713,9 @@ void PagingMessageTable::fillRow(int row, const MessageRecord& record, const QSt
     timeItem->setData(jsonRole, QString::fromUtf8(QJsonDocument(record.toJson()).toJson(QJsonDocument::Compact)));
 
     bool transmitted = (record.m_direction == MessageRecord::DirectionTX);
-    cell(ColDirection, transmitted ? "TX" : "RX");
+    // Direction as an arrow: down received, up transmitted
+    cell(ColDirection, transmitted ? QString(QChar(0x2191)) : QString(QChar(0x2193)), QString(),
+        transmitted ? tr("Transmitted") : tr("Received"));
     cell(ColChannel, record.m_channelAlias);
     cell(ColProtocol, record.m_protocol.toUpper());
     cell(ColRate, record.m_mode);

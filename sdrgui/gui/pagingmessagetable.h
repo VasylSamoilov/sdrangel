@@ -134,6 +134,7 @@ private:
     PagingVoicePlayer *m_player;
 
     void fillRow(int row, const MessageRecord& record, const QString& state);
+    void fitNarrowColumns();
     void showColumnMenu(const QPoint& pos);
     void showRowMenu(const QPoint& pos);
     void setVoiceCell(int row);
