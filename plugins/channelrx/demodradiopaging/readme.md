@@ -167,10 +167,6 @@ What the Pager demodulator has, for the messages of all three protocols. A messa
 * Log (record button) - writes each message to a .csv file, with the columns of the message record (header first, appended to an existing file). The folder button selects the file.
 * Load (arrow button) - reads the messages of a log written by this demodulator into the table. They are not notified again.
 * Notifications - a regular expression matched on a field of the message (address, message, protocol, type, channel or any of them), and what is done to a message that matches: its row is highlighted, the text of Speech is spoken (when the build has text to speech), the Command is run, and a position (latitude and longitude) in the message is plotted on the Map named by the address. Speech and Command replace ${address}, ${message}, ${protocol}, ${type}, ${channel} and ${0}, ${1}... (the captures of the expression). A duplicate is not notified again.
-* From Pager - takes over the settings of a Pager demodulator chosen from those there are: frequency shift, bandwidth, the POCSAG deviation, the protocols (its modulation), its character encoding, UDP, log, address filter and notifications (they replace those here). The character encoding sets the POCSAG codepage: none is Generic - ASCII, its Hebrew preset is Generic - Hebrew, other characters or the reverse order fill the POCSAG custom codepage. A table lists each setting with what there is here, what the Pager demodulator has and the action (add, update, delete, keep, or not imported and why) before anything is changed. The log is written next to the Pager log, as name_radiopaging.csv, with the columns of the message record.
-
-![Pager demodulator import](../../../doc/img/RadioPagingDemod_plugin_pagerimport.png)
-
 * Address filter - only the messages whose whole address matches the regular expression are shown, as in the Pager demodulator (e.g. 12345.., 001001/.). It applies as it is typed. A FLEX group message is shown for the address of a member of its group too; the notifications on the address match the members as well.
 
 <h3>8: Waveforms</h3>
