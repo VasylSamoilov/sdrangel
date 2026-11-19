@@ -23,6 +23,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstdio>
+#include <functional>
 #include <random>
 #include <set>
 #include <string>
@@ -832,6 +833,69 @@ void testVoiceStore()
 
 } // namespace
 
+// The input stops right at the end of a transmission (no samples after it), or in the data part of a FLEX frame: the
+// sink releases what it was receiving when told so (resetProtocol(-1)), and only then
+void testInputStopped()
+{
+    struct Case
+    {
+        std::string m_name;
+        std::function<void(Modulator&, std::set<std::string>&)> m_add;
+        double m_keep;  // Share of the transmission received
+    };
+    const std::vector<Case> cases = {
+        {"POCSAG 512", [](Modulator& m, std::set<std::string>& s) { addPocsag(m, s, 512, 7654, "POCSAG 512", false); }, 1.0},
+        {"POCSAG 2400", [](Modulator& m, std::set<std::string>& s) { addPocsag(m, s, 2400, 2000001, "POCSAG 2400", false); }, 1.0},
+        {"FLEX 1600/2", [](Modulator& m, std::set<std::string>& s) { addFlex(m, s, RadioPagingFlex::Mode1600_2, { 123456 }); }, 1.0},
+        {"FLEX 6400/4", [](Modulator& m, std::set<std::string>& s) { addFlex(m, s, RadioPagingFlex::Mode6400_4, { 345678 }); }, 1.0},
+        {"FLEX 6400/4 frame cut", [](Modulator& m, std::set<std::string>& s) { addFlex(m, s, RadioPagingFlex::Mode6400_4, { 345678 }); }, 0.6},
+        {"GSC", [](Modulator& m, std::set<std::string>& s) { addGsc(m, s, { gsc("100123", 3, RadioPagingGsc::Alphanumeric, "GSC SINGLE") }); }, 1.0},
+    };
+
+    for (const Case& c : cases)
+    {
+        Modulator mod;
+        std::set<std::string> sent;
+        mod.noise(3000);
+        const size_t start = mod.m_samples.size();
+        c.m_add(mod, sent);
+        // Without the noise the helpers add after the transmission
+        size_t end = mod.m_samples.size() - 4000;
+        end = start + (size_t) ((double) (end - start) * c.m_keep);
+        mod.m_samples.resize(end);
+
+        MessageQueue queue;
+        RadioPagingDemodSink sink;
+        sink.setMessageQueueToChannel(&queue);
+        sink.applyChannelSettings((int) sampleRate, 0, true);
+        sink.feed(mod.m_samples.begin(), mod.m_samples.end());
+
+        auto received = [&]() {
+            std::set<std::string> got;
+            Message *message;
+            while ((message = queue.pop()))
+            {
+                if (MainCore::MsgMessageRecord::match(*message))
+                {
+                    const MessageRecord& r = ((MainCore::MsgMessageRecord *) message)->getRecord();
+                    got.insert(key(r.m_protocol.toStdString(), r.m_mode.toStdString(), r.m_address.toStdString(),
+                        r.m_polarity == MessageRecord::PolarityInverted));
+                }
+                delete message;
+            }
+            return got;
+        };
+
+        std::set<std::string> before = received();
+        sink.resetProtocol(-1);
+        std::set<std::string> after = received();
+        std::printf("      %s: %zu before the input stopped, %zu released after\n", c.m_name.c_str(), before.size(), after.size());
+
+        before.insert(after.begin(), after.end());
+        check(before == sent, c.m_name + ": the input stops at the end of the transmission, its pages are received");
+    }
+}
+
 int main(int argc, char **argv)
 {
     if ((argc > 1) && (std::string(argv[1]) == "sweep"))
@@ -918,6 +982,7 @@ int main(int argc, char **argv)
     RadioPagingDemodSink::Status status = sink.getStatus();
     check((status.m_messages[0] == 4) && (status.m_messages[1] == 3) && (status.m_messages[2] == 4), "Status counts the records per protocol");
 
+    testInputStopped();
     testVoiceAudio();
     testVoiceRecording();
     testVoiceStore();

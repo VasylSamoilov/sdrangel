@@ -81,6 +81,9 @@ public:
     void startWork();
     void stopWork();
     void feed(const SampleVector::const_iterator& begin, const SampleVector::const_iterator& end);
+    //!< The input stopped: the samples still queued are processed, then the messages being received are released
+    //!< and every protocol's state is cleared
+    void inputStopped();
     MessageQueue *getInputMessageQueue() { return &m_inputMessageQueue; } //!< Get the queue for asynchronous inbound communication
     void getMagSqLevels(double& avg, double& peak, int& nbSamples) {
         m_sink.getMagSqLevels(avg, peak, nbSamples);

@@ -55,7 +55,12 @@ RadioPagingDemod::RadioPagingDemod(DeviceAPI *deviceAPI) :
         ChannelAPI(m_channelIdURI, ChannelAPI::StreamSingleSink),
         m_deviceAPI(deviceAPI),
         m_basebandSampleRate(0),
-        m_centerFrequency(0)
+        m_centerFrequency(0),
+        m_samplesFed(0),
+        m_samplesSeen(0),
+        m_inputIdleChecks(0),
+        m_inputActive(false),
+        m_inputTimer(nullptr)
 {
     setObjectName(m_channelId);
     m_thread.setObjectName("RadioPagingDemodBB");
@@ -81,6 +86,28 @@ RadioPagingDemod::RadioPagingDemod(DeviceAPI *deviceAPI) :
         announce("status");
     });
     m_announceTimer->start(5000);
+    // The input stops (end of a file, samples no longer coming): the messages being received are released
+    m_inputTimer = new QTimer(this);
+    QObject::connect(m_inputTimer, &QTimer::timeout, this, &RadioPagingDemod::checkInput);
+    m_inputTimer->start(250);
+}
+
+// No samples for two checks in a row (0.5 s) after samples came: the input stopped
+void RadioPagingDemod::checkInput()
+{
+    qint64 fed = m_samplesFed.load();
+
+    if (fed != m_samplesSeen)
+    {
+        m_samplesSeen = fed;
+        m_inputIdleChecks = 0;
+        m_inputActive = true;
+    }
+    else if (m_inputActive && (++m_inputIdleChecks >= 2))
+    {
+        m_inputActive = false;
+        resetProtocol(-1);
+    }
 }
 
 // The receiver as the message center sees it: every protocol, speed and polarity is decoded
@@ -111,6 +138,7 @@ RadioPagingDemod::~RadioPagingDemod()
 {
     qDebug("RadioPagingDemod::~RadioPagingDemod");
     m_announceTimer->stop();
+    m_inputTimer->stop();
     announce("unregister");
     QObject::disconnect(m_networkManager, &QNetworkAccessManager::finished, this, &RadioPagingDemod::networkManagerFinished);
     delete m_networkManager;
@@ -144,6 +172,7 @@ uint32_t RadioPagingDemod::getNumberOfDeviceStreams() const
 void RadioPagingDemod::feed(const SampleVector::const_iterator& begin, const SampleVector::const_iterator& end, bool firstOfBurst)
 {
     (void) firstOfBurst;
+    m_samplesFed += (qint64) (end - begin);
     m_basebandSink->feed(begin, end);
 }
 
@@ -188,6 +217,9 @@ void RadioPagingDemod::handleIndexInDeviceSetChanged(int index)
 void RadioPagingDemod::stop()
 {
     qDebug("RadioPagingDemod::stop");
+    // The device stopped: the messages being received are released
+    m_basebandSink->inputStopped();
+    m_inputActive = false;
     m_basebandSink->stopWork();
     m_thread.quit();
     m_thread.wait();

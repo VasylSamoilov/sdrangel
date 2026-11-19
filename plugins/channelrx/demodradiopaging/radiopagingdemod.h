@@ -18,6 +18,8 @@
 #ifndef INCLUDE_RADIOPAGINGDEMOD_H
 #define INCLUDE_RADIOPAGINGDEMOD_H
 
+#include <atomic>
+
 #include <QFile>
 #include <QNetworkRequest>
 #include <QTextStream>
@@ -168,6 +170,12 @@ private:
     void announce(const QString& event);
     QTimer *m_announceTimer = nullptr;
     QString m_lastAlias;                        //!< The alias announced last
+    std::atomic<qint64> m_samplesFed;           //!< Samples fed by the device (its thread)
+    qint64 m_samplesSeen;                       //!< ... when the input was last checked
+    int m_inputIdleChecks;                      //!< Checks in a row without samples
+    std::atomic<bool> m_inputActive;            //!< Samples came since the input last stopped
+    QTimer *m_inputTimer;
+    void checkInput();
     void webapiReverseSendSettings(const QStringList& channelSettingsKeys, const RadioPagingDemodSettings& settings, bool force);
     void webapiFormatChannelSettings(
             const QStringList& channelSettingsKeys,

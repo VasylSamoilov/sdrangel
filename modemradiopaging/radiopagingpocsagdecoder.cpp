@@ -293,22 +293,23 @@ bool RadioPagingPocsagDecoder::decipherable(int slot) const
     return (RadioPagingBCH::decode(m_batchWords[slot]).m_bitErrors >= 0) && (m_batchQuality[slot] < m_wordNoiseQuality);
 }
 
-// Decodes the codewords of the batch up to the first one that does not belong to the transmission: the second of
-// two indecipherable codewords in a row (the first one is then not taken either), or one whose last four codewords
-// are as poor as noise. A single indecipherable codeword is a lost codeword of the message in progress, never an
-// address. True if the batch has such a codeword: the message in progress ends truncated and the transmission is over
-bool RadioPagingPocsagDecoder::decodeUnconfirmedBatch()
+// Decodes the first received codewords of the batch up to the first one that does not belong to the transmission:
+// the second of two indecipherable codewords in a row (the first one is then not taken either), or one whose last
+// four codewords are as poor as noise. A single indecipherable codeword is a lost codeword of the message in progress,
+// never an address. True if the batch has such a codeword, or not all its codewords were received: the message in
+// progress ends truncated and the transmission is over
+bool RadioPagingPocsagDecoder::decodeUnconfirmedBatch(int received)
 {
-    int cut = RadioPagingPocsag::m_codewordsPerBatch;
+    int cut = received;
 
-    for (int slot = 0; slot < RadioPagingPocsag::m_codewordsPerBatch; slot++)
+    for (int slot = 0; slot < received; slot++)
     {
         if (m_batchWindow[slot] > m_noiseQuality)
         {
             cut = slot;
             break;
         }
-        if (!decipherable(slot) && (slot + 1 < RadioPagingPocsag::m_codewordsPerBatch) && !decipherable(slot + 1))
+        if (!decipherable(slot) && (slot + 1 < received) && !decipherable(slot + 1))
         {
             cut = slot;
             break;
@@ -317,7 +318,7 @@ bool RadioPagingPocsagDecoder::decodeUnconfirmedBatch()
 
     // The codeword the signal was lost in is partly the transmission's, partly noise or another signal: the code
     // corrects it to some other codeword. Codewords before the cut that needed a correction are not taken
-    while ((cut < RadioPagingPocsag::m_codewordsPerBatch) && (cut > 0))
+    while ((cut < received) && (cut > 0))
     {
         RadioPagingBCH::Result result = RadioPagingBCH::decode(m_batchWords[cut - 1]);
 
@@ -356,6 +357,27 @@ bool RadioPagingPocsagDecoder::decodeUnconfirmedBatch()
     }
 
     return false;
+}
+
+void RadioPagingPocsagDecoder::flush()
+{
+    // The batch received so far, of a transmission (its sync codeword confirmed, an earlier batch decoded, or after
+    // a preamble): a candidate found in noise is not decoded
+    if ((m_state != Hunting) && (m_leadingConfirmed || (m_batch > 0) || m_preambleBefore))
+    {
+        int received = (m_state == AwaitSync) ? RadioPagingPocsag::m_codewordsPerBatch : m_slot;
+
+        if (received > 0) {
+            decodeUnconfirmedBatch(received);
+        }
+    }
+
+    endTransmission();
+    m_word = 0;
+    m_wordBits = 0;
+    m_wordError2 = 0.0f;
+    m_recentCount = 0;
+    m_preambleBefore = false;
 }
 
 void RadioPagingPocsagDecoder::endTransmission()

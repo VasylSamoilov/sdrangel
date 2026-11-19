@@ -178,6 +178,19 @@ void RadioPagingPocsagReceiver::process(float sample)
     }
 }
 
+void RadioPagingPocsagReceiver::flush()
+{
+    m_normal.flush();
+    m_inverted.flush();
+
+    while (m_normal.hasMessage()) {
+        collect(m_normal.takeMessage());
+    }
+    while (m_inverted.hasMessage()) {
+        collect(m_inverted.takeMessage());
+    }
+}
+
 // The same message to the same pager (address and function) again within the window is a
 // duplicate. The other polarity is another network
 void RadioPagingPocsagReceiver::collect(RadioPagingPocsagDecoder::Message message)

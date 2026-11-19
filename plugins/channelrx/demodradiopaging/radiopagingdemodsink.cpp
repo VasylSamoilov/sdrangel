@@ -535,9 +535,44 @@ void RadioPagingDemodSink::applySettings(const QStringList& settingsKeys, const 
     }
 }
 
+// The messages being received are released first: batches and frames decoded as far as they were received, partial
+// messages marked incomplete
+void RadioPagingDemodSink::flushProtocol(int protocol)
+{
+    if (((protocol == 0) || (protocol < 0)) && m_settings.m_pocsagEnabled)
+    {
+        for (int i = 0; i < RadioPagingDemodSettings::m_nbPocsagSpeeds; i++)
+        {
+            m_pocsag[i].flush();
+
+            while (m_pocsag[i].hasMessage()) {
+                sendPocsag(m_pocsag[i].takeMessage(), RadioPagingDemodSettings::m_pocsagSpeeds[i]);
+            }
+        }
+    }
+    if (((protocol == 1) || (protocol < 0)) && m_settings.m_flexEnabled)
+    {
+        m_flex.flush();
+
+        while (m_flex.hasMessage()) {
+            sendFlex(m_flex.takeMessage());
+        }
+    }
+    if (((protocol == 2) || (protocol < 0)) && m_settings.m_gscEnabled)
+    {
+        m_gsc.flush();
+
+        while (m_gsc.hasMessage()) {
+            sendGsc(m_gsc.takeMessage());
+        }
+    }
+}
+
 void RadioPagingDemodSink::resetProtocol(int protocol)
 {
     qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    flushProtocol(protocol);
 
     // The polarities received are forgotten too: the status shows one again until another is received
     for (int p = 0; p < 3; p++)

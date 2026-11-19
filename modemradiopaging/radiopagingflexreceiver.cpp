@@ -152,6 +152,10 @@ RadioPagingFlexDecoder::Message RadioPagingFlexReceiver::takeMessage()
 
 void RadioPagingFlexReceiver::flush()
 {
+    if (m_state == Data) {
+        endFrame(true);
+    }
+
     std::vector<RadioPagingFlexDecoder::Message> messages = m_decoder.flush();
     for (auto& message : messages) {
         m_messages.push_back(message);
@@ -570,7 +574,9 @@ void RadioPagingFlexReceiver::storeDataSymbol(int sym, float magsq)
     }
 }
 
-void RadioPagingFlexReceiver::endFrame()
+// partial: the input stopped during the data part; the blocks from the first one not received whole are erased (each
+// codeword of a block has bits all over it)
+void RadioPagingFlexReceiver::endFrame(bool partial)
 {
     static const char names2[2] = {'A', 'C'};
     static const char names4[4] = {'A', 'B', 'C', 'D'};
@@ -587,9 +593,11 @@ void RadioPagingFlexReceiver::endFrame()
     frame.m_quality = std::max(0.0, std::min(1.0, 1.0 - 1.5 * rms));
 
     std::vector<uint8_t> erased(RadioPagingFlex::m_wordsPerFrame, 0);
+    const int blocksReceived = partial ? (m_bitIndex / (32 * RadioPagingFlex::m_wordsPerBlock)) : RadioPagingFlex::m_blocksPerFrame;
+
     for (int block = 0; block < RadioPagingFlex::m_blocksPerFrame; block++)
     {
-        if ((m_blockSamples[block] > 0) && ((m_blockPower[block] / m_blockSamples[block]) < threshold))
+        if ((block >= blocksReceived) || ((m_blockSamples[block] > 0) && ((m_blockPower[block] / m_blockSamples[block]) < threshold)))
         {
             for (int w = 0; w < RadioPagingFlex::m_wordsPerBlock; w++) {
                 erased[block * RadioPagingFlex::m_wordsPerBlock + w] = 1;

@@ -125,7 +125,8 @@ public:
 
     bool hasMessage() const { return !m_messages.empty(); }
     RadioPagingFlexDecoder::Message takeMessage();
-    //!< Partial messages still being reassembled, marked incomplete
+    //!< The input stopped: the frame being received is decoded from the blocks received (the others erased), then
+    //!< partial messages still being reassembled are released marked incomplete
     void flush();
 
     Status getStatus() const;
@@ -204,7 +205,7 @@ private:
     void dataSymbol(int symbol, float error, float magsq);
     void sync2Symbol(int symbol);
     void storeDataSymbol(int symbol, float magsq);
-    void endFrame();
+    void endFrame(bool partial = false);
     void backToHunting(bool keepHistory = false);
     int mirror(int symbol, int levels) const { return m_inverted ? (levels - 1 - symbol) : symbol; }
 };

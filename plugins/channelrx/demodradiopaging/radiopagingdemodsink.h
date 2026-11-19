@@ -160,6 +160,8 @@ public:
     Status getStatus() const;
     //!< Forget what the receivers of a protocol remember (0 POCSAG, 1 FLEX, 2 GSC, -1 all): duplicates,
     //!< fragments, groups, message numbers, network time
+    //!< Releases the messages being received (decoded as far as they were received) and clears the protocol's state;
+    //!< protocol -1: all of them (the input stopped)
     void resetProtocol(int protocol);
 
     void getMagSqLevels(double& avg, double& peak, int& nbSamples)
@@ -331,6 +333,7 @@ private:
     void updateStatus();
     void updatePolarityStatus(Status& status, const RadioPagingFlexReceiver::Status& flex, const RadioPagingGscReceiver::Status& gsc);
     void sendRecord(MessageRecord& record, int protocol);
+    void flushProtocol(int protocol);
     void sendPocsag(const RadioPagingPocsagDecoder::Message& message, int baud);
     void sendFlex(const RadioPagingFlexDecoder::Message& message);
     //!< Frequency of the channel to the receivers

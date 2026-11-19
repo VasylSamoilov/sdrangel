@@ -124,6 +124,9 @@ public:
     }
     //!< The sync codeword of the current candidate came after a preamble
     void setPreambleBefore() { m_preambleBefore = true; }
+    //!< The input stopped: the codewords of the batch received so far are decoded as a batch no sync codeword
+    //!< follows, the message in progress ends truncated and the decoder hunts again
+    void flush();
 
     bool isSynced() const { return m_state != Hunting; }
     //!< Sync codewords recognised since reset: when it changes, the last 32 symbols fed were
@@ -180,7 +183,7 @@ private:
     void startCandidate();
     bool batchValid() const;
     void decodeBatch();
-    bool decodeUnconfirmedBatch();
+    bool decodeUnconfirmedBatch(int received = 16);
     bool decipherable(int slot) const;
     void storeWord(int slot, uint32_t word);
     void endTransmission();

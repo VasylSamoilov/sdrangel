@@ -121,6 +121,32 @@ void RadioPagingDemodBaseband::handleData()
     }
 }
 
+void RadioPagingDemodBaseband::inputStopped()
+{
+    QMutexLocker mutexLocker(&m_mutex);
+
+    while (m_sampleFifo.fill() > 0)
+    {
+        SampleVector::iterator part1begin;
+        SampleVector::iterator part1end;
+        SampleVector::iterator part2begin;
+        SampleVector::iterator part2end;
+
+        std::size_t count = m_sampleFifo.readBegin(m_sampleFifo.fill(), &part1begin, &part1end, &part2begin, &part2end);
+
+        if (part1begin != part1end) {
+            m_channelizer->feed(part1begin, part1end);
+        }
+        if (part2begin != part2end) {
+            m_channelizer->feed(part2begin, part2end);
+        }
+
+        m_sampleFifo.readCommit((unsigned int) count);
+    }
+
+    m_sink.resetProtocol(-1);
+}
+
 void RadioPagingDemodBaseband::handleInputMessages()
 {
     Message* message;

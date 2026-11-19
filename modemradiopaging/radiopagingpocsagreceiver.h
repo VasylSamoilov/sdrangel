@@ -69,6 +69,8 @@ public:
     int getBaud() const { return m_baud; }
 
     void process(float sample);
+    //!< The input stopped: the batches being received are decoded as far as they were received
+    void flush();
 
     bool hasMessage() const { return !m_messages.empty(); }
     RadioPagingPocsagDecoder::Message takeMessage();
