@@ -133,7 +133,7 @@ int main(int argc, char **argv)
     flexTx.m_protocolData.insert("retransmission", 2);
     QString plain, html, tip;
     PagingMessageTable::recordInfo(flexTx, plain, html, tip);
-    check((plain == "PRI COPY:2") && html.contains("COPY:2"), "a transmitted FLEX message: priority and copy, no decode fields");
+    check((plain == "PRI:1 COPY:2") && html.contains("COPY:") && html.contains(">2<"), "a transmitted FLEX message: priority and copy, no decode fields");
 
     MessageRecord flexRx = record("g", "flex", "0001234567", "X");
     flexRx.m_protocolData.insert("phase", "A");
@@ -143,7 +143,7 @@ int main(int argc, char **argv)
     flexRx.m_protocolData.insert("retrieval", true);
     flexRx.m_protocolData.insert("checksum", "ok");
     PagingMessageTable::recordInfo(flexRx, plain, html, tip);
-    check(plain == "PH:A C:3 F:31 N:1 R K:ok", "a received FLEX message: phase, cycle, frame, number as shown by pagers, R, checksum");
+    check(plain == "PH:A C:3 F:31 N:1 R:1 K:ok", "a received FLEX message: phase, cycle, frame, number as shown by pagers, R, checksum");
 
     // Each chip has its own tool tip, saying what it is and its value
     QStringList chipTexts, chipHtml, chipTips;
@@ -160,7 +160,7 @@ int main(int argc, char **argv)
     pocsagRx.m_protocolData.insert("truncated", true);
     chipTexts.clear(); chipHtml.clear(); chipTips.clear();
     PagingMessageTable::recordChips(pocsagRx, chipTexts, chipHtml, chipTips);
-    check((chipTexts == QStringList({"B:2", "TRUNC"})) && chipTips[0].contains("Batch 2"), "POCSAG: batch counted from 1, truncated");
+    check((chipTexts == QStringList({"B:2", "END:cut"})) && chipTips[0].contains("Batch 2"), "POCSAG: batch counted from 1, truncated");
 
     MessageRecord gscRx = record("q", "gsc", "123456", "X");
     gscRx.m_protocolData.insert("slot", 0);

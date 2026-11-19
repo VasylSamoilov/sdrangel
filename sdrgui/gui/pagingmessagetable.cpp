@@ -152,21 +152,42 @@ QString typeChip(const QString& type)
     return chip(label, colours[0], colours[1]);
 }
 
-QString infoChip(const QString& text)
+// Info chips, all alike: bold on the same background, KEY:value with the key grey and the value coloured by its
+// meaning, a flag one word in its colour. The plain text is the label, character for character
+enum ChipTone {
+    ToneValue,      //!< A value or a flag that is neither good nor bad
+    ToneGood,       //!< A check that passed, a better copy
+    ToneWarn,       //!< Something to look at: truncated, duplicate, a copy, a check not done
+    ToneBad,        //!< A check that failed, messages missed
+    ToneGroup       //!< A group message or assignment
+};
+
+QString fieldChip(const QString& label, int tone)
 {
-    return chip(text, "#b39ddb", "#2e2e2e");
+    static const char *colours[] = {"#d1c4e9", "#66bb6a", "#ffb74d", "#ff5252", "#80cbc4"};
+    const QString colour = colours[tone];
+    const int colon = label.indexOf(':');
+    const QString body = (colon < 0)
+        ? QString("<span style=\"color:%1\">%2</span>").arg(colour, label.toHtmlEscaped())
+        : QString("<span style=\"color:#8a8a8a\">%1</span><span style=\"color:%2\">%3</span>")
+            .arg(label.left(colon + 1).toHtmlEscaped(), colour, label.mid(colon + 1).toHtmlEscaped());
+    return QString("<span style=\"background-color:#2e2e2e;font-weight:bold\">&nbsp;%1&nbsp;</span>").arg(body);
 }
 
-QString checkChip(const QString& name, const QString& check)
+QString infoChip(const QString& text)
 {
-    if (check == "ok") {
-        return chip(name + ":ok", "#66bb6a", "#2e2e2e");
-    } else if (check == "failed") {
-        return chip(name + ":bad", "#ff5252", "#2e2e2e");
-    } else if (check == "incomplete") {
-        return chip(name + ":?", "#ffca28", "#2e2e2e");
-    }
-    return QString();
+    return fieldChip(text, ToneValue);
+}
+
+// A check result (ok, failed, incomplete) as the value of a chip and its tone
+QString checkValue(const QString& check)
+{
+    return (check == "ok") ? "ok" : (check == "failed") ? "bad" : "?";
+}
+
+int checkTone(const QString& check)
+{
+    return (check == "ok") ? ToneGood : (check == "failed") ? ToneBad : ToneWarn;
 }
 
 const char *headers[PagingMessageTable::ColumnCount] = {
@@ -250,7 +271,7 @@ void PagingMessageTable::sizeColumns()
 
     const char *cells[ColumnCount] = {
         "00:00:00", "TX", "Channel alias", "POCSAG", "3200/4", "I", "0001234567A", "VOICE",
-        "ABCEDGHIJKLMNOPQRSTUVWXYZABCDEFGHIJ", "REASM 99", "PH:A C:14 F:127 N:64 R MD K:ok S:ok", "X99", "transmitted",
+        "ABCEDGHIJKLMNOPQRSTUVWXYZABCDEFGHIJ", "REASM 99", "PH:A C:14 F:127 N:64 R:1 ADDR:long K:ok S:ok DUP:same", "X99", "transmitted",
         "Wed Sep 30 2026"
     };
 
@@ -409,14 +430,16 @@ QString PagingMessageTable::statusHtml(const QString& text, const QString& charS
     return html;
 }
 
-// Chips of the protocol fields of a record: a label each (KEY:value for a value, a word for a flag), its HTML and a
-// tool tip saying what it is and its value
+// Chips of the protocol fields of a record, each KEY:value (the key the field's letter in the standard where it has
+// one), in the same order for every message: where it was sent, its number, the address and the type details, the
+// checks, then its state. A bit flag is shown with value 1 when set. Each chip has a tool tip saying what it is and its
+// value
 void PagingMessageTable::recordChips(const MessageRecord& record, QStringList& texts, QStringList& chips, QStringList& tips)
 {
     const QVariantMap& d = record.m_protocolData;
-    auto add = [&](const QString& text, const QString& tipText, const QString& chipHtml = QString()) {
+    auto add = [&](const QString& text, const QString& tipText, int tone = ToneValue) {
         texts.append(text);
-        chips.append(chipHtml.isEmpty() ? infoChip(text) : chipHtml);
+        chips.append(fieldChip(text, tone));
         tips.append(tipText);
     };
     auto checkTip = [](const QString& what, const QString& check) {
@@ -426,6 +449,11 @@ void PagingMessageTable::recordChips(const MessageRecord& record, QStringList& t
             return tr("%1: failed, the message received does not match it (a character is wrong)").arg(what);
         }
         return tr("%1: not checked, a word of the message was lost").arg(what);
+    };
+    auto check = [&](const QString& key, const QString& what, const QString& value) {
+        if ((value == "ok") || (value == "failed") || (value == "incomplete")) {
+            add(QString("%1:%2").arg(key, checkValue(value)), checkTip(what, value), checkTone(value));
+        }
     };
 
     if (record.m_protocol == "pocsag")
@@ -437,12 +465,13 @@ void PagingMessageTable::recordChips(const MessageRecord& record, QStringList& t
                 "(a batch is a sync codeword and 16 codewords; the first batch after the preamble is 1)").arg(batch));
         }
         if (d.value("truncated").toBool()) {
-            add("TRUNC", tr("Truncated: the message has no end codeword (idle or address); the signal was lost or two "
-                "codewords in a row could not be decoded, so its end may be missing"));
+            add("END:cut", tr("End cut: the message has no end codeword (idle or address); the signal was lost or two "
+                "codewords in a row could not be decoded, so its end may be missing"), ToneWarn);
         }
     }
     else if (record.m_protocol == "flex")
     {
+        // Where: phase, cycle, frame, copies of a multiple transmission
         if (d.contains("phase"))
         {
             QString phase = d.value("phase").toString();
@@ -453,7 +482,6 @@ void PagingMessageTable::recordChips(const MessageRecord& record, QStringList& t
             add(QString("C:%1").arg(cycle), tr("Cycle %1 of 0-14: the frame's cycle (15 cycles of 4 minutes make an hour)").arg(cycle));
             add(QString("F:%1").arg(frame), tr("Frame %1 of 0-127: the frame of its cycle (frames of 1.875 s)").arg(frame));
         }
-        // A subframe of a multiple transmission: the copies combined of the transmissions
         if (d.contains("transmissions"))
         {
             int copies = d.value("subframe_copies").toInt();
@@ -461,18 +489,18 @@ void PagingMessageTable::recordChips(const MessageRecord& record, QStringList& t
             add(QString("SUB:%1/%2").arg(copies).arg(transmissions), tr("Subframe copies: the frame is sent %2 times "
                 "(multiple transmission); %1 of the copies were received and combined").arg(copies).arg(transmissions));
         }
-        // The message number as the pager shows it: N + 1 (STD-43A 3.10.1.3 N)
+
+        // Number: N as the pager shows it (N + 1, STD-43A 3.10.1.3), the retrieval flag R, numbers missed
         if (d.contains("message_number") && (d.value("message_number").toInt() >= 0))
         {
             int number = d.value("message_number").toInt() + 1;
+            bool retrieval = d.value("retrieval").toBool();
             add(QString("N:%1").arg(number), tr("Message number %1: the network numbers the messages of each address in "
                 "sequence (sent 0-63, shown + 1 as pagers do); a skipped number is a missed message").arg(number));
+            add(QString("R:%1").arg(retrieval ? 1 : 0), retrieval
+                ? tr("Message retrieval flag 1 (the usual case): the numbers of this address are checked for skipped numbers")
+                : tr("Message retrieval flag 0: a retransmission; its number is not checked for skipped numbers"));
         }
-        if (d.value("retrieval").toBool()) {
-            add("R", tr("Message retrieval flag set (the usual case): the numbers of this address are checked for "
-                "skipped numbers; it is clear on a retransmission"));
-        }
-        // Numbers of the address skipped before this message (R = 1): messages missed
         if (d.contains("missed_numbers"))
         {
             QVariantList missed = d.value("missed_numbers").toList();
@@ -483,80 +511,35 @@ void PagingMessageTable::recordChips(const MessageRecord& record, QStringList& t
             }
 
             QString text = (missed.size() > 3)
-                ? QString("MISSED:%1-%2").arg(numbers.first(), numbers.last())
-                : QString("MISSED:%1").arg(numbers.join(","));
+                ? QString("MISS:%1-%2").arg(numbers.first(), numbers.last())
+                : QString("MISS:%1").arg(numbers.join(","));
             add(text, tr("Missed messages: %n number(s) of this address skipped before this message (%1), messages "
-                "that were not received", "", missed.size()).arg(numbers.join(", ")), chip(text, "#ef9a9a", "#3a1414"));
+                "that were not received", "", missed.size()).arg(numbers.join(", ")), ToneBad);
         }
-        if (d.value("maildrop").toBool()) {
-            add("MD", tr("Mail drop flag: the message can be handled separately from ordinary messages"));
+
+        // Address and type details
+        // The address type, always shown (STD-43A 3.8): short, long, temporary (a group), network, operator messaging,
+        // information service, reserved
+        static const QMap<QString, QPair<QString, const char *>> addrTypes = {
+            {"short", {"short", QT_TR_NOOP("Short address: the capcode takes one address word")}},
+            {"long", {"long", QT_TR_NOOP("Long address: the capcode takes two address words")}},
+            {"temporary", {"temp", QT_TR_NOOP("Temporary address: a group message, sent to the members of a group slot")}},
+            {"network", {"network", QT_TR_NOOP("Network address: a message of the network to its pagers")}},
+            {"operator", {"operator", QT_TR_NOOP("Operator messaging address")}},
+            {"info_service", {"info", QT_TR_NOOP("Information service address")}},
+            {"reserved", {"reserved", QT_TR_NOOP("Reserved address")}},
+            {"unknown", {"unknown", QT_TR_NOOP("Address type not known")}}
+        };
+        QString addrType = d.value("addr_type").toString();
+        if (addrTypes.contains(addrType)) {
+            add(QString("ADDR:%1").arg(addrTypes.value(addrType).first), tr(addrTypes.value(addrType).second));
         }
         if (d.value("priority").toBool()) {
-            add("PRI", tr("Priority address: sent ahead of the other addresses of the frame"));
+            add("PRI:1", tr("Priority address: sent ahead of the other addresses of the frame"));
         }
-
-        QString addrType = d.value("addr_type").toString();
-        if (addrType == "long") {
-            add("LONG", tr("Long address: the capcode takes two address words"));
-        } else if ((addrType != "short") && (addrType != "temporary") && !addrType.isEmpty()) {
-            add(addrType.toUpper(), tr("Address type: %1").arg(addrType), chip(addrType.toUpper(), "#ce93d8", "#2e2e2e"));
+        if (d.value("maildrop").toBool()) {
+            add("M:1", tr("Mail drop flag M: the message can be handled separately from ordinary messages"));
         }
-
-        // Network ID, or a system message of the NID (the NID change instruction has an unpublished layout)
-        if (d.contains("nid_service_area"))
-        {
-            QString traffic = QString("%1").arg(d.value("nid_traffic_flags").toInt(), 4, 2, QChar('0'));
-            add(QString("NID:A%1/M%2/T%3").arg(d.value("nid_service_area").toInt()).arg(d.value("nid_multiplier").toInt()).arg(traffic),
-                tr("Network ID (roaming): service area %1, multiplier %2, traffic flags %3").arg(d.value("nid_service_area").toInt())
-                    .arg(d.value("nid_multiplier").toInt()).arg(traffic));
-        }
-        if (d.value("nid_change").toBool()) {
-            add("NID CHG", tr("Network ID change instruction"));
-        } else if (d.value("nid_system_message").toBool()) {
-            add("NID MSG", tr("System message of the network ID"));
-        }
-        if (d.contains("hex_nibble_bits"))
-        {
-            bool lsb = (d.value("hex_bit_order").toString() == "lsb_first");
-            int nibble = d.value("hex_nibble_bits").toInt();
-            int bits = d.value("hex_bits").toInt();
-            add(QString("HEX:%1/%2/%3").arg(nibble).arg(lsb ? "LSB" : "MSB").arg(bits),
-                tr("HEX/binary data: %1 bits a digit, %2 bit first, %3 bits").arg(nibble).arg(lsb ? tr("least significant") : tr("most significant")).arg(bits));
-        }
-        if (d.value("payload_unknown").toBool()) {
-            add("NO LAYOUT", tr("The layout of this payload is not published: shown as data"));
-        }
-        if (d.contains("fragment_control") && (d.value("fragment_control").toString() != "00"))
-        {
-            QString uv = d.value("fragment_control").toString();
-            add(QString("UV:%1").arg(uv), tr("Fragment control bits U V = %1 (enhanced fragmentation)").arg(uv));
-        }
-        if (d.value("nul_error").toBool()) {
-            add("NUL?", tr("A NUL character inside the message, where only the padding at the end of a fragment may "
-                "have it: probably a reception error"));
-        }
-        if (d.contains("blocking"))
-        {
-            int blocking = d.value("blocking").toInt();
-            bool rtl = (d.value("display_direction").toString() == "rtl");
-            add(QString("BLK:%1").arg(blocking), tr("Blocking length: the data is in blocks of %1 bits").arg(blocking));
-            add(rtl ? "RTL" : "LTR", rtl ? tr("Display direction: right to left") : tr("Display direction: left to right"));
-            if (d.value("header_message").toBool()) {
-                add("HDR", tr("Header message: a header to a following transparent message of the same message number"));
-            }
-            if (d.value("status_info").toBool()) {
-                add("STAT", tr("Status information message"));
-            }
-        }
-        if (d.contains("secure_type"))
-        {
-            QString t = QString("%1%2").arg(d.value("secure_type").toInt() >> 1 & 1).arg(d.value("secure_type").toInt() & 1);
-            add(QString("T:%1").arg(t), tr("Secure message type bits t1 t0 = %1").arg(t));
-        }
-        if (d.value("registration_ack").toBool()) {
-            add("REGACK", tr("Registration acknowledgement"));
-        }
-
         if (d.contains("group_slot"))
         {
             QStringList members = d.value("group_capcodes").toStringList();
@@ -575,68 +558,109 @@ void PagingMessageTable::recordChips(const MessageRecord& record, QStringList& t
                     .arg(2029568 + slot).arg(members.size()).arg(shown.join("\n"))
                 : tr("Group message, group slot %1 (temporary address %2): the group assignment was not received, the members "
                     "are not known").arg(slot).arg(2029568 + slot),
-                chip(g, "#80cbc4", "#103a35"));
+                ToneGroup);
         }
         // A member added to a group: the slot and the frame of the group message
         if (d.contains("instruction_type") && (d.value("instruction_type").toInt() == 0))
         {
             int slot = d.value("instruction_slot").toInt();
             int frame = d.value("instruction_frame").toInt();
-            QString g = QString("G:%1>F:%2").arg(slot).arg(frame);
-            add(g, tr("%1 added to group slot %2 (temporary address %3); the group message comes in frame %4")
-                .arg(record.m_address).arg(slot).arg(2029568 + slot).arg(frame), chip(g, "#80cbc4", "#103a35"));
+            add(QString("G:%1>%2").arg(slot).arg(frame), tr("%1 added to group slot %2 (temporary address %3); the group "
+                "message comes in frame %4").arg(record.m_address).arg(slot).arg(2029568 + slot).arg(frame), ToneGroup);
+        }
+        if (d.contains("nid_service_area"))
+        {
+            QString traffic = QString("%1").arg(d.value("nid_traffic_flags").toInt(), 4, 2, QChar('0'));
+            add(QString("NID:A%1/M%2/T%3").arg(d.value("nid_service_area").toInt()).arg(d.value("nid_multiplier").toInt()).arg(traffic),
+                tr("Network ID (roaming): service area %1, multiplier %2, traffic flags %3").arg(d.value("nid_service_area").toInt())
+                    .arg(d.value("nid_multiplier").toInt()).arg(traffic));
+        }
+        if (d.value("nid_change").toBool()) {
+            add("NID:change", tr("Network ID change instruction"));
+        } else if (d.value("nid_system_message").toBool()) {
+            add("NID:message", tr("System message of the network ID"));
+        }
+        if (d.contains("hex_nibble_bits"))
+        {
+            bool lsb = (d.value("hex_bit_order").toString() == "lsb_first");
+            int nibble = d.value("hex_nibble_bits").toInt();
+            int bits = d.value("hex_bits").toInt();
+            add(QString("HEX:%1/%2/%3").arg(nibble).arg(lsb ? "lsb" : "msb").arg(bits),
+                tr("HEX/binary data: %1 bits a digit, %2 bit first, %3 bits").arg(nibble).arg(lsb ? tr("least significant") : tr("most significant")).arg(bits));
+        }
+        if (d.contains("blocking"))
+        {
+            int blocking = d.value("blocking").toInt();
+            bool rtl = (d.value("display_direction").toString() == "rtl");
+            add(QString("BLK:%1").arg(blocking), tr("Blocking length: the data is in blocks of %1 bits").arg(blocking));
+            add(rtl ? "D:rtl" : "D:ltr", rtl ? tr("Display direction D: right to left") : tr("Display direction D: left to right"));
+            if (d.value("header_message").toBool()) {
+                add("H:1", tr("Header message H: a header to a following transparent message of the same message number"));
+            }
+            if (d.value("status_info").toBool()) {
+                add("STAT:1", tr("Status information message"));
+            }
+        }
+        if (d.contains("secure_type"))
+        {
+            QString t = QString("%1%2").arg(d.value("secure_type").toInt() >> 1 & 1).arg(d.value("secure_type").toInt() & 1);
+            add(QString("T:%1").arg(t), tr("Secure message type bits t1 t0 = %1").arg(t));
+        }
+        if (d.contains("fragment_control") && (d.value("fragment_control").toString() != "00"))
+        {
+            QString uv = d.value("fragment_control").toString();
+            add(QString("UV:%1").arg(uv), tr("Fragment control bits U V = %1 (enhanced fragmentation)").arg(uv));
+        }
+        if (d.value("registration_ack").toBool()) {
+            add("REG:ack", tr("Registration acknowledgement"));
+        }
+        if (d.value("payload_unknown").toBool()) {
+            add("LAYOUT:unknown", tr("The layout of this payload is not published: shown as data"));
         }
 
-        QString checksum = d.value("checksum").toString();
-        QString k = checkChip("K", checksum);
-        if (!k.isEmpty()) {
-            add(QString("K:%1").arg(checksum), checkTip(tr("Checksum K of the message words"), checksum), k);
-        }
-        QString signature = d.value("signature").toString();
-        QString s = checkChip("S", signature);
-        if (!s.isEmpty()) {
-            add(QString("S:%1").arg(signature), checkTip(tr("Signature S (sum of the characters of the whole message)"), signature), s);
+        // Checks
+        check("K", tr("Checksum K of the message words"), d.value("checksum").toString());
+        check("S", tr("Signature S (sum of the characters of the whole message)"), d.value("signature").toString());
+
+        // State
+        if (d.value("nul_error").toBool()) {
+            add("NUL:inside", tr("A NUL character inside the message, where only the padding at the end of a fragment may "
+                "have it: probably a reception error"), ToneWarn);
         }
     }
     else if (record.m_protocol == "gsc")
     {
-        if (d.value("non_battery_saver").toBool()) {
-            add("NBS", tr("Non battery saver transmission"));
-        } else if (d.value("batch_mode").toBool()) {
-            add("BATCH", tr("Batch mode: the transmission started with a complemented preamble"));
-        }
         if (d.contains("slot"))
         {
             int slot = d.value("slot").toInt() + 1;
             add(QString("SLOT:%1").arg(slot), tr("Address %1 of the transmission (the first address is 1)").arg(slot));
         }
-        if (d.contains("checksum_passed"))
-        {
-            bool passed = d.value("checksum_passed").toBool();
-            add(passed ? "CK:ok" : "CK:bad", passed ? tr("Checksum of the data blocks: ok") : tr("Checksum of the data blocks: failed"),
-                checkChip("CK", passed ? "ok" : "failed"));
+        if (d.value("non_battery_saver").toBool()) {
+            add("MODE:nbs", tr("Non battery saver transmission"));
+        } else if (d.value("batch_mode").toBool()) {
+            add("MODE:batch", tr("Batch mode: the transmission started with a complemented preamble"));
         }
         if (d.value("interleaved").toBool()) {
-            add("INTL", tr("Interleaved: a tone only address sent in the alert time of a voice page"));
+            add("INTL:1", tr("Interleaved: a tone only address sent in the alert time of a voice page"));
+        }
+        if (d.contains("checksum_passed")) {
+            check("CK", tr("Checksum of the data blocks"), d.value("checksum_passed").toBool() ? "ok" : "failed");
         }
         if (d.value("truncated").toBool()) {
-            add("TRUNC", tr("Truncated: the transmission ended before the message did"));
+            add("END:cut", tr("End cut: the transmission ended before the message did"), ToneWarn);
         }
     }
 
-    // A transmitted copy of a message sent before (retransmission)
+    // State: a transmitted copy of a message sent before, a duplicate
     if (d.contains("retransmission"))
     {
         int copy = d.value("retransmission").toInt();
-        QString c = QString("COPY:%1").arg(copy);
-        add(c, tr("Transmitted copy %1 of a message sent before (retransmission)").arg(copy), chip(c, "#ffe082", "#3a2a00"));
+        add(QString("COPY:%1").arg(copy), tr("Transmitted copy %1 of a message sent before (retransmission)").arg(copy), ToneWarn);
     }
-
     if (record.m_duplicate == MessageRecord::DuplicateDup) {
-        add("DUP", tr("Duplicate: the same content was received before"), chip("DUP", "#2a1f00", "#ffcc44"));
+        add("DUP:same", tr("Duplicate: the same content was received before"), ToneWarn);
     } else if (record.m_duplicate == MessageRecord::DuplicateDupPlus) {
-        add("DUP+", tr("Duplicate with fewer errors: the same message was received before, this copy is better"),
-            chip("DUP+", "#0d2a12", "#66bb6a"));
+        add("DUP:better", tr("Duplicate with fewer errors: the same message was received before, this copy is better"), ToneGood);
     }
 }
 
