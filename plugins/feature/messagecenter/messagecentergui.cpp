@@ -283,6 +283,7 @@ void MessageCenterFilterWidget::setFilter(const MessageCenterFilter& f)
     }
 
     m_source->setCurrentIndex(f.m_sources.isEmpty() ? 0 : std::max(0, m_source->findText(f.m_sources.first())));
+    emit changed();     // The line edits tell their changes when edited only
 }
 
 void MessageCenterFilterWidget::showSources(const QStringList& sources)
@@ -446,6 +447,12 @@ void MessageCenterGUI::buildLog(QWidget *container)
     // A message decoded again replaces its record in the log
     connect(m_logTable, &PagingMessageTable::recordRedecoded, this, [this](const MessageRecord& record) {
         m_center->getInputMessageQueue()->push(MessageCenter::MsgRedecoded::create(record));
+    });
+    // A member of a group: its messages in the log (the group messages it is a member of too)
+    connect(m_logTable, &PagingMessageTable::addressFilterRequested, this, [this](const QString& address) {
+        MessageCenterFilter f = m_logFilter->filter();
+        f.m_address = QRegularExpression::escape(address);
+        m_logFilter->setFilter(f);
     });
 }
 

@@ -27,6 +27,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLineEdit>
 #include <QMap>
 #include <QMenu>
 #include <QMessageBox>
@@ -507,7 +508,15 @@ void PagingMessageTable::recordInfo(const MessageRecord& record, QString& plain,
             bool tracked = d.value("group_tracked").toBool();
             QString g = QString("G%1[%2]").arg(d.value("group_slot").toInt()).arg(tracked ? QString::number(members.size()) : QString("?"));
             add(g, chip(g, "#80cbc4", "#103a35"));
-            tip = tracked ? QString("G%1 members: %2").arg(d.value("group_slot").toInt()).arg(members.join(", "))
+            // The first members; the window of the members (right click) has them all
+            static const int shownMembers = 20;
+            QStringList shown = members.mid(0, shownMembers);
+
+            if (members.size() > shownMembers) {
+                shown.append(QString("and %1 more").arg(members.size() - shownMembers));
+            }
+
+            tip = tracked ? QString("G%1, %2 members:\n%3").arg(d.value("group_slot").toInt()).arg(members.size()).arg(shown.join("\n"))
                           : QString("G%1: the group assignment was not received").arg(d.value("group_slot").toInt());
         }
         // A member added to a group: the slot and the frame of the group message
@@ -985,6 +994,74 @@ void PagingMessageTable::showAllCodepages(const MessageRecord& record)
 // Every field of the record of the row, as stored (the JSON of the record): the common fields, protocolData
 // and the raw payload, also as bits
 
+// The members of a group message, one capcode a row: a search, copy, and the messages of a member
+void PagingMessageTable::showGroupMembers(const MessageRecord& record)
+{
+    const QVariantList members = record.m_protocolData.value("group_capcodes").toList();
+    QDialog *dialog = new QDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowTitle(tr("Group slot %1 (%2): %3 members").arg(record.m_protocolData.value("group_slot").toInt())
+        .arg(record.m_address).arg(members.size()));
+    QVBoxLayout *layout = new QVBoxLayout(dialog);
+    QLineEdit *search = new QLineEdit(dialog);
+    search->setPlaceholderText(tr("Search"));
+    search->setClearButtonEnabled(true);
+    QTableWidget *table = new QTableWidget(members.size(), 2, dialog);
+    table->setHorizontalHeaderLabels({tr("#"), tr("Capcode")});
+    table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    table->setSelectionBehavior(QAbstractItemView::SelectRows);
+    table->verticalHeader()->hide();
+    table->horizontalHeader()->setStretchLastSection(true);
+    table->setContextMenuPolicy(Qt::CustomContextMenu);
+
+    for (int i = 0; i < members.size(); i++)
+    {
+        table->setItem(i, 0, new QTableWidgetItem(QString::number(i + 1)));
+        table->setItem(i, 1, new QTableWidgetItem(members[i].toString()));
+    }
+
+    table->resizeColumnToContents(0);
+
+    connect(search, &QLineEdit::textChanged, table, [table](const QString& text) {
+        for (int i = 0; i < table->rowCount(); i++) {
+            table->setRowHidden(i, !text.isEmpty() && !table->item(i, 1)->text().contains(text.trimmed()));
+        }
+    });
+    connect(table, &QTableWidget::customContextMenuRequested, table, [this, table](const QPoint& pos) {
+        QTableWidgetItem *clicked = table->itemAt(pos);
+
+        if (!clicked) {
+            return;
+        }
+
+        const QString capcode = table->item(clicked->row(), 1)->text();
+        QMenu menu(table);
+        connect(menu.addAction(tr("Messages of %1").arg(capcode)), &QAction::triggered, this, [this, capcode]() {
+            emit addressFilterRequested(capcode);
+        });
+        connect(menu.addAction(tr("Copy")), &QAction::triggered, table, [capcode]() { QApplication::clipboard()->setText(capcode); });
+        menu.exec(table->viewport()->mapToGlobal(pos));
+    });
+
+    QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
+    QPushButton *copyAll = buttons->addButton(tr("Copy all"), QDialogButtonBox::ActionRole);
+    connect(copyAll, &QPushButton::clicked, dialog, [members]() {
+        QStringList list;
+
+        for (const QVariant& m : members) {
+            list.append(m.toString());
+        }
+
+        QApplication::clipboard()->setText(list.join('\n'));
+    });
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::close);
+    layout->addWidget(search);
+    layout->addWidget(table, 1);
+    layout->addWidget(buttons);
+    dialog->resize(320, 480);
+    dialog->show();
+}
+
 void PagingMessageTable::showDetails(int row)
 {
     QTableWidgetItem *timeItem = item(row, ColTime);
@@ -1005,6 +1082,21 @@ void PagingMessageTable::showDetails(int row)
     dialog->setWindowTitle(tr("Message %1 %2").arg(object.value("protocol").toString(), object.value("address").toString()));
     tree->setColumnCount(2);
     tree->setHeaderLabels({tr("Field"), tr("Value")});
+
+    // A group message: its members first, the list closed when it is long
+    const QJsonArray members = object.value("protocolData").toObject().value("group_capcodes").toArray();
+
+    if (!members.isEmpty())
+    {
+        QTreeWidgetItem *group = new QTreeWidgetItem(tree->invisibleRootItem(),
+            QStringList({tr("Group members (%1)").arg(members.size()), tr("slot %1").arg(object.value("protocolData").toObject().value("group_slot").toInt())}));
+
+        for (const QJsonValue& member : members) {
+            new QTreeWidgetItem(group, QStringList({QString(), member.toString()}));
+        }
+
+        group->setExpanded(members.size() <= 20);
+    }
 
     for (auto it = object.begin(); it != object.end(); ++it) {
         addJsonItem(tree->invisibleRootItem(), it.key(), it.value());
@@ -1148,6 +1240,13 @@ void PagingMessageTable::showRowMenu(const QPoint& pos)
     MessageRecord record;
     const QJsonObject json = QJsonDocument::fromJson(item(row, ColTime)->data(jsonRole).toString().toUtf8()).object();
     const bool parsed = MessageRecord::fromJson(json, record);
+
+    // The members of a group message, all of them
+    if (parsed && !record.m_protocolData.value("group_capcodes").toList().isEmpty())
+    {
+        connect(menu.addAction(tr("Group members (%1)...").arg(record.m_protocolData.value("group_capcodes").toList().size())),
+            &QAction::triggered, this, [this, record]() { showGroupMembers(record); });
+    }
 
     // A route of the Message Center filled from the message
     if (parsed && (record.m_kind == MessageRecord::KindMessage) && !record.m_address.isEmpty())

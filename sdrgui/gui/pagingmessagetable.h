@@ -106,6 +106,8 @@ public:
     static void createRoute(const MessageRecord& record, const QVariantMap& charset, const QString& type);
     //!< A window with the message decoded with every codepage of its protocol (and as numeric), a row each
     void showAllCodepages(const MessageRecord& record);
+    //!< A window with the members of a group message: searched, copied, an address filter on one of them
+    void showGroupMembers(const MessageRecord& record);
 
 signals:
     //!< The user moved, resized, showed or hid a column
@@ -114,6 +116,8 @@ signals:
     void audioDeviceChanged(const QString& deviceName);
     //!< The user decoded a received message again (another codepage or type): its row shows it
     void recordRedecoded(const MessageRecord& record);
+    //!< The user asked for the messages of an address (a member of a group): the address filter of the window
+    void addressFilterRequested(const QString& address);
 
 protected:
     void mousePressEvent(QMouseEvent *event) override;

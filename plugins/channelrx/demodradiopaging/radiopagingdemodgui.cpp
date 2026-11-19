@@ -1670,7 +1670,7 @@ QString statusField(const QString& html, int width)
 QString RadioPagingDemodGUI::groupSlotToolTip(const RadioPagingFlexDecoder::GroupSlot& slot, int pol,
     const RadioPagingDemodSink::Status& status)
 {
-    static const int shownMembers = 8;
+    static const int shownMembers = 20;
     QStringList members;
 
     for (size_t i = 0; (i < slot.m_members.size()) && (i < (size_t) shownMembers); i++) {
@@ -2346,6 +2346,10 @@ void RadioPagingDemodGUI::makeUIConnections()
     QObject::connect(ui->logOpen, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_logOpen_clicked);
     // The rows follow the filter as it is typed
     QObject::connect(ui->filterAddress, &QLineEdit::textChanged, this, &RadioPagingDemodGUI::on_filterAddress_editingFinished);
+    // A member of a group: its messages (the group messages it is a member of too)
+    QObject::connect(ui->messages, &PagingMessageTable::addressFilterRequested, this, [this](const QString& address) {
+        ui->filterAddress->setText(QRegularExpression::escape(address));
+    });
     QObject::connect(ui->channel1, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingDemodGUI::on_channel1_currentIndexChanged);
     QObject::connect(ui->channel2, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RadioPagingDemodGUI::on_channel2_currentIndexChanged);
 }
