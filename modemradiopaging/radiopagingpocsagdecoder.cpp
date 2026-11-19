@@ -27,6 +27,7 @@ const int RadioPagingPocsagDecoder::m_maxSyncErrors;
 const int RadioPagingPocsagDecoder::m_maxMessageBits;
 const int RadioPagingPocsagDecoder::m_minExactCodewords;
 const int RadioPagingPocsagDecoder::m_maxSoftSyncErrors;
+const int RadioPagingPocsagDecoder::m_maxIdleErrors;
 constexpr float RadioPagingPocsagDecoder::m_softSyncCorrelation;
 
 namespace {
@@ -440,6 +441,13 @@ void RadioPagingPocsagDecoder::processCodeword(uint32_t word, bool lost)
     }
 
     uint32_t corrected = result.m_word;
+
+    // An idle codeword received with 3 or 4 bit errors is corrected to an address codeword at distance 6 (the code's
+    // minimum distance) from it: a codeword corrected to an address while within m_maxIdleErrors of the idle codeword
+    // is the idle codeword
+    if ((corrected != word) && ((corrected & 0x80000000u) == 0) && (popcount32(word ^ RadioPagingPocsag::m_idleWord) <= m_maxIdleErrors)) {
+        corrected = RadioPagingPocsag::m_idleWord;
+    }
 
     if (corrected == RadioPagingPocsag::m_idleWord)
     {

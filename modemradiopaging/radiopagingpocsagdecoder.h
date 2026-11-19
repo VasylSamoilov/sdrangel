@@ -142,6 +142,8 @@ public:
     //!< Bit errors of a sync codeword taken when its symbols correlate with the sync codeword (soft values known):
     //!< the correlation of the normalised values with it, over their magnitudes, at least m_softSyncCorrelation
     static const int m_maxSoftSyncErrors = 4;
+    //!< Bit errors within which a codeword corrected to an address is taken as the idle codeword
+    static const int m_maxIdleErrors = 4;
     static constexpr float m_softSyncCorrelation = 0.7f;
 
 private:

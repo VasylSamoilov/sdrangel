@@ -616,6 +616,47 @@ void testPocsagSyncLoss()
 // in the middle of each codeword of the batch, the messages decoded have only the addresses sent and each text, up to
 // a codeword marked lost, is the start of the text sent. Symbols are fed with their error: small for the transmission,
 // as noise gives after the cut
+// An idle codeword received with 4 bit errors that the code corrects to an address codeword (at distance 6 from idle)
+// gives no page
+void testPocsagDamagedIdle()
+{
+    uint32_t damaged = 0;
+
+    for (int a = 0; (a < 32) && !damaged; a++)
+    {
+        for (int b = a + 1; (b < 32) && !damaged; b++)
+        {
+            for (int c = b + 1; (c < 32) && !damaged; c++)
+            {
+                for (int d = c + 1; (d < 32) && !damaged; d++)
+                {
+                    uint32_t w = RadioPagingPocsag::m_idleWord ^ (1u << a) ^ (1u << b) ^ (1u << c) ^ (1u << d);
+                    RadioPagingBCH::Result r = RadioPagingBCH::decode(w);
+                    if ((r.m_bitErrors >= 0) && ((r.m_word & 0x80000000u) == 0) && (r.m_word != RadioPagingPocsag::m_idleWord)) {
+                        damaged = w;
+                    }
+                }
+            }
+        }
+    }
+
+    RadioPagingPocsag::TxMessage tone;
+    tone.m_address = 1000;
+    tone.m_type = RadioPagingPocsag::Tone;
+    RadioPagingPocsag::EncodeResult enc = RadioPagingPocsag::encode({ tone });
+    std::vector<uint8_t> bits = enc.m_bits;
+    // The last codeword of the batch is an idle codeword: replaced by the damaged one
+    const size_t last = enc.m_codewords.size() - 1;
+    check(enc.m_codewords[last] == RadioPagingPocsag::m_idleWord, "POCSAG: the batch ends with an idle codeword");
+    for (int i = 0; i < 32; i++) {
+        bits[RadioPagingPocsag::m_preambleBits + 32 * last + i] = (damaged >> (31 - i)) & 1;
+    }
+
+    std::vector<RadioPagingPocsagDecoder::Message> messages = decodeBits(bits);
+    check((damaged != 0) && (messages.size() == 1) && (messages[0].m_address == 1000),
+        "POCSAG: an idle codeword with 4 bit errors corrected to an address gives no page");
+}
+
 void testPocsagSignalLost()
 {
     RadioPagingPocsag::TxMessage a, n;
@@ -946,6 +987,7 @@ int main()
     testPocsagStandardRules();
     testPocsagSyncLoss();
     testPocsagSignalLost();
+    testPocsagDamagedIdle();
     testPocsagLongNumeric();
     testPocsagPreambleLock();
     testFsk();
