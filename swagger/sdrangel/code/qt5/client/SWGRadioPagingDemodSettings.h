@@ -115,8 +115,6 @@ public:
     qint32 getGscDcCorrection();
     void setGscDcCorrection(qint32 gsc_dc_correction);
 
-    QString* getChannelAlias();
-    void setChannelAlias(QString* channel_alias);
 
     float getVolume();
     void setVolume(float volume);
@@ -257,8 +255,6 @@ private:
     qint32 gsc_dc_correction;
     bool m_gsc_dc_correction_isSet;
 
-    QString* channel_alias;
-    bool m_channel_alias_isSet;
 
     float volume;
     bool m_volume_isSet;

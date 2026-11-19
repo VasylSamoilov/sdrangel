@@ -12,7 +12,7 @@ A channel transmits one protocol. Its settings are the defaults of the messages 
 
 The symbols are shaped with a Gaussian filter and frequency modulated with the deviation of the channel. The power ramps up at the start of a transmission and down after its last symbol. The radio paging demodulator (demodradiopaging) receives what this plugin transmits.
 
-Messages are queued from the composer of the channel window, from the Message Center (pages sent to the alias of the channel) or with the `tx` action of the WebAPI. A message that can not be sent is refused with the reason. At most 100 messages wait.
+Messages are queued from the composer of the channel window, from the Message Center (pages sent to the channel by its name) or with the `tx` action of the WebAPI. A message that can not be sent is refused with the reason. At most 100 messages wait.
 
 <h2>Modes</h2>
 
@@ -59,10 +59,11 @@ The window is in four sections that can be rolled up.
 
 <h3>Settings</h3>
 
+The name of this transmitter, in the records of the messages it sends, in the names of its voice files and for the Message Center that sends pages to it, is the title of the channel, set in the channel settings dialog (right click on the window title).
+
 * Frequency shift from the center frequency of the device.
 * Channel power.
 * Mute: no samples are output. A muted FLEX transmission ends; it starts again with the re-synchronization when unmuted.
-* Alias: name of this transmitter, in the records of the messages it sends and in the names of the voice files. Empty: the frequency of the channel in Hz. The Message Center sends pages to a transmitter by its alias.
 * Files: the files of the voice sent (GSC): how many are kept, the space they take, and deleting the old ones.
 * Protocol of the channel and mode (one-shot or network). A change of protocol or mode ends the transmission and drops the messages waiting.
 * Deviation of the outer symbol (Hz), default 4500.

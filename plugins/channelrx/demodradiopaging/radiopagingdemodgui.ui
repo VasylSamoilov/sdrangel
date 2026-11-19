@@ -203,27 +203,6 @@
      </layout>
     </item>
     <item>
-     <layout class="QHBoxLayout" name="aliasLayout">
-      <item>
-       <widget class="QLabel" name="channelAliasLabel">
-        <property name="text">
-         <string>Alias</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QLineEdit" name="channelAlias">
-        <property name="toolTip">
-         <string>Name of this demodulator, in every message it outputs (channel alias)&#10;and in the names of the voice files. Empty: the frequency of the channel in Hz</string>
-        </property>
-        <property name="placeholderText">
-         <string>frequency</string>
-        </property>
-       </widget>
-      </item>
-     </layout>
-    </item>
-    <item>
      <widget class="Line" name="line_2">
       <property name="orientation">
        <enum>Qt::Orientation::Horizontal</enum>

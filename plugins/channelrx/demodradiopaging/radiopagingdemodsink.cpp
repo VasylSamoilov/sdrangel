@@ -712,7 +712,7 @@ void RadioPagingDemodSink::startVoiceRecording()
     recorder->setMono(true);
     // Named after the alias of the demodulator, by default its frequency
     recorder->setFileName(RadioPagingVoiceStore::filePrefix(directory,
-        m_settings.effectiveChannelAlias(m_centerFrequency + m_channelFrequencyOffset), "rx"));
+        m_settings.channelName(), "rx"));
 
     if (!recorder->startRecording())
     {

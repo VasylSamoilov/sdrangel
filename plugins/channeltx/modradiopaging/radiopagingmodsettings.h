@@ -79,7 +79,6 @@ struct RadioPagingModSettings
     bool m_gscInverted;                         //!< Set: binary 1 is a negative deviation (normal: positive)
     int m_gscVoiceSeconds;                      //!< Length of the voice of a GSC voice page in seconds, a longer sound file is cut
     QString m_audioInputDeviceName;             //!< Audio input of the voice recorded from the microphone
-    QString m_channelAlias;                     //!< Name of the transmitter in the message records and voice file names, empty for its frequency
     QString m_gscVoiceDirectory;                //!< Directory of the files of the voice sent, empty for the default (see voiceDirectory)
     int m_gscVoiceKeepDays;                     //!< Files of the voice sent older than this many days may be deleted, 0 to keep them all
     int m_gscVoiceKeepMin;                      //!< The newest files of the voice sent this many are not deleted
@@ -121,8 +120,8 @@ struct RadioPagingModSettings
     QString getDebugString(const QStringList& settingsKeys, bool force = false) const;
     //!< The directory of the files of the voice sent: the one set, or radiopaging/voice/tx in the application data
     QString voiceDirectory() const;
-    //!< The name of the transmitter: the alias set, or the frequency of the channel in Hz
-    QString effectiveChannelAlias(qint64 frequency) const;
+    //!< The name of the transmitter in the message records, the announcements and the voice file names: its title
+    QString channelName() const;
     //!< The codepage set for a protocol (pocsag, flex, gsc)
     const RadioPagingCharset::Key& charset(Protocol protocol) const;
     //!< The default codepage of a protocol: generic ASCII

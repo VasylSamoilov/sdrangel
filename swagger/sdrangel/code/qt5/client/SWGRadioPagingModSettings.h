@@ -103,8 +103,6 @@ public:
     void setMixSwitchMs2400(qint32 value);
     qint32 getRgbColor();
     void setRgbColor(qint32 value);
-    QString* getChannelAlias();
-    void setChannelAlias(QString* value);
     SWGRadioPagingCharset* getPocsagCharset();
     void setPocsagCharset(SWGRadioPagingCharset* value);
     SWGRadioPagingCharset* getFlexCharset();
@@ -216,8 +214,6 @@ private:
     bool m_mixSwitchMs2400IsSet = false;
     qint32 m_rgbColor = 0;
     bool m_rgbColorIsSet = false;
-    QString* m_channelAlias = nullptr;
-    bool m_channelAliasIsSet = false;
     SWGRadioPagingCharset* m_pocsagCharset = nullptr;
     bool m_pocsagCharsetIsSet = false;
     SWGRadioPagingCharset* m_flexCharset = nullptr;

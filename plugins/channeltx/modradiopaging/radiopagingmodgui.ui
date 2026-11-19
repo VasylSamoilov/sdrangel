@@ -174,37 +174,6 @@
      </layout>
     </item>
     <item>
-     <layout class="QHBoxLayout" name="aliasLayout">
-      <item>
-       <widget class="QLabel" name="channelAliasLabel">
-        <property name="text">
-         <string>Alias</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QLineEdit" name="channelAlias">
-        <property name="toolTip">
-         <string>Name of this transmitter, in the records of the messages it sends (channel alias)&#10;and in the names of the files of the voice sent. Empty: the frequency of the channel in Hz</string>
-        </property>
-        <property name="placeholderText">
-         <string>frequency</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QToolButton" name="voiceFiles">
-        <property name="toolTip">
-         <string>The files of the voice sent: how many are kept, the space they take, and deleting the old ones</string>
-        </property>
-        <property name="text">
-         <string>Files</string>
-        </property>
-       </widget>
-      </item>
-     </layout>
-    </item>
-    <item>
      <layout class="QHBoxLayout" name="protocolLayout">
       <item>
        <widget class="QComboBox" name="protocol">
@@ -296,6 +265,16 @@
          </size>
         </property>
        </spacer>
+      </item>
+      <item>
+       <widget class="QToolButton" name="voiceFiles">
+        <property name="toolTip">
+         <string>The files of the voice sent: how many are kept, the space they take, and deleting the old ones</string>
+        </property>
+        <property name="text">
+         <string>Files</string>
+        </property>
+       </widget>
       </item>
      </layout>
     </item>

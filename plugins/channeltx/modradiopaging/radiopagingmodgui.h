@@ -176,7 +176,6 @@ private slots:
     void on_mixSwitch512_valueChanged(int value);
     void on_mixSwitch1200_valueChanged(int value);
     void on_mixSwitch2400_valueChanged(int value);
-    void on_channelAlias_editingFinished();
     void on_voiceFiles_clicked();
     void micAudioSelect(const QPoint& p);
     void micDataReady();

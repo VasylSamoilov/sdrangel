@@ -95,6 +95,8 @@ The top and bottom bars of the channel window are described [here](../../../sdrg
 
 The window has a settings section and a section for the received messages. Each section can be rolled up.
 
+The name of the demodulator in the messages it outputs (their channel) and in the names of its voice files is the title of the channel, set in the channel settings dialog (right click on the window title).
+
 <h3>1: Frequency shift from center frequency of reception</h3>
 
 Use the wheels to adjust the frequency shift in Hz from the center frequency of reception. Left click on a digit sets the cursor position at this digit. Right click on a digit sets all digits on the right to zero.
@@ -109,15 +111,11 @@ Average total power in dB relative to a +/- 1.0 amplitude signal received in the
   - bottom bar (blue green): instantaneous peak value
   - tip vertical bar (bright green): peak hold value
 
-<h3>4: Alias</h3>
-
-Name of this demodulator, in every message it outputs (channel alias) and in the names of the voice files. Empty: the frequency of the channel in Hz.
-
-<h3>5: BW - Channel bandwidth</h3>
+<h3>4: BW - Channel bandwidth</h3>
 
 Bandwidth of the channel filter, from 10 to 25 kHz in 100 Hz steps (default 20 kHz: the 16 kHz of FLEX and room for the frequency offset of the transmitter and receiver oscillators). Each protocol filters further to its own bandwidth.
 
-<h3>6: Protocol rows</h3>
+<h3>5: Protocol rows</h3>
 
 ![FLEX network lines and group slots](../../../doc/img/RadioPagingDemod_plugin_groups.png)
 
@@ -159,7 +157,7 @@ GSC has in addition:
 
 The voice is the GSC discriminator output, with the DC removed, low pass filtered at 3 kHz and resampled to the audio output rate. It is processed only while a voice page is open.
 
-<h3>7: Output of the messages</h3>
+<h3>6: Output of the messages</h3>
 
 What the Pager demodulator has, for the messages of all three protocols. A message is output once, when it is received. The end of a GSC voice message, which only completes the record of its voice page, is not output again.
 
@@ -169,17 +167,17 @@ What the Pager demodulator has, for the messages of all three protocols. A messa
 * Notifications - a regular expression matched on a field of the message (address, message, protocol, type, channel or any of them), and what is done to a message that matches: its row is highlighted, the text of Speech is spoken (when the build has text to speech), the Command is run, and a position (latitude and longitude) in the message is plotted on the Map named by the address. Speech and Command replace ${address}, ${message}, ${protocol}, ${type}, ${channel} and ${0}, ${1}... (the captures of the expression). A duplicate is not notified again.
 * Address filter - only the messages whose whole address matches the regular expression are shown, as in the Pager demodulator (e.g. 12345.., 001001/.). It applies as it is typed. A FLEX group message is shown for the address of a member of its group too; the notifications on the address match the members as well.
 
-<h3>8: Waveforms</h3>
+<h3>7: Waveforms</h3>
 
 The scope shows two of the signals of the receiver, at the channel sample rate of 38400 Hz: I, Q and the power of the channel, the discriminator of each protocol (1 is the deviation set), the carrier offset correction of each protocol in kHz, and 1 while a receiver of the protocol is synchronised.
 
-<h3>9: Clear messages from table</h3>
+<h3>8: Clear messages from table</h3>
 
 Clears the table.
 
 The Message Center button next to it opens the Message Center (and adds it when there is none).
 
-<h3>10: Messages table</h3>
+<h3>9: Messages table</h3>
 
 ![The fields of a message record](../../../doc/img/RadioPagingDemod_plugin_details.png)
 
@@ -212,6 +210,6 @@ All records have interpretedBy = decoder.
 
 <h2>REST API</h2>
 
-Settings (RadioPagingDemodSettings): inputFrequencyOffset, rfBandwidth, channelAlias, pocsagEnabled, pocsagDeviation, pocsagDcCorrection, pocsagFill, pocsagFillCodes, pocsagCharset, flexEnabled, flexDeviation, flexDcCorrection, flexMaxMessageNumber, flexCharset, gscEnabled, gscDeviation, gscDcCorrection, gscCharset, gscVoiceTimeout, gscAudio, gscVoiceRecord, gscVoiceDirectory, gscVoiceKeepDays, gscVoiceKeepMin, volume, audioDeviceName and the usual channel settings (rgbColor, title, streamIndex, reverse API, channelMarker, rollupState).
+Settings (RadioPagingDemodSettings): inputFrequencyOffset, rfBandwidth, pocsagEnabled, pocsagDeviation, pocsagDcCorrection, pocsagFill, pocsagFillCodes, pocsagCharset, flexEnabled, flexDeviation, flexDcCorrection, flexMaxMessageNumber, flexCharset, gscEnabled, gscDeviation, gscDcCorrection, gscCharset, gscVoiceTimeout, gscAudio, gscVoiceRecord, gscVoiceDirectory, gscVoiceKeepDays, gscVoiceKeepMin, volume, audioDeviceName and the usual channel settings (rgbColor, title, streamIndex, reverse API, channelMarker, rollupState).
 
 Report (RadioPagingDemodReport): channelPowerDB, channelSampleRate, the state of each decoder (pocsag512Sync, pocsag1200Sync, pocsag2400Sync, flexSync, gscSync: 0 not synchronised, 1 synchronised, 2 synchronised on inverted polarity), flexMode and flexQuality of the last frame, flexErs, flexErsSeconds and flexErsCount, gscVoice, and the number of messages received per protocol (pocsagMessages, flexMessages, gscMessages).

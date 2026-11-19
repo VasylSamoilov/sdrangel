@@ -629,7 +629,7 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
     record.m_direction = MessageRecord::DirectionTX;
     record.m_kind = MessageRecord::KindMessage;
     record.m_frequency = m_centerFrequency + m_settings.m_inputFrequencyOffset;
-    record.m_channelAlias = m_settings.effectiveChannelAlias(record.m_frequency);
+    record.m_channelAlias = m_settings.channelName();
     record.m_deviceSetIndex = getDeviceSetIndex();
     record.m_channelIndex = getIndexInDeviceSet();
     record.m_centerFrequency = m_centerFrequency;
@@ -982,7 +982,7 @@ void RadioPagingMod::publishPageEvent(const QString& pageId, const QString& stat
     record.m_timestamp = QDateTime::currentMSecsSinceEpoch();
     record.m_kind = MessageRecord::KindEvent;
     record.m_direction = MessageRecord::DirectionTX;
-    record.m_channelAlias = m_settings.effectiveChannelAlias(m_centerFrequency + m_settings.m_inputFrequencyOffset);
+    record.m_channelAlias = m_settings.channelName();
     record.m_protocolData.insert("event", "page");
     record.m_protocolData.insert("state", state);
 
@@ -1001,7 +1001,7 @@ MessageRecord RadioPagingMod::endpointRecord(const QString& event)
     MessageEndpoint endpoint;
     int outstandingCount = outstanding();
     endpoint.m_frequency = m_centerFrequency + m_settings.m_inputFrequencyOffset;
-    endpoint.m_alias = m_settings.effectiveChannelAlias(endpoint.m_frequency);
+    endpoint.m_alias = m_settings.channelName();
     endpoint.m_role = MessageEndpoint::Transmitter;
     endpoint.m_status = (event == "unregister") ? MessageEndpoint::Offline
         : (outstandingCount > 0) ? MessageEndpoint::Busy : MessageEndpoint::Idle;
@@ -1034,7 +1034,7 @@ void RadioPagingMod::announce(const QString& event)
     MessageRecord record = endpointRecord(event);
     QString alias = record.m_protocolData.value("endpoint").toString();
 
-    // The alias changed (it is the frequency by default): the old one is gone
+    // The name (the title) changed: the old one is gone
     if (!m_lastAlias.isEmpty() && (alias != m_lastAlias) && (event != "unregister"))
     {
         MessageRecord old = record;
@@ -1263,9 +1263,9 @@ void RadioPagingMod::applySettings(const QStringList& settingsKeys, const RadioP
         m_settings.applySettings(settingsKeys, settings);
     }
 
-    // A new alias, frequency offset or protocol is announced at once
+    // A new name (the title), frequency offset or protocol is announced at once
     if (m_announceTimer && !force
-        && (settingsKeys.contains("channelAlias") || settingsKeys.contains("inputFrequencyOffset")
+        && (settingsKeys.contains("title") || settingsKeys.contains("inputFrequencyOffset")
             || settingsKeys.contains("protocol") || settingsKeys.contains("mode") || settingsKeys.contains("mixPocsag"))) {
         announce("status");
     }
@@ -1580,9 +1580,6 @@ void RadioPagingMod::webapiUpdateChannelSettings(
     if (channelSettingsKeys.contains("gscVoiceSeconds")) {
         settings.m_gscVoiceSeconds = swg->getGscVoiceSeconds();
     }
-    if (channelSettingsKeys.contains("channelAlias") && swg->getChannelAlias()) {
-        settings.m_channelAlias = *swg->getChannelAlias();
-    }
     if (channelSettingsKeys.contains("gscVoiceDirectory") && swg->getGscVoiceDirectory()) {
         settings.m_gscVoiceDirectory = *swg->getGscVoiceDirectory();
     }
@@ -1801,7 +1798,6 @@ void RadioPagingMod::webapiFormatChannelSettings(SWGSDRangel::SWGChannelSettings
     swg->setGscVoiceSeconds(settings.m_gscVoiceSeconds);
     swg->setGscVoiceKeepDays(settings.m_gscVoiceKeepDays);
     swg->setGscVoiceKeepMin(settings.m_gscVoiceKeepMin);
-    swg->setChannelAlias(new QString(settings.m_channelAlias));
     swg->setGscVoiceDirectory(new QString(settings.m_gscVoiceDirectory));
     swg->setMixPocsag(settings.m_flexMixPocsag ? 1 : 0);
     swg->setPocsagDeviation(settings.m_pocsagDeviation);
@@ -2050,9 +2046,6 @@ void RadioPagingMod::webapiFormatChannelSettings(
     }
     if (channelSettingsKeys.contains("gscVoiceSeconds") || force) {
         swg->setGscVoiceSeconds(settings.m_gscVoiceSeconds);
-    }
-    if (channelSettingsKeys.contains("channelAlias") || force) {
-        swg->setChannelAlias(new QString(settings.m_channelAlias));
     }
     if (channelSettingsKeys.contains("gscVoiceDirectory") || force) {
         swg->setGscVoiceDirectory(new QString(settings.m_gscVoiceDirectory));

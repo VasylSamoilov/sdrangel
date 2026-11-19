@@ -139,9 +139,6 @@ RadioPagingModSettings:
       description: "GSC voice pages: the length of the voice in seconds (1 to 50). A longer sound file is cut at this length, a voice from the microphone ends at this length"
       type: integer
       format: int32
-    channelAlias:
-      description: "Name of the transmitter, set in the channel alias of the records of the messages sent and in the names of the files of the voice sent. Empty: the frequency of the channel in Hz"
-      type: string
     gscVoiceDirectory:
       description: "Directory of the files of the voice sent. Empty: radiopaging/voice/tx in the application data directory"
       type: string

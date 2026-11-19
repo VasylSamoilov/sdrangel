@@ -57,10 +57,9 @@ QString RadioPagingDemodSettings::voiceDirectory() const
     return RadioPagingVoiceStore::defaultDirectory("rx");
 }
 
-QString RadioPagingDemodSettings::effectiveChannelAlias(qint64 frequency) const
+QString RadioPagingDemodSettings::channelName() const
 {
-    QString alias = m_channelAlias.trimmed();
-    return alias.isEmpty() ? QString::number(frequency) : alias;
+    return m_title;
 }
 
 RadioPagingCharset::Key RadioPagingDemodSettings::defaultCharset(const char *protocol)
@@ -168,7 +167,6 @@ void RadioPagingDemodSettings::resetToDefaults()
     m_gscVoiceDirectory = "";
     m_gscVoiceKeepDays = 3;
     m_gscVoiceKeepMin = 50;
-    m_channelAlias = "";
     m_flexMaxMessageNumber = 63;
     m_volume = 1.0f;
     m_audioDeviceName = AudioDeviceManager::m_defaultDeviceName;
@@ -248,7 +246,6 @@ QByteArray RadioPagingDemodSettings::serialize() const
     s.writeString(32, m_gscVoiceDirectory);
     s.writeS32(33, m_gscVoiceKeepDays);
     s.writeS32(34, m_gscVoiceKeepMin);
-    s.writeString(35, m_channelAlias);
     s.writeS32(36, m_flexMaxMessageNumber);
     s.writeBlob(37, m_messageColumns);
     writeCharset(s, 38, m_pocsagCharset);
@@ -344,7 +341,6 @@ bool RadioPagingDemodSettings::deserialize(const QByteArray& data)
         d.readString(32, &m_gscVoiceDirectory, "");
         d.readS32(33, &m_gscVoiceKeepDays, 3);
         d.readS32(34, &m_gscVoiceKeepMin, 50);
-        d.readString(35, &m_channelAlias, "");
         d.readS32(36, &m_flexMaxMessageNumber, 63);
         m_flexMaxMessageNumber = std::max(0, std::min(63, m_flexMaxMessageNumber));
         d.readBlob(37, &m_messageColumns);
@@ -439,9 +435,6 @@ void RadioPagingDemodSettings::applySettings(const QStringList& settingsKeys, co
     }
     if (settingsKeys.contains("gscVoiceKeepMin")) {
         m_gscVoiceKeepMin = settings.m_gscVoiceKeepMin;
-    }
-    if (settingsKeys.contains("channelAlias")) {
-        m_channelAlias = settings.m_channelAlias;
     }
     if (settingsKeys.contains("flexMaxMessageNumber")) {
         m_flexMaxMessageNumber = settings.m_flexMaxMessageNumber;
@@ -592,9 +585,6 @@ QString RadioPagingDemodSettings::getDebugString(const QStringList& settingsKeys
     }
     if (settingsKeys.contains("gscVoiceKeepMin") || force) {
         ostr << " m_gscVoiceKeepMin: " << m_gscVoiceKeepMin;
-    }
-    if (settingsKeys.contains("channelAlias") || force) {
-        ostr << " m_channelAlias: " << m_channelAlias.toStdString();
     }
     if (settingsKeys.contains("flexMaxMessageNumber") || force) {
         ostr << " m_flexMaxMessageNumber: " << m_flexMaxMessageNumber;

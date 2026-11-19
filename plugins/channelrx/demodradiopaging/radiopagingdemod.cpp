@@ -115,7 +115,7 @@ void RadioPagingDemod::announce(const QString& event)
 {
     MessageEndpoint endpoint;
     endpoint.m_frequency = m_centerFrequency + m_settings.m_inputFrequencyOffset;
-    endpoint.m_alias = m_settings.effectiveChannelAlias(endpoint.m_frequency);
+    endpoint.m_alias = m_settings.channelName();
     endpoint.m_role = MessageEndpoint::Receiver;
     endpoint.m_status = (event == "unregister") ? MessageEndpoint::Offline : MessageEndpoint::Idle;
     endpoint.m_protocols = QStringList({"pocsag", "flex", "gsc"});
@@ -276,7 +276,7 @@ bool RadioPagingDemod::handleMessage(const Message& cmd)
 void RadioPagingDemod::publishRecord(MessageRecord record)
 {
     record.m_frequency = m_centerFrequency + m_settings.m_inputFrequencyOffset;
-    record.m_channelAlias = m_settings.effectiveChannelAlias(record.m_frequency);
+    record.m_channelAlias = m_settings.channelName();
     record.m_deviceSetIndex = getDeviceSetIndex();
     record.m_channelIndex = getIndexInDeviceSet();
     record.m_centerFrequency = m_centerFrequency;
@@ -411,8 +411,8 @@ void RadioPagingDemod::applySettings(const QStringList& settingsKeys, const Radi
         openLog(m_settings);
     }
 
-    // A new alias or frequency offset is announced at once
-    if (m_announceTimer && !force && (settingsKeys.contains("channelAlias") || settingsKeys.contains("inputFrequencyOffset"))) {
+    // A new name (the title) or frequency offset is announced at once
+    if (m_announceTimer && !force && (settingsKeys.contains("title") || settingsKeys.contains("inputFrequencyOffset"))) {
         announce("status");
     }
 }
@@ -650,9 +650,6 @@ void RadioPagingDemod::webapiUpdateChannelSettings(
     if (channelSettingsKeys.contains("gscDcCorrection")) {
         settings.m_gscDcCorrection = model->getGscDcCorrection() != 0;
     }
-    if (channelSettingsKeys.contains("channelAlias") && model->getChannelAlias()) {
-        settings.m_channelAlias = *model->getChannelAlias();
-    }
     if (channelSettingsKeys.contains("volume")) {
         settings.m_volume = model->getVolume();
     }
@@ -759,12 +756,6 @@ void RadioPagingDemod::webapiFormatChannelSettings(SWGSDRangel::SWGChannelSettin
     model->setPocsagDcCorrection(settings.m_pocsagDcCorrection ? 1 : 0);
     model->setFlexDcCorrection(settings.m_flexDcCorrection ? 1 : 0);
     model->setGscDcCorrection(settings.m_gscDcCorrection ? 1 : 0);
-
-    if (model->getChannelAlias()) {
-        *model->getChannelAlias() = settings.m_channelAlias;
-    } else {
-        model->setChannelAlias(new QString(settings.m_channelAlias));
-    }
 
     if (model->getGscVoiceDirectory()) {
         *model->getGscVoiceDirectory() = settings.m_gscVoiceDirectory;
@@ -971,9 +962,6 @@ void RadioPagingDemod::webapiFormatChannelSettings(
     }
     if (channelSettingsKeys.contains("gscDcCorrection") || force) {
         model->setGscDcCorrection(settings.m_gscDcCorrection ? 1 : 0);
-    }
-    if (channelSettingsKeys.contains("channelAlias") || force) {
-        model->setChannelAlias(new QString(settings.m_channelAlias));
     }
     if (channelSettingsKeys.contains("volume") || force) {
         model->setVolume(settings.m_volume);

@@ -74,8 +74,6 @@ SWGRadioPagingDemodSettings::SWGRadioPagingDemodSettings() {
     m_flex_dc_correction_isSet = false;
     gsc_dc_correction = 0;
     m_gsc_dc_correction_isSet = false;
-    channel_alias = nullptr;
-    m_channel_alias_isSet = false;
     volume = 0.0f;
     m_volume_isSet = false;
     audio_device_name = nullptr;
@@ -174,8 +172,6 @@ SWGRadioPagingDemodSettings::init() {
     m_flex_dc_correction_isSet = false;
     gsc_dc_correction = 0;
     m_gsc_dc_correction_isSet = false;
-    channel_alias = new QString("");
-    m_channel_alias_isSet = false;
     volume = 0.0f;
     m_volume_isSet = false;
     audio_device_name = new QString("");
@@ -257,9 +253,6 @@ SWGRadioPagingDemodSettings::cleanup() {
 
 
 
-    if(channel_alias != nullptr) { 
-        delete channel_alias;
-    }
 
     if(audio_device_name != nullptr) { 
         delete audio_device_name;
@@ -363,7 +356,6 @@ SWGRadioPagingDemodSettings::fromJsonObject(QJsonObject &pJson) {
     
     ::SWGSDRangel::setValue(&gsc_dc_correction, pJson["gscDcCorrection"], "qint32", "");
     
-    ::SWGSDRangel::setValue(&channel_alias, pJson["channelAlias"], "QString", "QString");
     
     ::SWGSDRangel::setValue(&volume, pJson["volume"], "float", "");
     
@@ -493,9 +485,6 @@ SWGRadioPagingDemodSettings::asJsonObject() {
     }
     if(m_gsc_dc_correction_isSet){
         obj->insert("gscDcCorrection", QJsonValue(gsc_dc_correction));
-    }
-    if(channel_alias != nullptr && *channel_alias != QString("")){
-        toJsonValue(QString("channelAlias"), channel_alias, obj, QString("QString"));
     }
     if(m_volume_isSet){
         obj->insert("volume", QJsonValue(volume));
@@ -797,16 +786,6 @@ SWGRadioPagingDemodSettings::setGscDcCorrection(qint32 gsc_dc_correction) {
     this->m_gsc_dc_correction_isSet = true;
 }
 
-QString*
-SWGRadioPagingDemodSettings::getChannelAlias() {
-    return channel_alias;
-}
-void
-SWGRadioPagingDemodSettings::setChannelAlias(QString* channel_alias) {
-    this->channel_alias = channel_alias;
-    this->m_channel_alias_isSet = true;
-}
-
 float
 SWGRadioPagingDemodSettings::getVolume() {
     return volume;
@@ -1099,9 +1078,6 @@ SWGRadioPagingDemodSettings::isSet(){
             isObjectUpdated = true; break;
         }
         if(m_gsc_dc_correction_isSet){
-            isObjectUpdated = true; break;
-        }
-        if(channel_alias && *channel_alias != QString("")){
             isObjectUpdated = true; break;
         }
         if(m_volume_isSet){

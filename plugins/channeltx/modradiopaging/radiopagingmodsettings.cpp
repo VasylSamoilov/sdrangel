@@ -36,10 +36,9 @@ QString RadioPagingModSettings::voiceDirectory() const
     return m_gscVoiceDirectory.isEmpty() ? RadioPagingVoiceStore::defaultDirectory("tx") : m_gscVoiceDirectory;
 }
 
-QString RadioPagingModSettings::effectiveChannelAlias(qint64 frequency) const
+QString RadioPagingModSettings::channelName() const
 {
-    QString alias = m_channelAlias.trimmed();
-    return alias.isEmpty() ? QString::number(frequency) : alias;
+    return m_title;
 }
 
 const RadioPagingCharset::Key& RadioPagingModSettings::charset(Protocol protocol) const
@@ -142,7 +141,6 @@ void RadioPagingModSettings::resetToDefaults()
     m_gscInverted = false;
     m_gscVoiceSeconds = 30;
     m_audioInputDeviceName = AudioDeviceManager::m_defaultDeviceName;
-    m_channelAlias = "";
     m_gscVoiceDirectory = "";
     m_gscVoiceKeepDays = 3;
     m_gscVoiceKeepMin = 50;
@@ -312,7 +310,6 @@ QByteArray RadioPagingModSettings::serialize() const
     s.writeBool(41, m_gscInverted);
     s.writeS32(42, m_gscVoiceSeconds);
     s.writeString(43, m_audioInputDeviceName);
-    s.writeString(44, m_channelAlias);
     s.writeString(45, m_gscVoiceDirectory);
     s.writeS32(46, m_gscVoiceKeepDays);
     s.writeS32(47, m_gscVoiceKeepMin);
@@ -423,7 +420,6 @@ bool RadioPagingModSettings::deserialize(const QByteArray& data)
         d.readBool(41, &m_gscInverted, false);
         d.readS32(42, &m_gscVoiceSeconds, 30);
         d.readString(43, &m_audioInputDeviceName, AudioDeviceManager::m_defaultDeviceName);
-        d.readString(44, &m_channelAlias, "");
         d.readString(45, &m_gscVoiceDirectory, "");
         d.readS32(46, &m_gscVoiceKeepDays, 3);
         d.readS32(47, &m_gscVoiceKeepMin, 50);
@@ -561,9 +557,6 @@ void RadioPagingModSettings::applySettings(const QStringList& settingsKeys, cons
     }
     if (settingsKeys.contains("audioInputDeviceName")) {
         m_audioInputDeviceName = settings.m_audioInputDeviceName;
-    }
-    if (settingsKeys.contains("channelAlias")) {
-        m_channelAlias = settings.m_channelAlias;
     }
     if (settingsKeys.contains("gscVoiceDirectory")) {
         m_gscVoiceDirectory = settings.m_gscVoiceDirectory;
@@ -744,9 +737,6 @@ QString RadioPagingModSettings::getDebugString(const QStringList& settingsKeys, 
     }
     if (settingsKeys.contains("audioInputDeviceName") || force) {
         ostr << " m_audioInputDeviceName: " << m_audioInputDeviceName.toStdString();
-    }
-    if (settingsKeys.contains("channelAlias") || force) {
-        ostr << " m_channelAlias: " << m_channelAlias.toStdString();
     }
     if (settingsKeys.contains("gscVoiceDirectory") || force) {
         ostr << " m_gscVoiceDirectory: " << m_gscVoiceDirectory.toStdString();

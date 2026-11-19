@@ -53,7 +53,6 @@ struct RadioPagingDemodSettings
     QString m_gscVoiceDirectory;                //!< Directory of the voice files, empty for the default (see voiceDirectory)
     int m_gscVoiceKeepDays;                     //!< Voice files older than this many days may be deleted, 0 to keep them all
     int m_gscVoiceKeepMin;                      //!< The newest voice files this many are not deleted
-    QString m_channelAlias;                     //!< Name of the demodulator in the message records and voice file names, empty for its frequency
     int m_flexMaxMessageNumber;                 //!< FLEX: largest message number of the network, 0-63: skipped numbers are reported
     Real m_volume;                              //!< Voice audio gain
     QString m_audioDeviceName;                  //!< Voice audio output
@@ -168,8 +167,8 @@ struct RadioPagingDemodSettings
 
     //!< The directory of the voice files: the one set, or radiopaging/voice in the application data
     QString voiceDirectory() const;
-    //!< The name of the demodulator: the alias set, or the frequency of the channel in Hz
-    QString effectiveChannelAlias(qint64 frequency) const;
+    //!< The name of the demodulator in the message records, the announcements and the voice file names: its title
+    QString channelName() const;
     //!< The default codepage of a protocol (pocsag, flex, gsc): generic ASCII
     static RadioPagingCharset::Key defaultCharset(const char *protocol);
     //!< The POCSAG fill codes of the setting, the codepage the one of the messages

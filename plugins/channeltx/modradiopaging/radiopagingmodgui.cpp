@@ -915,12 +915,6 @@ void RadioPagingModGUI::updateLive(const RadioPagingModSource::Status& status)
     }
 }
 
-void RadioPagingModGUI::on_channelAlias_editingFinished()
-{
-    m_settings.m_channelAlias = ui->channelAlias->text().trimmed();
-    applySettings(QStringList("channelAlias"));
-}
-
 // The last messages transmitted: a row per message, its state updated as it is sent or dropped; a copy
 // (retransmission) has a row of its own
 void RadioPagingModGUI::showTx(const MessageRecord& record, const QString& status)
@@ -1263,7 +1257,6 @@ void RadioPagingModGUI::displayProtocol()
     }
 
     ui->voiceSeconds->setValue(m_settings.m_gscVoiceSeconds);
-    ui->channelAlias->setText(m_settings.m_channelAlias);
     ui->voiceSecondsLabel->setVisible(gsc);
     ui->voiceSeconds->setVisible(gsc);
 
@@ -1576,7 +1569,6 @@ void RadioPagingModGUI::makeUIConnections()
     QObject::connect(ui->composer, &PagingComposer::sendRequested, this, &RadioPagingModGUI::send);
     QObject::connect(ui->composer, &PagingComposer::microphoneInputRequested, this, [this]() { micAudioSelect(QCursor::pos()); });
     QObject::connect(&m_micFifo, &AudioFifo::dataReady, this, &RadioPagingModGUI::micDataReady);
-    QObject::connect(ui->channelAlias, &QLineEdit::editingFinished, this, &RadioPagingModGUI::on_channelAlias_editingFinished);
     QObject::connect(ui->voiceFiles, &QToolButton::clicked, this, &RadioPagingModGUI::on_voiceFiles_clicked);
     QObject::connect(ui->clear, &QPushButton::clicked, this, &RadioPagingModGUI::on_clear_clicked);
     QObject::connect(ui->openMessageCenter, &QPushButton::clicked, this, []() { PagingMessageTable::openMessageCenter(); });

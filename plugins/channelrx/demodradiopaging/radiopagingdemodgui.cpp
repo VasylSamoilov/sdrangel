@@ -267,12 +267,6 @@ void RadioPagingDemodGUI::on_gscVoiceRecord_toggled(bool checked)
     applySettings(QStringList("gscVoiceRecord"));
 }
 
-void RadioPagingDemodGUI::on_channelAlias_editingFinished()
-{
-    m_settings.m_channelAlias = ui->channelAlias->text().trimmed();
-    applySettings(QStringList("channelAlias"));
-}
-
 namespace {
 
 QString sizeText(qint64 bytes)
@@ -1259,7 +1253,6 @@ void RadioPagingDemodGUI::displaySettings()
     ui->gscDeviation->setValue(m_settings.m_gscDeviation);
     ui->gscAudio->setChecked(m_settings.m_gscAudio);
     ui->gscVoiceRecord->setChecked(m_settings.m_gscVoiceRecord);
-    ui->channelAlias->setText(m_settings.m_channelAlias);
     displayVoiceRecordToolTip();
     ui->volume->setValue(std::round(m_settings.m_volume * 100.0f));
     ui->volumeText->setText(QString::number(ui->volume->value()));
@@ -2149,7 +2142,6 @@ void RadioPagingDemodGUI::makeUIConnections()
     QObject::connect(ui->gscAudio, &QToolButton::toggled, this, &RadioPagingDemodGUI::on_gscAudio_toggled);
     QObject::connect(ui->gscVoiceRecord, &QToolButton::toggled, this, &RadioPagingDemodGUI::on_gscVoiceRecord_toggled);
     QObject::connect(ui->gscVoiceFiles, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_gscVoiceFiles_clicked);
-    QObject::connect(ui->channelAlias, &QLineEdit::editingFinished, this, &RadioPagingDemodGUI::on_channelAlias_editingFinished);
     QObject::connect(ui->volume, &QDial::valueChanged, this, &RadioPagingDemodGUI::on_volume_valueChanged);
     QObject::connect(ui->clearTable, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_clearTable_clicked);
     QObject::connect(ui->openMessageCenter, &QPushButton::clicked, this, []() { PagingMessageTable::openMessageCenter(); });

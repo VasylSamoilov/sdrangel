@@ -89,9 +89,6 @@ RadioPagingDemodSettings:
       description: "GSC DC offset correction (1 for yes, the default, 0 for no)"
       type: integer
       format: int32
-    channelAlias:
-      description: "Name of the demodulator, set in the channel alias of every message record and in the names of the voice files. Empty: the frequency of the channel in Hz"
-      type: string
     volume:
       description: Voice audio gain
       type: number

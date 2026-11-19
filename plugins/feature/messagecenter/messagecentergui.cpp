@@ -143,7 +143,7 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     m_type = new QComboBox(this);
     m_type->addItems({"Any type", "alphanumeric", "numeric", "tone", "voice", "short_message", "binary", "secure"});
     m_alias = new QLineEdit(this);
-    m_alias->setPlaceholderText("channel alias");
+    m_alias->setPlaceholderText("channel name");
     m_address = new QLineEdit(this);
     m_address->setPlaceholderText("regular expression");
     m_text = new QLineEdit(this);
@@ -195,7 +195,7 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     layout->addWidget(m_direction, 0, 1);
     layout->addWidget(m_polarity, 0, 2);
     layout->addWidget(m_type, 0, 3);
-    layout->addWidget(labelled("Alias", m_alias), 1, 0);
+    layout->addWidget(labelled("Channel", m_alias), 1, 0);
     layout->addWidget(labelled("Address", m_address), 1, 1);
     layout->addWidget(labelled("Text", m_text), 1, 2, 1, 2);
     layout->addWidget(m_hideDuplicates, 2, 0, 1, 2);

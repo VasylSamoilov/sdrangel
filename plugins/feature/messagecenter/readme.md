@@ -23,7 +23,7 @@ The window has a tab for each section: Log, Channels, Queue, Page, Routes and Fi
 
 The messages received and sent, newest at the bottom (at most the log size, the oldest go first).
 
-* Filters: protocol, direction (RX, TX or both), polarity, message type, channel alias, address and text, hide duplicates, voice pages with a file only, and a regular expression on a field (see Routes). Address and text are regular expressions the whole field must match, as the filters of the other plugins of SDRangel: 12345.. for the addresses 1234500 to 1234599, .*FIRE.* for a text that contains FIRE, (?i) at the start for not case sensitive. An expression that is not valid is shown in red and selects nothing. Only the messages the filters select are shown. An address selects the FLEX group messages of which it is a member too (the members received with the assignments).
+* Filters: protocol, direction (RX, TX or both), polarity, message type, channel name, address and text, hide duplicates, voice pages with a file only, and a regular expression on a field (see Routes). Address and text are regular expressions the whole field must match, as the filters of the other plugins of SDRangel: 12345.. for the addresses 1234500 to 1234599, .*FIRE.* for a text that contains FIRE, (?i) at the start for not case sensitive. An expression that is not valid is shown in red and selects nothing. Only the messages the filters select are shown. An address selects the FLEX group messages of which it is a member too (the members received with the assignments).
 * The table has the columns of the message tables of the channels: time, direction, channel, protocol, rate, polarity, address, type, message, fragment, info, errors and state. Right click on the header selects the columns.
 * A click on the icon of a voice message plays its file. Double click on a message opens a window with all the fields of its record: the common fields, protocolData (the flags and parameters of the protocol) and the raw payload, also as bits.
 * Right click on a message: details, copy the cell, the row or the record as JSON, play the voice, select the audio output, and decode a received message again as the other type or with another codepage of its protocol.
@@ -35,14 +35,14 @@ The messages received and sent, newest at the bottom (at most the log size, the 
 
 <h3>Channels</h3>
 
-The channels that announced themselves: alias, role (receiver or transmitter), status (online, or offline when it has not announced itself for the silent time), protocols, speeds, polarity, the pages queued to it, and the time it was last seen.
+The channels that announced themselves: name (the title of the channel), role (receiver or transmitter), status (online, or offline when it has not announced itself for the silent time), protocols, speeds, polarity, the pages queued to it, and the time it was last seen.
 
-* A channel whose alias changes (the alias is the frequency by default) keeps one entry, of its new alias.
+* A channel renamed (its title changed) keeps one entry, of its new name.
 * Remove: removes the channel selected; it comes back when it announces itself again. Remove offline: removes the channels offline. The pages of a transmitter removed go back to the queue.
 
 <h3>Queue</h3>
 
-The pages to transmit, with the transmitter (alias), protocol, address, text, state, tries, retries and the reason of a failure. A page goes through pending, queued, claimed, transmitted and sent: the transmitter claims it and reports its state back. A page given to a transmitter that does not claim it within the claim timeout goes back to the queue; a page that can not be sent is dead.
+The pages to transmit, with the transmitter (its name), protocol, address, text, state, tries, retries and the reason of a failure. A page goes through pending, queued, claimed, transmitted and sent: the transmitter claims it and reports its state back. A page given to a transmitter that does not claim it within the claim timeout goes back to the queue; a page that can not be sent is dead.
 
 * Requeue: a dead page goes back to pending with its attempts reset.
 * Cancel: withdraws a page nobody has claimed, or a dead page.
@@ -52,7 +52,7 @@ The pages to transmit, with the transmitter (alias), protocol, address, text, st
 
 ![Message Center page composer and codepage table](../../../doc/img/MessageCenter_plugin_page.png)
 
-The composer of a page, the same as in the Radio Paging modulator: transmitter (alias), protocol, address, type, text and the fields of the protocol. Table opens the codepage table of the text. Post the page queues the page for the transmitter.
+The composer of a page, the same as in the Radio Paging modulator: transmitter (its name), protocol, address, type, text and the fields of the protocol. Table opens the codepage table of the text. Post the page queues the page for the transmitter.
 
 <h3>Routes</h3>
 
@@ -107,7 +107,7 @@ Report (`MessageCenterReport`): the number of messages logged and routed, the en
 
 Actions (`MessageCenterActions`):
 
-* `post`: a page to transmit (`MessageCenterPost`): transmitter alias, protocol, address, type, text and the fields of the protocol. The FLEX address takes the capcode forms of STD-43A Appendix A.
+* `post`: a page to transmit (`MessageCenterPost`): transmitter (its name), protocol, address, type, text and the fields of the protocol. The FLEX address takes the capcode forms of STD-43A Appendix A.
 * `requeue`, `cancel`: the id of a page.
 * `clearSent`: 1 to remove the pages sent.
 * `redecode`: a record of the log decoded again (`MessageCenterRedecode`: id, charset, type).
