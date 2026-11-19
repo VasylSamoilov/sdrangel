@@ -34,8 +34,10 @@
 // candidate batch, which is buffered. A batch is decoded when
 //   - its sync codeword is confirmed by another sync codeword one batch (544 bits) away,
 //     before or after it, or
-//   - the batch is valid by itself: all 16 codewords decode within the correction
-//     capacity of the code (this covers single batch transmissions).
+//   - no sync codeword follows it: up to the end of the signal in it (below). A sync
+//     codeword found alone (no preamble before it, none after it) needs a batch valid by
+//     itself (all 16 codewords decode) or with m_minExactCodewords received exactly: a
+//     sync codeword pattern in noise or in another signal is not decoded.
 // A transmission therefore needs no preamble to be acquired: a receiver that starts
 // listening during a transmission synchronises on two consecutive batches. Nothing is
 // predicted from earlier transmissions. While a candidate is not confirmed, a sync
@@ -46,17 +48,15 @@
 // message bits as received) and counted as uncorrectable.
 //
 // A batch that no sync codeword follows (the last batch of a transmission, or a batch
-// whose signal was lost or taken over by another transmission) is decoded up to its
-// first codeword that does not belong to the transmission: the first of two
-// indecipherable codewords in a row (one that cannot be decoded, or whose symbols are as
-// poor as noise), or one after which the symbols of the last four codewords are as poor
-// as noise.
-// A single indecipherable codeword is a lost codeword of the message, never an address.
-// Nothing from the cut on is decoded (no address can start there), the message in
-// progress ends truncated and so does the transmission. The quality of a codeword is the rms distance of its symbols
-// from the decided levels (feed() with the error); without it only the codeword checks
-// apply. A first batch whose sync codeword came after a preamble is decoded the same way
-// when the batch is not valid by itself.
+// whose signal was lost or taken over by another transmission) is decoded up to the end
+// of the signal in it: its last decipherable codeword (one that decodes on symbols better
+// than noise; noise has none). Indecipherable codewords before it are a burst of errors:
+// lost codewords of the message, never addresses. Corrected codewords just before the end
+// (the codeword the signal ended in, corrected to another one) are not taken. Nothing
+// after the end is decoded, the message in progress ends truncated and so does the
+// transmission. The quality of a codeword is the rms distance of its symbols from the
+// decided levels (feed() with the error); without it every codeword that decodes is
+// decipherable.
 //
 // Symbols are the output of an FSK demodulator, 1 = positive deviation. For normal
 // polarity a binary 1 is a negative deviation, inverted polarity is the opposite. A
@@ -114,14 +114,9 @@ public:
     void feed(int symbol);
     //!< Feed one symbol with its distance from the decided level (normalised, outer levels +/-1)
     void feed(int symbol, float error);
-    //!< Limits of the codewords of a batch no sync codeword follows: a codeword with a quality above
-    //!< wordNoiseQuality is indecipherable; from a codeword whose last four codewords have a quality above
-    //!< noiseQuality on, they do not belong to the transmission
-    void setNoiseQuality(float wordNoiseQuality, float noiseQuality)
-    {
-        m_wordNoiseQuality = wordNoiseQuality;
-        m_noiseQuality = noiseQuality;
-    }
+    //!< Limit of the codewords of a batch no sync codeword follows: a codeword with a quality above it is
+    //!< indecipherable (noise)
+    void setNoiseQuality(float wordNoiseQuality) { m_wordNoiseQuality = wordNoiseQuality; }
     //!< The sync codeword of the current candidate came after a preamble
     void setPreambleBefore() { m_preambleBefore = true; }
     //!< The input stopped: the codewords of the batch received so far are decoded as a batch no sync codeword
@@ -139,6 +134,9 @@ public:
     //!< Bit errors corrected in a sync codeword, the correction capacity of the code
     static const int m_maxSyncErrors = 2;
     static const int m_maxMessageBits = 20 * 400;
+    //!< Codewords received exactly in the batch of a sync codeword found alone (a batch of a transmission has idle,
+    //!< address and message codewords mostly received exactly; noise or another signal rarely one)
+    static const int m_minExactCodewords = 4;
 
 private:
     Polarity m_polarity;
@@ -152,12 +150,7 @@ private:
     float m_batchQuality[16];           //!< Their quality (rms symbol error), -1 if not known
     float m_wordError2;                 //!< Sum of the squared symbol errors of the codeword being received
     bool m_wordQualityKnown;
-    float m_recentQuality[4];           //!< Quality of the last four codewords received, ring
-    int m_recentPos;
-    int m_recentCount;
-    float m_batchWindow[16];            //!< rms quality of the four codewords up to each codeword of the batch
     float m_wordNoiseQuality;
-    float m_noiseQuality;
     bool m_preambleBefore;
     bool m_leadingConfirmed;            //!< The sync codeword of the current batch is confirmed
     int m_batch;                        //!< Batches decoded in the current transmission
@@ -185,6 +178,7 @@ private:
     void decodeBatch();
     bool decodeUnconfirmedBatch(int received = 16);
     bool decipherable(int slot) const;
+    int exactCodewords() const;
     void storeWord(int slot, uint32_t word);
     void endTransmission();
     void processCodeword(uint32_t word, bool lost = false);

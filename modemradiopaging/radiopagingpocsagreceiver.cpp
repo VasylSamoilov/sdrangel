@@ -35,13 +35,12 @@ void RadioPagingPocsagReceiver::create(double sampleRate, int baud)
     m_baud = baud;
     m_demod.create(sampleRate, baud, 2);
 
-    // Quality limits of the codewords of a batch no sync codeword follows (rms symbol error, outer levels
-    // +/-1), measured per speed with the FSK modulator through noise: the lowest value of one codeword and
-    // of four codewords of noise only, less a margin
+    // Quality limit of the codewords of a batch no sync codeword follows (rms symbol error, outer levels +/-1),
+    // measured per speed with the FSK modulator through noise: the lowest value of one codeword of noise only,
+    // less a margin
     float wordNoise = (baud <= 512) ? 0.72f : (baud <= 1200) ? 0.59f : 0.50f;
-    float noise = (baud <= 512) ? 0.78f : (baud <= 1200) ? 0.69f : 0.60f;
-    m_normal.setNoiseQuality(wordNoise, noise);
-    m_inverted.setNoiseQuality(wordNoise, noise);
+    m_normal.setNoiseQuality(wordNoise);
+    m_inverted.setNoiseQuality(wordNoise);
 
     reset();
 }

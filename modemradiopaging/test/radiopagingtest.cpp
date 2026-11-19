@@ -639,7 +639,7 @@ void testPocsagSignalLost()
             std::mt19937 rng(100 * seed + word);
             std::uniform_real_distribution<float> noiseError(0.7f, 1.2f);
             RadioPagingPocsagDecoder decoder(RadioPagingPocsagDecoder::Normal);
-            decoder.setNoiseQuality(0.59f, 0.69f);
+            decoder.setNoiseQuality(0.59f);
             std::vector<RadioPagingPocsagDecoder::Message> messages;
 
             for (int i = 0; i < cut + 32 * 17 * 3; i++)
@@ -735,12 +735,25 @@ void testPocsagStandardRules()
     singleBits.insert(singleBits.begin(), 40, 0);
     check(hasAddressText(decodeBits(singleBits), 77, "single"), "POCSAG decoder: a valid single batch is decoded without preamble");
 
-    // A single batch with an undecodable codeword has no confirming sync codeword: dropped
+    // A single batch with an undecodable codeword has no confirming sync codeword: its codewords received exactly show a
+    // transmission, it is decoded
     std::vector<uint8_t> badSingle = single.m_bits;
     for (int i = 0; i < 3; i++) {
         badSingle[32 * 15 + 2 + 9 * i] ^= 1;    // 3 errors in the last idle codeword
     }
-    check(decodeBits(badSingle).empty(), "POCSAG decoder: an unconfirmed batch with an undecodable codeword is not decoded");
+    // (the undecodable codeword, an idle codeword after the message, is kept in it marked lost)
+    std::vector<RadioPagingPocsagDecoder::Message> badDecoded = decodeBits(badSingle);
+    check((badDecoded.size() == 1) && (badDecoded[0].m_address == 77)
+        && (RadioPagingPocsag::interpret(badDecoded[0].m_rawData, badDecoded[0].m_rawBits).m_text.compare(0, 6, "single") == 0)
+        && (badDecoded[0].m_wordStatus.back() == 'X'), "POCSAG decoder: an unconfirmed batch with an undecodable codeword is decoded");
+
+    // A sync codeword pattern alone, noise after it: not decoded
+    std::vector<uint8_t> syncAlone(single.m_bits.begin(), single.m_bits.begin() + 32);
+    std::mt19937 noiseRng(5);
+    for (int i = 0; i < 32 * 17; i++) {
+        syncAlone.push_back(noiseRng() & 1);
+    }
+    check(decodeBits(syncAlone).empty(), "POCSAG decoder: a sync codeword pattern followed by noise gives no message");
 
     // The same damage in the last batch of a multi-batch transmission: its sync codeword is
     // confirmed by the previous one, the batch is decoded
