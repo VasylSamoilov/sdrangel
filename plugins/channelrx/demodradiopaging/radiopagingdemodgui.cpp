@@ -43,7 +43,6 @@
 #include <QVBoxLayout>
 #include <QPainter>
 #include <QRegularExpression>
-#include <QFontDatabase>
 #include <QScrollBar>
 #include <QStyledItemDelegate>
 #include <QTextDocument>
@@ -80,13 +79,8 @@
 
 namespace {
 
-// The fields of a status line, in characters of the fixed-pitch font
-const int statusStateWidth = 5;     // VOICE
-const int statusPolarityWidth = 4;  // NORM, INV
-const int statusDetailWidth = 16;   // 512 1200 2400
-const int statusQualityWidth = 10;  // BER 12.50%
-const int statusOffsetWidth = 12;   // Df -12500 Hz
-const int statusSpacing = 1;
+// Between the fields of a status line: a gap the line may wrap at (a field itself does not wrap)
+const char *statusGap = "&nbsp;&nbsp; ";
 
 } // namespace
 
@@ -1325,9 +1319,6 @@ void RadioPagingDemodGUI::tick()
     m_tickCount++;
 }
 
-// Per protocol one line of fixed fields: SYNC (green) or HUNT (grey), what is received and its
-// polarity, the reception quality, the carrier offset and the number of messages. The
-// details of the last reception are in the tooltip
 // Extended FLEX status of the network of the last frame: frame, network time and
 // identification (once received several times the same), groups and reassemblies
 QStringList RadioPagingDemodGUI::flexDetails(const RadioPagingDemodSink::Status& status)
@@ -1476,27 +1467,35 @@ QString RadioPagingDemodGUI::qualityHtml(const RadioPagingBerWindow& ber, bool l
 
 namespace {
 
-// The fields of a status line, in characters of the fixed-pitch font
-// The text of a field padded to its width (characters beyond it are cut)
-QString statusField(const QString& html, int width)
+// A field of a status line kept in one piece: the spaces of its text (not those of its tags) do not break
+QString statusField(const QString& html)
 {
-    static const QRegularExpression tags("<[^>]*>");
-    QString visible = QString(html).remove(tags);
-    QString text = html;
+    static const QRegularExpression parts("(<[^>]*>)|([^<]+)");
+    QString out;
+    QRegularExpressionMatchIterator it = parts.globalMatch(html);
 
-    if (visible.size() > width)
+    while (it.hasNext())
     {
-        // Only the plain text of a field too long is cut
-        text = visible.left(width - 1) + "~";
-        visible = text;
+        QRegularExpressionMatch m = it.next();
+        out += m.captured(1).isEmpty() ? QString(m.captured(2)).replace(' ', "&nbsp;") : m.captured(1);
     }
 
-    QString padding;
-    for (int i = (int) visible.size(); i < width + statusSpacing; i++) {
-        padding += "&nbsp;";
+    return out;
+}
+
+// The fields of a line, those not empty, with the gap between them
+QString statusFields(const QStringList& fields)
+{
+    QStringList shown;
+
+    for (const QString& f : fields)
+    {
+        if (!f.isEmpty()) {
+            shown.append(statusField(f));
+        }
     }
 
-    return text + padding;
+    return shown.join(statusGap);
 }
 
 } // namespace
@@ -1593,14 +1592,10 @@ SlotStyle slotStyle(RadioPagingFlexDecoder::GroupState state)
 // network lines of each polarity received, under the button. FLEX adds the group slots of each polarity
 void RadioPagingDemodGUI::layoutProtocols()
 {
-    QFont fixed = QFontDatabase::systemFont(QFontDatabase::FixedFont);
-    double size = ui->pocsagStatus->font().pointSizeF();
-
-    if (size > 0) {
-        fixed.setPointSizeF(size);
-    }
-
-    QFont small = fixed;
+    // The font of the window for the live lines, one point smaller for the network lines
+    QFont normal = font();
+    double size = normal.pointSizeF();
+    QFont small = normal;
 
     if (size > 1) {
         small.setPointSizeF(size - 1.0);
@@ -1648,9 +1643,10 @@ void RadioPagingDemodGUI::layoutProtocols()
         live->addWidget(deviationLabel[p]);
         live->addWidget(deviation[p]);
         live->addWidget(dc[p]);
-        status[p]->setFont(fixed);
+        status[p]->setFont(normal);
         status[p]->setTextFormat(Qt::RichText);
-        status[p]->setWordWrap(false);
+        // A narrow window wraps the line between its fields; nothing is cut
+        status[p]->setWordWrap(true);
         status[p]->setMinimumHeight(0);
         status[p]->setMaximumHeight(QWIDGETSIZE_MAX);
         status[p]->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
@@ -1720,7 +1716,7 @@ void RadioPagingDemodGUI::layoutProtocols()
             m_networkLabel[p][pol] = new QLabel(block);
             m_networkLabel[p][pol]->setFont(small);
             m_networkLabel[p][pol]->setTextFormat(Qt::RichText);
-            m_networkLabel[p][pol]->setWordWrap(false);
+            m_networkLabel[p][pol]->setWordWrap(true);
             m_networkLabel[p][pol]->setContentsMargins(indent, 0, 0, 0);
             m_networkLabel[p][pol]->setVisible(false);
             column->addWidget(m_networkLabel[p][pol]);
@@ -1799,12 +1795,8 @@ QString RadioPagingDemodGUI::statusLine(const RadioPagingDemodSink::Status& stat
     bool both = status.m_pol[protocol][0].m_seen && status.m_pol[protocol][1].m_seen;
     QString polarity = (both || (pol == 1)) ? polarityHtml(pol == 1) : QString();
 
-    return statusField(stateHtml, statusStateWidth)
-        + statusField(sync ? value(detail, colourLive, true) : QString(), statusDetailWidth)
-        + statusField(polarity, statusPolarityWidth)
-        + statusField(ber, statusQualityWidth)
-        + statusField(offset, statusOffsetWidth)
-        + QString("(%1)").arg(status.m_messages[protocol]);
+    return statusFields({stateHtml, sync ? value(detail, colourLive, true) : QString(), polarity, ber, offset,
+        QString("(%1)").arg(status.m_messages[protocol])});
 }
 
 // The polarities received since the reset; the normal one while none was
@@ -1826,16 +1818,16 @@ QString RadioPagingDemodGUI::memoryLine(const RadioPagingDemodSink::Status& stat
     }
 
     const bool live = status.m_pol[protocol][pol].m_sync || status.m_pol[protocol][pol].m_berLive;
-    QString text = value(QString("MEM %1").arg(status.m_pol[protocol][pol].m_remembered), colourMemory, live);
+    QStringList fields = {value(QString("MEM %1").arg(status.m_pol[protocol][pol].m_remembered), colourMemory, live)};
 
     if (protocol == 1) {
-        text += " " + value(QString("FRAG %1").arg(status.m_flexReassembliesPol[pol]), colourMemory, live);
+        fields.append(value(QString("FRAG %1").arg(status.m_flexReassembliesPol[pol]), colourMemory, live));
     }
     if (status.m_resetTime[protocol] > 0) {
-        text += " " + coloured("RESET " + QDateTime::fromMSecsSinceEpoch(status.m_resetTime[protocol]).toString("HH:mm:ss"), colourInactive);
+        fields.append(coloured("RESET " + QDateTime::fromMSecsSinceEpoch(status.m_resetTime[protocol]).toString("HH:mm:ss"), colourInactive));
     }
 
-    return text;
+    return statusFields(fields);
 }
 
 // FLEX: the network of the last frame of the polarity. Line 1: cycle and frame, collapse, roaming and repeats, the network
@@ -1919,10 +1911,10 @@ QString RadioPagingDemodGUI::flexNetworkLines(const RadioPagingDemodSink::Status
     QStringList lines;
 
     if (!line1.isEmpty()) {
-        lines.append(line1.join("&nbsp;&nbsp;"));
+        lines.append(statusFields(line1));
     }
     if (!line2.isEmpty()) {
-        lines.append(line2.join("&nbsp;&nbsp;"));
+        lines.append(statusFields(line2));
     }
 
     return lines.join("<br>");
@@ -1958,11 +1950,9 @@ void RadioPagingDemodGUI::updateStatus()
         }
 
         bool both = shown[p][0] && shown[p][1];
-        QString tag = both ? statusField(polarityHtml(pol == 1), statusPolarityWidth) : QString();
-        QString pad = both ? statusField(QString(), statusPolarityWidth) : QString();
-
-        for (int i = 0; i < shownLines.size(); i++) {
-            shownLines[i] = ((i == 0) ? tag : pad) + shownLines[i];
+        // The polarity before the first line of each network when both were received
+        if (both) {
+            shownLines[0] = statusField(polarityHtml(pol == 1)) + statusGap + shownLines[0];
         }
 
         label->setText(shownLines.join("<br>"));
@@ -1985,7 +1975,7 @@ void RadioPagingDemodGUI::updateStatus()
     {
         QString batches = ((p == pol) && (status.m_pocsagBatches > 0))
             ? value(QString("B%1").arg(status.m_pocsagBatches), colourFrame, status.m_pol[0][p].m_berLive) : QString();
-        setNetwork(0, p, {batches.isEmpty() ? memoryLine(status, 0, p) : batches + "&nbsp;&nbsp;" + memoryLine(status, 0, p)});
+        setNetwork(0, p, {batches.isEmpty() ? memoryLine(status, 0, p) : statusField(batches) + statusGap + memoryLine(status, 0, p)});
     }
 
     // FLEX: between the frames the decoder hunts for the next sync 1; SYNC stays shown until
@@ -2043,7 +2033,7 @@ void RadioPagingDemodGUI::updateStatus()
             page = value(fields.join(" "), colourPage, status.m_pol[2][p].m_berLive);
         }
 
-        setNetwork(2, p, {page.isEmpty() ? memoryLine(status, 2, p) : page + "&nbsp;&nbsp;" + memoryLine(status, 2, p)});
+        setNetwork(2, p, {page.isEmpty() ? memoryLine(status, 2, p) : statusField(page) + statusGap + memoryLine(status, 2, p)});
     }
 
     QString pocsagTip = m_pocsagToolTip;
