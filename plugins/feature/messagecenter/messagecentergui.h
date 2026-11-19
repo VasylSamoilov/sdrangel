@@ -73,6 +73,9 @@ private:
     bool m_sourcesShown = false;
 };
 
+class QTabWidget;
+class QDialog;
+
 class MessageCenterGUI : public FeatureGUI
 {
     Q_OBJECT
@@ -115,6 +118,8 @@ private:
     PagingComposer *m_composer;
     // The routes and the files
     QTableWidget *m_routesTable;
+    QTabWidget *m_tabs;                 //!< The sections of the window
+    QDialog *m_optionsDialog;           //!< The options (log size, history, claim time, offline time)
     QSpinBox *m_logSize;
     QCheckBox *m_historyEnabled;
     QSpinBox *m_historyMaxMB;

@@ -18,6 +18,9 @@
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDialog>
+#include <QDialogButtonBox>
+#include <QTabWidget>
+#include <QToolButton>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QColorDialog>
@@ -57,7 +60,7 @@ QTableWidget *makeTable(const QStringList& headers, QWidget *parent)
     table->setSelectionMode(QAbstractItemView::SingleSelection);
     table->verticalHeader()->setVisible(false);
     table->horizontalHeader()->setStretchLastSection(true);
-    table->setMinimumHeight(140);
+    table->setMinimumHeight(60);
     table->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     return table;
 }
@@ -371,14 +374,46 @@ MessageCenterGUI::MessageCenterGUI(PluginAPI* pluginAPI, FeatureUISet *featureUI
     m_settings = m_center->settings();
     m_settings.setRollupState(&m_rollupState);
 
+    // The sections as tabs (as the APRS and Aircraft features), so that the window fits a small screen; the options in
+    // a dialog opened from the corner of the tabs
     RollupContents *rollupContents = getRollupContents();
-    buildLog(makeRollup("Log", true));
-    buildEndpoints(makeRollup("Channels", true));
-    buildQueue(makeRollup("Queue", true));
-    buildCompose(makeRollup("Page", false));
-    buildRoutes(makeRollup("Routes", true));
-    buildFiles(makeRollup("Files", true));
-    buildOptions(makeRollup("Options", false));
+    QWidget *main = makeRollup("Message Center", true);
+    QVBoxLayout *mainLayout = new QVBoxLayout(main);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
+    m_tabs = new QTabWidget(main);
+    m_tabs->setDocumentMode(true);
+    auto tab = [this](const QString& title) {
+        QWidget *w = new QWidget(m_tabs);
+        w->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        m_tabs->addTab(w, title);
+        return w;
+    };
+    buildLog(tab(tr("Log")));
+    buildEndpoints(tab(tr("Channels")));
+    buildQueue(tab(tr("Queue")));
+    buildCompose(tab(tr("Page")));
+    buildRoutes(tab(tr("Routes")));
+    buildFiles(tab(tr("Files")));
+    mainLayout->addWidget(m_tabs);
+
+    m_optionsDialog = new QDialog(this);
+    m_optionsDialog->setWindowTitle(tr("Message Center options"));
+    QVBoxLayout *optionsLayout = new QVBoxLayout(m_optionsDialog);
+    QWidget *options = new QWidget(m_optionsDialog);
+    buildOptions(options);
+    optionsLayout->addWidget(options);
+    QDialogButtonBox *optionsButtons = new QDialogButtonBox(QDialogButtonBox::Close, m_optionsDialog);
+    connect(optionsButtons, &QDialogButtonBox::rejected, m_optionsDialog, &QDialog::hide);
+    optionsLayout->addWidget(optionsButtons);
+    new DialogPositioner(m_optionsDialog, true);
+    QToolButton *optionsButton = new QToolButton(m_tabs);
+    optionsButton->setIcon(QIcon(":/listing.png"));
+    optionsButton->setToolTip(tr("Options: log size, history file, claim time of the pages, time to offline of the channels"));
+    connect(optionsButton, &QToolButton::clicked, this, [this]() {
+        m_optionsDialog->show();
+        m_optionsDialog->raise();
+    });
+    m_tabs->setCornerWidget(optionsButton, Qt::TopRightCorner);
     rollupContents->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     rollupContents->arrangeRollups();
     connect(rollupContents, SIGNAL(widgetRolled(QWidget*,bool)), this, SLOT(onWidgetRolled(QWidget*,bool)));
@@ -403,7 +438,7 @@ void MessageCenterGUI::buildLog(QWidget *container)
     layout->setContentsMargins(2, 2, 2, 2);
     m_logFilter = new MessageCenterFilterWidget(container);
     m_logTable = new PagingMessageTable(container);
-    m_logTable->setMinimumHeight(220);
+    m_logTable->setMinimumHeight(80);
     m_logTable->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_logTable->setMaxRows(m_maxLogRows);
     m_logTable->setDefaultColumns({PagingMessageTable::ColDate, PagingMessageTable::ColTime, PagingMessageTable::ColDirection, PagingMessageTable::ColChannel,
