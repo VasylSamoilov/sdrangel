@@ -1541,11 +1541,11 @@ namespace {
 
 const char *colourInactive = "#888888";
 const char *colourLive = "#e8e8e8";         // Values of a reception in progress
-const char *colourFrame = "#9cc3e6";        // FLEX cycle and frame
-const char *colourFlags = "#c7a6e6";        // FLEX collapse, roaming, repeats
-const char *colourSystem = "#e6cf9c";       // FLEX system ID
-const char *colourMemory = "#9cd6cc";       // What the receivers remember
-const char *colourPage = "#e6b89c";         // GSC page: preamble, batch, slot
+const char *colourFrame = "#b8b8b8";        // FLEX cycle and frame
+const char *colourFlags = "#b8b8b8";        // FLEX collapse, roaming, repeats
+const char *colourSystem = "#b8b8b8";       // FLEX system ID
+const char *colourMemory = "#b8b8b8";       // What the receivers remember
+const char *colourPage = "#b8b8b8";         // GSC page: preamble, batch, slot
 
 QString coloured(const QString& text, const QString& colour)
 {
@@ -1633,49 +1633,38 @@ void RadioPagingDemodGUI::layoutProtocols()
         column->setContentsMargins(0, 0, 0, 0);
         column->setSpacing(1);
 
-        QHBoxLayout *live = new QHBoxLayout();
-        enabled[p]->setMinimumWidth(0);
-        enabled[p]->setMaximumWidth(QWIDGETSIZE_MAX);
-        enabled[p]->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-        live->addWidget(enabled[p]);
-        live->addWidget(deviationLabel[p]);
-        live->addWidget(deviation[p]);
-        live->addWidget(dc[p]);
-        status[p]->setFont(normal);
-        status[p]->setTextFormat(Qt::RichText);
-        // A narrow window wraps the line between its fields; nothing is cut
-        status[p]->setWordWrap(true);
-        status[p]->setMinimumHeight(0);
-        status[p]->setMaximumHeight(QWIDGETSIZE_MAX);
-        status[p]->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-        live->addWidget(status[p], 1);
-        column->addLayout(live);
-
-        // The options of the protocol under its fields: each label with its field, the codepage with its editor and the
-        // reset button; a narrow window wraps them to more lines
-        QWidget *optionsWidget = new QWidget(block);
-        FlowLayout *options = new FlowLayout(optionsWidget, 0, 6, 2);
-        optionsWidget->setContentsMargins(indent, 0, 0, 0);
-        auto group = [&](QLabel *label, QWidget *field, QLayout *fields = nullptr) {
-            QWidget *w = new QWidget(optionsWidget);
+        // The controls of the protocol on one line, as the settings lines of the other channels: its switch, then each
+        // label with its field (deviation, DC correction, strip or voice, codepage) and the small buttons of the
+        // codepage editor and the reset; a narrow window wraps them
+        QWidget *controls = new QWidget(block);
+        FlowLayout *flow = new FlowLayout(controls, 0, 6, 2);
+        auto group = [&](QWidget *first, QWidget *field = nullptr, QLayout *fields = nullptr) {
+            QWidget *w = new QWidget(controls);
             QHBoxLayout *row = new QHBoxLayout(w);
             row->setContentsMargins(0, 0, 0, 0);
             row->setSpacing(3);
-            row->addWidget(label);
+            row->addWidget(first);
             if (field) {
                 row->addWidget(field);
             }
             if (fields) {
                 row->addLayout(fields);
             }
-            options->addWidget(w);
+            flow->addWidget(w);
             return row;
         };
 
+        enabled[p]->setMinimumWidth(0);
+        enabled[p]->setMaximumWidth(QWIDGETSIZE_MAX);
+        enabled[p]->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        QHBoxLayout *head = group(enabled[p], deviationLabel[p], nullptr);
+        head->addWidget(deviation[p]);
+        head->addWidget(dc[p]);
+
         if (p == 0) {
-            group(new QLabel(tr("Strip"), optionsWidget), ui->pocsagFill);
+            group(new QLabel(tr("Strip"), controls), ui->pocsagFill);
         } else if (p == 2) {
-            group(new QLabel(tr("Voice"), optionsWidget), nullptr, ui->gscVoiceLayout);
+            group(new QLabel(tr("Voice"), controls), nullptr, ui->gscVoiceLayout);
         }
 
         if (p == 2)
@@ -1685,25 +1674,36 @@ void RadioPagingDemodGUI::layoutProtocols()
             charset[p]->setSizeAdjustPolicy(QComboBox::AdjustToContents);
         }
 
-        m_codepageLabel[p] = new QLabel(tr("Codepage"), optionsWidget);
+        m_codepageLabel[p] = new QLabel(tr("Codepage"), controls);
         QHBoxLayout *codepage = group(m_codepageLabel[p], charset[p]);
 
-        // The custom codepage of the protocol: its editor
-        QToolButton *custom = new QToolButton(optionsWidget);
-        custom->setText(tr("Custom..."));
+        // The custom codepage of the protocol: its editor (the character set button of the Pager demodulator)
+        QToolButton *custom = new QToolButton(controls);
+        custom->setIcon(QIcon(":/keyboard.png"));
         custom->setToolTip(tr("Edit the custom codepage of %1: the character of each code and the direction of the text.\n"
             "Choose Custom in the codepages to decode with it").arg(names[p]));
         connect(custom, &QToolButton::clicked, this, [this, p]() { editCustomCodepage(p); });
         codepage->addWidget(custom);
 
-        QToolButton *reset = new QToolButton(optionsWidget);
+        QToolButton *reset = new QToolButton(controls);
         reset->setIcon(QIcon(":/recycle.png"));
         reset->setToolTip(tr("Forget what the %1 receivers remember: the messages for duplicate detection%2.\n"
             "Done when the device starts too, so that a file played again is not taken as duplicates")
             .arg(names[p]).arg(p == 1 ? tr(", fragments, groups, message numbers and network time") : QString()));
         connect(reset, &QToolButton::clicked, this, [this, p]() { m_radioPagingDemod->resetProtocol(p); });
         codepage->addWidget(reset);
-        column->addWidget(optionsWidget);
+        column->addWidget(controls);
+
+        // Its status under the controls: the network being received, then a line for each network (polarity)
+        status[p]->setFont(normal);
+        status[p]->setTextFormat(Qt::RichText);
+        // A narrow window wraps the line between its fields; nothing is cut
+        status[p]->setWordWrap(true);
+        status[p]->setMinimumHeight(0);
+        status[p]->setMaximumHeight(QWIDGETSIZE_MAX);
+        status[p]->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+        status[p]->setContentsMargins(indent, 0, 0, 0);
+        column->addWidget(status[p]);
 
         for (int pol = 0; pol < 2; pol++)
         {
