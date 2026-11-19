@@ -916,6 +916,35 @@ void testErrors()
 
         check(found && (d.status().m_codewordsUncorrectable == 1), "errors: uncorrectable counter");
 
+        // The same word with one of its error bits the least reliable of the frame: soft decision gives the word
+        // sent, its characters still marked uncertain and the word counted uncorrectable
+        {
+            Dec::RxFrame soft = bad2;
+            const int block = target / 8;
+            const int k = target % 8;
+            int errorBit = 0;
+
+            while (((mask >> errorBit) & 1) == 0) {
+                errorBit++;
+            }
+
+            const int j = 31 - errorBit;
+            soft.m_phases[0].m_reliability.assign(32 * 88, 200);
+            soft.m_phases[0].m_reliability[(block * 8 + j / 4) * 32 + 8 * (j % 4) + k] = 5;
+
+            Dec ds;
+            bool softOk = false;
+
+            for (const Dec::Message& m : ds.decodeFrame(soft))
+            {
+                if (m.m_typeName == "alphanumeric") {
+                    softOk = (m.m_text == tx.m_text) && (m.m_charStatus.find('u') != std::string::npos) && (m.m_wordsUncorrectable == 1);
+                }
+            }
+
+            check(softOk, "errors: soft decision of an uncorrectable word gives the word sent, marked uncertain");
+        }
+
         // Erased codewords
         Dec::RxFrame erased = clean;
         erased.m_phases[0].m_erased.assign(Flex::m_wordsPerFrame, 0);

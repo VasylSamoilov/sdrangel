@@ -101,6 +101,10 @@ public:
         //! 88 flags (may be empty = none): non zero if the codeword is lost (carrier lost). The
         //! index is the codeword index after deinterleaving, block * 8 + word in block
         std::vector<uint8_t> m_erased;
+        //! Reliability of each received bit (may be empty = none), 32 for each word of m_words in transmission
+        //! order (index word * 32 + 31 - bit): the larger the more reliable. Only used to choose the characters
+        //! shown for a word that cannot be corrected (see Word::m_received)
+        std::vector<uint8_t> m_reliability;
     };
 
     struct RxFrame
@@ -464,7 +468,9 @@ private:
     struct Word
     {
         uint32_t m_data = 0;                //!< 21 data bits d0-d20 (d0 in bit 0)
-        uint32_t m_received = 0;            //!< Data bits as received, for a word that could not be corrected
+        //! Data bits of a word that could not be corrected: as received, or the word one flip of its three least
+        //! reliable bits and BCH correct to (soft decision, the most likely), shown marked uncertain
+        uint32_t m_received = 0;
         bool m_hasReceived = false;         //!< m_received holds the bits of a received (not erased) word
         uint8_t m_status = WordNotReceived;
         uint8_t m_bits = 0;                 //!< Bits corrected
@@ -670,6 +676,7 @@ private:
     void setTempOutcome(int slot, GroupState state, const TempSlot& group);
 
     static Word decodeWord(uint32_t raw, bool erased);
+    static bool softDecode(uint32_t raw, const uint8_t reliability[32], uint32_t& codeword);
     bool decodeFiw(const RxFrame& frame);
     void decodePhase(const RxPhase& phase);
     void decodeSubframes(int phaseIndex);

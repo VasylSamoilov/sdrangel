@@ -181,6 +181,59 @@ RadioPagingFlexDecoder::Word RadioPagingFlexDecoder::decodeWord(uint32_t raw, bo
     return word;
 }
 
+// Soft decision for a word BCH cannot correct (Chase): each of its three least reliable bits flipped in turn, the
+// word BCH corrects that to is a candidate; the candidate whose changed bits have the smallest summed reliability is
+// taken, none when two different codewords tie. reliability: of bits 0-31 of raw
+bool RadioPagingFlexDecoder::softDecode(uint32_t raw, const uint8_t reliability[32], uint32_t& codeword)
+{
+    int order[32];
+
+    for (int b = 0; b < 32; b++) {
+        order[b] = b;
+    }
+
+    std::partial_sort(order, order + 3, order + 32, [&](int a, int b) {
+        return (reliability[a] < reliability[b]) || ((reliability[a] == reliability[b]) && (a < b));
+    });
+
+    bool found = false;
+    bool tie = false;
+    int bestMetric = 0;
+
+    for (int k = 0; k < 3; k++)
+    {
+        RadioPagingBCH::Result result = RadioPagingBCH::decode(raw ^ (1u << order[k]));
+
+        if (result.m_bitErrors < 0) {
+            continue;
+        }
+
+        uint32_t changed = result.m_word ^ raw;
+        int metric = 0;
+
+        for (int b = 0; b < 32; b++)
+        {
+            if ((changed >> b) & 1) {
+                metric += reliability[b];
+            }
+        }
+
+        if (!found || (metric < bestMetric))
+        {
+            found = true;
+            tie = false;
+            bestMetric = metric;
+            codeword = result.m_word;
+        }
+        else if ((metric == bestMetric) && (result.m_word != codeword))
+        {
+            tie = true;
+        }
+    }
+
+    return found && !tie;
+}
+
 bool RadioPagingFlexDecoder::decodeFiw(const RxFrame& frame)
 {
     Word word = decodeWord(frame.m_fiw, false);
@@ -451,6 +504,25 @@ void RadioPagingFlexDecoder::decodePhase(const RxPhase& phase)
 
         m_w[i] = decodeWord(raw[i], erased[i]);
         m_status.m_codewords++;
+
+        // A received word that cannot be corrected: its characters are those of the most likely word
+        if ((m_w[i].m_status == WordUncorrectable) && m_w[i].m_hasReceived && (phase.m_reliability.size() >= 32 * (size_t) wordsPerFrame))
+        {
+            // Deinterleaved word i = block * 8 + k: its bit 31 - j is bit j of byte j of the block (interleaved
+            // word j / 4, bit 31 - 8 * (j % 4) - k), transmitted as bit index (block * 8 + j / 4) * 32 + 8 * (j % 4) + k
+            const int block = i / RadioPagingFlex::m_wordsPerBlock;
+            const int k = i % RadioPagingFlex::m_wordsPerBlock;
+            uint8_t reliability[32];
+            uint32_t codeword;
+
+            for (int j = 0; j < 32; j++) {
+                reliability[31 - j] = phase.m_reliability[(block * 8 + j / 4) * 32 + 8 * (j % 4) + k];
+            }
+
+            if (softDecode(raw[i], reliability, codeword)) {
+                m_w[i].m_received = RadioPagingFlex::wordData(codeword);
+            }
+        }
 
         // Erased words were not received: they tell nothing about the bit errors
         if (!erased[i])

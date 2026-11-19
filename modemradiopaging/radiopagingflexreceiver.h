@@ -164,6 +164,7 @@ private:
     int m_s2Count;
     uint32_t m_s2Reg;                   //!< Bits of the second sync, newest in bit 0
     std::vector<uint8_t> m_s2Tail;      //!< Symbols around the nominal end of the second sync
+    std::vector<float> m_s2TailSoft;    //!< Their normalised values
     int m_s2TailStart;
     int m_s2ExactEnd;                   //!< Symbol count at which inverted C ended without errors, -1 if not seen
 
@@ -172,6 +173,9 @@ private:
     int m_bitIndex;                     //!< Bit index in the phase words
     bool m_secondOfPair;                //!< 6400/4 and 3200/2: second symbol of a pair
     std::vector<std::vector<uint32_t>> m_words;
+    //! Reliability of each bit of m_words (bit index of the phase): distance of its symbol from the decision
+    //! threshold of the bit, 100 = the outer level deviation, at most 255
+    std::vector<std::vector<uint8_t>> m_reliability;
     std::vector<double> m_blockPower;
     std::vector<int> m_blockSamples;
     double m_errorSum;
@@ -206,9 +210,9 @@ private:
     bool m_levelsMeasured = false;
     float m_measuredDc = 0.0f;
     void startData(float offset);
-    void dataSymbol(int symbol, float error, float magsq);
-    void sync2Symbol(int symbol);
-    void storeDataSymbol(int symbol, float magsq);
+    void dataSymbol(int symbol, float error, float soft, float magsq);
+    void sync2Symbol(int symbol, float soft);
+    void storeDataSymbol(int symbol, float soft, float magsq);
     void endFrame(bool partial = false);
     void backToHunting(bool keepHistory = false);
     int mirror(int symbol, int levels) const { return m_inverted ? (levels - 1 - symbol) : symbol; }
