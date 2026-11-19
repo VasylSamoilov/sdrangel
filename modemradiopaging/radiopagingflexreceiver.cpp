@@ -67,6 +67,7 @@ int popcount32(uint32_t x)
 RadioPagingFlexReceiver::RadioPagingFlexReceiver() :
     m_sampleRate(38400.0),
     m_syncPower(1.0),
+    m_s2Symbols(0),
     m_syncSymbols(0),
     m_ersFirst(0),
     m_ersLast(0),

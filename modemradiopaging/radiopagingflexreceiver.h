@@ -159,7 +159,7 @@ private:
     uint32_t m_fiw = 0;
     int m_fiwBits = 0;
 
-    int m_s2Symbols = 0;                //!< Nominal second sync length in symbols
+    int m_s2Symbols;                    //!< Nominal second sync length in symbols
     int m_s2Count;
     uint32_t m_s2Reg;                   //!< Bits of the second sync, newest in bit 0
     std::vector<uint8_t> m_s2Tail;      //!< Symbols around the nominal end of the second sync
