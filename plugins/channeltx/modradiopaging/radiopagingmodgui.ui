@@ -176,6 +176,13 @@
     <item>
      <layout class="QHBoxLayout" name="protocolLayout">
       <item>
+       <widget class="QLabel" name="protocolLabel">
+        <property name="text">
+         <string>Protocol</string>
+        </property>
+       </widget>
+      </item>
+      <item>
        <widget class="QComboBox" name="protocol">
         <property name="toolTip">
          <string>Protocol transmitted by this channel</string>
@@ -195,6 +202,13 @@
           <string>GSC</string>
          </property>
         </item>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="modeLabel">
+        <property name="text">
+         <string>Mode</string>
+        </property>
        </widget>
       </item>
       <item>
@@ -237,6 +251,13 @@
         </property>
         <property name="value">
          <number>4500</number>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="charsetLabel">
+        <property name="text">
+         <string>Codepage</string>
         </property>
        </widget>
       </item>

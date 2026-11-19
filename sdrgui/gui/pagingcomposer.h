@@ -115,6 +115,10 @@ private:
     QToolButton *m_micInput;
     QPushButton *m_send;
     QLabel *m_overrideLabel;
+    QLabel *m_polarityLabel;
+    QLabel *m_charsetLabel;
+    QLabel *m_intervalLabel;
+    QLabel *m_delayLabel;
     QComboBox *m_speed;
     QComboBox *m_polarity;
     QLabel *m_shortLabel;

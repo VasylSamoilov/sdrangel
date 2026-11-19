@@ -1084,6 +1084,19 @@ RadioPagingModGUI::RadioPagingModGUI(PluginAPI* pluginAPI, DeviceUISet *deviceUI
     RollupContents *rollupContents = getRollupContents();
     ui->setupUi(rollupContents);
     setSizePolicy(rollupContents->sizePolicy());
+
+    // The fields of the network settings keep their size, an empty last column takes the width left (as the settings
+    // lines of the other channels), instead of fields stretched across the window
+    for (QComboBox *combo : ui->networkContainer->findChildren<QComboBox*>()) {
+        combo->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    }
+    for (QAbstractSpinBox *spin : ui->networkContainer->findChildren<QAbstractSpinBox*>()) {
+        spin->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    }
+    ui->networkLayout->setColumnStretch(ui->networkLayout->columnCount(), 1);
+
+    // The log of the requests and events: a few lines under the table of the messages
+    ui->log->setMaximumHeight(ui->log->fontMetrics().lineSpacing() * 5 + 2 * ui->log->frameWidth() + 8);
     rollupContents->arrangeRollups();
     connect(rollupContents, SIGNAL(widgetRolled(QWidget*,bool)), this, SLOT(onWidgetRolled(QWidget*,bool)));
     connect(this, SIGNAL(customContextMenuRequested(const QPoint &)), this, SLOT(onMenuDialogCalled(const QPoint &)));

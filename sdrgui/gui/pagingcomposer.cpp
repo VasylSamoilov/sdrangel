@@ -95,6 +95,7 @@ PagingComposer::PagingComposer(QWidget *parent) :
     m_polarity = new QComboBox(this);
     m_polarity->addItems({tr("Default"), tr("Normal"), tr("Inverted")});
     m_polarity->setToolTip(tr("Polarity of this message; Default is the polarity set for the channel"));
+    m_polarityLabel = new QLabel(tr("Polarity"), this);
     m_overrideLabel = new QLabel(tr("Speed"), this);
     m_speed = new QComboBox(this);
     m_speed->addItem(tr("Default"));
@@ -106,6 +107,7 @@ PagingComposer::PagingComposer(QWidget *parent) :
     m_speed->setToolTip(tr("POCSAG speed of this message; Default is the speed set for the channel"));
 
     m_textLabel = new QLabel(tr("Text"), this);
+    m_charsetLabel = new QLabel(tr("Codepage"), this);
     m_text = new QLineEdit(this);
     m_charset = new QComboBox(this);
     m_charset->setMaximumWidth(160);
@@ -160,6 +162,8 @@ PagingComposer::PagingComposer(QWidget *parent) :
         "01 data defined separately (hex digits, not terminated), 10 binary (hex digits)"));
 
     m_scheduleLabel = new QLabel(tr("Copies"), this);
+    m_intervalLabel = new QLabel(tr("every"), this);
+    m_delayLabel = new QLabel(tr("first after"), this);
     m_retransmit = new QSpinBox(this);
     m_retransmit->setRange(0, RadioPagingFlexEncoder::m_maxRetransmit);
     m_retransmit->setToolTip(tr("Network mode: copies sent after the message. POCSAG 0 to 10;\n"
@@ -204,11 +208,14 @@ PagingComposer::PagingComposer(QWidget *parent) :
     typeRow->addWidget(m_type);
     typeRow->addWidget(m_overrideLabel);
     typeRow->addWidget(m_speed);
+    typeRow->addWidget(m_polarityLabel);
     typeRow->addWidget(m_polarity);
+    typeRow->addStretch(1);
     QHBoxLayout *textRow = new QHBoxLayout();
     textRow->setSpacing(3);
     textRow->addWidget(m_voiceSource);
     textRow->addWidget(m_text, 1);
+    textRow->addWidget(m_charsetLabel);
     textRow->addWidget(m_charset);
     textRow->addWidget(m_codepageTable);
     textRow->addWidget(m_browse);
@@ -216,8 +223,11 @@ PagingComposer::PagingComposer(QWidget *parent) :
     QHBoxLayout *scheduleRow = new QHBoxLayout();
     scheduleRow->setSpacing(3);
     scheduleRow->addWidget(m_retransmit);
+    scheduleRow->addWidget(m_intervalLabel);
     scheduleRow->addWidget(m_retransmitInterval);
+    scheduleRow->addWidget(m_delayLabel);
     scheduleRow->addWidget(m_sendDelay);
+    scheduleRow->addStretch(1);
 
     int row = 0;
     layout->addWidget(m_transmitterLabel, row, 0);
@@ -619,6 +629,7 @@ void PagingComposer::display()
     // The codepage of the characters: alphanumeric, FLEX secure type 00; a protocol with a single codepage has no choice
     const bool characters = !microphone && ((type == "alphanumeric") || (secure && (m_secureType->currentIndex() == 0)));
     m_charset->setVisible(characters && (RadioPagingCharset::codepages(proto.toStdString()).size() > 1));
+    m_charsetLabel->setVisible(m_charset->isVisibleTo(this));
     m_codepageTable->setVisible(characters);
 
     // Copies and send delay: network mode (POCSAG and FLEX); FLEX copies of the numbered types on a network
@@ -631,6 +642,8 @@ void PagingComposer::display()
     m_retransmit->setVisible(scheduled);
     m_retransmitInterval->setVisible(scheduled);
     m_sendDelay->setVisible(scheduled);
+    m_intervalLabel->setVisible(scheduled);
+    m_delayLabel->setVisible(scheduled);
     m_retransmit->setMaximum(flex ? RadioPagingFlexEncoder::m_maxRetransmit : RadioPagingPocsagTxStream::m_maxRepeat);
     m_retransmit->setEnabled(copies);
     m_retransmitInterval->setEnabled(copies && (m_retransmit->value() > 0));
