@@ -25,7 +25,6 @@
 
 const int RadioPagingPocsagDecoder::m_maxSyncErrors;
 const int RadioPagingPocsagDecoder::m_maxMessageBits;
-const int RadioPagingPocsagDecoder::m_minExactCodewords;
 const int RadioPagingPocsagDecoder::m_maxSoftSyncErrors;
 const int RadioPagingPocsagDecoder::m_maxIdleErrors;
 constexpr float RadioPagingPocsagDecoder::m_softSyncCorrelation;
@@ -236,13 +235,6 @@ void RadioPagingPocsagDecoder::feed(int symbol)
                 m_slot = 0;
                 m_state = InBatch;
             }
-            else if (!m_leadingConfirmed && (m_batch == 0) && !m_preambleBefore && !batchValid() && (exactCodewords() < m_minExactCodewords))
-            {
-                // A sync codeword found alone (no preamble before it, none after it) whose batch has few codewords
-                // received exactly: a sync codeword pattern in noise or in another signal
-                m_candidatesDropped++;
-                endTransmission();
-            }
             else if (!m_syncMissedLast)
             {
                 // The following sync codeword was missed: the batch is decoded up to the end of the signal in it, which
@@ -272,18 +264,6 @@ void RadioPagingPocsagDecoder::feed(int symbol)
     }
 }
 
-bool RadioPagingPocsagDecoder::batchValid() const
-{
-    for (uint32_t word : m_batchWords)
-    {
-        if (RadioPagingBCH::decode(word).m_bitErrors < 0) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
 void RadioPagingPocsagDecoder::decodeBatch()
 {
     if (m_batch == 0)
@@ -306,24 +286,12 @@ bool RadioPagingPocsagDecoder::decipherable(int slot) const
     return (RadioPagingBCH::decode(m_batchWords[slot]).m_bitErrors >= 0) && (m_batchQuality[slot] < m_wordNoiseQuality);
 }
 
-// Codewords received exactly among the first received ones of the batch
-int RadioPagingPocsagDecoder::exactCodewords(int received) const
-{
-    int exact = 0;
-
-    for (int slot = 0; slot < received; slot++)
-    {
-        RadioPagingBCH::Result result = RadioPagingBCH::decode(m_batchWords[slot]);
-        exact += ((result.m_bitErrors == 0) && !result.m_parityError) ? 1 : 0;
-    }
-
-    return exact;
-}
-
-// Decodes the first received codewords of the batch up to the end of the signal in it: the last decipherable codeword
-// (noise has none, so the signal is there up to it; indecipherable codewords before it are a burst of errors, lost
-// codewords of the message, never addresses). True if the batch is cut there, or not all its codewords were received:
-// the message in progress ends truncated and the transmission is over
+// Decodes the first received codewords of the batch up to the end of the signal in it. Indecipherable codewords are lost
+// codewords of the message, never addresses. After a confirmed sync codeword the batch is the last one of the
+// transmission, which ends at the end of a batch (M.584-2 1): it is decoded whole. Otherwise (after a missed sync
+// codeword, or a sync codeword found alone) the signal ends at its last decipherable codeword (noise has none). True
+// if the batch is cut there, or not all its codewords were received: the message in progress ends truncated and the
+// transmission is over
 bool RadioPagingPocsagDecoder::decodeUnconfirmedBatch(int received)
 {
     int cut = 0;
@@ -333,6 +301,10 @@ bool RadioPagingPocsagDecoder::decodeUnconfirmedBatch(int received)
         if (decipherable(slot)) {
             cut = slot + 1;
         }
+    }
+
+    if (m_leadingConfirmed) {
+        cut = received;
     }
 
     // The codeword the signal was lost in is partly the transmission's, partly noise or another signal: the code
@@ -380,13 +352,10 @@ bool RadioPagingPocsagDecoder::decodeUnconfirmedBatch(int received)
 
 void RadioPagingPocsagDecoder::flush()
 {
-    // The batch received so far, of a transmission (its sync codeword confirmed, an earlier batch decoded, after a
-    // preamble, or with m_minExactCodewords received exactly as a sync codeword found alone needs): a sync codeword
-    // pattern in noise is not decoded
+    // The batch received so far, decoded as a batch no sync codeword follows
     int received = (m_state == AwaitSync) ? RadioPagingPocsag::m_codewordsPerBatch : m_slot;
 
-    if ((m_state != Hunting) && (received > 0)
-        && (m_leadingConfirmed || (m_batch > 0) || m_preambleBefore || (exactCodewords(received) >= m_minExactCodewords))) {
+    if ((m_state != Hunting) && (received > 0)) {
         decodeUnconfirmedBatch(received);
     }
 

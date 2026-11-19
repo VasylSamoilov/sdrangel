@@ -30,14 +30,12 @@
 // nothing but the bits it is fed.
 //
 // Synchronisation uses the codeword structure only. The preamble trains the bit clock of
-// the demodulator and is not counted. A sync codeword with up to 2 bit errors starts a
-// candidate batch, which is buffered. A batch is decoded when
+// the demodulator and is not counted. A sync codeword with up to 2 bit errors (or up to
+// m_maxSoftSyncErrors on symbols that correlate with it) starts a candidate batch, which
+// is buffered. A batch is decoded when
 //   - its sync codeword is confirmed by another sync codeword one batch (544 bits) away,
 //     before or after it, or
-//   - no sync codeword follows it: up to the end of the signal in it (below). A sync
-//     codeword found alone (no preamble before it, none after it) needs a batch valid by
-//     itself (all 16 codewords decode) or with m_minExactCodewords received exactly: a
-//     sync codeword pattern in noise or in another signal is not decoded.
+//   - no sync codeword follows it: up to the end of the signal in it (below).
 // A transmission therefore needs no preamble to be acquired: a receiver that starts
 // listening during a transmission synchronises on two consecutive batches. Nothing is
 // predicted from earlier transmissions. While a candidate is not confirmed, a sync
@@ -47,14 +45,15 @@
 // that cannot be decoded. A single undecodable codeword is kept in the message (its 20
 // message bits as received) and counted as uncorrectable.
 //
-// A batch that no sync codeword follows (the last batch of a transmission, or a batch
-// whose signal was lost or taken over by another transmission) is decoded up to the end
-// of the signal in it: its last decipherable codeword (one that decodes on symbols better
-// than noise; noise has none). Indecipherable codewords before it are a burst of errors:
-// lost codewords of the message, never addresses. Corrected codewords just before the end
-// (the codeword the signal ended in, corrected to another one) are not taken. Nothing
-// after the end is decoded, the message in progress ends truncated and so does the
-// transmission. The quality of a codeword is the rms distance of its symbols from the
+// A batch that no sync codeword follows is decoded up to the end of the signal in it.
+// After a confirmed sync codeword it is the last batch of the transmission, which ends at
+// the end of a batch (M.584-2 1): decoded whole. After a missed sync codeword, or after a
+// sync codeword found alone, the signal ends at its last decipherable codeword (one that
+// decodes on symbols better than noise; noise has none), and corrected codewords just
+// before that end (the codeword the signal ended in, corrected to another one) are not
+// taken. Indecipherable codewords are lost codewords of the message, never addresses.
+// Nothing after the end is decoded, the message in progress ends truncated and so does
+// the transmission. The quality of a codeword is the rms distance of its symbols from the
 // decided levels (feed() with the error); without it every codeword that decodes is
 // decipherable.
 //
@@ -136,9 +135,6 @@ public:
     //!< Bit errors corrected in a sync codeword, the correction capacity of the code
     static const int m_maxSyncErrors = 2;
     static const int m_maxMessageBits = 20 * 400;
-    //!< Codewords received exactly in the batch of a sync codeword found alone (a batch of a transmission has idle,
-    //!< address and message codewords mostly received exactly; noise or another signal rarely one)
-    static const int m_minExactCodewords = 4;
     //!< Bit errors of a sync codeword taken when its symbols correlate with the sync codeword (soft values known):
     //!< the correlation of the normalised values with it, over their magnitudes, at least m_softSyncCorrelation
     static const int m_maxSoftSyncErrors = 4;
@@ -186,11 +182,9 @@ private:
     bool syncMatch() const;
     bool softSyncMatch(uint32_t word) const;
     void startCandidate();
-    bool batchValid() const;
     void decodeBatch();
     bool decodeUnconfirmedBatch(int received = 16);
     bool decipherable(int slot) const;
-    int exactCodewords(int received = 16) const;
     void storeWord(int slot, uint32_t word);
     void endTransmission();
     void processCodeword(uint32_t word, bool lost = false);
