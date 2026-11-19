@@ -32,6 +32,7 @@ const uint32_t codeA[4] = {0x78f35939u, 0x84e75939u, 0x4f975939u, 0x215f5939u};
 const uint32_t codeAInv[4] = {0x870ca6c6u, 0x7b18a6c6u, 0xb068a6c6u, 0xdea0a6c6u};
 const uint32_t codeB = 0x5555u;
 // Closing pattern of the second sync
+const uint32_t syncC = 0xed84u;
 const uint32_t syncCInv = 0x127bu;
 // Gray decode of 4-level symbols to dibits: 0 -> 00, 1 -> 01, 2 -> 11, 3 -> 10
 const unsigned grayToDibit[4] = {0, 1, 3, 2};
@@ -278,6 +279,58 @@ void RadioPagingFlexReceiver::fitSync1(RadioPagingFlex::Mode mode, bool inverted
     m_syncDemod.setHoldLevels(true);
 }
 
+// Known levels of the second sync at the frame's symbol rate (STD-43A 3.2): the alternating
+// pattern, C, the inverted pattern and inverted C, the last of them symbolsAgo symbols before the
+// last symbol. The DC offset of the data demodulator is fitted to them: an error of the DC
+// measured on sync 1 moves every threshold of the frame, most the inner level decisions of
+// 4-level symbols. The deviation measured on sync 1 is kept: shaping shrinks the alternating
+// pattern at the data rate more than the data symbols
+void RadioPagingFlexReceiver::fitSync2(size_t symbolsAgo)
+{
+    static const float levels4[4] = {-1.0f, -1.0f / 3.0f, 1.0f / 3.0f, 1.0f};
+    static const int dibitToSymbol[4] = {0, 1, 3, 2};
+    bool fourLevel = RadioPagingFlex::levels(m_mode) == 4;
+    int patternSymbols = (m_mode == RadioPagingFlex::Mode1600_2) ? 4 : (m_mode == RadioPagingFlex::Mode6400_4) ? 32 : (fourLevel ? 12 : 24);
+    std::vector<float> known;
+
+    auto symbolLevel = [&](int sym) {
+        int raw = mirror(sym, fourLevel ? 4 : 2);
+        return fourLevel ? levels4[raw & 3] : ((raw & 1) ? 1.0f : -1.0f);
+    };
+    auto pattern = [&](bool inverse) {
+        for (int s = 0; s < patternSymbols; s++)
+        {
+            bool one = (((s & 1) == 0) != inverse);
+            known.push_back(symbolLevel(fourLevel ? dibitToSymbol[one ? 2 : 0] : (one ? 1 : 0)));
+        }
+    };
+    auto sixteen = [&](uint32_t value) {
+        if (fourLevel)
+        {
+            for (int i = 14; i >= 0; i -= 2) {
+                known.push_back(symbolLevel(dibitToSymbol[(value >> i) & 3]));
+            }
+        }
+        else
+        {
+            for (int i = 15; i >= 0; i--) {
+                known.push_back(symbolLevel((value >> i) & 1));
+            }
+        }
+    };
+
+    pattern(false);
+    sixteen(syncC);
+    pattern(true);
+    sixteen(syncCInv);
+
+    float deviation = m_dataDemod.getDeviation();
+
+    if (m_dataDemod.fitLevels(known, symbolsAgo)) {
+        m_dataDemod.setLevels(m_dataDemod.getDC(), deviation);
+    }
+}
+
 bool RadioPagingFlexReceiver::takeLevelsMeasured(float& dc)
 {
     if (!m_levelsMeasured) {
@@ -501,6 +554,7 @@ void RadioPagingFlexReceiver::sync2Symbol(int sym)
         }
 
         m_state = Data;
+        fitSync2((size_t) (m_s2Count - boundary));
 
         // Symbols received after the boundary are data
         for (size_t k = 0; k < m_s2Tail.size(); k++)

@@ -204,6 +204,7 @@ private:
     void startData(float offset);
     void dataSymbol(int symbol, float error, float magsq);
     void sync2Symbol(int symbol);
+    void fitSync2(size_t symbolsAgo);
     void storeDataSymbol(int symbol, float magsq);
     void endFrame(bool partial = false);
     void backToHunting(bool keepHistory = false);

@@ -51,7 +51,7 @@ const qint64 voiceMinFreeBytes = 500LL * 1024 * 1024;  // No recording on a disk
 const Real dcBlockPole = 0.995f;        // About 30 Hz at 38400 Hz
 const int audioBufferSize = 1 << 12;
 const double huntCentreDecay = 0.967216;    // exp(-1 s / 30 s), per second
-const double narrowResidual = 300.0;        // Hz: a leg is narrowed once a measurement is this close
+const double narrowResidual = 2500.0;       // Hz: a leg is narrowed once a measurement is this close
 
 enum Protocol {
     ProtocolPocsag,
@@ -141,9 +141,11 @@ void RadioPagingDemodSink::legMeasured(Leg& leg, int protocol, float dc)
         leg.m_framesAtStart = (protocol == ProtocolFlex) ? m_flex.getStatus().m_frames : 0;
     }
 
-    // Near the noise threshold a signal cut by the filter on one side is measured too close
-    // to the filter centre: the leg is narrowed only once the carrier is on its centre (a
-    // small residual), before that it is only moved. GSC has too few known patterns for one
+    // A signal cut by the filter on one side is measured too close to the filter centre: the
+    // leg is narrowed once the carrier is within the room the hunting width leaves around
+    // Carson (a residual below narrowResidual), the first measurement of a carrier offset by a
+    // few kHz included, so the transmission it belongs to is received through the narrow leg;
+    // a carrier further off is only moved. GSC has too few known patterns for one
     // measurement to place the carrier closely at a low signal to noise ratio: its receiving
     // leg keeps the offset room and is narrowed at the first measurement
     double residual = dc * leg.m_deviation;
