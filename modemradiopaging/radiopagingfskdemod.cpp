@@ -31,6 +31,8 @@ const int defaultHuntWindow = 64;
 const size_t historySize = 256;
 // Smoothing of the symbol power used to normalise the timing error
 const double timingPowerAlpha = 0.01;
+// Held levels followed from the decisions (setTrackDecided): the offset and the outer deviation, per symbol
+const float levelGainDecided = 0.01f;
 
 } // namespace
 
@@ -240,6 +242,16 @@ bool RadioPagingFskDemod::process(float sample, Symbol& symbol)
             {
                 m_dc = (float) m_huntDc.instantAverage();
                 m_deviation = std::max(0.05f, std::min(20.0f, (float) m_huntDeviation.instantAverage()));
+            }
+            else if (m_trackDecided)
+            {
+                // Held levels follow the decisions: the offset from every symbol, the deviation from the outer ones
+                const float err = normalised - level;
+                m_dc += levelGainDecided * err * m_deviation;
+
+                if (std::fabs(level) == 1.0f) {
+                    m_deviation = std::max(0.05f, std::min(20.0f, m_deviation + levelGainDecided * (std::fabs(normalised) - 1.0f) * m_deviation));
+                }
             }
 
             m_timingPower += timingPowerAlpha * ((double) value * value - m_timingPower);

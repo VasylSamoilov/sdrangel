@@ -67,6 +67,9 @@ public:
     //!< Keep the DC offset and deviation as they are (a transmission is being decoded); when
     //!< released they follow the hunting means again
     void setHoldLevels(bool hold) { m_holdLevels = hold; }
+    //!< With the levels held: they follow the decisions (4-level data, whose eye at its rate is not the one measured on
+    //!< the 2-level sync)
+    void setTrackDecided(bool track) { m_trackDecided = track; }
     bool getHoldLevels() const { return m_holdLevels; }
     //!< Set DC offset and outer level deviation, e.g. measured by another demodulator
     void setLevels(float dc, float deviation);
@@ -95,6 +98,7 @@ private:
     int m_levels;
     bool m_locked;
     bool m_holdLevels;
+    bool m_trackDecided = false;
 
     MovingAverageUtilVar<float, double> m_matchedFilter;
     float m_prevFiltered;           //!< Matched filter output of the previous input sample
