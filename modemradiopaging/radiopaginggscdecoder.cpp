@@ -31,6 +31,9 @@ const int RadioPagingGscDecoder::m_maxCommaErrors;
 const int RadioPagingGscDecoder::m_alertSymbols;
 const int RadioPagingGscDecoder::m_voiceMessageStart;
 const int RadioPagingGscDecoder::m_defaultVoiceTimeoutSeconds;
+constexpr float RadioPagingGscDecoder::m_dataWordNoiseQuality;
+constexpr float RadioPagingGscDecoder::m_cleanQuality;
+constexpr float RadioPagingGscDecoder::m_poorQuality;
 
 namespace {
 
@@ -54,7 +57,8 @@ bool isWord1(uint16_t data)
 RadioPagingGscDecoder::RadioPagingGscDecoder(Polarity polarity) :
     m_polarity(polarity),
     m_nonBatterySaver(false),
-    m_voiceTimeoutSymbols(m_defaultVoiceTimeoutSeconds * RadioPagingGsc::m_dataBitRate)
+    m_voiceTimeoutSymbols(m_defaultVoiceTimeoutSeconds * RadioPagingGsc::m_dataBitRate),
+    m_lastQuality(1.0f)
 {
     reset();
 }
@@ -68,6 +72,7 @@ void RadioPagingGscDecoder::reset()
 {
     m_state = Hunting;
     m_parse = SeekStart;
+    m_lastQuality = 1.0f;
     m_reg = 0;
     m_regBits = 0;
     std::fill(m_softRing, m_softRing + codewordBits, 0.0f);
@@ -185,6 +190,35 @@ bool RadioPagingGscDecoder::isWord(int pos) const
     }
 
     return (total > 0.0f) && (agree >= m_minPairAgreement * total);
+}
+
+// Where the signal turns poor in count symbols from pos: the first symbol after which the rest (at least minPoor
+// symbols) has a quality of limit or more while the symbols before it (at least minClean) are clean. -1 if it does
+// not. A signal poor all along (weak) has no such point
+int RadioPagingGscDecoder::noiseOnset(int pos, int count, float limit, int minClean, int minPoor) const
+{
+    for (int p = minClean; p <= count - minPoor; p++)
+    {
+        if ((softQuality(pos + p, count - p, 1) >= limit) && (softQuality(pos, p, 1) < m_cleanQuality)) {
+            return p;
+        }
+    }
+
+    return -1;
+}
+
+// rms distance of count soft symbols (from pos, every step) from the levels +/-1
+float RadioPagingGscDecoder::softQuality(int pos, int count, int step) const
+{
+    float sum2 = 0.0f;
+
+    for (int i = 0; i < count; i++)
+    {
+        float e = std::fabs(m_soft[pos + i * step]) - 1.0f;
+        sum2 += e * e;
+    }
+
+    return std::sqrt(sum2 / (float) count);
 }
 
 bool RadioPagingGscDecoder::decodeWord(int pos, RadioPagingGsc::GolayResult& result) const
@@ -684,6 +718,21 @@ bool RadioPagingGscDecoder::parseAddress(int pos, Message& message, int& errors1
         return false;
     }
 
+    // The signal is not lost in the comma or the address: clean symbols that turn poor in (or before) a word that
+    // needed two or three corrected bits are noise the code (perfect, every word decodes) corrected to the codeword of
+    // another address. A word the signal ended in decodes with few corrections only by chance, a received one with
+    // many corrections is rare
+    const int addressSymbols = 2 * codewordBits + 1;
+    const int symbols = RadioPagingGsc::m_commaBits + addressSymbols;
+    const int word1End = RadioPagingGsc::m_commaBits + codewordBits;
+    int poor = noiseOnset(pos, symbols, m_poorQuality, 16, 8);
+
+    if ((poor >= 0) && (((poor < word1End) && (r1.m_bitErrors >= 2)) || ((poor < symbols) && (r2.m_bitErrors >= 2)))) {
+        return false;
+    }
+
+    m_lastQuality = softQuality(pos + RadioPagingGsc::m_commaBits, addressSymbols, 1);
+
     if (RadioPagingGsc::word1Index(r1.m_data) >= 0)
     {
         word1 = r1.m_data;
@@ -927,9 +976,29 @@ bool RadioPagingGscDecoder::processData()
 
     RadioPagingGsc::deinterleaveBlock(&m_buf[m_pos + 1], codewords);
 
+    // The signal lost in the block (clean symbols, then noise) or before it (the block as poor as noise after clean
+    // symbols). Interleaved, a codeword has its bits all over the block: with more than two of them noise, the code
+    // corrects it to some other codeword, and it is not taken
+    const int blockSymbols = RadioPagingGsc::m_blockBits - 1;
+    float quality = softQuality(m_pos + 1, blockSymbols, 1);
+    int onset = noiseOnset(m_pos + 1, blockSymbols, m_dataWordNoiseQuality, 8, 8);
+    bool lostBefore = (m_lastQuality < m_cleanQuality) && (quality >= m_dataWordNoiseQuality);
+    m_lastQuality = quality;
+
     for (int k = 0; k < 8; k++)
     {
         RadioPagingGsc::BchResult b = RadioPagingGsc::bchDecode(codewords[k]);
+        int noisy = 0;
+
+        if (onset >= 0)
+        {
+            for (int j = 0; j < 15; j++) {
+                noisy += (j * 8 + k >= onset) ? 1 : 0;
+            }
+        }
+        if ((noisy > 2) || lostBefore) {
+            b.m_bitErrors = -1;
+        }
 
         m_codewords++;
         m_ber.add(b.m_bitErrors > 0 ? b.m_bitErrors : 0, 15, b.m_bitErrors < 0);

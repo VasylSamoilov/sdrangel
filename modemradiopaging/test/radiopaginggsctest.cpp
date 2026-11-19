@@ -1229,6 +1229,75 @@ void testSoftDecisions()
     std::printf("      symbol noise sigma 1.0: %d addresses never sent in 500 batches\n", falseAddresses);
 }
 
+// The signal lost in a batch transmission and noise after (soft symbols spread as the discriminator spreads noise):
+// for a cut at every half address word, no address that was not sent, and each message text, up to its first lost
+// bit, is the start of the text sent
+void testSignalLost()
+{
+    std::mt19937 rng(11);
+    std::normal_distribution<float> clean(0.0f, 0.05f);
+    std::normal_distribution<float> noise(0.0f, 1.5f);
+    std::vector<G::TxMessage> batch = { tx("219789", 2, G::Numeric, "5551234"), tx("219456", 1, G::Tone),
+        tx("219457", 4, G::Alphanumeric, "GSC SWEEP") };
+    G::EncodeResult enc = G::encode(batch);
+    int foreign = 0, wrongText = 0, cuts = 0;
+
+    for (size_t cut = enc.m_bits.size() / 4; cut <= enc.m_bits.size(); cut += 23)
+    {
+        D d(D::Normal);
+
+        for (size_t i = 0; i < cut; i++) {
+            d.feedSoft((enc.m_bits[i] ? 1.0f : -1.0f) + clean(rng));
+        }
+        for (int i = 0; i < 3000; i++) {
+            d.feedSoft(noise(rng));
+        }
+        d.flush();
+        cuts++;
+
+        while (d.hasMessage())
+        {
+            D::Message m = d.takeMessage();
+            const G::TxMessage *sent = nullptr;
+
+            for (const G::TxMessage& s : batch)
+            {
+                if (m.m_address.substr(1) == s.m_address.substr(1)) {
+                    sent = &s;
+                }
+            }
+            if (!sent)
+            {
+                foreign++;
+                continue;
+            }
+            if ((m.m_type != G::Data) || (sent->m_type == G::Tone)) {
+                continue;
+            }
+
+            // The bits up to the first lost one
+            int bits = m.m_rawBits;
+            for (int i = 0; i < m.m_rawBits; i++)
+            {
+                if (m.m_rawLost[i >> 3] & (0x80 >> (i & 7)))
+                {
+                    bits = i;
+                    break;
+                }
+            }
+            std::string text = (sent->m_type == G::Numeric) ? G::decodeNumeric(m.m_rawData, bits) : G::decodeAlphanumeric(m.m_rawData, bits);
+            if (!text.empty()) {
+                text.pop_back();    // The last character may be cut
+            }
+            wrongText += (sent->m_text.compare(0, text.size(), text) != 0) ? 1 : 0;
+        }
+    }
+
+    std::printf("      signal lost at %d points: %d addresses never sent, %d messages with a wrong text\n", cuts, foreign, wrongText);
+    check(foreign == 0, "Signal lost in a transmission, noise after: no address that was not sent");
+    check(wrongText == 0, "Signal lost in a transmission, noise after: nothing wrong is added to a message without a mark");
+}
+
 // FM discriminator output for a bit stream, binary 1 = positive deviation, between random symbols
 std::vector<float> makeWaveform(const std::vector<uint8_t>& bits, double sampleRate, bool inverted, float dc, float noise, int lead, int tail, unsigned seed)
 {
@@ -1482,6 +1551,7 @@ int main()
     testCharacterSets();
     testVoice();
     testSoftDecisions();
+    testSignalLost();
     testReceiver();
     testAddresses();
     testStreaming();

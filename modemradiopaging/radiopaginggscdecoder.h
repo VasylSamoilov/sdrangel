@@ -199,6 +199,14 @@ public:
     //!< Default voice timeout: the longest documented pager timeout, 50 s (Motorola GSC manual,
     //!< Code Word Automatic Reset). Rep. 900-2 gives none
     static const int m_defaultVoiceTimeoutSeconds = 50;
+    //!< Quality (rms distance of the soft symbols from +/-1) above which symbols are noise. Measured with the FSK
+    //!< modulator through noise at 600 symbols/s: the lowest value of 15 symbols of noise only (0.724), less a margin
+    static constexpr float m_dataWordNoiseQuality = 0.70f;
+    //!< Quality of clean symbols: a signal that goes from below it to noise within an address or a data block was lost
+    //!< there (a weak signal, poor all along, is decoded as it is)
+    static constexpr float m_cleanQuality = 0.40f;
+    //!< Quality of symbols turned poor (no longer clean)
+    static constexpr float m_poorQuality = 0.50f;
 
 private:
     enum Parse {
@@ -235,6 +243,7 @@ private:
     Message m_voiceMessage;             //!< The voice page whose voice message is going on
     int m_voiceSymbols;                 //!< Symbols since the activation code
     int m_voiceTimeoutSymbols;
+    mutable float m_lastQuality;        //!< Quality of the last address or data block taken
     int m_voiceHold;                    //!< Symbols before the next word may be detected in the voice state
 
     int m_preamble;
@@ -272,6 +281,8 @@ private:
     uint32_t wordAt(int pos) const;
     //!< Soft correlation of the 46 symbols at a position of m_buf with a codeword
     float correlation(int pos, uint32_t codeword) const;
+    float softQuality(int pos, int count, int step) const;
+    int noiseOnset(int pos, int count, float limit, int minClean, int minPoor) const;
     //!< The 46 symbols at a position of m_buf are pairs of equal symbols, not a comma
     bool isWord(int pos) const;
     //!< Decodes the word at a position of m_buf. False if the symbols are not a word
