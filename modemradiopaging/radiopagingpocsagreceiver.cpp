@@ -124,10 +124,10 @@ void RadioPagingPocsagReceiver::process(float sample)
     uint32_t invertedSyncs = m_inverted.syncWords();
 
     if (m_normalEnabled) {
-        m_normal.feed(symbol.m_value, symbol.m_error);
+        m_normal.feed(symbol.m_value, symbol.m_error, symbol.m_soft);
     }
     if (m_invertedEnabled) {
-        m_inverted.feed(symbol.m_value, symbol.m_error);
+        m_inverted.feed(symbol.m_value, symbol.m_error, symbol.m_soft);
     }
 
     // A sync codeword was just received (the candidate of a batch or the codeword of the

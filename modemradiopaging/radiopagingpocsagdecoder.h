@@ -114,6 +114,8 @@ public:
     void feed(int symbol);
     //!< Feed one symbol with its distance from the decided level (normalised, outer levels +/-1)
     void feed(int symbol, float error);
+    //!< Feed one symbol with its distance from the decided level and its normalised value (outer levels +/-1)
+    void feed(int symbol, float error, float soft);
     //!< Limit of the codewords of a batch no sync codeword follows: a codeword with a quality above it is
     //!< indecipherable (noise)
     void setNoiseQuality(float wordNoiseQuality) { m_wordNoiseQuality = wordNoiseQuality; }
@@ -137,6 +139,10 @@ public:
     //!< Codewords received exactly in the batch of a sync codeword found alone (a batch of a transmission has idle,
     //!< address and message codewords mostly received exactly; noise or another signal rarely one)
     static const int m_minExactCodewords = 4;
+    //!< Bit errors of a sync codeword taken when its symbols correlate with the sync codeword (soft values known):
+    //!< the correlation of the normalised values with it, over their magnitudes, at least m_softSyncCorrelation
+    static const int m_maxSoftSyncErrors = 4;
+    static constexpr float m_softSyncCorrelation = 0.7f;
 
 private:
     Polarity m_polarity;
@@ -151,6 +157,9 @@ private:
     float m_wordError2;                 //!< Sum of the squared symbol errors of the codeword being received
     bool m_wordQualityKnown;
     float m_wordNoiseQuality;
+    float m_softBits[32];               //!< Normalised values of the last 32 symbols as bits (positive = binary 1), ring
+    int m_softPos;                      //!< Where the next one goes (the oldest)
+    bool m_softKnown;
     bool m_preambleBefore;
     bool m_leadingConfirmed;            //!< The sync codeword of the current batch is confirmed
     int m_batch;                        //!< Batches decoded in the current transmission
@@ -173,6 +182,7 @@ private:
     std::deque<Message> m_messages;
 
     bool syncMatch() const;
+    bool softSyncMatch(uint32_t word) const;
     void startCandidate();
     bool batchValid() const;
     void decodeBatch();

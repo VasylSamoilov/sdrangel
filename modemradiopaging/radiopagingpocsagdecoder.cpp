@@ -26,6 +26,8 @@
 const int RadioPagingPocsagDecoder::m_maxSyncErrors;
 const int RadioPagingPocsagDecoder::m_maxMessageBits;
 const int RadioPagingPocsagDecoder::m_minExactCodewords;
+const int RadioPagingPocsagDecoder::m_maxSoftSyncErrors;
+constexpr float RadioPagingPocsagDecoder::m_softSyncCorrelation;
 
 namespace {
 
@@ -46,6 +48,9 @@ RadioPagingPocsagDecoder::RadioPagingPocsagDecoder(Polarity polarity) :
     m_wordError2(0.0f),
     m_wordQualityKnown(false),
     m_wordNoiseQuality(1e9f),
+    m_softBits{},
+    m_softPos(0),
+    m_softKnown(false),
     m_preambleBefore(false)
 {
     reset();
@@ -61,6 +66,8 @@ void RadioPagingPocsagDecoder::reset()
     m_slot = 0;
     m_wordError2 = 0.0f;
     m_wordQualityKnown = false;
+    m_softPos = 0;
+    m_softKnown = false;
     m_preambleBefore = false;
     m_leadingConfirmed = false;
     m_batch = 0;
@@ -106,7 +113,29 @@ RadioPagingPocsagDecoder::Message RadioPagingPocsagDecoder::takeMessage()
 
 bool RadioPagingPocsagDecoder::syncMatch() const
 {
-    return (m_regBits >= 32) && (popcount32(m_reg ^ RadioPagingPocsag::m_syncWord) <= m_maxSyncErrors);
+    return (m_regBits >= 32) && ((popcount32(m_reg ^ RadioPagingPocsag::m_syncWord) <= m_maxSyncErrors) || softSyncMatch(m_reg));
+}
+
+// The last 32 symbols (word: their bits, newest in bit 0) as a sync codeword with up to m_maxSoftSyncErrors bit errors:
+// their normalised values correlate with the sync codeword (the bits in error are uncertain ones)
+bool RadioPagingPocsagDecoder::softSyncMatch(uint32_t word) const
+{
+    if (!m_softKnown || (popcount32(word ^ RadioPagingPocsag::m_syncWord) > m_maxSoftSyncErrors)) {
+        return false;
+    }
+
+    float correlation = 0.0f;
+    float magnitude = 0.0f;
+
+    for (int k = 0; k < 32; k++)
+    {
+        // Bit k of the sync codeword (bit 0 is the newest symbol)
+        float s = m_softBits[(m_softPos + 31 - k) % 32];
+        correlation += ((RadioPagingPocsag::m_syncWord >> k) & 1) ? s : -s;
+        magnitude += std::fabs(s);
+    }
+
+    return (magnitude > 0.0f) && (correlation >= m_softSyncCorrelation * magnitude);
 }
 
 void RadioPagingPocsagDecoder::startCandidate()
@@ -136,6 +165,15 @@ void RadioPagingPocsagDecoder::feed(int symbol, float error)
     m_wordQualityKnown = true;
     m_wordError2 += error * error;
     feed(symbol);
+}
+
+void RadioPagingPocsagDecoder::feed(int symbol, float error, float soft)
+{
+    // Binary 1 is a negative deviation for normal polarity
+    m_softBits[m_softPos] = (m_polarity == Normal) ? -soft : soft;
+    m_softPos = (m_softPos + 1) % 32;
+    m_softKnown = true;
+    feed(symbol, error);
 }
 
 void RadioPagingPocsagDecoder::feed(int symbol)
@@ -181,7 +219,7 @@ void RadioPagingPocsagDecoder::feed(int symbol)
         m_word = (m_word << 1) | (uint32_t) bit;
         if (++m_wordBits == 32)
         {
-            bool sync = popcount32(m_word ^ RadioPagingPocsag::m_syncWord) <= m_maxSyncErrors;
+            bool sync = (popcount32(m_word ^ RadioPagingPocsag::m_syncWord) <= m_maxSyncErrors) || softSyncMatch(m_word);
 
             m_wordBits = 0;
             m_word = 0;
