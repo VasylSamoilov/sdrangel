@@ -190,7 +190,7 @@ private:
     void decodeBatch();
     bool decodeUnconfirmedBatch(int received = 16);
     bool decipherable(int slot) const;
-    int exactCodewords() const;
+    int exactCodewords(int received = 16) const;
     void storeWord(int slot, uint32_t word);
     void endTransmission();
     void processCodeword(uint32_t word, bool lost = false);

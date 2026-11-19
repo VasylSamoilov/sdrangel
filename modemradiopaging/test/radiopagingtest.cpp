@@ -652,7 +652,16 @@ void testPocsagDamagedIdle()
         bits[RadioPagingPocsag::m_preambleBits + 32 * last + i] = (damaged >> (31 - i)) & 1;
     }
 
-    std::vector<RadioPagingPocsagDecoder::Message> messages = decodeBits(bits);
+    // The input stops after the transmission: everything received is released
+    RadioPagingPocsagDecoder decoder(RadioPagingPocsagDecoder::Normal);
+    std::vector<RadioPagingPocsagDecoder::Message> messages;
+    for (uint8_t b : bits) {
+        decoder.feed(b ? 0 : 1);
+    }
+    decoder.flush();
+    while (decoder.hasMessage()) {
+        messages.push_back(decoder.takeMessage());
+    }
     check((damaged != 0) && (messages.size() == 1) && (messages[0].m_address == 1000),
         "POCSAG: an idle codeword with 4 bit errors corrected to an address gives no page");
 }
