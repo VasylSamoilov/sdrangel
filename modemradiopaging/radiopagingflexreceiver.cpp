@@ -31,6 +31,8 @@ namespace {
 const uint32_t codeA[4] = {0x78f35939u, 0x84e75939u, 0x4f975939u, 0x215f5939u};
 const uint32_t codeAInv[4] = {0x870ca6c6u, 0x7b18a6c6u, 0xb068a6c6u, 0xdea0a6c6u};
 const uint32_t codeB = 0x5555u;
+// Frame period (STD-43A 3.1.1: frames 0-127 of cycles 0-14, one after the other)
+const double frameSeconds = 1.875;
 // Closing pattern of the second sync
 const uint32_t syncCInv = 0x127bu;
 // Gray decode of 4-level symbols to dibits: 0 -> 00, 1 -> 01, 2 -> 11, 3 -> 10
@@ -77,7 +79,10 @@ RadioPagingFlexReceiver::RadioPagingFlexReceiver() :
     m_frameInfoFailures(0),
     m_lastCycle(0),
     m_lastFrame(0),
-    m_lastQuality(0.0f)
+    m_lastQuality(0.0f),
+    m_fiwKnown(false),
+    m_fiwIndex(0),
+    m_fiwTime(0.0)
 {
     setPolarities(true, true);
     create(m_sampleRate);
@@ -109,6 +114,9 @@ void RadioPagingFlexReceiver::reset()
     m_mode = RadioPagingFlex::Mode1600_2;
     m_inverted = false;
     m_lastQuality = 0.0f;
+    m_fiwKnown = false;
+    m_fiwIndex = 0;
+    m_fiwTime = 0.0;
     backToHunting();
 }
 
@@ -402,6 +410,15 @@ void RadioPagingFlexReceiver::syncSymbol(const RadioPagingFskDemod::Symbol& symb
         if (++m_fiwBits == 32)
         {
             RadioPagingBCH::Result result = RadioPagingBCH::decode(m_fiw);
+            uint32_t corrected;
+
+            // Three or more errors: taken when the word it corrects to is the frame expected next
+            if ((result.m_bitErrors < 0) && frameInfoInSequence(m_fiw, corrected))
+            {
+                m_fiw = corrected;
+                result = RadioPagingBCH::decode(m_fiw);
+            }
+
             uint32_t data = RadioPagingFlex::wordData(result.m_word);
 
             if ((result.m_bitErrors < 0) || !RadioPagingFlex::checksumValid(data) || (((data >> 4) & 0xf) > 14))
@@ -411,10 +428,49 @@ void RadioPagingFlexReceiver::syncSymbol(const RadioPagingFskDemod::Symbol& symb
             }
             else
             {
+                m_fiwKnown = true;
+                m_fiwIndex = ((data >> 4) & 0xf) * 128 + ((data >> 8) & 0x7f);
+                m_fiwTime = m_time;
                 startData(symbol.m_offset);
             }
         }
     }
+}
+
+// A frame information word whose parity is still wrong after the correction of two bits (three or more errors):
+// the corrected word is taken when its checksum is valid and its cycle and frame are those of the frame expected
+// at this time after the last frame decoded (frames every 1.875 s, STD-43A 3.1.1), within the last 128 frames
+bool RadioPagingFlexReceiver::frameInfoInSequence(uint32_t raw, uint32_t& corrected) const
+{
+    if (!m_fiwKnown) {
+        return false;
+    }
+
+    // The parity bit flipped: the correction of bits 31-1 is the same and the parity then holds
+    RadioPagingBCH::Result result = RadioPagingBCH::decode(raw ^ 1u);
+
+    if (result.m_bitErrors != 2) {
+        return false;
+    }
+
+    const double elapsed = (m_time - m_fiwTime) / frameSeconds;
+    const long frames = std::lround(elapsed);
+
+    if ((frames < 1) || (frames > 128) || (std::fabs(elapsed - (double) frames) > 0.1)) {
+        return false;
+    }
+
+    const uint32_t data = RadioPagingFlex::wordData(result.m_word);
+    const unsigned cycle = (data >> 4) & 0xf;
+    const unsigned index = cycle * 128 + ((data >> 8) & 0x7f);
+    const unsigned expected = (m_fiwIndex + (unsigned) frames) % (15 * 128);
+
+    if (!RadioPagingFlex::checksumValid(data) || (cycle > 14) || (index != expected)) {
+        return false;
+    }
+
+    corrected = result.m_word;
+    return true;
 }
 
 void RadioPagingFlexReceiver::startData(float offset)

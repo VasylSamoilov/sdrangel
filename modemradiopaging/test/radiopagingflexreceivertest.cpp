@@ -459,6 +459,61 @@ void testDamagedSync()
 
 } // namespace
 
+// Frames 0 to 2 back to back (or frame 1 alone), a message in frame 1 whose frame information word has three bit
+// errors: two in bits 31-1 and the parity bit (BCH corrects the two, the parity is still wrong)
+bool receivedWithDamagedFrameInfo(bool withPrevious)
+{
+    RadioPagingFlexEncoder encoder;
+    encoder.setMode(RadioPagingFlex::Mode1600_2);
+    RadioPagingFlexEncoder::TxMessage m;
+    m.m_capcode = 54321;
+    m.m_text = "frame info damage";
+    m.m_frame = 1;
+    encoder.enqueue(m);
+
+    std::vector<RadioPagingFlex::SymbolBlock> blocks;
+
+    for (uint64_t index = withPrevious ? 0 : 1; index < 3; index++)
+    {
+        RadioPagingFlexEncoder::Frame frame = encoder.buildFrame(index);
+
+        if (index == 1)
+        {
+            // Sync 1 is bit sync (32), A (32), B (16), inverted A (32); the frame information word follows, its
+            // parity bit last
+            frame.m_blocks[0].m_symbols[115] ^= 1;
+            frame.m_blocks[0].m_symbols[124] ^= 1;
+            frame.m_blocks[0].m_symbols[143] ^= 1;
+        }
+        for (const auto& block : frame.m_blocks) {
+            blocks.push_back(block);
+        }
+    }
+
+    Signal signal;
+    signal.m_noise = 0.03f;
+    std::vector<float> samples = makeSamples(blocks, signal, 2000);
+    RadioPagingFlexReceiver receiver;
+    receiver.create(38400.0);
+    bool found = false;
+
+    for (float s : samples)
+    {
+        receiver.process(s);
+        while (receiver.hasMessage()) {
+            found = found || (receiver.takeMessage().m_text == "frame info damage");
+        }
+    }
+
+    return found;
+}
+
+void testDamagedFrameInfo()
+{
+    check(receivedWithDamagedFrameInfo(true), "Frame information word with 3 errors (2 and parity) taken: the frame expected after the last one");
+    check(!receivedWithDamagedFrameInfo(false), "Frame information word with 3 errors (2 and parity) rejected: no frame before it");
+}
+
 int main()
 {
     const RadioPagingFlex::Mode modes[4] = {
@@ -476,6 +531,7 @@ int main()
     testTwoNetworks();
     testDamagedSync();
     testFalseInvertedSync();
+    testDamagedFrameInfo();
 
     std::printf("%s (%d failure%s)\n", failures ? "FAILED" : "OK", failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;

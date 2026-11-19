@@ -188,6 +188,9 @@ private:
     unsigned m_lastCycle;
     unsigned m_lastFrame;
     float m_lastQuality;
+    bool m_fiwKnown;                    //!< m_fiwIndex and m_fiwTime hold the last frame information word decoded
+    unsigned m_fiwIndex;                //!< Its cycle * 128 + frame
+    double m_fiwTime;                   //!< When it was received (m_time)
 
     std::deque<RadioPagingFlexDecoder::Message> m_messages;
     // The window of the message history of the decoder: 960 frames
@@ -195,6 +198,7 @@ private:
     double m_time = 0.0;                //!< Seconds of signal received, for the duplicate window
 
     void syncSymbol(const RadioPagingFskDemod::Symbol& symbol, float magsq);
+    bool frameInfoInSequence(uint32_t raw, uint32_t& corrected) const;
     bool checkSync(RadioPagingFlex::Mode& mode, bool& inverted) const;
     bool checkErs() const;
     bool ersActive() const;
