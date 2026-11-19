@@ -35,6 +35,9 @@
 #include <QSignalBlocker>
 #include <QStandardItemModel>
 
+#include <algorithm>
+#include <cstdlib>
+
 #include "dsp/dspcommands.h"
 #include "device/deviceuiset.h"
 #include "plugin/pluginapi.h"
@@ -228,7 +231,13 @@ bool RadioPagingModGUI::handleMessage(const Message& message)
         const DSPSignalNotification& notif = (const DSPSignalNotification&) message;
         m_deviceCenterFrequency = notif.getCenterFrequency();
         m_basebandSampleRate = notif.getSampleRate();
+        // The dial clamps its value to a new range and signals it as a change: the range of a sample rate that is
+        // not yet the device's (a configuration being loaded, a file not yet opened) would replace the offset. The
+        // offset stays in the settings; the dial shows it within the range
+        ui->deltaFrequency->blockSignals(true);
         ui->deltaFrequency->setValueRange(false, 7, -m_basebandSampleRate/2, m_basebandSampleRate/2);
+        ui->deltaFrequency->setValue(m_settings.m_inputFrequencyOffset);
+        ui->deltaFrequency->blockSignals(false);
         ui->deltaFrequencyLabel->setToolTip(tr("Range %1 %L2 Hz").arg(QChar(0xB1)).arg(m_basebandSampleRate/2));
         updateAbsoluteCenterFrequency();
         return true;
@@ -1430,7 +1439,13 @@ void RadioPagingModGUI::displaySettings()
 
     blockApplySettings(true);
 
-    ui->deltaFrequency->setValue(m_channelMarker.getCenterFrequency());
+    // Shown without signalling a change. Before the device has given its sample rate (a configuration being loaded)
+    // the range may be narrower than the offset: it is widened to show the offset, and set by the next sample rate
+    ui->deltaFrequency->blockSignals(true);
+    const qint64 halfRange = std::max<qint64>(m_basebandSampleRate / 2, std::abs((qint64) m_settings.m_inputFrequencyOffset));
+    ui->deltaFrequency->setValueRange(false, 7, -halfRange, halfRange);
+    ui->deltaFrequency->setValue(m_settings.m_inputFrequencyOffset);
+    ui->deltaFrequency->blockSignals(false);
     ui->channelMute->setChecked(m_settings.m_channelMute);
     ui->protocol->setCurrentIndex((int) m_settings.m_protocol);
     ui->mode->setCurrentIndex((int) m_settings.m_mode);
