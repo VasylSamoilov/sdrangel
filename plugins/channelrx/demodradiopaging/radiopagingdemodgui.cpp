@@ -59,6 +59,7 @@
 #include "ui_radiopagingdemodgui.h"
 #include "plugin/pluginapi.h"
 #include "util/db.h"
+#include "gui/flowlayout.h"
 #include "gui/basicchannelsettingsdialog.h"
 #include "gui/dialogpositioner.h"
 #include "gui/crightclickenabler.h"
@@ -1620,14 +1621,9 @@ void RadioPagingDemodGUI::layoutProtocols()
     QWidget *dc[3] = {ui->pocsagDcCorrection, ui->flexDcCorrection, ui->gscDcCorrection};
     QLabel *status[3] = {ui->pocsagStatus, ui->flexStatus, ui->gscStatus};
     QComboBox *charset[3] = {ui->pocsagCharset, ui->flexCharset, ui->gscCharset};
-    // The network lines are under the fields, after the protocol button
-    int indent = 0;
-
-    for (QWidget *button : enabled) {
-        indent = std::max(indent, button->sizeHint().width());
-    }
-
-    indent += grid->horizontalSpacing() > 0 ? grid->horizontalSpacing() : 4;
+    // The protocol switch starts the first line of its protocol, as wide as its name (as the switches of other
+    // channels); the lines under it are indented a little, not by the width of the switch
+    const int indent = fontMetrics().horizontalAdvance("MM");
     ui->flexMaxMessageNumber->hide();     // 63, as the networks are; the WebAPI sets another
 
     for (int p = 0; p < 3; p++)
@@ -1638,7 +1634,9 @@ void RadioPagingDemodGUI::layoutProtocols()
         column->setSpacing(1);
 
         QHBoxLayout *live = new QHBoxLayout();
-        enabled[p]->setFixedWidth(indent - 4);
+        enabled[p]->setMinimumWidth(0);
+        enabled[p]->setMaximumWidth(QWIDGETSIZE_MAX);
+        enabled[p]->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         live->addWidget(enabled[p]);
         live->addWidget(deviationLabel[p]);
         live->addWidget(deviation[p]);
@@ -1653,63 +1651,59 @@ void RadioPagingDemodGUI::layoutProtocols()
         live->addWidget(status[p], 1);
         column->addLayout(live);
 
-        QHBoxLayout *options = new QHBoxLayout();
-        options->addSpacing(indent);
+        // The options of the protocol under its fields: each label with its field, the codepage with its editor and the
+        // reset button; a narrow window wraps them to more lines
+        QWidget *optionsWidget = new QWidget(block);
+        FlowLayout *options = new FlowLayout(optionsWidget, 0, 6, 2);
+        optionsWidget->setContentsMargins(indent, 0, 0, 0);
+        auto group = [&](QLabel *label, QWidget *field, QLayout *fields = nullptr) {
+            QWidget *w = new QWidget(optionsWidget);
+            QHBoxLayout *row = new QHBoxLayout(w);
+            row->setContentsMargins(0, 0, 0, 0);
+            row->setSpacing(3);
+            row->addWidget(label);
+            if (field) {
+                row->addWidget(field);
+            }
+            if (fields) {
+                row->addLayout(fields);
+            }
+            options->addWidget(w);
+            return row;
+        };
 
-        if (p == 0)
-        {
-            options->addWidget(new QLabel(tr("Strip"), block));
-            options->addWidget(ui->pocsagFill);
+        if (p == 0) {
+            group(new QLabel(tr("Strip"), optionsWidget), ui->pocsagFill);
+        } else if (p == 2) {
+            group(new QLabel(tr("Voice"), optionsWidget), nullptr, ui->gscVoiceLayout);
         }
-        else if (p == 2)
-        {
-            options->addWidget(new QLabel(tr("Voice"), block));
-            options->addLayout(ui->gscVoiceLayout);
-        }
-
-        // GSC: its voice controls fill the line, the codepage goes on a line of its own
-        QHBoxLayout *codepageLine = options;
 
         if (p == 2)
         {
-            options->addStretch(1);
-            codepageLine = new QHBoxLayout();
-            codepageLine->addSpacing(indent);
             // Its two codepages, shown whole
             charset[p]->setMaximumWidth(QWIDGETSIZE_MAX);
             charset[p]->setSizeAdjustPolicy(QComboBox::AdjustToContents);
         }
 
-        m_codepageLabel[p] = new QLabel(tr("Codepage"), block);
-        codepageLine->addWidget(m_codepageLabel[p]);
-        codepageLine->addWidget(charset[p]);
+        m_codepageLabel[p] = new QLabel(tr("Codepage"), optionsWidget);
+        QHBoxLayout *codepage = group(m_codepageLabel[p], charset[p]);
 
         // The custom codepage of the protocol: its editor
-        QToolButton *custom = new QToolButton(block);
+        QToolButton *custom = new QToolButton(optionsWidget);
         custom->setText(tr("Custom..."));
         custom->setToolTip(tr("Edit the custom codepage of %1: the character of each code and the direction of the text.\n"
             "Choose Custom in the codepages to decode with it").arg(names[p]));
         connect(custom, &QToolButton::clicked, this, [this, p]() { editCustomCodepage(p); });
-        codepageLine->addWidget(custom);
+        codepage->addWidget(custom);
 
-        if (p != 2) {
-            options->addStretch(1);
-        }
-
-        QToolButton *reset = new QToolButton(block);
+        QToolButton *reset = new QToolButton(optionsWidget);
         reset->setIcon(QIcon(":/recycle.png"));
         reset->setToolTip(tr("Forget what the %1 receivers remember: the messages for duplicate detection%2.\n"
             "Done when the device starts too, so that a file played again is not taken as duplicates")
             .arg(names[p]).arg(p == 1 ? tr(", fragments, groups, message numbers and network time") : QString()));
         connect(reset, &QToolButton::clicked, this, [this, p]() { m_radioPagingDemod->resetProtocol(p); });
-        options->addWidget(reset);
-        column->addLayout(options);
-
-        if (p == 2)
-        {
-            codepageLine->addStretch(1);
-            column->addLayout(codepageLine);
-        }
+        codepage->addWidget(reset);
+        column->addWidget(optionsWidget);
 
         for (int pol = 0; pol < 2; pol++)
         {
