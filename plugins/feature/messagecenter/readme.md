@@ -17,7 +17,7 @@ The channels publish their messages as message records on the "messages" pipe, a
 
 ![Message Center plugin GUI](../../../doc/img/MessageCenter_plugin.png)
 
-The window is in sections that can be rolled up.
+The window has a tab for each section: Log, Channels, Queue, Page, Routes and Files. The button at the right of the tabs opens the options.
 
 <h3>Log</h3>
 
@@ -91,6 +91,8 @@ Sources:
 * udp: datagrams received on an address (default 127.0.0.1, this computer only) and port: message records as JSON lines, or the Pager demodulator format. What is received is a message received: it never becomes a page to transmit.
 
 <h3>Options</h3>
+
+In the dialog opened by the button at the right of the tabs:
 
 * Log size: messages kept in the log (default 10000).
 * History: keep the log in the history file (messagecenter/history.jsonl in the application data directory), so that it is there again when the Message Center starts. One Message Center keeps the history. Over its size limit (default 50 MB) the file is written again with the newest messages of the log, up to half the limit.
