@@ -133,7 +133,7 @@ const std::vector<RadioPagingCharset::Codepage>& RadioPagingCharset::codepages()
         {"flex", "generic", "generic", "ascii-rot13", "Generic - ASCII, ROT-13", &pocsagAscii, &rot13},
         {"flex", "generic", "generic", "kanji", "Generic - Kanji (Shift JIS, HEX/binary messages)", &pocsagAscii, &kanji},
         // GSC
-        {"gsc", "generic", "generic", "ascii", "Generic - ASCII (Table VII)", &gscAscii},
+        {"gsc", "generic", "generic", "ascii", "Generic - ASCII", &gscAscii},
     };
 
     return list;
