@@ -159,7 +159,8 @@ def flexCases(mode, full):
             f("short message long address", 2101300 + mode, "short_message", "12345678", extra={"shortType": 0}),
             f("printable ASCII", base + 30, "alphanumeric", PRINTABLE),
             f("mail drop", base + 31, "alphanumeric", "Mail drop", extra={"mailDrop": 1}),
-            f("retransmit 1", base + 32, "alphanumeric", "Copy me", extra={"retransmit": 1, "retransmitInterval": 2}, copies=2),
+            # One-shot (the transmission ends with its last message): copies and delays need the network mode
+            f("retransmit 1 (one-shot)", base + 32, "alphanumeric", "Copy me", extra={"retransmit": 1, "retransmitInterval": 2}, expect="refused"),
             f("not hex", base + 33, "binary", "GHIJ", expect="refused"),
             f("capcode 0", 0, "alphanumeric", "x", expect="refused"),
         ]
@@ -332,6 +333,11 @@ def runGroup(api, cases, sinkPath, seen, settings, wait):
         r = rx[got[0]]
         d = r.get("protocolData") or {}
         rtext = r.get("text") or ""
+
+        # FLEX numeric: the unused digits of the last word are spaces (fill), kept by the decoder as the reference
+        # receivers do
+        if protocol == "flex" and c.msg["type"] in ("numeric", "special_numeric", "numbered_numeric", "numbered_special_numeric"):
+            rtext = rtext.rstrip(" ")
         problems = []
         if rtext != text and not (c.rxType == "any" and d.get("alt_text") == text):
             problems.append("text %r, sent %r" % (rtext[:80], text[:80]))
@@ -360,8 +366,17 @@ def runGroup(api, cases, sinkPath, seen, settings, wait):
         c.result = "FAIL" if problems else "PASS"
         c.detail = "; ".join(problems + notes)
 
-    unexpected = [r for i, r in enumerate(rx) if i not in used and not (r.get("protocolData") or {}).get("is_fragment")
-                  and r.get("kind", "message") == "message"]
+    # The short instructions of a group message go to its members: expected
+    members = set()
+    for c in cases:
+        for m in (c.group or []):
+            members.add(int(m))
+
+    def expected(r):
+        d = r.get("protocolData") or {}
+        return d.get("is_fragment") or (r.get("msgType") == "short_instruction" and int(d.get("capcode", -1)) in members)
+
+    unexpected = [r for i, r in enumerate(rx) if i not in used and not expected(r) and r.get("kind", "message") == "message"]
     return unexpected
 
 
