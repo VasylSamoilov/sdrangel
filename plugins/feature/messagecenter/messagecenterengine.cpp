@@ -28,6 +28,8 @@
 #include <algorithm>
 
 #include "util/csv.h"
+#include "radiopagingflex.h"
+#include "radiopaginggsc.h"
 #include "radiopagingpagerformat.h"
 #include "radiopagingrecode.h"
 #include "messagecenterengine.h"
@@ -65,6 +67,10 @@ QList<int> intsFromJson(const QJsonValue& value)
 bool MessageCenterFilter::matches(const MessageRecord& record) const
 {
     if (!m_protocols.isEmpty() && !m_protocols.contains(record.m_protocol, Qt::CaseInsensitive)) {
+        return false;
+    }
+    // The contact of the address book the message is from or for (the engine names it when the record comes in)
+    if (!m_contacts.isEmpty() && !m_contacts.contains(record.m_protocolData.value("contact").toString())) {
         return false;
     }
     // The channel of a message; a page also by the transmitter it is for
@@ -326,6 +332,9 @@ QJsonObject MessageCenterFilter::toJson() const
     if (!m_channels.isEmpty()) {
         json["channels"] = QJsonArray::fromStringList(m_channels);
     }
+    if (!m_contacts.isEmpty()) {
+        json["contacts"] = QJsonArray::fromStringList(m_contacts);
+    }
     if (!m_sources.isEmpty()) {
         json["sources"] = QJsonArray::fromStringList(m_sources);
     }
@@ -388,6 +397,9 @@ MessageCenterFilter MessageCenterFilter::fromJson(const QJsonObject& json)
     for (const QJsonValue& v : json[json.contains("channels") ? "channels" : "aliases"].toArray()) {
         f.m_channels.append(v.toString());
     }
+    for (const QJsonValue& v : json["contacts"].toArray()) {
+        f.m_contacts.append(v.toString());
+    }
     for (const QJsonValue& v : json["sources"].toArray()) {
         f.m_sources.append(v.toString());
     }
@@ -408,6 +420,268 @@ MessageCenterFilter MessageCenterFilter::fromJson(const QJsonObject& json)
     f.m_hideDuplicates = json["hideDuplicates"].toBool(false);
     f.m_voiceOnly = json["voiceOnly"].toBool(false);
     return f;
+}
+
+// ---------------------------------------------------------------------------
+// Contacts
+// ---------------------------------------------------------------------------
+
+QJsonObject MessageCenterContact::toJson() const
+{
+    QJsonObject json;
+    json["name"] = m_name;
+    json["addresses"] = QJsonArray::fromStringList(m_addresses);
+
+    if (!m_icon.isEmpty()) {
+        json["icon"] = m_icon;
+    }
+    if (m_color != 0) {
+        json["color"] = (double) m_color;
+    }
+    if (!m_note.isEmpty()) {
+        json["note"] = m_note;
+    }
+
+    return json;
+}
+
+MessageCenterContact MessageCenterContact::fromJson(const QJsonObject& json)
+{
+    MessageCenterContact c;
+    c.m_name = json["name"].toString().trimmed();
+
+    for (const QJsonValue& v : json["addresses"].toArray())
+    {
+        const QString address = v.toString().simplified();
+
+        if (!address.isEmpty()) {
+            c.m_addresses.append(address);
+        }
+    }
+
+    c.m_icon = json["icon"].toString();
+    c.m_color = (quint32) json["color"].toDouble(0);
+    c.m_note = json["note"].toString();
+    return c;
+}
+
+QByteArray MessageCenterContact::listToJson(const QList<MessageCenterContact>& contacts)
+{
+    QJsonArray array;
+
+    for (const MessageCenterContact& c : contacts) {
+        array.append(c.toJson());
+    }
+
+    return QJsonDocument(array).toJson(QJsonDocument::Compact);
+}
+
+QList<MessageCenterContact> MessageCenterContact::listFromJson(const QByteArray& json, QString *error)
+{
+    QList<MessageCenterContact> contacts;
+    QJsonParseError parseError;
+    QJsonDocument doc = QJsonDocument::fromJson(json, &parseError);
+
+    if (json.trimmed().isEmpty()) {
+        return contacts;
+    }
+    if (!doc.isArray())
+    {
+        if (error) {
+            *error = QString("Contacts: not a JSON array (%1)").arg(parseError.errorString());
+        }
+        return QList<MessageCenterContact>();
+    }
+
+    QStringList names;
+
+    for (const QJsonValue& v : doc.array())
+    {
+        MessageCenterContact c = fromJson(v.toObject());
+        QString why;
+
+        if (c.m_name.isEmpty()) {
+            why = "a contact has no name";
+        } else if (names.contains(c.m_name)) {
+            why = QString("two contacts are named %1").arg(c.m_name);
+        }
+
+        for (const QString& address : c.m_addresses)
+        {
+            QString addressError;
+
+            if (why.isEmpty() && addressKey(address, &addressError).isEmpty()) {
+                why = QString("%1: %2").arg(c.m_name, addressError);
+            }
+        }
+
+        if (!why.isEmpty())
+        {
+            if (error) {
+                *error = QString("Contacts: %1").arg(why);
+            }
+            return QList<MessageCenterContact>();
+        }
+
+        names.append(c.m_name);
+        contacts.append(c);
+    }
+
+    return contacts;
+}
+
+QString MessageCenterContact::addressKey(const QString& address, QString *error)
+{
+    const QStringList parts = address.simplified().split(' ');
+    auto fail = [error, &address](const QString& why) {
+        if (error) {
+            *error = QString("%1: %2").arg(address, why);
+        }
+        return QString();
+    };
+
+    if (parts.size() != 2) {
+        return fail("the protocol and the address, e.g. pocsag 1234567D, flex 1234567, gsc 012345/2");
+    }
+
+    const QString protocol = parts[0].toLower();
+    const QString value = parts[1];
+
+    if (protocol == "pocsag")
+    {
+        // RIC, and its function letter (A-D) or none for all
+        static const QRegularExpression ric("^(\\d{1,7})([A-Da-d]?)$");
+        QRegularExpressionMatch m = ric.match(value);
+
+        if (!m.hasMatch() || (m.captured(1).toULongLong() > 2097151)) {
+            return fail("a POCSAG address is 0 to 2097151, with A to D for one function");
+        }
+
+        const QString function = m.captured(2).isEmpty() ? QString("*") : QString::number(m.captured(2).toUpper()[0].unicode() - 'A');
+        return QString("pocsag:%1:%2").arg(m.captured(1).toULongLong()).arg(function);
+    }
+    if (protocol == "flex")
+    {
+        RadioPagingFlex::CapcodeText capcode;
+        std::string why;
+
+        if (!RadioPagingFlex::parseCapcode(value.toStdString(), capcode, why) || (capcode.m_capcode == 0)) {
+            return fail(QString("FLEX capcode: %1").arg(why.empty() ? std::string("not one").c_str() : why.c_str()));
+        }
+
+        return QString("flex:%1").arg(capcode.m_capcode);
+    }
+    if (protocol == "gsc")
+    {
+        // 012345, 012345/2 (address number 1-4) or the 7 digit cap code
+        const QStringList pieces = value.split('/');
+        std::string gscAddress;
+        int number = 0;
+        std::string why;
+
+        if ((pieces.size() > 2) || !RadioPagingGsc::parseCapCode(pieces[0].toStdString(), gscAddress, number, &why)) {
+            return fail(QString("GSC cap code: %1").arg(why.empty() ? std::string("5 to 7 digits, /1 to /4 for one address number").c_str() : why.c_str()));
+        }
+        if (pieces.size() == 2)
+        {
+            bool ok;
+            number = pieces[1].toInt(&ok);
+
+            if (!ok || (number < 1) || (number > 4)) {
+                return fail("the GSC address number is 1 to 4");
+            }
+        }
+
+        return QString("gsc:%1:%2").arg(QString::fromStdString(gscAddress)).arg(number > 0 ? QString::number(number) : QString("*"));
+    }
+    if (!QRegularExpression("^[a-z0-9_-]+$").match(protocol).hasMatch()) {
+        return fail("the protocol is a word, e.g. pocsag, flex, gsc");
+    }
+
+    return QString("%1:%2").arg(protocol, value.toUpper());
+}
+
+QStringList MessageCenterContact::recordKeys(const MessageRecord& record)
+{
+    const QVariantMap& d = record.m_protocolData;
+    QStringList keys;
+
+    if (record.m_protocol == "pocsag")
+    {
+        // The RIC and the function of the record, or of its address (1234567D)
+        qulonglong ric = d.value("ric", -1).toLongLong() >= 0 ? d.value("ric").toULongLong() : 0;
+        int function = d.value("function", -1).toInt();
+
+        if (!d.contains("ric") || (function < 0))
+        {
+            static const QRegularExpression text("^0*(\\d+)([A-D])$");
+            QRegularExpressionMatch m = text.match(record.m_address);
+
+            if (!m.hasMatch()) {
+                return keys;
+            }
+
+            ric = m.captured(1).toULongLong();
+            function = m.captured(2)[0].unicode() - 'A';
+        }
+
+        keys << QString("pocsag:%1:%2").arg(ric).arg(function) << QString("pocsag:%1:*").arg(ric);
+    }
+    else if (record.m_protocol == "flex")
+    {
+        // The capcode, or the pagers of a group message
+        if (d.contains("capcode")) {
+            keys << QString("flex:%1").arg(d.value("capcode").toULongLong());
+        } else if (!record.m_address.isEmpty() && !record.m_address.contains(',')) {
+            keys << QString("flex:%1").arg(record.m_address.toULongLong());
+        }
+        for (const QString& member : record.addresses())
+        {
+            const QString key = QString("flex:%1").arg(member.toULongLong());
+
+            if ((member.toULongLong() != 0) && !keys.contains(key)) {
+                keys << key;
+            }
+        }
+    }
+    else if (record.m_protocol == "gsc")
+    {
+        // 012345/2: the address and its number
+        const QStringList pieces = record.m_address.split('/');
+
+        if (pieces.size() == 2) {
+            keys << QString("gsc:%1:%2").arg(pieces[0], pieces[1]);
+        }
+        if (!pieces[0].isEmpty()) {
+            keys << QString("gsc:%1:*").arg(pieces[0]);
+        }
+    }
+    else if (!record.m_protocol.isEmpty() && !record.m_address.isEmpty())
+    {
+        keys << QString("%1:%2").arg(record.m_protocol.toLower(), record.m_address.toUpper());
+    }
+
+    return keys;
+}
+
+const QStringList& MessageCenterContact::symbols()
+{
+    // In DejaVu Sans (Linux) and Segoe UI Symbol (Windows) as text, not colour emoji: the same everywhere
+    // Star, warning, telephone, envelope, airplane, anchor, heart, house, cross, staff of Aesculapius, lightning,
+    // gear, flag, sun, cloud, umbrella, radioactive, biohazard, skull, hot springs, check mark, cross mark, circle,
+    // triangle
+    static const QList<ushort> codes = {
+        0x2605, 0x26a0, 0x260e, 0x2709, 0x2708, 0x2693, 0x2665, 0x2302, 0x271a, 0x2695, 0x26a1, 0x2699,
+        0x2691, 0x2600, 0x2601, 0x2602, 0x2622, 0x2623, 0x2620, 0x2668, 0x2714, 0x2716, 0x25cf, 0x25b2
+    };
+    static const QStringList list = []() {
+        QStringList symbols;
+        for (ushort code : codes) {
+            symbols.append(QString(QChar(code)));
+        }
+        return symbols;
+    }();
+    return list;
 }
 
 // ---------------------------------------------------------------------------
@@ -1016,6 +1290,64 @@ void MessageCenterEngine::setLogSize(int size)
 
 // The same id is the same message: the later record (a voice message that ended, a page that was
 // sent) completes the earlier one
+void MessageCenterEngine::setContacts(const QList<MessageCenterContact>& contacts)
+{
+    m_contacts = contacts;
+    m_contactKeys.clear();
+
+    // An address in two contacts is the first one's
+    for (int i = 0; i < m_contacts.size(); i++)
+    {
+        for (const QString& address : m_contacts[i].m_addresses)
+        {
+            const QString key = MessageCenterContact::addressKey(address);
+
+            if (!key.isEmpty() && !m_contactKeys.contains(key)) {
+                m_contactKeys.insert(key, i);
+            }
+        }
+    }
+}
+
+const MessageCenterContact *MessageCenterEngine::contactOf(const MessageRecord& record) const
+{
+    if (m_contactKeys.isEmpty()) {
+        return nullptr;
+    }
+
+    for (const QString& key : MessageCenterContact::recordKeys(record))
+    {
+        auto it = m_contactKeys.constFind(key);
+
+        if (it != m_contactKeys.constEnd()) {
+            return &m_contacts[it.value()];
+        }
+    }
+
+    return nullptr;
+}
+
+void MessageCenterEngine::nameContact(MessageRecord& record) const
+{
+    const MessageCenterContact *contact = contactOf(record);
+
+    record.m_protocolData.remove("contact");
+    record.m_protocolData.remove("contact_icon");
+    record.m_protocolData.remove("contact_color");
+
+    if (contact)
+    {
+        record.m_protocolData.insert("contact", contact->m_name);
+
+        if (!contact->m_icon.isEmpty()) {
+            record.m_protocolData.insert("contact_icon", contact->m_icon);
+        }
+        if (contact->m_color != 0) {
+            record.m_protocolData.insert("contact_color", (qulonglong) contact->m_color);
+        }
+    }
+}
+
 void MessageCenterEngine::noteChange(const QString& id)
 {
     m_logged++;
@@ -1417,12 +1749,15 @@ void MessageCenterEngine::ingest(const MessageRecord& record, const QString& sou
     }
 
     // The messages: each route that selects it sends it to its sinks, in the order of the routes, until one that
-    // stops. The log is a sink as the others: the default route sends every message to it
+    // stops. The log is a sink as the others: the default route sends every message to it. The message has the name
+    // of its contact first: the routes select by it, the sinks have it
     bool matched = false;
+    MessageRecord named = record;
+    nameContact(named);
 
     for (const Route& route : m_routes)
     {
-        if (!route.m_enabled || !route.m_filter.matches(record, source)) {
+        if (!route.m_enabled || !route.m_filter.matches(named, source)) {
             continue;
         }
 
@@ -1430,8 +1765,8 @@ void MessageCenterEngine::ingest(const MessageRecord& record, const QString& sou
         MessageRecord decoded;
         QString error;
         const bool redecoded = route.decodes()
-            && RadioPagingRecode::redecode(record, route.m_decodeCharset, route.m_decodeType, decoded, error);
-        const MessageRecord& routed = redecoded ? decoded : record;
+            && RadioPagingRecode::redecode(named, route.m_decodeCharset, route.m_decodeType, decoded, error);
+        const MessageRecord& routed = redecoded ? decoded : named;
         QStringList captures = route.m_filter.captures(routed);
 
         for (const QString& sink : route.m_sinks) {
@@ -1557,6 +1892,7 @@ QString MessageCenterEngine::addPage(MessageRecord record, qint64 now)
         record.m_timestamp = now;
     }
 
+    nameContact(record);
     MessageCenterPage page;
     page.m_record = record;
     page.m_changed = now;

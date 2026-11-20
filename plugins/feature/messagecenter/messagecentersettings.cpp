@@ -45,6 +45,7 @@ void MessageCenterSettings::resetToDefaults()
     m_claimTimeoutSec = 10;
     m_silentSec = 20;
     m_routes = MessageCenterEngine::defaultRoutes();
+    m_contacts.clear();
     m_sinks.clear();
     m_sources.clear();
     m_useReverseAPI = false;
@@ -250,6 +251,7 @@ QByteArray MessageCenterSettings::serialize() const
     s.writeBool(20, m_historyEnabled);
     s.writeS32(21, m_historyMaxMB);
     s.writeS32(22, 2);      // Routing: the log is a sink
+    s.writeBlob(23, MessageCenterContact::listToJson(m_contacts));
 
     return s.final();
 }
@@ -311,6 +313,8 @@ bool MessageCenterSettings::deserialize(const QByteArray& data)
         d.readString(19, &m_voicePlaybackDeviceName, AudioDeviceManager::m_defaultDeviceName);
         d.readBool(20, &m_historyEnabled, true);
         d.readS32(21, &m_historyMaxMB, MessageCenterEngine::m_defaultHistoryMB);
+        d.readBlob(23, &bytes);
+        m_contacts = MessageCenterContact::listFromJson(bytes);
 
         // Settings of before the log was a sink: a record no route selected was logged. The default route at the top
         // keeps logging every message
@@ -356,6 +360,9 @@ void MessageCenterSettings::applySettings(const QStringList& settingsKeys, const
     }
     if (settingsKeys.contains("routes")) {
         m_routes = settings.m_routes;
+    }
+    if (settingsKeys.contains("contacts")) {
+        m_contacts = settings.m_contacts;
     }
     if (settingsKeys.contains("sinks")) {
         m_sinks = settings.m_sinks;

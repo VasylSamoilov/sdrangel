@@ -439,6 +439,9 @@ void MessageCenter::webapiReverseSendSettings(const QList<QString>& featureSetti
     if (featureSettingsKeys.contains("routes") || force) {
         swg->setRoutes(new QString(QString::fromUtf8(MessageCenterSettings::routesToJson(settings.m_routes))));
     }
+    if (featureSettingsKeys.contains("contacts") || force) {
+        swg->setContacts(new QString(QString::fromUtf8(MessageCenterContact::listToJson(settings.m_contacts))));
+    }
     if (featureSettingsKeys.contains("sinks") || force) {
         swg->setSinks(new QString(QString::fromUtf8(MessageCenterSettings::filesToJson(settings.m_sinks))));
     }
@@ -526,6 +529,7 @@ void MessageCenter::applyEngineSettings()
     }
 
     m_engine.setRoutes(m_settings.m_routes);
+    m_engine.setContacts(m_settings.m_contacts);
     m_dirty = true;
 }
 
@@ -708,6 +712,7 @@ void MessageCenter::webapiFormatFeatureSettings(SWGSDRangel::SWGFeatureSettings&
     swg->setClaimTimeoutSec(settings.m_claimTimeoutSec);
     swg->setSilentSec(settings.m_silentSec);
     swg->setRoutes(new QString(QString::fromUtf8(MessageCenterSettings::routesToJson(settings.m_routes))));
+    swg->setContacts(new QString(QString::fromUtf8(MessageCenterContact::listToJson(settings.m_contacts))));
     swg->setSinks(new QString(QString::fromUtf8(MessageCenterSettings::filesToJson(settings.m_sinks))));
     swg->setSources(new QString(QString::fromUtf8(MessageCenterSettings::filesToJson(settings.m_sources))));
     swg->setUseReverseApi(settings.m_useReverseAPI ? 1 : 0);
@@ -751,6 +756,9 @@ void MessageCenter::webapiUpdateFeatureSettings(MessageCenterSettings& settings,
     }
     if (featureSettingsKeys.contains("routes") && swg->getRoutes()) {
         settings.m_routes = MessageCenterSettings::routesFromJson(swg->getRoutes()->toUtf8());
+    }
+    if (featureSettingsKeys.contains("contacts") && swg->getContacts()) {
+        settings.m_contacts = MessageCenterContact::listFromJson(swg->getContacts()->toUtf8());
     }
     if (featureSettingsKeys.contains("sinks") && swg->getSinks()) {
         settings.m_sinks = MessageCenterSettings::filesFromJson(swg->getSinks()->toUtf8());
@@ -873,6 +881,19 @@ int MessageCenter::webapiSettingsPutPatch(bool force, const QStringList& feature
         if (featureSettingsKeys.contains(key) && text && !QJsonDocument::fromJson(text->toUtf8()).isArray())
         {
             errorMessage = QString("%1 must be a JSON array").arg(key);
+            return 400;
+        }
+    }
+
+    // The contacts: a name each, addresses that are addresses
+    if (featureSettingsKeys.contains("contacts") && swg->getContacts())
+    {
+        QString error;
+        MessageCenterContact::listFromJson(swg->getContacts()->toUtf8(), &error);
+
+        if (!error.isEmpty())
+        {
+            errorMessage = error;
             return 400;
         }
     }

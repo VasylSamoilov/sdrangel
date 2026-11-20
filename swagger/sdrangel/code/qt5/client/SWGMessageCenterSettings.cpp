@@ -44,6 +44,8 @@ SWGMessageCenterSettings::SWGMessageCenterSettings() {
     m_silent_sec_isSet = false;
     routes = nullptr;
     m_routes_isSet = false;
+    contacts = nullptr;
+    m_contacts_isSet = false;
     sinks = nullptr;
     m_sinks_isSet = false;
     sources = nullptr;
@@ -82,6 +84,8 @@ SWGMessageCenterSettings::init() {
     m_silent_sec_isSet = false;
     routes = new QString("");
     m_routes_isSet = false;
+    contacts = new QString("");
+    m_contacts_isSet = false;
     sinks = new QString("");
     m_sinks_isSet = false;
     sources = new QString("");
@@ -111,6 +115,9 @@ SWGMessageCenterSettings::cleanup() {
 
     if(routes != nullptr) { 
         delete routes;
+    }
+    if(contacts != nullptr) { 
+        delete contacts;
     }
     if(sinks != nullptr) { 
         delete sinks;
@@ -153,6 +160,8 @@ SWGMessageCenterSettings::fromJsonObject(QJsonObject &pJson) {
     ::SWGSDRangel::setValue(&silent_sec, pJson["silentSec"], "qint32", "");
     
     ::SWGSDRangel::setValue(&routes, pJson["routes"], "QString", "QString");
+    
+    ::SWGSDRangel::setValue(&contacts, pJson["contacts"], "QString", "QString");
     
     ::SWGSDRangel::setValue(&sinks, pJson["sinks"], "QString", "QString");
     
@@ -207,6 +216,9 @@ SWGMessageCenterSettings::asJsonObject() {
     }
     if(routes != nullptr && *routes != QString("")){
         toJsonValue(QString("routes"), routes, obj, QString("QString"));
+    }
+    if(contacts != nullptr && *contacts != QString("")){
+        toJsonValue(QString("contacts"), contacts, obj, QString("QString"));
     }
     if(sinks != nullptr && *sinks != QString("")){
         toJsonValue(QString("sinks"), sinks, obj, QString("QString"));
@@ -314,6 +326,16 @@ SWGMessageCenterSettings::setRoutes(QString* routes) {
 }
 
 QString*
+SWGMessageCenterSettings::getContacts() {
+    return contacts;
+}
+void
+SWGMessageCenterSettings::setContacts(QString* contacts) {
+    this->contacts = contacts;
+    this->m_contacts_isSet = true;
+}
+
+QString*
 SWGMessageCenterSettings::getSinks() {
     return sinks;
 }
@@ -410,6 +432,9 @@ SWGMessageCenterSettings::isSet(){
             isObjectUpdated = true; break;
         }
         if(routes && *routes != QString("")){
+            isObjectUpdated = true; break;
+        }
+        if(contacts && *contacts != QString("")){
             isObjectUpdated = true; break;
         }
         if(sinks && *sinks != QString("")){

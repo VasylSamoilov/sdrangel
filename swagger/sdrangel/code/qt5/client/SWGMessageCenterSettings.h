@@ -66,6 +66,9 @@ public:
     QString* getRoutes();
     void setRoutes(QString* routes);
 
+    QString* getContacts();
+    void setContacts(QString* contacts);
+
     QString* getSinks();
     void setSinks(QString* sinks);
 
@@ -114,6 +117,9 @@ private:
 
     QString* routes;
     bool m_routes_isSet;
+
+    QString* contacts;
+    bool m_contacts_isSet;
 
     QString* sinks;
     bool m_sinks_isSet;

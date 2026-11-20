@@ -64,6 +64,7 @@ struct MessageCenterSettings
     int m_claimTimeoutSec;                  //!< A page given to a transmitter that does not claim it in this time goes back to the queue
     int m_silentSec;                        //!< A channel that does not announce itself for this time is offline
     std::vector<MessageCenterEngine::Route> m_routes;
+    QList<MessageCenterContact> m_contacts;         //!< The address book
     QList<MessageCenterFileSetting> m_sinks;
     QList<MessageCenterFileSetting> m_sources;
     bool m_useReverseAPI;

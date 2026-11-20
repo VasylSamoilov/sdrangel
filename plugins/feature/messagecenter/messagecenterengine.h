@@ -19,6 +19,7 @@
 #define INCLUDE_MESSAGECENTERENGINE_H
 
 #include <QDateTime>
+#include <QHash>
 #include <QHostAddress>
 #include <QJsonObject>
 #include <QMap>
@@ -53,10 +54,38 @@ class QUdpSocket;
 // the states back with event records of the same id (see MessageCenterEngine::applyEvent).
 // No Qt GUI and no thread: the caller (the feature) serializes the calls.
 
+// A contact of the address book: a name for the addresses of one pager (or station), in any protocol, as a pager
+// has several (POCSAG functions, FLEX capcodes). The records of its addresses get its name (protocolData contact),
+// its icon (contact_icon) and its colour (contact_color)
+struct MessageCenterContact
+{
+    QString m_name;
+    //! "protocol address": pocsag 1234567 (all functions) or 1234567D, flex 1234567 or a capcode form with letters,
+    //! gsc 012345 (all address numbers), 012345/2 or a 7 digit cap code; another protocol: its address as written
+    QStringList m_addresses;
+    QString m_icon;                     //!< A symbol (a character), or the path of an image file; empty for none
+    quint32 m_color = 0;                //!< ARGB, 0 for none
+    QString m_note;
+
+    QJsonObject toJson() const;
+    static MessageCenterContact fromJson(const QJsonObject& json);
+    static QByteArray listToJson(const QList<MessageCenterContact>& contacts);
+    //!< The contacts of a JSON array; error says what is not valid (the contacts are not taken then)
+    static QList<MessageCenterContact> listFromJson(const QByteArray& json, QString *error = nullptr);
+    //!< The key an address of a contact matches (see recordKeys), empty and an error if it is not one
+    static QString addressKey(const QString& address, QString *error = nullptr);
+    //!< The keys of the addresses of a record, the most precise first: a POCSAG address with its function, then
+    //!< without; the members of a FLEX group message
+    static QStringList recordKeys(const MessageRecord& record);
+    //!< The symbols offered for the icon (characters of the common fonts, drawn in the colour of the contact)
+    static const QStringList& symbols();
+};
+
 // The records a filter selects: every field set must match
 struct MessageCenterFilter
 {
     QStringList m_protocols;            //!< Lower case protocol names, empty for all
+    QStringList m_contacts;             //!< Names of contacts of the address book, empty for all
     QStringList m_channels;             //!< Channel names (titles) or transmitters of pages, empty for all
     int m_direction = -1;               //!< MessageRecord::Direction, -1 for both
     int m_kind = -1;                    //!< MessageRecord::Kind, -1 for all
@@ -376,6 +405,15 @@ public:
     void setRoutes(const std::vector<Route>& routes) { m_routes = routes; }
     const std::vector<Route>& routes() const { return m_routes; }
 
+    // The address book
+    void setContacts(const QList<MessageCenterContact>& contacts);
+    const QList<MessageCenterContact>& contacts() const { return m_contacts; }
+    //!< The contact of the addresses of a record (the most precise address first), nullptr if none
+    const MessageCenterContact *contactOf(const MessageRecord& record) const;
+    //!< The record with the name, icon and colour of its contact in protocolData (contact, contact_icon,
+    //!< contact_color), or without them when it has none
+    void nameContact(MessageRecord& record) const;
+
     //!< A record from a source: events update the endpoints and the pages, the others are routed
     void ingest(const MessageRecord& record, const QString& source, qint64 now);
 
@@ -456,6 +494,8 @@ private:
     std::deque<MessageRecord> m_log;
     int m_logSize;
     int m_logged = 0;
+    QList<MessageCenterContact> m_contacts;
+    QHash<QString, int> m_contactKeys;              //!< Key of an address (MessageCenterContact::addressKey): its contact
     std::deque<std::pair<int, QString>> m_changes;  //!< Version and id of the last records stored or changed
     int m_resetVersion = 0;                         //!< Version of the last time the log was emptied or loaded
     static const int m_maxChanges = 4096;
