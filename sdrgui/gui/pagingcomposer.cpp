@@ -407,9 +407,7 @@ void PagingComposer::fillFunctions()
 
     m_function->clear();
 
-    for (int i = 0; i < 4; i++) {
-        m_function->addItem(gsc ? QString("%1 (%2)").arg(i + 1).arg(QChar(RadioPagingGsc::functionLetter(i + 1))) : QString(QChar('A' + i)));
-    }
+    m_function->addItems(RadioPagingPage::functions(gsc ? "gsc" : "pocsag"));
 
     m_function->setCurrentIndex(index);
     m_function->setToolTip(gsc ? tr("GSC address number 1 to 4, function A to D") : tr("POCSAG function A to D"));
@@ -548,9 +546,10 @@ void PagingComposer::display()
     const bool suffix = gsc && (capCode.size() == 7);
     m_capCode->setVisible(!capCode.isEmpty());
 
+    m_capCode->setText(RadioPagingPage::addressDescription(proto, capCode, m_function->currentIndex()));
+
     if (gsc)
     {
-        m_capCode->setText(QString::fromStdString(RadioPagingGsc::capCodeText(capCode.toStdString())));
         m_capCode->setToolTip(tr("GSC cap code: index I, group G1 G0, address A2 A1 A0 and the suffix F.\n"
             "The preamble is (I + G0) mod 10, word 1 comes from G1 G0, word 2 from A2 A1 A0.\n"
             "The suffix gives the function: 1-4 and 5-8 are A-D, 9 and 0 are A and B.\n"
@@ -558,7 +557,6 @@ void PagingComposer::display()
     }
     else if (flex)
     {
-        m_capCode->setText(QString::fromStdString(RadioPagingFlex::capcodeDescription(capCode.toStdString())));
         m_capCode->setToolTip(tr("FLEX capcode: the address type (STD-43A Table A-1) and what the letters tell.\n"
             "The pager frame is set in the pager (ID-ROM); the letters A-L say it follows the standard rule:\n"
             "phase = (address / 4) mod 4, frame = (address / 16) mod 128 (Appendix A 3).\n"
@@ -566,8 +564,6 @@ void PagingComposer::display()
     }
     else
     {
-        m_capCode->setText(QString::fromStdString(RadioPagingPocsag::addressDescription(
-            (uint32_t) std::min<qulonglong>(capCode.toULongLong(), 0xffffffffULL), m_function->currentIndex())));
         m_capCode->setToolTip(tr("POCSAG (ITU-R M.584-2): a batch is the sync codeword and 8 frames of 2 codewords.\n"
             "A pager examines the frame of the 3 LSBs of its identity only (1.2).\n"
             "One identity is 4 addresses, the functions A-D of bits 20-21 (1.3.2)"));

@@ -91,24 +91,108 @@ bool RadioPagingPage::flexCapcode(qulonglong& capcode, QString *error) const
     return ok;
 }
 
+QString RadioPagingPage::checkAddress() const
+{
+    if (!protocols().contains(m_protocol)) {
+        return "Protocol must be pocsag, flex or gsc";
+    }
+    // A JSON number is not taken for the address string
+    if (m_address.isEmpty()) {
+        return "The address is missing: a string of digits, e.g. \"1234567\"";
+    }
+
+    if (m_protocol == "flex")
+    {
+        // FLEX: digits or a capcode form with letters
+        qulonglong capcode;
+        QString error;
+
+        if (!flexCapcode(capcode, &error)) {
+            return QString("FLEX capcode: %1").arg(error);
+        }
+        if (capcode == 0) {
+            return "FLEX capcode must be 1 to 1933312 or 2101249 to 4297068542";
+        }
+    }
+    else
+    {
+        bool digits = true;
+
+        for (QChar c : m_address) {
+            digits = digits && c.isDigit();
+        }
+
+        if (!digits) {
+            return "The address must be a number";
+        }
+        if ((m_protocol == "pocsag") && (m_address.toULongLong() > RadioPagingPocsag::m_maxAddress)) {
+            return "POCSAG address must be 0 to 2097151";
+        }
+        if (m_protocol == "gsc")
+        {
+            std::string address, error;
+            int number;
+
+            if (!RadioPagingGsc::parseCapCode(m_address.toStdString(), address, number, &error)) {
+                return QString("GSC: %1").arg(QString::fromStdString(error));
+            }
+        }
+    }
+    if ((m_function < 0) || (m_function > 3)) {
+        return (m_protocol == "gsc") ? "GSC function must be 0 to 3 (A to D), for the address number 1 to 4"
+            : "Function must be 0 to 3";
+    }
+
+    return QString();
+}
+
+QStringList RadioPagingPage::functions(const QString& protocol)
+{
+    QStringList names;
+
+    // POCSAG: the function A to D; GSC: the address number 1 to 4 (function A to D); FLEX has none
+    if ((protocol == "pocsag") || (protocol == "gsc"))
+    {
+        for (int i = 0; i < 4; i++) {
+            names.append((protocol == "gsc") ? QString("%1 (%2)").arg(i + 1).arg(QChar(RadioPagingGsc::functionLetter(i + 1))) : QString(QChar('A' + i)));
+        }
+    }
+
+    return names;
+}
+
+QString RadioPagingPage::addressDescription(const QString& protocol, const QString& address, int function)
+{
+    // GSC the digits of the cap code (a suffix digit sets the function), FLEX the capcode form, POCSAG the frame and
+    // function
+    if (protocol == "gsc") {
+        return QString::fromStdString(RadioPagingGsc::capCodeText(address.toStdString()));
+    } else if (protocol == "flex") {
+        return QString::fromStdString(RadioPagingFlex::capcodeDescription(address.toStdString()));
+    } else if (protocol == "pocsag") {
+        return QString::fromStdString(RadioPagingPocsag::addressDescription((uint32_t) std::min<qulonglong>(address.toULongLong(), 0xffffffffULL),
+            std::max(0, function)));
+    }
+
+    return QString();
+}
+
 QString RadioPagingPage::check() const
 {
     const QString type = m_type.isEmpty() ? QString("alphanumeric") : m_type;
-    bool digits = !m_address.isEmpty();
-
-    for (QChar c : m_address) {
-        digits = digits && c.isDigit();
-    }
 
     // A group message: the pagers, not an address
     const bool group = (m_protocol == "flex") && !m_groupMembers.trimmed().isEmpty();
 
-    // A JSON number is not taken for the address string
-    if (!group && m_address.isEmpty()) {
-        return "The address is missing: a string of digits, e.g. \"1234567\"";
-    }
+    if (!group)
+    {
+        const QString error = checkAddress();
 
-    if (group)
+        if (!error.isEmpty()) {
+            return error;
+        }
+    }
+    else
     {
         bool ok = false;
         QList<qulonglong> members = groupMembers(&ok);
@@ -125,48 +209,9 @@ QString RadioPagingPage::check() const
         if ((type != "alphanumeric") && (type != "numeric") && (type != "tone") && (type != "short_message")) {
             return "A group message is alphanumeric, numeric, tone or a short message";
         }
-
-        digits = true;
-    }
-    else if (m_protocol == "flex")
-    {
-        // FLEX: digits or a capcode form with letters
-        qulonglong capcode;
-        QString error;
-
-        if (!flexCapcode(capcode, &error)) {
-            return QString("FLEX capcode: %1").arg(error);
-        }
-        if (capcode == 0) {
-            return "FLEX capcode must be 1 to 1933312 or 2101249 to 4297068542";
-        }
-
-        digits = true;
-    }
-    if (!protocols().contains(m_protocol)) {
-        return "Protocol must be pocsag, flex or gsc";
     }
     if (!types(m_protocol).contains(type)) {
         return QString("Type must be %1 for %2").arg(types(m_protocol).join(", ")).arg(m_protocol);
-    }
-    if (!digits) {
-        return "The address must be a number";
-    }
-    if ((m_protocol == "pocsag") && (m_address.toULongLong() > RadioPagingPocsag::m_maxAddress)) {
-        return "POCSAG address must be 0 to 2097151";
-    }
-    if (m_protocol == "gsc")
-    {
-        std::string address, error;
-        int number;
-
-        if (!RadioPagingGsc::parseCapCode(m_address.toStdString(), address, number, &error)) {
-            return QString("GSC: %1").arg(QString::fromStdString(error));
-        }
-    }
-    if ((m_function < 0) || (m_function > 3)) {
-        return (m_protocol == "gsc") ? "GSC function must be 0 to 3 (A to D), for the address number 1 to 4"
-            : "Function must be 0 to 3";
     }
     if ((m_polarity < -1) || (m_polarity > 1)) {
         return "Polarity must be normal or inverted";

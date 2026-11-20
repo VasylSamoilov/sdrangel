@@ -76,6 +76,14 @@ struct MODEMRADIOPAGING_API RadioPagingPage
 
     //!< Empty if the page can be queued, else why not
     QString check() const;
+    //!< Empty if m_protocol is one and m_address and m_function are an address of it, else why not (the address
+    //!< part of check(), for whatever names an address: the composer, the contacts of the Message Center)
+    QString checkAddress() const;
+    //!< The names of the functions of a protocol, index 0-3: POCSAG A to D, GSC 1 (A) to 4 (D); none for FLEX
+    static QStringList functions(const QString& protocol);
+    //!< What an address is: POCSAG its frame and function, FLEX what the capcode form tells, GSC the digits of the
+    //!< cap code; empty for another protocol
+    static QString addressDescription(const QString& protocol, const QString& address, int function);
     //!< The capcodes of m_groupMembers (digits or the capcode forms of STD-43A Appendix A: their addresses)
     QList<qulonglong> groupMembers(bool *ok = nullptr) const;
     //!< FLEX: the address of the capcode in m_address, digits or a capcode form of STD-43A Appendix A (only the
