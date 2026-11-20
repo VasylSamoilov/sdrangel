@@ -478,6 +478,25 @@ QString PagingMessageTable::recordText(const MessageRecord& record)
     if (record.m_text.isEmpty() && ((record.m_msgType == "tone") || d.value("tone_only").toBool())) {
         return QString("(tone only)");
     }
+    // A FLEX short message without digits (STD-43A Table 3.9.2-1): type 1 is a source alone (the pager shows the
+    // message it has for it), type 2 a source with a message number and the retrieval flag, type 3 is reserved
+    if (record.m_text.isEmpty() && (record.m_msgType == "short_message") && d.contains("short_type"))
+    {
+        const int type = d.value("short_type").toInt();
+        const int source = d.value("short_source").toInt();
+
+        if (type == 1) {
+            return QString("(type:source source:%1)").arg(source);
+        }
+        if (type == 2)
+        {
+            return QString("(type:numbered source:%1 number:%2%3)").arg(source).arg(d.value("message_number").toInt())
+                .arg(d.value("retrieval").toBool() ? " retrieval" : "");
+        }
+        if (type == 3) {
+            return QString("(type:reserved(3) data:0x%1)").arg(record.m_rawData.toHex().constData());
+        }
+    }
     // A FLEX short instruction: what it tells the pager of the address
     if (record.m_text.isEmpty() && d.contains("instruction_type"))
     {

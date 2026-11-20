@@ -166,6 +166,30 @@ int main(int argc, char **argv)
             && info->toolTip().contains("01010100101"), "its info explains the type and has the bits");
     }
 
+    // FLEX short messages without digits: a source (type 1), a source with a message number (type 2), reserved (type 3)
+    {
+        PagingMessageTable sm;
+        auto shortMessage = [](const char *id, int type, int source) {
+            MessageRecord r = record(id, "flex", "0000374296", QString());
+            r.m_msgType = "short_message";
+            r.m_rawData = QByteArray::fromHex("950948");
+            r.m_protocolData.insert("short_type", type);
+            r.m_protocolData.insert("short_source", source);
+            return r;
+        };
+        MessageRecord numbered = shortMessage("s2", 2, 3);
+        numbered.m_protocolData.insert("message_number", 17);
+        numbered.m_protocolData.insert("retrieval", true);
+        sm.addRecord(shortMessage("s1", 1, 0));
+        sm.addRecord(numbered);
+        sm.addRecord(shortMessage("s3", 3, 0));
+        check(cell(sm, 0, PagingMessageTable::ColMessage) == "(type:source source:0)", "a short message of type 1 shows its source");
+        check(cell(sm, 1, PagingMessageTable::ColMessage) == "(type:numbered source:3 number:17 retrieval)",
+            "a short message of type 2 shows its source, its number and the retrieval flag");
+        check(cell(sm, 2, PagingMessageTable::ColMessage) == "(type:reserved(3) data:0x950948)",
+            "a reserved short message shows its data");
+    }
+
     // The oldest rows go first
     table.addRecord(record("c", "gsc", "123456/1", "C"));
     table.addRecord(record("d", "gsc", "123456/2", "D"));
