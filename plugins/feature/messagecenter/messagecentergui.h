@@ -53,11 +53,14 @@ public:
     void setFilter(const MessageCenterFilter& filter);
     //!< The source of the messages can be chosen too (routes): channels, api and these sources
     void showSources(const QStringList& sources);
+    //!< The contacts of the address book to choose from (with their icons); hidden when there is none
+    void setContacts(const QList<MessageCenterContact>& contacts);
 
 signals:
     void changed();
 
 private:
+    QComboBox *m_contact;
     QComboBox *m_protocol;
     QComboBox *m_direction;
     QComboBox *m_polarity;
@@ -118,6 +121,7 @@ private:
     PagingComposer *m_composer;
     // The routes and the files
     QTableWidget *m_routesTable;
+    QTableWidget *m_contactsTable;
     QTabWidget *m_tabs;                 //!< The sections of the window
     QDialog *m_optionsDialog;           //!< The options (log size, history, claim time, offline time)
     QSpinBox *m_logSize;
@@ -143,6 +147,7 @@ private:
     void buildQueue(QWidget *container);
     void buildCompose(QWidget *container);
     void buildRoutes(QWidget *container);
+    void buildContacts(QWidget *container);
     void buildFiles(QWidget *container);
     void buildOptions(QWidget *container);
 
@@ -155,6 +160,11 @@ private:
     void refreshQueue();
     void refreshComposeTransmitters();
     void refreshRoutes();
+    void refreshContacts();
+    void editContact(int index);        //!< -1: a new one
+    void removeContact();
+    void exportContacts();
+    void importContacts();
     void refreshFiles();
     QString selectedId(QTableWidget *table) const;
     //! A route: index -1 for a new one, filled from preset when it is given

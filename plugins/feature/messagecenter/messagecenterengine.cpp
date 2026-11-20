@@ -28,8 +28,6 @@
 #include <algorithm>
 
 #include "util/csv.h"
-#include "radiopagingflex.h"
-#include "radiopaginggsc.h"
 #include "radiopagingpagerformat.h"
 #include "radiopagingrecode.h"
 #include "messagecenterengine.h"
@@ -426,11 +424,150 @@ MessageCenterFilter MessageCenterFilter::fromJson(const QJsonObject& json)
 // Contacts
 // ---------------------------------------------------------------------------
 
+QJsonObject MessageCenterContact::Condition::toJson() const
+{
+    QJsonObject json;
+    json["field"] = m_field;
+    json[m_regExp ? "matches" : "is"] = m_value;
+    return json;
+}
+
+MessageCenterContact::Condition MessageCenterContact::Condition::fromJson(const QJsonObject& json)
+{
+    Condition c;
+    c.m_field = json["field"].toString().trimmed();
+    c.m_regExp = json.contains("matches");
+    c.m_value = c.m_regExp ? json["matches"].toString() : json["is"].toVariant().toString();
+    return c;
+}
+
+QString MessageCenterContact::Condition::check() const
+{
+    if (m_field.isEmpty()) {
+        return "a condition has no field";
+    }
+    if (m_regExp)
+    {
+        QRegularExpression expression(QRegularExpression::anchoredPattern(m_value));
+
+        if (!expression.isValid()) {
+            return QString("%1 matches %2: %3").arg(m_field, m_value, expression.errorString());
+        }
+    }
+
+    return QString();
+}
+
+bool MessageCenterContact::Condition::matches(const QJsonObject& fields) const
+{
+    const QJsonValue value = fields.value(m_field);
+
+    if (value.isUndefined() || value.isNull()) {
+        return false;
+    }
+
+    // A list: one of its values
+    if (value.isArray())
+    {
+        for (const QJsonValue& element : value.toArray())
+        {
+            QJsonObject one;
+            one.insert(m_field, element);
+
+            if (matches(one)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    const QString text = value.isString() ? value.toString() : value.toVariant().toString();
+
+    if (m_regExp)
+    {
+        if (m_compiled.pattern().isEmpty() && !m_value.isEmpty()) {
+            m_compiled = QRegularExpression(QRegularExpression::anchoredPattern(m_value));
+        }
+
+        return m_compiled.isValid() && m_compiled.match(text).hasMatch();
+    }
+
+    // Numbers as numbers: the capcode 0001234567 is 1234567
+    bool ok1, ok2;
+    const qlonglong a = text.toLongLong(&ok1);
+    const qlonglong b = m_value.trimmed().toLongLong(&ok2);
+
+    return (ok1 && ok2) ? (a == b) : (text == m_value);
+}
+
+bool MessageCenterContact::matches(const QJsonObject& fields) const
+{
+    for (const Rule& rule : m_rules)
+    {
+        bool all = !rule.isEmpty();
+
+        for (const Condition& condition : rule)
+        {
+            if (!condition.matches(fields))
+            {
+                all = false;
+                break;
+            }
+        }
+
+        if (all) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+QJsonObject MessageCenterContact::recordFields(const MessageRecord& record)
+{
+    QJsonObject fields = record.toJson();
+    const QJsonObject data = fields.value("protocolData").toObject();
+
+    for (auto it = data.begin(); it != data.end(); ++it)
+    {
+        if (!fields.contains(it.key())) {
+            fields.insert(it.key(), it.value());
+        }
+    }
+
+    return fields;
+}
+
+QString MessageCenterContact::ruleText(const Rule& rule)
+{
+    QStringList parts;
+
+    for (const Condition& c : rule) {
+        parts.append(QString("%1 %2 %3").arg(c.m_field, c.m_regExp ? "matches" : "is", c.m_value));
+    }
+
+    return parts.join(" and ");
+}
+
 QJsonObject MessageCenterContact::toJson() const
 {
     QJsonObject json;
+    QJsonArray rules;
+
+    for (const Rule& rule : m_rules)
+    {
+        QJsonArray conditions;
+
+        for (const Condition& c : rule) {
+            conditions.append(c.toJson());
+        }
+
+        rules.append(conditions);
+    }
+
     json["name"] = m_name;
-    json["addresses"] = QJsonArray::fromStringList(m_addresses);
+    json["rules"] = rules;
 
     if (!m_icon.isEmpty()) {
         json["icon"] = m_icon;
@@ -450,12 +587,16 @@ MessageCenterContact MessageCenterContact::fromJson(const QJsonObject& json)
     MessageCenterContact c;
     c.m_name = json["name"].toString().trimmed();
 
-    for (const QJsonValue& v : json["addresses"].toArray())
+    for (const QJsonValue& r : json["rules"].toArray())
     {
-        const QString address = v.toString().simplified();
+        Rule rule;
 
-        if (!address.isEmpty()) {
-            c.m_addresses.append(address);
+        for (const QJsonValue& v : r.toArray()) {
+            rule.append(Condition::fromJson(v.toObject()));
+        }
+
+        if (!rule.isEmpty()) {
+            c.m_rules.append(rule);
         }
     }
 
@@ -506,12 +647,15 @@ QList<MessageCenterContact> MessageCenterContact::listFromJson(const QByteArray&
             why = QString("two contacts are named %1").arg(c.m_name);
         }
 
-        for (const QString& address : c.m_addresses)
+        for (const Rule& rule : c.m_rules)
         {
-            QString addressError;
+            for (const Condition& condition : rule)
+            {
+                const QString conditionError = condition.check();
 
-            if (why.isEmpty() && addressKey(address, &addressError).isEmpty()) {
-                why = QString("%1: %2").arg(c.m_name, addressError);
+                if (why.isEmpty() && !conditionError.isEmpty()) {
+                    why = QString("%1: %2").arg(c.m_name, conditionError);
+                }
             }
         }
 
@@ -530,158 +674,53 @@ QList<MessageCenterContact> MessageCenterContact::listFromJson(const QByteArray&
     return contacts;
 }
 
-QString MessageCenterContact::addressKey(const QString& address, QString *error)
+const QList<QPair<QString, QStringList>>& MessageCenterContact::iconCategories()
 {
-    const QStringList parts = address.simplified().split(' ');
-    auto fail = [error, &address](const QString& why) {
-        if (error) {
-            *error = QString("%1: %2").arg(address, why);
-        }
-        return QString();
+    static const QList<QPair<QString, QStringList>> categories = {
+        {"Emergency", QString("fire_engine ambulance police_car oncoming_police_car police_car_light fire fire_extinguisher hospital "
+            "medical_symbol syringe pill stethoscope adhesive_bandage drop_of_blood rescue_workers_helmet sos_button warning no_entry "
+            "stop_sign construction high_voltage collision prohibited radioactive biohazard red_exclamation_mark red_question_mark").split(' ')},
+        {"Radio", QString("pager radio satellite_antenna antenna_bars satellite telephone telephone_receiver mobile_phone "
+            "mobile_phone_with_arrow mobile_phone_off vibration_mode fax_machine studio_microphone microphone headphone loudspeaker "
+            "megaphone speaker_high_volume speaker_medium_volume speaker_low_volume muted_speaker bell bell_with_slash postal_horn "
+            "control_knobs level_slider television video_camera movie_camera camera film_projector videocassette laptop "
+            "desktop_computer keyboard computer_mouse printer joystick floppy_disk computer_disk optical_disk battery low_battery "
+            "electric_plug light_bulb flashlight magnet telescope microscope robot flying_saucer rocket globe_with_meridians link "
+            "bar_chart chart_increasing chart_decreasing abacus input_numbers input_symbols input_latin_letters").split(' ')},
+        {"Messages", QString("envelope incoming_envelope envelope_with_arrow e-mail inbox_tray outbox_tray postbox "
+            "open_mailbox_with_raised_flag closed_mailbox_with_raised_flag memo spiral_notepad clipboard calendar pushpin "
+            "round_pushpin paperclip").split(' ')},
+        {"Weather", QString("cloud_with_lightning cloud_with_lightning_and_rain tornado water_wave snowflake thermometer droplet sun "
+            "cloud_with_rain fog volcano mountain evergreen_tree deciduous_tree seedling dog cat horse cow bird fish honeybee").split(' ')},
+        {"Places", QString("house house_with_garden office_building factory school bank hotel post_office classical_building church "
+            "stadium tent hut castle department_store convenience_store station").split(' ')},
+        {"Transport", QString("automobile taxi bus delivery_truck articulated_lorry tractor racing_car motorcycle bicycle locomotive "
+            "railway_car tram ship ferry motor_boat sailboat anchor airplane small_airplane helicopter fuel_pump").split(' ')},
+        {"People", QString("bust_in_silhouette busts_in_silhouette police_officer firefighter health_worker construction_worker guard "
+            "mechanic farmer cook teacher technologist scientist pilot detective person baby older_person").split(' ')},
+        {"Things", QString("key locked unlocked shield hammer_and_wrench wrench gear toolbox package alarm_clock stopwatch watch "
+            "mantelpiece_clock timer_clock hourglass_done hourglass_not_done money_bag credit_card shopping_cart "
+            "fork_and_knife_with_plate hot_beverage briefcase magnifying_glass_tilted_left globe_showing_europe-africa "
+            "globe_showing_americas world_map compass").split(' ')},
+        {"Signs", QString("information check_mark_button cross_mark recycling_symbol star glowing_star sparkles id_button new_button "
+            "free_button ok_button cool_button play_button pause_button stop_button record_button fast-forward_button "
+            "fast_reverse_button repeat_button shuffle_tracks_button radio_button musical_note musical_notes triangular_flag "
+            "chequered_flag keycap_0 keycap_1 keycap_2 keycap_3 keycap_4 keycap_5 keycap_6 keycap_7 keycap_8 keycap_9").split(' ')},
+        {"Colours", QString("red_heart orange_heart yellow_heart green_heart blue_heart purple_heart black_heart white_heart "
+            "red_circle orange_circle yellow_circle green_circle blue_circle purple_circle brown_circle black_circle white_circle "
+            "red_square orange_square yellow_square green_square blue_square purple_square brown_square black_large_square "
+            "white_large_square red_triangle_pointed_down").split(' ')}
     };
-
-    if (parts.size() != 2) {
-        return fail("the protocol and the address, e.g. pocsag 1234567D, flex 1234567, gsc 012345/2");
-    }
-
-    const QString protocol = parts[0].toLower();
-    const QString value = parts[1];
-
-    if (protocol == "pocsag")
-    {
-        // RIC, and its function letter (A-D) or none for all
-        static const QRegularExpression ric("^(\\d{1,7})([A-Da-d]?)$");
-        QRegularExpressionMatch m = ric.match(value);
-
-        if (!m.hasMatch() || (m.captured(1).toULongLong() > 2097151)) {
-            return fail("a POCSAG address is 0 to 2097151, with A to D for one function");
-        }
-
-        const QString function = m.captured(2).isEmpty() ? QString("*") : QString::number(m.captured(2).toUpper()[0].unicode() - 'A');
-        return QString("pocsag:%1:%2").arg(m.captured(1).toULongLong()).arg(function);
-    }
-    if (protocol == "flex")
-    {
-        RadioPagingFlex::CapcodeText capcode;
-        std::string why;
-
-        if (!RadioPagingFlex::parseCapcode(value.toStdString(), capcode, why) || (capcode.m_capcode == 0)) {
-            return fail(QString("FLEX capcode: %1").arg(why.empty() ? std::string("not one").c_str() : why.c_str()));
-        }
-
-        return QString("flex:%1").arg(capcode.m_capcode);
-    }
-    if (protocol == "gsc")
-    {
-        // 012345, 012345/2 (address number 1-4) or the 7 digit cap code
-        const QStringList pieces = value.split('/');
-        std::string gscAddress;
-        int number = 0;
-        std::string why;
-
-        if ((pieces.size() > 2) || !RadioPagingGsc::parseCapCode(pieces[0].toStdString(), gscAddress, number, &why)) {
-            return fail(QString("GSC cap code: %1").arg(why.empty() ? std::string("5 to 7 digits, /1 to /4 for one address number").c_str() : why.c_str()));
-        }
-        if (pieces.size() == 2)
-        {
-            bool ok;
-            number = pieces[1].toInt(&ok);
-
-            if (!ok || (number < 1) || (number > 4)) {
-                return fail("the GSC address number is 1 to 4");
-            }
-        }
-
-        return QString("gsc:%1:%2").arg(QString::fromStdString(gscAddress)).arg(number > 0 ? QString::number(number) : QString("*"));
-    }
-    if (!QRegularExpression("^[a-z0-9_-]+$").match(protocol).hasMatch()) {
-        return fail("the protocol is a word, e.g. pocsag, flex, gsc");
-    }
-
-    return QString("%1:%2").arg(protocol, value.toUpper());
+    return categories;
 }
 
-QStringList MessageCenterContact::recordKeys(const MessageRecord& record)
+QString MessageCenterContact::iconPath(const QString& icon)
 {
-    const QVariantMap& d = record.m_protocolData;
-    QStringList keys;
-
-    if (record.m_protocol == "pocsag")
-    {
-        // The RIC and the function of the record, or of its address (1234567D)
-        qulonglong ric = d.value("ric", -1).toLongLong() >= 0 ? d.value("ric").toULongLong() : 0;
-        int function = d.value("function", -1).toInt();
-
-        if (!d.contains("ric") || (function < 0))
-        {
-            static const QRegularExpression text("^0*(\\d+)([A-D])$");
-            QRegularExpressionMatch m = text.match(record.m_address);
-
-            if (!m.hasMatch()) {
-                return keys;
-            }
-
-            ric = m.captured(1).toULongLong();
-            function = m.captured(2)[0].unicode() - 'A';
-        }
-
-        keys << QString("pocsag:%1:%2").arg(ric).arg(function) << QString("pocsag:%1:*").arg(ric);
-    }
-    else if (record.m_protocol == "flex")
-    {
-        // The capcode, or the pagers of a group message
-        if (d.contains("capcode")) {
-            keys << QString("flex:%1").arg(d.value("capcode").toULongLong());
-        } else if (!record.m_address.isEmpty() && !record.m_address.contains(',')) {
-            keys << QString("flex:%1").arg(record.m_address.toULongLong());
-        }
-        for (const QString& member : record.addresses())
-        {
-            const QString key = QString("flex:%1").arg(member.toULongLong());
-
-            if ((member.toULongLong() != 0) && !keys.contains(key)) {
-                keys << key;
-            }
-        }
-    }
-    else if (record.m_protocol == "gsc")
-    {
-        // 012345/2: the address and its number
-        const QStringList pieces = record.m_address.split('/');
-
-        if (pieces.size() == 2) {
-            keys << QString("gsc:%1:%2").arg(pieces[0], pieces[1]);
-        }
-        if (!pieces[0].isEmpty()) {
-            keys << QString("gsc:%1:*").arg(pieces[0]);
-        }
-    }
-    else if (!record.m_protocol.isEmpty() && !record.m_address.isEmpty())
-    {
-        keys << QString("%1:%2").arg(record.m_protocol.toLower(), record.m_address.toUpper());
+    if (icon.startsWith(':') && !icon.startsWith(":/")) {
+        return QString(":/messagecenter/icons/%1.svg").arg(icon.mid(1));
     }
 
-    return keys;
-}
-
-const QStringList& MessageCenterContact::symbols()
-{
-    // In DejaVu Sans (Linux) and Segoe UI Symbol (Windows) as text, not colour emoji: the same everywhere
-    // Star, warning, telephone, envelope, airplane, anchor, heart, house, cross, staff of Aesculapius, lightning,
-    // gear, flag, sun, cloud, umbrella, radioactive, biohazard, skull, hot springs, check mark, cross mark, circle,
-    // triangle
-    static const QList<ushort> codes = {
-        0x2605, 0x26a0, 0x260e, 0x2709, 0x2708, 0x2693, 0x2665, 0x2302, 0x271a, 0x2695, 0x26a1, 0x2699,
-        0x2691, 0x2600, 0x2601, 0x2602, 0x2622, 0x2623, 0x2620, 0x2668, 0x2714, 0x2716, 0x25cf, 0x25b2
-    };
-    static const QStringList list = []() {
-        QStringList symbols;
-        for (ushort code : codes) {
-            symbols.append(QString(QChar(code)));
-        }
-        return symbols;
-    }();
-    return list;
+    return icon;
 }
 
 // ---------------------------------------------------------------------------
@@ -1293,34 +1332,21 @@ void MessageCenterEngine::setLogSize(int size)
 void MessageCenterEngine::setContacts(const QList<MessageCenterContact>& contacts)
 {
     m_contacts = contacts;
-    m_contactKeys.clear();
-
-    // An address in two contacts is the first one's
-    for (int i = 0; i < m_contacts.size(); i++)
-    {
-        for (const QString& address : m_contacts[i].m_addresses)
-        {
-            const QString key = MessageCenterContact::addressKey(address);
-
-            if (!key.isEmpty() && !m_contactKeys.contains(key)) {
-                m_contactKeys.insert(key, i);
-            }
-        }
-    }
 }
 
+// The first contact a rule of which the record matches (the fields of the record made once for all)
 const MessageCenterContact *MessageCenterEngine::contactOf(const MessageRecord& record) const
 {
-    if (m_contactKeys.isEmpty()) {
+    if (m_contacts.isEmpty()) {
         return nullptr;
     }
 
-    for (const QString& key : MessageCenterContact::recordKeys(record))
-    {
-        auto it = m_contactKeys.constFind(key);
+    const QJsonObject fields = MessageCenterContact::recordFields(record);
 
-        if (it != m_contactKeys.constEnd()) {
-            return &m_contacts[it.value()];
+    for (const MessageCenterContact& contact : m_contacts)
+    {
+        if (contact.matches(fields)) {
+            return &contact;
         }
     }
 

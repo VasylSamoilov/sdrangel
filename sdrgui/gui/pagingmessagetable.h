@@ -61,6 +61,7 @@ public:
         ColErrors,
         ColState,
         ColDate,            //!< Last in the enumeration so saved column states keep their indexes; shown before Time
+        ColContact,         //!< The contact of the address book (Message Center): its icon and name
         ColumnCount
     };
 

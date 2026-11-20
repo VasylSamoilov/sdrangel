@@ -394,6 +394,12 @@ void MessageCenter::applySettings(const MessageCenterSettings& settings, const Q
         || settingsKeys.contains("sources") || settingsKeys.contains("historyEnabled") || settingsKeys.contains("historyMaxMB")) {
         applyEngineSettings();
     }
+    else if (settingsKeys.contains("contacts"))
+    {
+        // The address book alone: the sinks and sources stay open
+        QMutexLocker mutexLocker(&m_mutex);
+        m_engine.setContacts(m_settings.m_contacts);
+    }
 
     if (m_settings.m_useReverseAPI)
     {

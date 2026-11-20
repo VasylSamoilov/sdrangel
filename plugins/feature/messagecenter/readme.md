@@ -56,6 +56,24 @@ The pages to transmit, with the transmitter (its name), protocol, address, text,
 
 The composer of a page, the same as in the Radio Paging modulator: transmitter (its name), protocol, address, type, text and the fields of the protocol. Table opens the codepage table of the text. Post the page queues the page for the transmitter.
 
+<h3>Contacts</h3>
+
+![Message Center contacts](../../../doc/img/MessageCenter_plugin_contacts.png)
+
+The address book: a name, an icon and a colour for the messages of a pager or a station. The log shows them in the Contact column, and the filters (of the log and of the routes) choose the messages of a contact (Any contact).
+
+![Message Center contacts in the log](../../../doc/img/MessageCenter_plugin_contacts_log.png)
+
+A contact has rules; a message is the contact's when it meets all the conditions of one of them. A condition is on a field of the message: protocol, address, msgType, channel, frequency, mode, or a field of its protocol (ric, function, capcode, group_capcodes...; the details of a message in the log show them all). It is the value (numbers are compared as numbers: the capcode 0001234567 is 1234567) or matches a regular expression of the whole value; a list field (the members of a FLEX group message) when one of its values does. A pager has several addresses (POCSAG functions, FLEX capcodes): one contact with a rule for each. The first contact a message is of names it.
+
+![Message Center contact](../../../doc/img/MessageCenter_plugin_contact.png)
+
+* Icon: a built-in one (Microsoft Fluent Emoji, flat style, MIT License: emergency, radio, messages, weather, places, transport, people, things, signs and colours) or an image file of your own. The colour colours the name; right click on it for none.
+* Rules: a row for each condition, its rule number groups them. + Rule adds a rule, + Condition a condition to the rule selected. The field list has the fields of the messages of the log; another one can be typed. Finds: the messages of the log the rule finds; a regular expression that is not valid is shown in red.
+* The contacts are saved to and added from a JSON file (a contact of the same name is replaced).
+
+A message of a contact has its name, icon and colour in its data (contact, contact_icon, contact_color): the sinks have them too. A change of the contacts names the messages that come after it.
+
 <h3>Routes</h3>
 
 Every message is checked against all the routes in their number order (#), not only the first. Each route whose filter selects the message sends it to the sinks of the route: the log, the transmit queue or the sinks of I/O. A route with Stop ends the check for the messages it selects, so the routes after it do not see them. The log is a sink as the others: a message no route sends to it is not logged. A new Message Center has one route, 1 "All messages to the log", without a filter. A sink takes only what a route sends to it.
@@ -107,7 +125,7 @@ In the dialog opened by the button at the right of the tabs:
 
 <h2>REST API</h2>
 
-Settings (`MessageCenterSettings`, feature type `MessageCenter`): title, rgbColor, logSize, historyEnabled, historyMaxMB, claimTimeoutSec, silentSec, routes, sinks, sources and the reverse API settings. Routes, sinks and sources are JSON arrays (as text); a setting with a sink, source or route that is not valid is refused with the reason.
+Settings (`MessageCenterSettings`, feature type `MessageCenter`): title, rgbColor, logSize, historyEnabled, historyMaxMB, claimTimeoutSec, silentSec, routes, contacts, sinks, sources and the reverse API settings. Routes, contacts, sinks and sources are JSON arrays (as text); a setting with a sink, source, route or contact that is not valid is refused with the reason. A contact: `{"name": "Fire station 3", "icon": ":fire_engine", "color": 4294926400, "rules": [[{"field": "protocol", "is": "pocsag"}, {"field": "ric", "is": "1234567"}], [{"field": "protocol", "is": "flex"}, {"field": "capcode", "matches": "11000.."}]]}`.
 
 Report (`MessageCenterReport`): the number of messages logged and routed, the endpoints, the pages, the log, the records each sink took and refused (sinks) and the errors.
 

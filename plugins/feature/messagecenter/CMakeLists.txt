@@ -25,10 +25,13 @@ if(NOT SERVER_MODE)
     set(messagecenter_SOURCES
         ${messagecenter_SOURCES}
         messagecentergui.cpp
+        messagecentercontacts.cpp
+        messagecenter.qrc
     )
     set(messagecenter_HEADERS
         ${messagecenter_HEADERS}
         messagecentergui.h
+        messagecentercontacts.h
     )
 
     set(TARGET_NAME ${PLUGINS_PREFIX}featuremessagecenter)

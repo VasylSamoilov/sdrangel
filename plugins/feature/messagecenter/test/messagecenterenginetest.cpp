@@ -759,50 +759,58 @@ void testContacts()
 {
     QString error;
 
-    check(MessageCenterContact::addressKey("pocsag 1234567") == "pocsag:1234567:*", "Contacts: a POCSAG RIC, all functions");
-    check(MessageCenterContact::addressKey("POCSAG 0001234d") == "pocsag:1234:3", "Contacts: a POCSAG RIC and function D");
-    check(MessageCenterContact::addressKey("flex 3E005237593") == "flex:5237593", "Contacts: a FLEX capcode form with letters");
-    check(MessageCenterContact::addressKey("gsc 12345") == "gsc:012345:*", "Contacts: a GSC cap code of 5 digits, all address numbers");
-    check(MessageCenterContact::addressKey("gsc 012345/2") == "gsc:012345:2", "Contacts: a GSC address and its number");
-    check(MessageCenterContact::addressKey("aprs n0call-9") == "aprs:N0CALL-9", "Contacts: another protocol, its address");
-    check(MessageCenterContact::addressKey("pocsag 2097152", &error).isEmpty() && !error.isEmpty(), "Contacts: a RIC out of range is refused");
-    check(MessageCenterContact::addressKey("1234567", &error).isEmpty(), "Contacts: an address without its protocol is refused");
-
-    QString json = "[{\"name\":\"Fire 3\",\"addresses\":[\"pocsag 1234567\",\"flex 2101249\"],\"icon\":\":fire_engine\",\"color\":4294901760},"
-        "{\"name\":\"Duty\",\"addresses\":[\"pocsag 1234567A\",\"gsc 012345/2\"]}]";
+    // Rules of conditions on the fields of the records; the first contact one of whose rules a record meets names it
+    // (Duty, the function A of the RIC, before Fire 3, all the functions)
+    QString json = "["
+        "{\"name\":\"Duty\",\"rules\":["
+            "[{\"field\":\"protocol\",\"is\":\"pocsag\"},{\"field\":\"ric\",\"is\":\"1234567\"},{\"field\":\"function\",\"is\":\"0\"}],"
+            "[{\"field\":\"protocol\",\"is\":\"gsc\"},{\"field\":\"address\",\"is\":\"012345/2\"}]]},"
+        "{\"name\":\"Fire 3\",\"icon\":\":fire_engine\",\"color\":4294901760,\"rules\":["
+            "[{\"field\":\"protocol\",\"is\":\"pocsag\"},{\"field\":\"ric\",\"is\":\"1234567\"}],"
+            "[{\"field\":\"protocol\",\"is\":\"flex\"},{\"field\":\"capcode\",\"is\":\"2101249\"}],"
+            "[{\"field\":\"group_capcodes\",\"is\":\"2101249\"}],"
+            "[{\"field\":\"protocol\",\"is\":\"flex\"},{\"field\":\"capcode\",\"matches\":\"12345..\"}]]}"
+        "]";
     QList<MessageCenterContact> contacts = MessageCenterContact::listFromJson(json.toUtf8(), &error);
-    check((contacts.size() == 2) && (contacts[0].m_addresses.size() == 2), "Contacts: read from JSON");
+    check((contacts.size() == 2) && (contacts[1].m_rules.size() == 4) && (contacts[0].m_rules[0].size() == 3) && error.isEmpty(),
+        "Contacts: rules of conditions read from JSON");
+    check(MessageCenterContact::listFromJson(MessageCenterContact::listToJson(contacts)).size() == 2, "Contacts: written to JSON and read again");
     check(MessageCenterContact::listFromJson("[{\"name\":\"\"}]", &error).isEmpty() && !error.isEmpty(), "Contacts: a contact without a name is refused");
     check(MessageCenterContact::listFromJson("[{\"name\":\"A\"},{\"name\":\"A\"}]", &error).isEmpty() && error.contains("two"),
         "Contacts: two contacts of the same name are refused");
-    check(MessageCenterContact::listFromJson("[{\"name\":\"A\",\"addresses\":[\"flex 0\"]}]", &error).isEmpty() && error.contains("A"),
-        "Contacts: a contact with an address that is not one is refused, with its name");
+    check(MessageCenterContact::listFromJson("[{\"name\":\"A\",\"rules\":[[{\"field\":\"ric\",\"matches\":\"12(\"}]]}]", &error).isEmpty()
+        && error.contains("A"), "Contacts: a regular expression that is not valid is refused, with the name of the contact");
 
     MessageCenterEngine engine;
     engine.setContacts(contacts);
 
-    // POCSAG: the most precise address first (1234567A is Duty's, the other functions Fire 3's)
+    // POCSAG: the fields of the record, numbers as numbers
     MessageRecord a = rx("a", "pocsag", "1234567A", "A", "ch");
     a.m_protocolData.insert("ric", 1234567);
     a.m_protocolData.insert("function", 0);
     MessageRecord d = rx("d", "pocsag", "1234567D", "D", "ch");
+    d.m_protocolData.insert("ric", 1234567);
+    d.m_protocolData.insert("function", 3);
     const MessageCenterContact *ca = engine.contactOf(a);
     const MessageCenterContact *cd = engine.contactOf(d);
-    check(ca && (ca->m_name == "Duty") && cd && (cd->m_name == "Fire 3"), "Contacts: a POCSAG function of its own, the others of the RIC");
+    check(ca && (ca->m_name == "Duty") && cd && (cd->m_name == "Fire 3"), "Contacts: the first contact a record is of: a function, then all of the RIC");
 
-    // FLEX: the capcode, and a group message by its members
+    // FLEX: the capcode (10 digits in the address, a number in the data), a group message by a list field, a match
     MessageRecord f = rx("f", "flex", "0002101249", "F", "ch");
     f.m_protocolData.insert("capcode", 2101249);
     MessageRecord g = rx("g", "flex", "0002029568", "G", "ch");
     g.m_protocolData.insert("capcode", 2029568);
     g.m_protocolData.insert("group_capcodes", QVariantList({"0000002020", "0002101249"}));
-    check(engine.contactOf(f) && (engine.contactOf(f)->m_name == "Fire 3") && engine.contactOf(g) && (engine.contactOf(g)->m_name == "Fire 3"),
-        "Contacts: a FLEX capcode, and a group message of a member");
+    MessageRecord m = rx("m", "flex", "0001234599", "M", "ch");
+    m.m_protocolData.insert("capcode", 1234599);
+    check(engine.contactOf(f) && (engine.contactOf(f)->m_name == "Fire 3") && engine.contactOf(g) && (engine.contactOf(g)->m_name == "Fire 3")
+        && engine.contactOf(m) && (engine.contactOf(m)->m_name == "Fire 3"),
+        "Contacts: a FLEX capcode, a group message by one of the values of its list, a regular expression");
 
-    // GSC: the address number given; another number of the address is nobody's
+    // GSC: the address as the log shows it; another address number is nobody's
     MessageRecord s2 = rx("s2", "gsc", "012345/2", "S", "ch");
     MessageRecord s3 = rx("s3", "gsc", "012345/3", "S", "ch");
-    check(engine.contactOf(s2) && (engine.contactOf(s2)->m_name == "Duty") && !engine.contactOf(s3), "Contacts: a GSC address number");
+    check(engine.contactOf(s2) && (engine.contactOf(s2)->m_name == "Duty") && !engine.contactOf(s3), "Contacts: a field of the record (address)");
 
     // The log has the name, icon and colour; a route selects by the name
     std::vector<MessageCenterEngine::Route> routes = MessageCenterEngine::defaultRoutes();

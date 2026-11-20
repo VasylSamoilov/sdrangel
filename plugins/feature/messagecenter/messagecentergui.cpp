@@ -47,6 +47,7 @@
 
 #include "radiopagingpage.h"
 #include "messagecentergui.h"
+#include "messagecentercontacts.h"
 
 namespace {
 
@@ -152,6 +153,10 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     // Center, one when it is wide enough), each at its size, as the settings lines of the channels
     FlowLayout *layout = new FlowLayout(this, 0, 6, 3);
 
+    m_contact = new QComboBox(this);
+    m_contact->addItem("Any contact");
+    m_contact->setToolTip("The messages of a contact of the address book (the Contacts tab): of any of its addresses");
+    m_contact->setVisible(false);
     m_protocol = new QComboBox(this);
     m_protocol->addItems({"Any protocol", "pocsag", "flex", "gsc"});
     m_direction = new QComboBox(this);
@@ -220,6 +225,7 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
         return w;
     };
 
+    layout->addWidget(m_contact);
     layout->addWidget(m_protocol);
     layout->addWidget(m_direction);
     layout->addWidget(m_polarity);
@@ -232,7 +238,7 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     layout->addWidget(labelled("Text", nullptr, m_text, 16));
     layout->addWidget(labelled(QString(), m_matchField, m_regExp, 16));
 
-    for (QComboBox *combo : {m_protocol, m_direction, m_polarity, m_type, m_source}) {
+    for (QComboBox *combo : {m_contact, m_protocol, m_direction, m_polarity, m_type, m_source}) {
         connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MessageCenterFilterWidget::changed);
     }
     connect(m_matchField, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MessageCenterFilterWidget::changed);
@@ -264,6 +270,9 @@ MessageCenterFilter MessageCenterFilterWidget::filter() const
 {
     MessageCenterFilter f;
 
+    if (m_contact->currentIndex() > 0) {
+        f.m_contacts = QStringList(m_contact->currentText());
+    }
     if (m_protocol->currentIndex() > 0) {
         f.m_protocols = QStringList(m_protocol->currentText());
     }
@@ -296,6 +305,13 @@ MessageCenterFilter MessageCenterFilterWidget::filter() const
 
 void MessageCenterFilterWidget::setFilter(const MessageCenterFilter& f)
 {
+    // A contact the address book no longer has is kept in the list: the filter keeps it
+    if (!f.m_contacts.isEmpty() && (m_contact->findText(f.m_contacts.first()) < 0)) {
+        m_contact->addItem(f.m_contacts.first());
+    }
+
+    m_contact->setCurrentIndex(f.m_contacts.isEmpty() ? 0 : std::max(0, m_contact->findText(f.m_contacts.first())));
+    m_contact->setVisible(m_contact->count() > 1);
     m_protocol->setCurrentIndex(f.m_protocols.isEmpty() ? 0 : std::max(0, m_protocol->findText(f.m_protocols.first())));
     m_direction->setCurrentIndex(f.m_direction < 0 ? 0 : (f.m_direction == (int) MessageRecord::DirectionRX ? 1 : 2));
     m_polarity->setCurrentIndex(f.m_polarity < 0 ? 0 : (f.m_polarity == (int) MessageRecord::PolarityNormal ? 1 : 2));
@@ -314,6 +330,25 @@ void MessageCenterFilterWidget::setFilter(const MessageCenterFilter& f)
 
     m_source->setCurrentIndex(f.m_sources.isEmpty() ? 0 : std::max(0, m_source->findText(f.m_sources.first())));
     emit changed();     // The line edits tell their changes when edited only
+}
+
+void MessageCenterFilterWidget::setContacts(const QList<MessageCenterContact>& contacts)
+{
+    m_contact->blockSignals(true);
+    const QString current = m_contact->currentIndex() > 0 ? m_contact->currentText() : QString();
+    m_contact->clear();
+    m_contact->addItem("Any contact");
+
+    for (const MessageCenterContact& contact : contacts) {
+        m_contact->addItem(MessageCenterContactIcons::icon(contact.m_icon), contact.m_name);
+    }
+    if (!current.isEmpty() && (m_contact->findText(current) < 0)) {
+        m_contact->addItem(current);
+    }
+
+    m_contact->setCurrentIndex(current.isEmpty() ? 0 : std::max(0, m_contact->findText(current)));
+    m_contact->setVisible(m_contact->count() > 1);
+    m_contact->blockSignals(false);
 }
 
 void MessageCenterFilterWidget::showSources(const QStringList& sources)
@@ -420,6 +455,9 @@ MessageCenterGUI::MessageCenterGUI(PluginAPI* pluginAPI, FeatureUISet *featureUI
     buildEndpoints(tab(tr("Channels")));
     buildQueue(tab(tr("Queue")));
     buildCompose(tab(tr("Page")));
+    buildContacts(tab(tr("Contacts")));
+    m_tabs->setTabToolTip(m_tabs->count() - 1, tr("The address book: a name, an icon and a colour for the addresses of a pager "
+        "or a station,\nshown in the log beside their messages and chosen in the filters"));
     buildRoutes(tab(tr("Routes")));
     buildFiles(tab(tr("I/O")));
     m_tabs->setTabToolTip(m_tabs->count() - 1, tr("Sources and sinks: where messages come from besides the channels "
@@ -473,8 +511,8 @@ void MessageCenterGUI::buildLog(QWidget *container)
     m_logTable->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_logTable->setMaxRows(m_maxLogRows);
     m_logTable->setDefaultColumns({PagingMessageTable::ColDate, PagingMessageTable::ColTime, PagingMessageTable::ColDirection, PagingMessageTable::ColChannel,
-        PagingMessageTable::ColProtocol, PagingMessageTable::ColRate, PagingMessageTable::ColPolarity, PagingMessageTable::ColAddress,
-        PagingMessageTable::ColType, PagingMessageTable::ColMessage, PagingMessageTable::ColInfo});
+        PagingMessageTable::ColProtocol, PagingMessageTable::ColRate, PagingMessageTable::ColPolarity, PagingMessageTable::ColContact,
+        PagingMessageTable::ColAddress, PagingMessageTable::ColType, PagingMessageTable::ColMessage, PagingMessageTable::ColInfo});
     m_logTable->setToolTip("The messages the routes put in the log. Click the icon of a voice message to play it.\nDouble-click a message for all its fields. Right click the header to choose the columns");
     layout->addWidget(m_logFilter);
     layout->addWidget(m_logTable);
@@ -641,6 +679,207 @@ void MessageCenterGUI::buildRoutes(QWidget *container)
     connect(exportRouting, &QToolButton::clicked, this, &MessageCenterGUI::exportRouting);
     connect(importRouting, &QToolButton::clicked, this, &MessageCenterGUI::importRouting);
     connect(m_routesTable, &QTableWidget::cellDoubleClicked, this, &MessageCenterGUI::editSelectedRoute);
+}
+
+void MessageCenterGUI::buildContacts(QWidget *container)
+{
+    QVBoxLayout *layout = new QVBoxLayout(container);
+    layout->setContentsMargins(2, 2, 2, 2);
+    m_contactsTable = makeTable({"Contact", "Rules", "Note"}, container);
+    m_contactsTable->setIconSize(QSize(fontMetrics().height(), fontMetrics().height()));
+    m_contactsTable->horizontalHeader()->setStretchLastSection(false);
+    m_contactsTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    m_contactsTable->setToolTip("The address book: the messages of the addresses of a contact have its name, icon and colour\n"
+        "in the log, and the filters choose them by it (Any contact). A pager has several addresses\n"
+        "(POCSAG functions, FLEX capcodes): one contact for all. Double-click a contact to edit it");
+    QHBoxLayout *buttons = new QHBoxLayout();
+    QToolButton *add = iconButton(container, ":/plus.png", "Add a contact");
+    QToolButton *edit = iconButton(container, ":/edit.png", "Edit the contact selected");
+    QToolButton *remove = iconButton(container, ":/bin.png", "Remove the contact selected");
+    QToolButton *exportButton = iconButton(container, ":/save.png", "Save the contacts to a JSON file");
+    QToolButton *importButton = iconButton(container, ":/load.png", "Add the contacts of a JSON file (those of the same name are replaced)");
+    buttons->addWidget(add);
+    buttons->addWidget(edit);
+    buttons->addWidget(remove);
+    buttons->addStretch();
+    buttons->addWidget(importButton);
+    buttons->addWidget(exportButton);
+    layout->addWidget(m_contactsTable);
+    layout->addLayout(buttons);
+
+    connect(add, &QToolButton::clicked, this, [this]() { editContact(-1); });
+    connect(edit, &QToolButton::clicked, this, [this]() { editContact(m_contactsTable->currentRow()); });
+    connect(remove, &QToolButton::clicked, this, &MessageCenterGUI::removeContact);
+    connect(exportButton, &QToolButton::clicked, this, &MessageCenterGUI::exportContacts);
+    connect(importButton, &QToolButton::clicked, this, &MessageCenterGUI::importContacts);
+    connect(m_contactsTable, &QTableWidget::cellDoubleClicked, this, [this](int row, int) { editContact(row); });
+}
+
+void MessageCenterGUI::refreshContacts()
+{
+    const int selected = m_contactsTable->currentRow();
+    m_contactsTable->setRowCount(m_settings.m_contacts.size());
+
+    for (int i = 0; i < m_settings.m_contacts.size(); i++)
+    {
+        const MessageCenterContact& c = m_settings.m_contacts[i];
+        QStringList rules;
+
+        for (const MessageCenterContact::Rule& rule : c.m_rules) {
+            rules.append(MessageCenterContact::ruleText(rule));
+        }
+
+        setRow(m_contactsTable, i, {c.m_name, rules.join(" | "), c.m_note});
+        QTableWidgetItem *name = m_contactsTable->item(i, 0);
+        name->setIcon(MessageCenterContactIcons::icon(c.m_icon));
+        name->setForeground(c.m_color ? QBrush(QColor::fromRgba(c.m_color)) : QBrush());
+        m_contactsTable->item(i, 1)->setToolTip(rules.join("\nor "));
+    }
+
+    if ((selected >= 0) && (selected < m_contactsTable->rowCount())) {
+        m_contactsTable->selectRow(selected);
+    }
+
+    m_logFilter->setContacts(m_settings.m_contacts);
+}
+
+void MessageCenterGUI::editContact(int index)
+{
+    const bool existing = (index >= 0) && (index < m_settings.m_contacts.size());
+    QStringList others;
+
+    for (int i = 0; i < m_settings.m_contacts.size(); i++)
+    {
+        if (i != index) {
+            others.append(m_settings.m_contacts[i].m_name);
+        }
+    }
+
+    // The fields of the messages of the log (the conditions are on them), and the last messages to show what each rule
+    // finds
+    std::vector<QJsonObject> sample;
+    QSet<QString> fieldSet;
+    {
+        const std::deque<MessageRecord>& log = m_center->engine().log();
+        const size_t count = std::min<size_t>(log.size(), 2000);
+
+        for (size_t i = log.size() - count; i < log.size(); i++)
+        {
+            QJsonObject fields = MessageCenterContact::recordFields(log[i]);
+
+            for (const QString& key : fields.keys())
+            {
+                const QJsonValue::Type type = fields.value(key).type();
+
+                if ((type != QJsonValue::Object) && (key != "protocolData") && !key.startsWith("contact")) {
+                    fieldSet.insert(key);
+                }
+            }
+
+            sample.push_back(fields);
+        }
+    }
+
+    // The usual ones first, then the others by name
+    QStringList fields = {"protocol", "address", "ric", "function", "capcode", "group_capcodes", "msgType", "channel", "frequency", "mode"};
+    QStringList seen = fieldSet.values();
+    std::sort(seen.begin(), seen.end());
+
+    for (const QString& field : seen)
+    {
+        if (!fields.contains(field)) {
+            fields.append(field);
+        }
+    }
+
+    MessageCenterContactDialog dialog(existing ? m_settings.m_contacts[index] : MessageCenterContact(), others, fields, sample, this);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    if (existing) {
+        m_settings.m_contacts[index] = dialog.contact();
+    } else {
+        m_settings.m_contacts.append(dialog.contact());
+    }
+
+    refreshContacts();
+    m_contactsTable->selectRow(existing ? index : m_settings.m_contacts.size() - 1);
+    applySettings(QStringList("contacts"));
+}
+
+void MessageCenterGUI::removeContact()
+{
+    const int row = m_contactsTable->currentRow();
+
+    if ((row < 0) || (row >= m_settings.m_contacts.size())) {
+        return;
+    }
+
+    m_settings.m_contacts.removeAt(row);
+    refreshContacts();
+    applySettings(QStringList("contacts"));
+}
+
+void MessageCenterGUI::exportContacts()
+{
+    const QString path = QFileDialog::getSaveFileName(this, "Export the contacts", "contacts.json", "JSON (*.json)");
+
+    if (path.isEmpty()) {
+        return;
+    }
+
+    QFile file(path);
+    const QByteArray json = QJsonDocument::fromJson(MessageCenterContact::listToJson(m_settings.m_contacts)).toJson();
+
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || (file.write(json) < 0)) {
+        QMessageBox::warning(this, "Export the contacts", QString("Cannot write %1").arg(path));
+    }
+}
+
+void MessageCenterGUI::importContacts()
+{
+    const QString path = QFileDialog::getOpenFileName(this, "Import contacts", QString(), "JSON (*.json);;All files (*)");
+
+    if (path.isEmpty()) {
+        return;
+    }
+
+    QFile file(path);
+    QString error;
+    const QList<MessageCenterContact> contacts = file.open(QIODevice::ReadOnly)
+        ? MessageCenterContact::listFromJson(file.readAll(), &error) : QList<MessageCenterContact>();
+
+    if (!error.isEmpty() || contacts.isEmpty())
+    {
+        QMessageBox::warning(this, "Import contacts", error.isEmpty() ? QString("%1 has no contacts").arg(path) : error);
+        return;
+    }
+
+    // A contact of the same name is replaced, the others added
+    int replaced = 0;
+
+    for (const MessageCenterContact& c : contacts)
+    {
+        auto it = std::find_if(m_settings.m_contacts.begin(), m_settings.m_contacts.end(),
+            [&c](const MessageCenterContact& other) { return other.m_name == c.m_name; });
+
+        if (it != m_settings.m_contacts.end())
+        {
+            *it = c;
+            replaced++;
+        }
+        else
+        {
+            m_settings.m_contacts.append(c);
+        }
+    }
+
+    refreshContacts();
+    applySettings(QStringList("contacts"));
+    QMessageBox::information(this, "Import contacts", QString("%1 contacts added, %2 replaced")
+        .arg(contacts.size() - replaced).arg(replaced));
 }
 
 void MessageCenterGUI::moveRoute(int step)
@@ -889,6 +1128,7 @@ void MessageCenterGUI::displaySettings()
     m_claimTimeout->setValue(m_settings.m_claimTimeoutSec);
     m_silentTime->setValue(m_settings.m_silentSec);
     refreshRoutes();
+    refreshContacts();
     refreshFiles();
     m_doApplySettings = true;
 
@@ -1334,6 +1574,7 @@ void MessageCenterGUI::editRoute(int index, const MessageCenterEngine::Route *pr
     QLineEdit *name = new QLineEdit(route.m_name, &dialog);
     name->setPlaceholderText("name");
     MessageCenterFilterWidget *filter = new MessageCenterFilterWidget(&dialog);
+    filter->setContacts(m_settings.m_contacts);
     QStringList sources;
 
     for (const MessageCenterFileSetting& f : m_settings.m_sources) {

@@ -41,6 +41,7 @@
 #include <QHelpEvent>
 #include <QToolTip>
 #include <QTreeWidget>
+#include <QIcon>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -216,8 +217,31 @@ int checkTone(const QString& check)
 }
 
 const char *headers[PagingMessageTable::ColumnCount] = {
-    "Time", "Dir", "Channel", "Proto", "Rate", "Pol", "Address", "Type", "Message", "Fragment", "Info", "Errors", "State", "Date"
+    "Time", "Dir", "Channel", "Proto", "Rate", "Pol", "Address", "Type", "Message", "Fragment", "Info", "Errors", "State", "Date",
+    "Contact"
 };
+
+// The icon of a contact: a built-in one (:name) is a resource of the Message Center, else an image file. Kept: the
+// same few icons are on many rows
+QIcon contactIcon(const QString& icon)
+{
+    static QHash<QString, QIcon> icons;
+
+    if (icon.isEmpty()) {
+        return QIcon();
+    }
+
+    auto it = icons.constFind(icon);
+
+    if (it != icons.constEnd()) {
+        return it.value();
+    }
+
+    const QString path = (icon.startsWith(':') && !icon.startsWith(":/")) ? QString(":/messagecenter/icons/%1.svg").arg(icon.mid(1)) : icon;
+    QIcon result(path);
+    icons.insert(icon, result);
+    return result;
+}
 
 } // namespace
 
@@ -248,6 +272,8 @@ PagingMessageTable::PagingMessageTable(QWidget *parent) :
     horizontalHeader()->setSectionsMovable(true);
     // The date before the time
     horizontalHeader()->moveSection(horizontalHeader()->visualIndex(ColDate), horizontalHeader()->visualIndex(ColTime));
+    // The contact before the address
+    horizontalHeader()->moveSection(horizontalHeader()->visualIndex(ColContact), horizontalHeader()->visualIndex(ColAddress));
     horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
     setContextMenuPolicy(Qt::CustomContextMenu);
 
@@ -342,7 +368,7 @@ void PagingMessageTable::sizeColumns()
     const char *cells[ColumnCount] = {
         "00:00:00", "TX", "Channel alias", "POCSAG", "3200/4", "I", "0001234567A", "VOICE",
         "ABCEDGHIJKLMNOPQRSTUVWXYZABCDEFGHIJ", "REASM 99", "PH:A C:14 F:127 N:64 R:1 ADDR:long K:ok S:ok DUP:same", "X99", "transmitted",
-        "Wed Sep 30 2026"
+        "Wed Sep 30 2026", "WW Fire station 3"
     };
 
     for (int c = 0; c < ColumnCount; c++) {
@@ -826,6 +852,22 @@ void PagingMessageTable::fillRow(int row, const MessageRecord& record, const QSt
         cell(ColDirection, queued ? "QU" : "NS", queued ? chip("QU", "#1a1a0d", "#cccc66") : chip("NS", "#2a0d0d", "#ff7777"), tip);
     }
     cell(ColChannel, record.m_channel);
+
+    // The contact of the address book: its icon and its name, in its colour
+    {
+        const QString name = d.value("contact").toString();
+        const QString icon = d.value("contact_icon").toString();
+        const quint32 color = (quint32) d.value("contact_color").toULongLong();
+        QString html;
+
+        if (!name.isEmpty() && (color != 0)) {
+            html = QString("<span style=\"color:%1\">%2</span>").arg(QColor::fromRgba(color).name(), name.toHtmlEscaped());
+        }
+
+        // The icon beside the name (the delegate draws the text beside it)
+        QTableWidgetItem *contactItem = cell(ColContact, name, html, name.isEmpty() ? QString() : tr("Contact of the address book: %1").arg(name));
+        contactItem->setIcon(name.isEmpty() ? QIcon() : contactIcon(icon));
+    }
     cell(ColProtocol, record.m_protocol.toUpper());
     cell(ColRate, record.m_mode);
 

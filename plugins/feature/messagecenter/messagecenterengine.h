@@ -59,26 +59,50 @@ class QUdpSocket;
 // its icon (contact_icon) and its colour (contact_color)
 struct MessageCenterContact
 {
+    //! A condition on a field of a record: the field is a field of the record as JSON (protocol, address, msgType,
+    //! channel, frequency, mode...) or of its protocol data (ric, function, capcode, group_capcodes...). It is the
+    //! value (numbers compared as numbers), or matches the regular expression (the whole value); a list (the members
+    //! of a group message) when one of its values does
+    struct Condition
+    {
+        QString m_field;
+        QString m_value;
+        bool m_regExp = false;
+        mutable QRegularExpression m_compiled;      //!< Of m_value, made the first time
+
+        //!< The value of the field in a record (record JSON and protocol data together, see recordFields)
+        bool matches(const QJsonObject& fields) const;
+        //!< Empty if it can match, else why not: a field, a valid regular expression
+        QString check() const;
+        QJsonObject toJson() const;
+        static Condition fromJson(const QJsonObject& json);
+    };
+    //! A rule: all its conditions
+    typedef QList<Condition> Rule;
+
     QString m_name;
-    //! "protocol address": pocsag 1234567 (all functions) or 1234567D, flex 1234567 or a capcode form with letters,
-    //! gsc 012345 (all address numbers), 012345/2 or a 7 digit cap code; another protocol: its address as written
-    QStringList m_addresses;
-    QString m_icon;                     //!< A symbol (a character), or the path of an image file; empty for none
+    QList<Rule> m_rules;                //!< The messages of the contact: those of any of its rules
+    QString m_icon;                     //!< A built-in icon (:name, see iconCategories), or the path of an image file; empty for none
     quint32 m_color = 0;                //!< ARGB, 0 for none
     QString m_note;
 
+    //!< The record matches one of the rules (fields: recordFields of the record)
+    bool matches(const QJsonObject& fields) const;
     QJsonObject toJson() const;
     static MessageCenterContact fromJson(const QJsonObject& json);
     static QByteArray listToJson(const QList<MessageCenterContact>& contacts);
     //!< The contacts of a JSON array; error says what is not valid (the contacts are not taken then)
     static QList<MessageCenterContact> listFromJson(const QByteArray& json, QString *error = nullptr);
-    //!< The key an address of a contact matches (see recordKeys), empty and an error if it is not one
-    static QString addressKey(const QString& address, QString *error = nullptr);
-    //!< The keys of the addresses of a record, the most precise first: a POCSAG address with its function, then
-    //!< without; the members of a FLEX group message
-    static QStringList recordKeys(const MessageRecord& record);
-    //!< The symbols offered for the icon (characters of the common fonts, drawn in the colour of the contact)
-    static const QStringList& symbols();
+    //!< The fields of a record the conditions look at: its JSON, the protocol data in it at the top too (a field of
+    //!< the record first)
+    static QJsonObject recordFields(const MessageRecord& record);
+    //!< A rule as a text: protocol is pocsag and ric is 1234567
+    static QString ruleText(const Rule& rule);
+    //!< The built-in icons by category, in the order of the picker (Microsoft Fluent Emoji, flat, MIT License):
+    //!< :name is :/messagecenter/icons/name.svg in the GUI
+    static const QList<QPair<QString, QStringList>>& iconCategories();
+    //!< The image of an icon: the resource of a built-in one (:name), else the path itself
+    static QString iconPath(const QString& icon);
 };
 
 // The records a filter selects: every field set must match
@@ -408,7 +432,7 @@ public:
     // The address book
     void setContacts(const QList<MessageCenterContact>& contacts);
     const QList<MessageCenterContact>& contacts() const { return m_contacts; }
-    //!< The contact of the addresses of a record (the most precise address first), nullptr if none
+    //!< The first contact one of whose rules the record matches, nullptr if none
     const MessageCenterContact *contactOf(const MessageRecord& record) const;
     //!< The record with the name, icon and colour of its contact in protocolData (contact, contact_icon,
     //!< contact_color), or without them when it has none
@@ -495,7 +519,6 @@ private:
     int m_logSize;
     int m_logged = 0;
     QList<MessageCenterContact> m_contacts;
-    QHash<QString, int> m_contactKeys;              //!< Key of an address (MessageCenterContact::addressKey): its contact
     std::deque<std::pair<int, QString>> m_changes;  //!< Version and id of the last records stored or changed
     int m_resetVersion = 0;                         //!< Version of the last time the log was emptied or loaded
     static const int m_maxChanges = 4096;
