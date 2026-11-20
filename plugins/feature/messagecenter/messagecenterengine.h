@@ -57,7 +57,7 @@ class QUdpSocket;
 struct MessageCenterFilter
 {
     QStringList m_protocols;            //!< Lower case protocol names, empty for all
-    QStringList m_aliases;              //!< Channel aliases, empty for all
+    QStringList m_channels;             //!< Channel names (titles) or transmitters of pages, empty for all
     int m_direction = -1;               //!< MessageRecord::Direction, -1 for both
     int m_kind = -1;                    //!< MessageRecord::Kind, -1 for all
     int m_polarity = -1;                //!< MessageRecord::Polarity, -1 for all
@@ -382,6 +382,9 @@ public:
     //!< The log records a filter selects, the newest last
     std::vector<MessageRecord> select(const MessageCenterFilter& filter) const;
     const MessageRecord *find(const QString& id) const;
+    //!< The records of the pages in the log get the state of their page (protocolData page_state and page_reason)
+    //!< until the transmitter's record replaces them. Returns the number of records changed
+    int syncLoggedPages();
     //!< A record of the log decoded again (another codepage or type): it replaces the one of its id. False if none
     bool replace(const MessageRecord& record);
     //!< Empties the log, and the history file when it is kept
@@ -465,6 +468,7 @@ private:
     void deliver(const MessageRecord& record, const QString& sinkName, const QStringList& captures, qint64 now);
     MessageCenterPage *findPage(const QString& id);
     void endpointGone(const QString& alias, qint64 now);
+    bool markLogged(const QString& id, const QString& state, const QString& reason);
 };
 
 #endif // INCLUDE_MESSAGECENTERENGINE_H

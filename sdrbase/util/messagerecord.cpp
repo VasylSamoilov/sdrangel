@@ -85,7 +85,7 @@ void MessageRecord::resetToDefaults()
     m_ber = -1.0f;
     m_charStatus = QString();
     m_frequency = -1;
-    m_channelAlias = QString();
+    m_channel = QString();
     m_deviceSetIndex = -1;
     m_channelIndex = -1;
     m_centerFrequency = -1;
@@ -144,7 +144,7 @@ QJsonObject MessageRecord::toJson() const
     json.insert("ber", m_ber < 0.0f ? QJsonValue(QJsonValue::Null) : QJsonValue((double) m_ber));
     json.insert("charStatus", stringOrNull(m_charStatus));
     json.insert("frequency", intOrNull(m_frequency));
-    json.insert("channelAlias", stringOrNull(m_channelAlias));
+    json.insert("channel", stringOrNull(m_channel));
     json.insert("deviceSetIndex", intOrNull(m_deviceSetIndex));
     json.insert("channelIndex", intOrNull(m_channelIndex));
     json.insert("centerFrequency", intOrNull(m_centerFrequency));
@@ -186,7 +186,8 @@ bool MessageRecord::fromJson(const QJsonObject& json, MessageRecord& record)
     record.m_ber = ber.isDouble() ? (float) ber.toDouble() : -1.0f;
     record.m_charStatus = readString(json, "charStatus");
     record.m_frequency = readInt(json, "frequency");
-    record.m_channelAlias = readString(json, "channelAlias");
+    // channelAlias: the name in the logs written before it was channel
+    record.m_channel = json.contains("channel") ? readString(json, "channel") : readString(json, "channelAlias");
     record.m_deviceSetIndex = (int) readInt(json, "deviceSetIndex");
     record.m_channelIndex = (int) readInt(json, "channelIndex");
     record.m_centerFrequency = readInt(json, "centerFrequency");
@@ -212,7 +213,7 @@ QStringList MessageRecord::csvHeader()
         "id", "timestamp", "direction", "protocol", "mode", "kind", "msgType",
         "address", "polarity", "speed", "text", "rawData", "rawBits",
         "errorsCorrected", "errorsUncorrectable", "ber", "charStatus",
-        "frequency", "channelAlias", "deviceSetIndex", "channelIndex",
+        "frequency", "channel", "deviceSetIndex", "channelIndex",
         "centerFrequency", "channelOffset", "duplicate", "dedupKey", "partial", "protocolData"
     };
 }
@@ -239,7 +240,7 @@ QString MessageRecord::toCSV() const
     fields.append(m_ber < 0.0f ? QString("") : QString::number(m_ber));
     fields.append(csvString(m_charStatus));
     fields.append(csvInt(m_frequency));
-    fields.append(csvString(m_channelAlias));
+    fields.append(csvString(m_channel));
     fields.append(csvInt(m_deviceSetIndex));
     fields.append(csvInt(m_channelIndex));
     fields.append(csvInt(m_centerFrequency));
@@ -297,7 +298,7 @@ bool MessageRecord::fromCSV(const QHash<QString, int>& columns, const QStringLis
 
     json.insert("charStatus", stringValue("charStatus"));
     json.insert("frequency", intValue("frequency"));
-    json.insert("channelAlias", stringValue("channelAlias"));
+    json.insert("channel", columns.contains("channel") ? stringValue("channel") : stringValue("channelAlias"));
     json.insert("deviceSetIndex", intValue("deviceSetIndex"));
     json.insert("channelIndex", intValue("channelIndex"));
     json.insert("centerFrequency", intValue("centerFrequency"));

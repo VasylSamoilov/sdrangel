@@ -115,22 +115,22 @@ void RadioPagingDemod::announce(const QString& event)
 {
     MessageEndpoint endpoint;
     endpoint.m_frequency = m_centerFrequency + m_settings.m_inputFrequencyOffset;
-    endpoint.m_alias = m_settings.channelName();
+    endpoint.m_channel = m_settings.channelName();
     endpoint.m_role = MessageEndpoint::Receiver;
     endpoint.m_status = (event == "unregister") ? MessageEndpoint::Offline : MessageEndpoint::Idle;
     endpoint.m_protocols = QStringList({"pocsag", "flex", "gsc"});
     endpoint.m_capabilities.insert("voice", true);
     endpoint.m_capabilities.insert("voiceRecording", m_settings.m_gscVoiceRecord);
     // The alias changed (it is the frequency by default): the old one is gone
-    if (!m_lastAlias.isEmpty() && (endpoint.m_alias != m_lastAlias) && (event != "unregister"))
+    if (!m_lastName.isEmpty() && (endpoint.m_channel != m_lastName) && (event != "unregister"))
     {
         MessageEndpoint old = endpoint;
-        old.m_alias = m_lastAlias;
+        old.m_channel = m_lastName;
         old.m_status = MessageEndpoint::Offline;
         publishRecord(MessageEndpoint::toRecord(old, "unregister"));
     }
 
-    m_lastAlias = endpoint.m_alias;
+    m_lastName = endpoint.m_channel;
     publishRecord(MessageEndpoint::toRecord(endpoint, event));
 }
 
@@ -276,7 +276,7 @@ bool RadioPagingDemod::handleMessage(const Message& cmd)
 void RadioPagingDemod::publishRecord(MessageRecord record)
 {
     record.m_frequency = m_centerFrequency + m_settings.m_inputFrequencyOffset;
-    record.m_channelAlias = m_settings.channelName();
+    record.m_channel = m_settings.channelName();
     record.m_deviceSetIndex = getDeviceSetIndex();
     record.m_channelIndex = getIndexInDeviceSet();
     record.m_centerFrequency = m_centerFrequency;

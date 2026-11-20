@@ -169,7 +169,7 @@ private:
     void publishRecord(MessageRecord record);
     void announce(const QString& event);
     QTimer *m_announceTimer = nullptr;
-    QString m_lastAlias;                        //!< The alias announced last
+    QString m_lastName;                         //!< The channel name announced last
     std::atomic<qint64> m_samplesFed;           //!< Samples fed by the device (its thread)
     qint64 m_samplesSeen;                       //!< ... when the input was last checked
     int m_inputIdleChecks;                      //!< Checks in a row without samples

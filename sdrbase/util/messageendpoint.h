@@ -36,7 +36,7 @@ struct SDRBASE_API MessageEndpoint
     enum Role { Receiver, Transmitter };
     enum Status { Offline, Idle, Busy };
 
-    QString m_alias;                    //!< The channel alias: the id of the transmitter in a page
+    QString m_channel;                  //!< The channel name (title): the transmitter of a page
     Role m_role = Receiver;
     Status m_status = Offline;
     QStringList m_protocols;            //!< Lower case protocol names it handles

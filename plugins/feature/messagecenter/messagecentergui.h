@@ -62,7 +62,7 @@ private:
     QComboBox *m_direction;
     QComboBox *m_polarity;
     QComboBox *m_type;
-    QLineEdit *m_alias;
+    QLineEdit *m_channel;
     QLineEdit *m_address;
     QLineEdit *m_text;
     QCheckBox *m_hideDuplicates;

@@ -88,6 +88,29 @@ int main(int argc, char **argv)
     check((cell(table, 1, PagingMessageTable::ColErrors) == "ok") && (cell(table, 1, PagingMessageTable::ColDirection) == "RX"),
         "a received message shows its errors");
 
+    // A page of the Message Center not sent yet: QU in the queue, NS not sent; TX once its channel sent it
+    {
+        PagingMessageTable pages;
+        MessageRecord p = record("p", "pocsag", "0000005A", "PAGE");
+        p.m_direction = MessageRecord::DirectionTX;
+        p.m_protocolData.insert("transmitter", "tx1");
+        p.m_protocolData.insert("page_state", "pending");
+        p.m_protocolData.insert("page_reason", "waiting: no transmitter tx1");
+        pages.addRecord(p);
+        const QTableWidgetItem *dir = pages.item(0, PagingMessageTable::ColDirection);
+        check((cell(pages, 0, PagingMessageTable::ColDirection) == "QU") && dir && dir->toolTip().contains("waiting: no transmitter tx1"),
+            "a page in the queue is QU, its tooltip has the reason");
+        p.m_protocolData.insert("page_state", "dead");
+        pages.addRecord(p);
+        check(cell(pages, 0, PagingMessageTable::ColDirection) == "NS", "a page that failed is NS");
+        p.m_protocolData.remove("page_state");
+        pages.addRecord(p);
+        check(cell(pages, 0, PagingMessageTable::ColDirection) == "NS", "a page no longer queued (after a restart) is NS");
+        p.m_channel = "tx1";
+        pages.addRecord(p);
+        check(cell(pages, 0, PagingMessageTable::ColDirection) == "TX", "a page its channel sent is TX");
+    }
+
     // The oldest rows go first
     table.addRecord(record("c", "gsc", "123456/1", "C"));
     table.addRecord(record("d", "gsc", "123456/2", "D"));

@@ -59,7 +59,7 @@ bool MessageEndpoint::fromRecord(const MessageRecord& record, MessageEndpoint& e
     }
 
     endpoint = MessageEndpoint();
-    endpoint.m_alias = d.value("endpoint").toString();
+    endpoint.m_channel = d.value("endpoint").toString();
     endpoint.m_role = (d.value("role").toString() == "tx") ? Transmitter : Receiver;
     QString status = d.value("status").toString();
     endpoint.m_status = (event == "unregister") ? Offline : (status == "busy") ? Busy : (status == "offline") ? Offline : Idle;
@@ -88,11 +88,11 @@ MessageRecord MessageEndpoint::toRecord(const MessageEndpoint& endpoint, const Q
     record.m_timestamp = QDateTime::currentMSecsSinceEpoch();
     record.m_kind = MessageRecord::KindEvent;
     record.m_direction = (endpoint.m_role == Transmitter) ? MessageRecord::DirectionTX : MessageRecord::DirectionRX;
-    record.m_channelAlias = endpoint.m_alias;
+    record.m_channel = endpoint.m_channel;
     record.m_frequency = endpoint.m_frequency;
     record.m_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     record.m_protocolData.insert("event", event);
-    record.m_protocolData.insert("endpoint", endpoint.m_alias);
+    record.m_protocolData.insert("endpoint", endpoint.m_channel);
     record.m_protocolData.insert("role", endpoint.m_role == Transmitter ? "tx" : "rx");
     record.m_protocolData.insert("status", statuses[std::max(0, std::min(2, (int) endpoint.m_status))]);
     record.m_protocolData.insert("protocols", endpoint.m_protocols);

@@ -401,7 +401,7 @@ private:
     MessageRecord endpointRecord(const QString& event);
     void announce(const QString& event = "status");
     QTimer *m_announceTimer = nullptr;
-    QString m_lastAlias;                        //!< The alias announced last
+    QString m_lastName;                         //!< The channel name announced last
     QString recordVoice(const PendingTx& pending, double& seconds);
     void publishRecord(const MessageRecord& record);
 

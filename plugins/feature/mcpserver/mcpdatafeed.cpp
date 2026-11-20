@@ -265,7 +265,7 @@ QJsonObject MCPDataFeed::getMessages(const QString& protocol, const QString& add
         if (!text.isEmpty() && !textExpression.match(r.m_text).hasMatch()) {
             continue;
         }
-        if (!alias.isEmpty() && (r.m_channelAlias != alias)) {
+        if (!alias.isEmpty() && (r.m_channel != alias)) {
             continue;
         }
         if (!direction.isEmpty() && (MessageRecord::directionToString(r.m_direction) != direction.toLower())) {

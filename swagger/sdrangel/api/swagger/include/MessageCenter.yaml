@@ -22,7 +22,7 @@ MessageCenterSettings:
       description: "A channel that does not announce itself for this time is offline"
       type: integer
     routes:
-      description: "JSON array of routes, in order: name, enabled, stop, sinks (log, queue or a sink added; the captures of regExp are given to the actions) and filter (protocols, aliases, sources (channels, api or a source name), direction, kind, polarity, speeds, address and text (regular expressions the whole field must match), msgType, matchField (0 address, 1 message, 2 protocol, 3 type, 4 channel, 5 any) with regExp (a regular expression the field must match, anywhere in it), frequencyMin, frequencyMax, timeFrom, timeTo, hideDuplicates, voiceOnly), decodeCharset (vendor, model and codepage) and decodeType (alphanumeric or numeric): the messages decoded again so before they go to the sinks of the route. Each record is checked against all the routes in order: every route that selects it sends it to its sinks, one with stop ends the check. The log is a sink: a message no route sends to it is not logged. Default: one route without a filter to the log"
+      description: "JSON array of routes, in order: name, enabled, stop, sinks (log, queue or a sink added; the captures of regExp are given to the actions) and filter (protocols, channels (names of channels or transmitters of pages), sources (channels, api or a source name), direction, kind, polarity, speeds, address and text (regular expressions the whole field must match), msgType, matchField (0 address, 1 message, 2 protocol, 3 type, 4 channel, 5 any) with regExp (a regular expression the field must match, anywhere in it), frequencyMin, frequencyMax, timeFrom, timeTo, hideDuplicates, voiceOnly), decodeCharset (vendor, model and codepage) and decodeType (alphanumeric or numeric): the messages decoded again so before they go to the sinks of the route. Each record is checked against all the routes in order: every route that selects it sends it to its sinks, one with stop ends the check. The log is a sink: a message no route sends to it is not logged. Default: one route without a filter to the log"
       type: string
     sinks:
       description: "JSON array of the sinks the routes send records to: name and type. file (the default): path and format (0 JSON lines, 1 CSV). udp: address, port and format (0 the Pager demodulator fields each ended by a NUL, 1 the record as one line of JSON). command: text, a command whose arguments get the message (${address}, ${message}, ${protocol}, ${type}, ${channel}, ${mode}, ${id}, ${frequency}, ${time} and ${0}, ${1}... the captures of the regular expression of the route); at most 5 are run in a second. speech: text said by the GUI. highlight: color (ARGB integer) of the row of the message in the log of the GUI. map: the position (latitude and longitude) in the text of the message is plotted on the Map, named by the address"
@@ -60,7 +60,7 @@ MessageCenterReport:
       description: "Records a route selected since the start"
       type: integer
     endpoints:
-      description: "JSON array of the channels that announced themselves: alias, role (rx, tx), status (offline, idle, busy), protocols, speeds, polarities, queueDepth, capacity, frequency, lastSeen"
+      description: "JSON array of the channels that announced themselves: channel (its name), role (rx, tx), status (offline, idle, busy), protocols, speeds, polarities, queueDepth, capacity, frequency, lastSeen"
       type: string
     pages:
       description: "JSON array of the pages: id, transmitter, protocol, address, text, state (pending, queued, claimed, transmitted, sent, dead), attempts, retransmits, reason"
@@ -82,7 +82,7 @@ MessageCenterPost:
       description: "Id of the page, optional (generated if empty). The records of the message have this id"
       type: string
     transmitter:
-      description: "Alias of the transmitter channel"
+      description: "Name (title) of the transmitter channel"
       type: string
     protocol:
       description: "pocsag, flex or gsc"

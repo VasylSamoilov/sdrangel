@@ -68,8 +68,8 @@ bool MessageCenterFilter::matches(const MessageRecord& record) const
         return false;
     }
     // The channel of a message; a page also by the transmitter it is for
-    if (!m_aliases.isEmpty() && !m_aliases.contains(record.m_channelAlias)
-        && !m_aliases.contains(record.m_protocolData.value("transmitter").toString())) {
+    if (!m_channels.isEmpty() && !m_channels.contains(record.m_channel)
+        && !m_channels.contains(record.m_protocolData.value("transmitter").toString())) {
         return false;
     }
     if ((m_direction >= 0) && ((int) record.m_direction != m_direction)) {
@@ -243,9 +243,9 @@ QString MessageCenterFilter::fieldText(const MessageRecord& record, int field)
     case MatchType:
         return record.m_msgType;
     case MatchChannel:
-        return record.m_channelAlias;
+        return record.m_channel;
     case MatchAny:
-        return (record.addresses() + QStringList({record.m_text, record.m_protocol, record.m_msgType, record.m_channelAlias})).join(' ');
+        return (record.addresses() + QStringList({record.m_text, record.m_protocol, record.m_msgType, record.m_channel})).join(' ');
     default:
         return QString();
     }
@@ -291,7 +291,7 @@ QString messageCenterSubstitute(const QString& text, const MessageRecord& record
         } else if (name == "type") {
             value = record.m_msgType;
         } else if (name == "channel") {
-            value = record.m_channelAlias;
+            value = record.m_channel;
         } else if (name == "mode") {
             value = record.m_mode;
         } else if (name == "id") {
@@ -323,8 +323,8 @@ QJsonObject MessageCenterFilter::toJson() const
     if (!m_protocols.isEmpty()) {
         json["protocols"] = QJsonArray::fromStringList(m_protocols);
     }
-    if (!m_aliases.isEmpty()) {
-        json["aliases"] = QJsonArray::fromStringList(m_aliases);
+    if (!m_channels.isEmpty()) {
+        json["channels"] = QJsonArray::fromStringList(m_channels);
     }
     if (!m_sources.isEmpty()) {
         json["sources"] = QJsonArray::fromStringList(m_sources);
@@ -384,8 +384,9 @@ MessageCenterFilter MessageCenterFilter::fromJson(const QJsonObject& json)
     for (const QJsonValue& v : json["protocols"].toArray()) {
         f.m_protocols.append(v.toString());
     }
-    for (const QJsonValue& v : json["aliases"].toArray()) {
-        f.m_aliases.append(v.toString());
+    // aliases: the name in the routes saved before it was channels
+    for (const QJsonValue& v : json[json.contains("channels") ? "channels" : "aliases"].toArray()) {
+        f.m_channels.append(v.toString());
     }
     for (const QJsonValue& v : json["sources"].toArray()) {
         f.m_sources.append(v.toString());
@@ -1041,8 +1042,8 @@ void MessageCenterEngine::store(const MessageRecord& record)
             if (!record.m_mode.isEmpty()) {
                 merged.m_mode = record.m_mode;
             }
-            if (!record.m_channelAlias.isEmpty()) {
-                merged.m_channelAlias = record.m_channelAlias;
+            if (!record.m_channel.isEmpty()) {
+                merged.m_channel = record.m_channel;
             }
             if (!record.m_protocol.isEmpty()) {
                 merged.m_protocol = record.m_protocol;
@@ -1324,7 +1325,7 @@ void MessageCenterEngine::ingest(const MessageRecord& record, const QString& sou
         if (MessageEndpoint::fromRecord(record, endpoint, event))
         {
             // A receiver and a transmitter may have the same alias (the frequency): they are two endpoints
-            QString key = endpointKey(endpoint.m_role, endpoint.m_alias);
+            QString key = endpointKey(endpoint.m_role, endpoint.m_channel);
 
             // A channel whose alias changed (the alias is the frequency by default): its entry of the old alias goes
             if ((record.m_deviceSetIndex >= 0) && (record.m_channelIndex >= 0))
@@ -1337,7 +1338,7 @@ void MessageCenterEngine::ingest(const MessageRecord& record, const QString& sou
                         && (m_endpoints[it.key()].m_role == endpoint.m_role))
                     {
                         if (endpoint.m_role == MessageEndpoint::Transmitter) {
-                            endpointGone(m_endpoints[it.key()].m_alias, now);
+                            endpointGone(m_endpoints[it.key()].m_channel, now);
                         }
 
                         m_endpoints.remove(it.key());
@@ -1357,7 +1358,7 @@ void MessageCenterEngine::ingest(const MessageRecord& record, const QString& sou
             m_endpoints[key] = endpoint;
 
             if ((m_endpoints[key].m_status == MessageEndpoint::Offline) && (endpoint.m_role == MessageEndpoint::Transmitter)) {
-                endpointGone(endpoint.m_alias, now);
+                endpointGone(endpoint.m_channel, now);
             }
 
             return;
@@ -1435,6 +1436,48 @@ const MessageRecord *MessageCenterEngine::find(const QString& id) const
     return nullptr;
 }
 
+// The record of a page in the log, until the transmitter's record (with its channel) replaces it, has the
+// state of the page and its reason in protocolData page_state and page_reason
+bool MessageCenterEngine::markLogged(const QString& id, const QString& state, const QString& reason)
+{
+    for (auto it = m_log.rbegin(); it != m_log.rend(); ++it)
+    {
+        if (it->m_id != id) {
+            continue;
+        }
+        if ((it->m_direction != MessageRecord::DirectionTX) || !it->m_channel.isEmpty()
+            || ((it->m_protocolData.value("page_state").toString() == state) && (it->m_protocolData.value("page_reason").toString() == reason))) {
+            return false;
+        }
+
+        it->m_protocolData.insert("page_state", state);
+
+        if (reason.isEmpty()) {
+            it->m_protocolData.remove("page_reason");
+        } else {
+            it->m_protocolData.insert("page_reason", reason);
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
+int MessageCenterEngine::syncLoggedPages()
+{
+    int changed = 0;
+
+    for (const MessageCenterPage& page : m_pages)
+    {
+        if (markLogged(page.m_record.m_id, MessageCenterPage::stateName(page.m_state), page.m_reason)) {
+            changed++;
+        }
+    }
+
+    return changed;
+}
+
 QStringList MessageCenterEngine::eligible(const MessageRecord& page) const
 {
     QStringList aliases;
@@ -1442,7 +1485,7 @@ QStringList MessageCenterEngine::eligible(const MessageRecord& page) const
     for (auto it = m_endpoints.begin(); it != m_endpoints.end(); ++it)
     {
         if ((it->m_status != MessageEndpoint::Offline) && it->canTransmit(page)) {
-            aliases.append(it->m_alias);
+            aliases.append(it->m_channel);
         }
     }
 
@@ -1710,7 +1753,7 @@ int MessageCenterEngine::removeEndpoints(const QStringList& keys, bool offline, 
         if ((offline && (it->m_status == MessageEndpoint::Offline)) || keys.contains(it.key()))
         {
             if (it->m_role == MessageEndpoint::Transmitter) {
-                endpointGone(it->m_alias, now);
+                endpointGone(it->m_channel, now);
             }
 
             m_endpointChannels.remove(it.key());
@@ -1784,7 +1827,7 @@ void MessageCenterEngine::sweep(qint64 now, qint64 silentMs)
         it->m_status = MessageEndpoint::Offline;
 
         if (it->m_role == MessageEndpoint::Transmitter) {
-            endpointGone(it->m_alias, now);
+            endpointGone(it->m_channel, now);
         }
     }
 }
@@ -1825,6 +1868,7 @@ bool MessageCenterEngine::cancel(const QString& id)
         if (!it->m_dispatched && ((it->m_state == MessageCenterPage::Pending) || (it->m_state == MessageCenterPage::Queued)
             || (it->m_state == MessageCenterPage::Dead)))
         {
+            markLogged(id, "cancelled", QString());
             m_pages.erase(it);
             return true;
         }

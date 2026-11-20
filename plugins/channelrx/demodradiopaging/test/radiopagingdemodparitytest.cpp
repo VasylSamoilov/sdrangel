@@ -77,7 +77,7 @@ MessageRecord pocsagRecord()
     r.m_errorsCorrected = 1;
     r.m_errorsUncorrectable = 0;
     r.m_frequency = 929613000;
-    r.m_channelAlias = "chan";
+    r.m_channel = "chan";
     r.m_protocolData.insert("ric", (qulonglong) 1234);
     r.m_protocolData.insert("function", 0);
     r.m_protocolData.insert("alt_type", "numeric");
@@ -154,7 +154,7 @@ void testCsv()
     check(back.m_charStatus == r.m_charStatus, "character status");
     check(back.m_errorsCorrected == 1 && back.m_errorsUncorrectable == 0, "errors");
     check(back.m_ber < 0.0f && back.m_rawBits < 0, "absent values stay absent");
-    check(back.m_frequency == r.m_frequency && back.m_channelAlias == "chan", "frequency and channel");
+    check(back.m_frequency == r.m_frequency && back.m_channel == "chan", "frequency and channel");
     check(back.m_kind == MessageRecord::KindMessage, "kind");
     check(back.m_protocolData.value("ric").toULongLong() == 1234 && back.m_protocolData.value("note").toString() == "a,b \"c\"",
         "protocol data");

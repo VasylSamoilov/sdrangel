@@ -6312,7 +6312,7 @@ void MCPTools::registerMessageCenterTools()
 
     add("get_paging_messages",
         "Get the paging messages (POCSAG, FLEX, GSC) the Radio Paging demodulators received and the modulators sent, as "
-        "message records: protocol, mode, address, type, text, polarity, errors, channel name (channelAlias: the title of "
+        "message records: protocol, mode, address, type, text, polarity, errors, channel (the title of "
         "the channel), frequency and the protocol "
         "fields. The last 1000 are kept, whether or not a Message Center is there; use sinceSequence with the lastSequence "
         "of a previous call to read only new ones.",
@@ -6367,7 +6367,7 @@ void MCPTools::registerMessageCenterTools()
         "gives them). Each message is checked against all the routes in their order; every route whose filter selects it sends it "
         "to that route's sinks (log, queue or a sink named here); a route with stop ends the check. The log is a sink: a "
         "message no route sends to it is not logged (the default route 'All messages to the log' does).\n"
-        "Route: {name, enabled, stop, sinks: [names], filter: {protocols: [pocsag|flex|gsc], aliases (channel names: their titles), sources (channels, "
+        "Route: {name, enabled, stop, sinks: [names], filter: {protocols: [pocsag|flex|gsc], channels (channel names: their titles), sources (channels, "
         "api or source names), direction (0 rx, 1 tx), kind, polarity (1 normal, 2 inverted), speeds, address and text (regular "
         "expressions on the whole field), msgType, matchField (0 address, 1 message, 2 protocol, 3 type, 4 channel, 5 any), "
         "regExp (anywhere in that field, its captures are ${1}... in the sinks), hideDuplicates, voiceOnly}, decodeCharset: "
@@ -6460,7 +6460,7 @@ void MCPTools::registerMessageCenterTools()
         "Give message records to the Message Center as messages received: they go through its routes (log, files, UDP, "
         "commands, map) as if a channel had published them. They are never pages to transmit.",
         schema({{"records", prop("array", "Message records (as get_paging_messages gives them): protocol (required: pocsag, "
-            "flex or gsc), address, msgType, text, channelAlias... id and timestamp (ms) are given when missing")}}, {"records"}),
+            "flex or gsc), address, msgType, text, channel... id and timestamp (ms) are given when missing")}}, {"records"}),
         [this](const QJsonObject& args)
         {
             if (!args["records"].isArray() || args["records"].toArray().isEmpty()) {

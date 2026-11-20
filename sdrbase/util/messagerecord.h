@@ -83,7 +83,7 @@ struct SDRBASE_API MessageRecord
     float m_ber;                    //!< Bit error rate, negative if not applicable
     QString m_charStatus;           //!< One of 'o' (ok), 'c' (corrected), 'b' (bad) per text character, null if unknown
     qint64 m_frequency;             //!< Absolute frequency in Hz, -1 if unknown
-    QString m_channelAlias;         //!< Channel title at the time of the message
+    QString m_channel;              //!< Channel title at the time of the message
     int m_deviceSetIndex;           //!< -1 if unknown
     int m_channelIndex;             //!< -1 if unknown
     qint64 m_centerFrequency;       //!< Device centre frequency in Hz, -1 if unknown

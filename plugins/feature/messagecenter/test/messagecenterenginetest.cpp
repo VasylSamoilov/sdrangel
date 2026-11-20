@@ -54,7 +54,7 @@ MessageRecord rx(const QString& id, const QString& protocol, const QString& addr
     r.m_address = address;
     r.m_text = text;
     r.m_msgType = "alphanumeric";
-    r.m_channelAlias = alias;
+    r.m_channel = alias;
     r.m_speed = speed;
     r.m_polarity = polarity;
     r.m_frequency = 466000000;
@@ -64,7 +64,7 @@ MessageRecord rx(const QString& id, const QString& protocol, const QString& addr
 MessageEndpoint transmitter(const QString& alias, const QStringList& protocols)
 {
     MessageEndpoint e;
-    e.m_alias = alias;
+    e.m_channel = alias;
     e.m_role = MessageEndpoint::Transmitter;
     e.m_status = MessageEndpoint::Idle;
     e.m_protocols = protocols;
@@ -113,7 +113,7 @@ void testFilter()
     f = MessageCenterFilter();
     f.m_polarity = (int) MessageRecord::PolarityInverted;
     f.m_speeds = {3200, 6400};
-    f.m_aliases = QStringList({"dsB"});
+    f.m_channels = QStringList({"dsB"});
     check(!f.matches(a) && f.matches(b), "Filter: polarity, speed and channel together");
     f = MessageCenterFilter();
     f.m_hideDuplicates = true;
@@ -235,7 +235,7 @@ void testEndpoints()
 
     MessageEndpoint e;
     QString event;
-    check(MessageEndpoint::fromRecord(reg, e, event) && (event == "register") && (e.m_alias == "tx1") && (e.m_speeds == QList<int>({1200}))
+    check(MessageEndpoint::fromRecord(reg, e, event) && (event == "register") && (e.m_channel == "tx1") && (e.m_speeds == QList<int>({1200}))
         && (e.m_capabilities.value("maxText").toInt() == 80), "Endpoint: the registration record round trip");
     check(engine.endpoints().contains("tx:tx1") && engine.endpoints()["tx:tx1"].ready(), "Endpoint: registered, ready with room in its queue");
 
@@ -279,6 +279,9 @@ void testPages()
     check(engine.page(id) && (engine.page(id)->m_state == MessageCenterPage::Pending) && engine.dispatch(101).empty(),
         "Page: pending while no transmitter can take it");
     check(engine.find(id) && (engine.find(id)->m_direction == MessageRecord::DirectionTX), "Page: also in the log");
+    check((engine.syncLoggedPages() == 1) && (engine.find(id)->m_protocolData.value("page_state").toString() == "pending")
+        && (engine.find(id)->m_protocolData.value("page_reason").toString() == "waiting: no transmitter tx1") && (engine.syncLoggedPages() == 0),
+        "Page: its record in the log has its state and reason, changed once");
 
     MessageEndpoint tx = transmitter("tx1", {"pocsag"});
     tx.m_capacity = 2;
@@ -298,6 +301,8 @@ void testPages()
         "Page: waits for a transmitter of its protocol, with the reason");
     engine.cancel(lost);
     engine.cancel(flex);
+    check(engine.find(lost) && (engine.find(lost)->m_protocolData.value("page_state").toString() == "cancelled"),
+        "Page: a page cancelled is cancelled in the log");
 
     engine.ingest(event(id, "claimed"), "channels", 130);
     check((engine.page(id)->m_state == MessageCenterPage::Claimed) && (engine.page(id)->m_attempts == 1) && !engine.page(id)->m_dispatched
@@ -604,7 +609,7 @@ void testEndpointRemoval()
     MessageCenterEngine engine;
     auto announce = [&engine](const QString& alias, int channel, MessageEndpoint::Status status, qint64 now) {
         MessageEndpoint e;
-        e.m_alias = alias;
+        e.m_channel = alias;
         e.m_role = MessageEndpoint::Receiver;
         e.m_status = status;
         e.m_protocols = QStringList({"pocsag"});
@@ -889,7 +894,7 @@ void testGuards()
     log.ingest(bare, "channels", 2);
     const MessageRecord *kept = log.find("m1");
     check(kept && (kept->m_protocol == "gsc") && (kept->m_address == "100123") && (kept->m_frequency == 466000000) && (kept->m_speed == 600)
-        && (kept->m_channelAlias == "A") && !kept->m_partial, "Guards: an update with fields left out keeps the earlier record's fields");
+        && (kept->m_channel == "A") && !kept->m_partial, "Guards: an update with fields left out keeps the earlier record's fields");
 
     // Endpoint records
     MessageEndpoint e;

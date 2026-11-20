@@ -101,8 +101,8 @@ QString filterSummary(const MessageCenterFilter& f)
     if (f.m_polarity >= 0) {
         parts << (f.m_polarity == (int) MessageRecord::PolarityInverted ? "inverted" : "normal");
     }
-    if (!f.m_aliases.isEmpty()) {
-        parts << "alias " + f.m_aliases.join(",");
+    if (!f.m_channels.isEmpty()) {
+        parts << "channel " + f.m_channels.join(",");
     }
     if (!f.m_address.isEmpty()) {
         parts << "address /" + f.m_address + "/";
@@ -159,8 +159,8 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     m_polarity->addItems({"Any polarity", "Normal", "Inverted"});
     m_type = new QComboBox(this);
     m_type->addItems({"Any type", "alphanumeric", "numeric", "tone", "voice", "short_message", "binary", "secure"});
-    m_alias = new QLineEdit(this);
-    m_alias->setPlaceholderText("channel name");
+    m_channel = new QLineEdit(this);
+    m_channel->setPlaceholderText("channel name");
     m_address = new QLineEdit(this);
     m_address->setPlaceholderText("regular expression");
     m_text = new QLineEdit(this);
@@ -183,7 +183,7 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     m_direction->setToolTip("Received (RX), transmitted (TX) or both");
     m_polarity->setToolTip("Polarity the message was received or sent with");
     m_type->setToolTip("Message type as the decoder or encoder names it");
-    m_alias->setToolTip("Name of the channel (its title), or the transmitter of a page (exact). Empty: any channel");
+    m_channel->setToolTip("Name of the channel (its title), or the transmitter of a page (exact). Empty: any channel");
     m_address->setToolTip("Regular expression the whole address must match, as the filters of the other channels:\n"
         "e.g. 1234567 for that RIC, 12345.. for 1234500 to 1234599, 001001/. for a GSC cap code. Empty: any address");
     m_text->setToolTip("Regular expression the whole text must match: e.g. .*FIRE.* for a text that contains FIRE,\n"
@@ -226,7 +226,7 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     layout->addWidget(m_hideDuplicates);
     layout->addWidget(m_voiceOnly);
     layout->addWidget(m_source);
-    layout->addWidget(labelled("Channel", nullptr, m_alias, 14));
+    layout->addWidget(labelled("Channel", nullptr, m_channel, 14));
     layout->addWidget(labelled("Address", nullptr, m_address, 14));
     layout->addWidget(labelled("Text", nullptr, m_text, 16));
     layout->addWidget(labelled(QString(), m_matchField, m_regExp, 16));
@@ -251,7 +251,7 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
         connect(edit, &QLineEdit::textChanged, this, [validate, edit, anchored, help]() { validate(edit, anchored, help); });
     }
 
-    for (QLineEdit *edit : {m_alias, m_address, m_text, m_regExp}) {
+    for (QLineEdit *edit : {m_channel, m_address, m_text, m_regExp}) {
         connect(edit, &QLineEdit::editingFinished, this, &MessageCenterFilterWidget::changed);
     }
     for (QCheckBox *check : {m_hideDuplicates, m_voiceOnly}) {
@@ -275,8 +275,8 @@ MessageCenterFilter MessageCenterFilterWidget::filter() const
     if (m_type->currentIndex() > 0) {
         f.m_msgType = m_type->currentText();
     }
-    if (!m_alias->text().trimmed().isEmpty()) {
-        f.m_aliases = QStringList(m_alias->text().trimmed());
+    if (!m_channel->text().trimmed().isEmpty()) {
+        f.m_channels = QStringList(m_channel->text().trimmed());
     }
 
     f.m_address = m_address->text().trimmed();
@@ -299,7 +299,7 @@ void MessageCenterFilterWidget::setFilter(const MessageCenterFilter& f)
     m_direction->setCurrentIndex(f.m_direction < 0 ? 0 : (f.m_direction == (int) MessageRecord::DirectionRX ? 1 : 2));
     m_polarity->setCurrentIndex(f.m_polarity < 0 ? 0 : (f.m_polarity == (int) MessageRecord::PolarityNormal ? 1 : 2));
     m_type->setCurrentIndex(f.m_msgType.isEmpty() ? 0 : std::max(0, m_type->findText(f.m_msgType)));
-    m_alias->setText(f.m_aliases.isEmpty() ? QString() : f.m_aliases.first());
+    m_channel->setText(f.m_channels.isEmpty() ? QString() : f.m_channels.first());
     m_address->setText(f.m_address);
     m_text->setText(f.m_text);
     m_hideDuplicates->setChecked(f.m_hideDuplicates);
@@ -1028,7 +1028,7 @@ void MessageCenterGUI::refreshEndpoints()
         }
 
         setRow(m_endpointsTable, row, {
-            e.m_alias, e.m_role == MessageEndpoint::Transmitter ? "transmitter" : "receiver", statuses[(int) e.m_status],
+            e.m_channel, e.m_role == MessageEndpoint::Transmitter ? "transmitter" : "receiver", statuses[(int) e.m_status],
             e.m_protocols.join(", "), speeds.join(", "), polarities.join(", "),
             e.m_role == MessageEndpoint::Transmitter ? QString("%1/%2").arg(e.m_queueDepth).arg(e.m_capacity) : QString(),
             QDateTime::fromMSecsSinceEpoch(e.m_lastSeen).toString("HH:mm:ss")
@@ -1072,7 +1072,7 @@ void MessageCenterGUI::refreshComposeTransmitters()
     for (const MessageEndpoint& e : m_center->engine().endpoints())
     {
         if ((e.m_role == MessageEndpoint::Transmitter) && (e.m_status != MessageEndpoint::Offline)) {
-            aliases.append(e.m_alias);
+            aliases.append(e.m_channel);
         }
     }
 
@@ -1233,7 +1233,7 @@ void MessageCenterGUI::transmitterChanged()
 
     for (const MessageEndpoint& e : m_center->engine().endpoints())
     {
-        if ((e.m_role == MessageEndpoint::Transmitter) && (e.m_alias == alias)) {
+        if ((e.m_role == MessageEndpoint::Transmitter) && (e.m_channel == alias)) {
             protocols = e.m_protocols;
         }
     }

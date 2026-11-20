@@ -283,9 +283,9 @@ void MessageCenter::ingest(const MessageRecord& record, const QObject *source)
         ChannelAPI *channel = qobject_cast<ChannelAPI*>(const_cast<QObject*>(source));
 
         if ((event == "unregister") || !channel) {
-            m_transmitters.remove(endpoint.m_alias);
+            m_transmitters.remove(endpoint.m_channel);
         } else {
-            m_transmitters[endpoint.m_alias] = channel;
+            m_transmitters[endpoint.m_channel] = channel;
         }
     }
 
@@ -323,6 +323,10 @@ void MessageCenter::tick()
     }
 
     m_errors.append(m_engine.takeSinkErrors());
+
+    if (m_engine.syncLoggedPages() > 0) {
+        m_dirty = true;
+    }
 
     if (m_dirty && getMessageQueueToGUI())
     {
@@ -915,7 +919,7 @@ int MessageCenter::webapiReportGet(SWGSDRangel::SWGFeatureReport& response, QStr
     for (const MessageEndpoint& e : m_engine.endpoints())
     {
         QJsonObject o;
-        o["alias"] = e.m_alias;
+        o["channel"] = e.m_channel;
         o["role"] = roles[(e.m_role == MessageEndpoint::Transmitter) ? 1 : 0];
         o["status"] = statuses[(int) e.m_status];
         o["protocols"] = QJsonArray::fromStringList(e.m_protocols);
@@ -1142,7 +1146,7 @@ int MessageCenter::webapiActionsPost(const QStringList& featureActionsKeys, SWGS
 
         if (page.m_transmitter.isEmpty())
         {
-            errorMessage = "A page needs a transmitter (its alias)";
+            errorMessage = "A page needs a transmitter (the name of its channel)";
             return 400;
         }
 

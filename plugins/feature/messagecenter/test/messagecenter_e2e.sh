@@ -43,7 +43,7 @@ curl_code POST /deviceset/0/device/run > /dev/null
 # The modulator announces itself every 5 s
 sleep 7
 R=$(report)
-check "the modulator is registered under its name (title), idle" '[[ "$R" == *"\"alias\":\"t1\""*"\"role\":\"tx\""*"\"status\":\"idle\""* ]]'
+check "the modulator is registered under its name (title), idle" '[[ "$R" == *"\"channel\":\"t1\""*"\"role\":\"tx\""*"\"status\":\"idle\""* ]]'
 
 check "a page is accepted" '[ "$(post "{\"id\":\"p-tone\",\"transmitter\":\"t1\",\"protocol\":\"gsc\",\"address\":\"123456\",\"function\":1,\"type\":\"tone\"}")" = 202 ]'
 check "a page with text is accepted" '[ "$(post "{\"id\":\"p-alpha\",\"transmitter\":\"t1\",\"protocol\":\"gsc\",\"address\":\"123456\",\"function\":2,\"type\":\"alphanumeric\",\"text\":\"FROM THE CENTER\"}")" = 202 ]'
@@ -56,7 +56,7 @@ R=$(report)
 check "the page was claimed by the modulator and sent" '[[ "$R" == *"\"claimedBy\":\"t1\""*"\"id\":\"p-tone\""*"\"state\":\"sent\""* ]]'
 check "the page with text was sent" '[[ "$R" == *"\"id\":\"p-alpha\""*"\"state\":\"sent\""*"\"text\":\"FROM THE CENTER\""* ]]'
 check "the page for nobody waits" '[[ "$R" == *"\"id\":\"p-nobody\""*"\"state\":\"pending\""* ]]'
-check "the sent messages are in the log, from the transmitter" '[[ "$R" == *"\"channelAlias\":\"t1\""*"\"direction\":\"tx\""* ]]'
+check "the sent messages are in the log, from the transmitter" '[[ "$R" == *"\"channel\":\"t1\""*"\"direction\":\"tx\""* ]]'
 check "the modulator sent two messages" '[ "$(curl -s "$U/deviceset/0/channel/0/report" | tr -d "\n " | grep -o "\"sent\":[0-9]*")" = "\"sent\":2" ]'
 
 check "a page nobody has can be withdrawn" '[ "$(curl_code POST /featureset/feature/0/actions "{\"featureType\":\"MessageCenter\",\"MessageCenterActions\":{\"cancel\":\"p-nobody\"}}")" = 202 ]'

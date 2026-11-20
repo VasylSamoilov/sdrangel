@@ -831,9 +831,9 @@ QStringList RadioPagingDemodGUI::matchTexts(const MessageRecord& record, int fie
     case Notification::MatchType:
         return QStringList(record.m_msgType);
     case Notification::MatchChannel:
-        return QStringList(record.m_channelAlias);
+        return QStringList(record.m_channel);
     case Notification::MatchAny:
-        return QStringList((record.addresses() + QStringList({record.m_text, record.m_protocol, record.m_msgType, record.m_channelAlias})).join(' '));
+        return QStringList((record.addresses() + QStringList({record.m_text, record.m_protocol, record.m_msgType, record.m_channel})).join(' '));
     default:
         return QStringList();
     }
@@ -899,7 +899,7 @@ QString RadioPagingDemodGUI::subStrings(const MessageRecord& record, const QRegu
     s.replace("${message}", record.m_text);
     s.replace("${protocol}", record.m_protocol);
     s.replace("${type}", record.m_msgType);
-    s.replace("${channel}", record.m_channelAlias);
+    s.replace("${channel}", record.m_channel);
 
     for (int i = 0; i < match.capturedTexts().size(); i++) {
         s.replace(QString("${%1}").arg(i), match.capturedTexts()[i]);

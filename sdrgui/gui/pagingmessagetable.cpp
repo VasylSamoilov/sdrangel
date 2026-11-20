@@ -716,9 +716,35 @@ void PagingMessageTable::fillRow(int row, const MessageRecord& record, const QSt
     timeItem->setData(voiceFileRole, d.value("voice_file").toString());
     timeItem->setData(jsonRole, QString::fromUtf8(QJsonDocument(record.toJson()).toJson(QJsonDocument::Compact)));
 
-    bool transmitted = (record.m_direction == MessageRecord::DirectionTX);
-    cell(ColDirection, transmitted ? "TX" : "RX", QString(), transmitted ? tr("Transmitted") : tr("Received"));
-    cell(ColChannel, record.m_channelAlias);
+    // RX received, TX sent by its channel; a page of the Message Center not sent yet (its record has no channel
+    // until the transmitter's record replaces it): QU waiting in the queue, NS not sent (dead, cancelled or no
+    // longer queued, as after a restart)
+    if (record.m_direction != MessageRecord::DirectionTX)
+    {
+        cell(ColDirection, "RX", QString(), tr("Received"));
+    }
+    else if (!record.m_channel.isEmpty() || !d.contains("transmitter"))
+    {
+        cell(ColDirection, "TX", QString(), tr("Transmitted"));
+    }
+    else
+    {
+        const QString state = d.value("page_state").toString();
+        const QString reason = d.value("page_reason").toString();
+        const QString transmitter = d.value("transmitter").toString();
+        const bool queued = (state == "pending") || (state == "queued") || (state == "claimed") || (state == "transmitted");
+        QString tip = queued ? tr("In the queue of the Message Center for %1: %2").arg(transmitter, state)
+            : (state == "dead") ? tr("Not sent by %1: it failed").arg(transmitter)
+            : (state == "cancelled") ? tr("Not sent by %1: cancelled").arg(transmitter)
+            : tr("Not sent by %1: no longer in the queue (Message Center restarted)").arg(transmitter);
+
+        if (!reason.isEmpty()) {
+            tip += QString(" (%1)").arg(reason);
+        }
+
+        cell(ColDirection, queued ? "QU" : "NS", queued ? chip("QU", "#1a1a0d", "#cccc66") : chip("NS", "#2a0d0d", "#ff7777"), tip);
+    }
+    cell(ColChannel, record.m_channel);
     cell(ColProtocol, record.m_protocol.toUpper());
     cell(ColRate, record.m_mode);
 

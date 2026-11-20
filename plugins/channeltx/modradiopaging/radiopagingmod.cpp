@@ -629,7 +629,7 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
     record.m_direction = MessageRecord::DirectionTX;
     record.m_kind = MessageRecord::KindMessage;
     record.m_frequency = m_centerFrequency + m_settings.m_inputFrequencyOffset;
-    record.m_channelAlias = m_settings.channelName();
+    record.m_channel = m_settings.channelName();
     record.m_deviceSetIndex = getDeviceSetIndex();
     record.m_channelIndex = getIndexInDeviceSet();
     record.m_centerFrequency = m_centerFrequency;
@@ -952,7 +952,7 @@ QString RadioPagingMod::recordVoice(const PendingTx& pending, double& seconds)
     WavFileRecord recorder((quint32) RadioPagingWav::m_sampleRate);
     recorder.setMono(true);
     recorder.setFileName(RadioPagingVoiceStore::filePrefix(directory,
-        pending.m_record.m_channelAlias, "tx"));
+        pending.m_record.m_channel, "tx"));
 
     if (!recorder.startRecording())
     {
@@ -982,7 +982,7 @@ void RadioPagingMod::publishPageEvent(const QString& pageId, const QString& stat
     record.m_timestamp = QDateTime::currentMSecsSinceEpoch();
     record.m_kind = MessageRecord::KindEvent;
     record.m_direction = MessageRecord::DirectionTX;
-    record.m_channelAlias = m_settings.channelName();
+    record.m_channel = m_settings.channelName();
     record.m_protocolData.insert("event", "page");
     record.m_protocolData.insert("state", state);
 
@@ -1001,7 +1001,7 @@ MessageRecord RadioPagingMod::endpointRecord(const QString& event)
     MessageEndpoint endpoint;
     int outstandingCount = outstanding();
     endpoint.m_frequency = m_centerFrequency + m_settings.m_inputFrequencyOffset;
-    endpoint.m_alias = m_settings.channelName();
+    endpoint.m_channel = m_settings.channelName();
     endpoint.m_role = MessageEndpoint::Transmitter;
     endpoint.m_status = (event == "unregister") ? MessageEndpoint::Offline
         : (outstandingCount > 0) ? MessageEndpoint::Busy : MessageEndpoint::Idle;
@@ -1035,17 +1035,17 @@ void RadioPagingMod::announce(const QString& event)
     QString alias = record.m_protocolData.value("endpoint").toString();
 
     // The name (the title) changed: the old one is gone
-    if (!m_lastAlias.isEmpty() && (alias != m_lastAlias) && (event != "unregister"))
+    if (!m_lastName.isEmpty() && (alias != m_lastName) && (event != "unregister"))
     {
         MessageRecord old = record;
-        old.m_channelAlias = m_lastAlias;
+        old.m_channel = m_lastName;
         old.m_protocolData.insert("event", "unregister");
-        old.m_protocolData.insert("endpoint", m_lastAlias);
+        old.m_protocolData.insert("endpoint", m_lastName);
         old.m_protocolData.insert("status", "offline");
         publishRecord(old);
     }
 
-    m_lastAlias = alias;
+    m_lastName = alias;
     publishRecord(record);
 }
 
