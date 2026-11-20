@@ -406,6 +406,15 @@ void testReferenceFrames()
             if (rec.find(" TON|") != std::string::npos) {
                 continue;
             }
+            // The reference keeps the unused digits of the last word of a numeric message (spaces, fill): the decoder
+            // leaves them out
+            if ((rec.find(" NUM|") != std::string::npos) || (rec.find(" SNUM|") != std::string::npos)
+                || (rec.find(" NNUM|") != std::string::npos) || (rec.find(" NSNUM|") != std::string::npos))
+            {
+                while (!rec.empty() && (rec.back() == ' ')) {
+                    rec.pop_back();
+                }
+            }
 
             theirs.push_back(rec);
         }

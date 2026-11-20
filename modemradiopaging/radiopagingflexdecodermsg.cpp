@@ -1601,6 +1601,16 @@ void RadioPagingFlexDecoder::decodeNumeric(Message& proto, const AddressContext&
         msg.m_type = TypeNumeric;
     }
 
+    // The unused digits of the last word are spaces (fill): not part of the message
+    while (!digits.empty() && (digits.back() == ' '))
+    {
+        digits.pop_back();
+
+        if (!digitStatus.empty()) {
+            digitStatus.pop_back();
+        }
+    }
+
     msg.m_text = digits;
     msg.m_charStatus = digitStatus;
     msg.m_messageNumber = number;
