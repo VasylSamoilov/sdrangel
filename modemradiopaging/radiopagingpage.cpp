@@ -103,6 +103,11 @@ QString RadioPagingPage::check() const
     // A group message: the pagers, not an address
     const bool group = (m_protocol == "flex") && !m_groupMembers.trimmed().isEmpty();
 
+    // A JSON number is not taken for the address string
+    if (!group && m_address.isEmpty()) {
+        return "The address is missing: a string of digits, e.g. \"1234567\"";
+    }
+
     if (group)
     {
         bool ok = false;
@@ -372,8 +377,8 @@ RadioPagingPage RadioPagingPage::fromRecord(const MessageRecord& record)
     return page;
 }
 
-// POCSAG: address and function; FLEX: capcode and priority; GSC: the address as the capcode integer, the
-// function 0-3 for the address number 1-4. A voice page has its sound file as the text
+// The address as a string. POCSAG: address and function; FLEX: capcode and priority; GSC: the 6 digits of the
+// address, the function 0-3 for the address number 1-4. A voice page has its sound file as the text
 void RadioPagingPage::toTx(SWGSDRangel::SWGRadioPagingModTx& tx) const
 {
     const QString type = m_type.isEmpty() ? QString("alphanumeric") : m_type;
@@ -386,7 +391,7 @@ void RadioPagingPage::toTx(SWGSDRangel::SWGRadioPagingModTx& tx) const
 
     if (m_protocol == "pocsag")
     {
-        tx.setAddress((qint32) m_address.toULongLong());
+        tx.setAddress(new QString(QString::number(m_address.toULongLong())));
         tx.setFunction(m_function);
         tx.setSpeed(m_speed);
     }
@@ -394,7 +399,7 @@ void RadioPagingPage::toTx(SWGSDRangel::SWGRadioPagingModTx& tx) const
     {
         qulonglong capcode = 0;
         flexCapcode(capcode);
-        tx.setCapcode((qint64) capcode);
+        tx.setAddress(new QString(QString::number(capcode)));
         tx.setPriority(m_priority ? 1 : 0);
         tx.setGroupMembers(new QString(m_groupMembers));
 
@@ -425,7 +430,7 @@ void RadioPagingPage::toTx(SWGSDRangel::SWGRadioPagingModTx& tx) const
         QString address;
         int function;
         gscAddress(address, function);
-        tx.setCapcode(address.toLongLong());
+        tx.setAddress(new QString(address));
         tx.setFunction(function);
     }
 
@@ -477,12 +482,7 @@ RadioPagingPage RadioPagingPage::fromTx(SWGSDRangel::SWGRadioPagingModTx& tx, co
         page.m_protocol = defaultProtocol;
     }
 
-    page.m_address = (page.m_protocol == "pocsag") ? QString::number(tx.getAddress()) : QString::number(tx.getCapcode());
-
-    // GSC: the 6 digits of the address (index, group, 3 address digits)
-    if ((page.m_protocol == "gsc") && (tx.getCapcode() >= 0)) {
-        page.m_address = page.m_address.rightJustified(6, QChar('0'));
-    }
+    page.m_address = text(tx.getAddress()).trimmed();
 
     return page;
 }

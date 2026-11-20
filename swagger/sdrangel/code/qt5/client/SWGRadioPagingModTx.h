@@ -43,14 +43,11 @@ public:
     virtual void fromJsonObject(QJsonObject &json) override;
     virtual SWGRadioPagingModTx* fromJson(QString &jsonString) override;
 
-    qint32 getAddress();
-    void setAddress(qint32 address);
+    QString* getAddress();
+    void setAddress(QString* address);
 
     qint32 getFunction();
     void setFunction(qint32 function);
-
-    qint64 getCapcode();
-    void setCapcode(qint64 capcode);
 
     qint32 getPriority();
     void setPriority(qint32 priority);
@@ -116,14 +113,11 @@ public:
     virtual bool isSet() override;
 
 private:
-    qint32 address;
+    QString* address;
     bool m_address_isSet;
 
     qint32 function;
     bool m_function_isSet;
-
-    qint64 capcode;
-    bool m_capcode_isSet;
 
     qint32 priority;
     bool m_priority_isSet;

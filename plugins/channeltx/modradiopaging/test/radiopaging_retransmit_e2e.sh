@@ -66,17 +66,17 @@ curl_code PATCH /deviceset/0/channel/0/settings '{"channelType":"RadioPagingMod"
 curl_code PATCH /deviceset/1/channel/0/settings '{"channelType":"RadioPagingMod","direction":1,"RadioPagingModSettings":{"protocol":0,"mode":1,"pocsagSpeed":1200,"title":"tp","deviation":4500}}' > /dev/null
 
 # Refused: out of range, a type FLEX does not number, GSC, one-shot
-check "FLEX: 16 copies are refused" '[ "$(tx 0 "{\"protocol\":\"flex\",\"capcode\":1100001,\"type\":\"alphanumeric\",\"retransmit\":16,\"text\":\"x\"}")" = 400 ]'
-check "FLEX: copies of a numeric message are refused" '[ "$(tx 0 "{\"protocol\":\"flex\",\"capcode\":1100001,\"type\":\"numeric\",\"retransmit\":1,\"text\":\"123\"}")" = 400 ]'
-check "POCSAG: 11 copies are refused" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":1100001,\"type\":\"alphanumeric\",\"retransmit\":11,\"text\":\"x\"}")" = 400 ]'
+check "FLEX: 16 copies are refused" '[ "$(tx 0 "{\"protocol\":\"flex\",\"address\":\"1100001\",\"type\":\"alphanumeric\",\"retransmit\":16,\"text\":\"x\"}")" = 400 ]'
+check "FLEX: copies of a numeric message are refused" '[ "$(tx 0 "{\"protocol\":\"flex\",\"address\":\"1100001\",\"type\":\"numeric\",\"retransmit\":1,\"text\":\"123\"}")" = 400 ]'
+check "POCSAG: 11 copies are refused" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":\"1100001\",\"type\":\"alphanumeric\",\"retransmit\":11,\"text\":\"x\"}")" = 400 ]'
 check "FLEX: a group of one pager is refused" '[ "$(tx 0 "{\"protocol\":\"flex\",\"type\":\"alphanumeric\",\"groupMembers\":\"1100010\",\"text\":\"x\"}")" = 400 ]'
 check "FLEX: a binary group message is refused" '[ "$(tx 0 "{\"protocol\":\"flex\",\"type\":\"binary\",\"groupMembers\":\"1100010,1100011\",\"text\":\"A5\"}")" = 400 ]'
 check "FLEX: a group message with copies is refused" '[ "$(tx 0 "{\"protocol\":\"flex\",\"type\":\"alphanumeric\",\"groupMembers\":\"1100010,1100011\",\"retransmit\":1,\"text\":\"x\"}")" = 400 ]'
-check "an interval over 3600 s is refused" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":1100001,\"type\":\"alphanumeric\",\"retransmit\":1,\"retransmitInterval\":3601,\"text\":\"x\"}")" = 400 ]'
-check "a negative send delay is refused" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":1100001,\"type\":\"alphanumeric\",\"sendDelay\":-1,\"text\":\"x\"}")" = 400 ]'
+check "an interval over 3600 s is refused" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":\"1100001\",\"type\":\"alphanumeric\",\"retransmit\":1,\"retransmitInterval\":3601,\"text\":\"x\"}")" = 400 ]'
+check "a negative send delay is refused" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":\"1100001\",\"type\":\"alphanumeric\",\"sendDelay\":-1,\"text\":\"x\"}")" = 400 ]'
 curl_code PATCH /deviceset/1/channel/0/settings '{"channelType":"RadioPagingMod","direction":1,"RadioPagingModSettings":{"mode":0}}' > /dev/null
-check "one-shot: copies are refused" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":1100001,\"type\":\"alphanumeric\",\"retransmit\":1,\"text\":\"x\"}")" = 400 ]'
-check "one-shot: a send delay is refused" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":1100001,\"type\":\"alphanumeric\",\"sendDelay\":1,\"text\":\"x\"}")" = 400 ]'
+check "one-shot: copies are refused" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":\"1100001\",\"type\":\"alphanumeric\",\"retransmit\":1,\"text\":\"x\"}")" = 400 ]'
+check "one-shot: a send delay is refused" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":\"1100001\",\"type\":\"alphanumeric\",\"sendDelay\":1,\"text\":\"x\"}")" = 400 ]'
 curl_code PATCH /deviceset/1/channel/0/settings '{"channelType":"RadioPagingMod","direction":1,"RadioPagingModSettings":{"mode":1}}' > /dev/null
 
 curl_code POST /deviceset/0/device/run > /dev/null
@@ -85,8 +85,8 @@ sleep 1
 
 # FLEX: 2 copies 4 s apart (3 frames), after 2 s. POCSAG: 2 copies 3 s apart, after 2 s; a page of the
 # message center with one copy
-check "FLEX: alphanumeric with 2 copies is accepted" '[ "$(tx 0 "{\"protocol\":\"flex\",\"capcode\":1100002,\"type\":\"alphanumeric\",\"retransmit\":2,\"retransmitInterval\":4,\"sendDelay\":2,\"text\":\"FLEX COPIES\"}")" = 202 ]'
-check "POCSAG: alphanumeric with 2 copies is accepted" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":1100003,\"type\":\"alphanumeric\",\"retransmit\":2,\"retransmitInterval\":3,\"sendDelay\":2,\"text\":\"POCSAG COPIES\"}")" = 202 ]'
+check "FLEX: alphanumeric with 2 copies is accepted" '[ "$(tx 0 "{\"protocol\":\"flex\",\"address\":\"1100002\",\"type\":\"alphanumeric\",\"retransmit\":2,\"retransmitInterval\":4,\"sendDelay\":2,\"text\":\"FLEX COPIES\"}")" = 202 ]'
+check "POCSAG: alphanumeric with 2 copies is accepted" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":\"1100003\",\"type\":\"alphanumeric\",\"retransmit\":2,\"retransmitInterval\":3,\"sendDelay\":2,\"text\":\"POCSAG COPIES\"}")" = 202 ]'
 check "FLEX: a group message is accepted" '[ "$(tx 0 "{\"protocol\":\"flex\",\"type\":\"alphanumeric\",\"groupMembers\":\"1100010, 1100011\",\"text\":\"GROUP TEXT\"}")" = 202 ]'
 
 # Codepages: the text of a page is encoded with its codepage, else the one of the channel; a character without a
@@ -100,22 +100,22 @@ GERMAN='{"vendor":"generic","model":"generic","codepage":"latin-german"}'
 CYRILLIC='{"vendor":"motorola","model":"linguist","codepage":"cyrillic"}'
 GERMAN_REC='"charset":{"codepage":"latin-german","model":"generic","vendor":"generic"}'
 CYRILLIC_REC='"charset":{"codepage":"cyrillic","model":"linguist","vendor":"motorola"}'
-check "POCSAG: a character without a code in the codepage is refused" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":1100005,\"type\":\"alphanumeric\",\"text\":\"$GRUSSE\"}")" = 400 ]'
-check "POCSAG: a FLEX codepage is refused" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":1100005,\"type\":\"alphanumeric\",\"charset\":$CYRILLIC,\"text\":\"x\"}")" = 400 ]'
-check "POCSAG: German text with the German codepage is accepted" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":1100005,\"type\":\"alphanumeric\",\"charset\":$GERMAN,\"text\":\"$GRUSSE\"}")" = 202 ]'
+check "POCSAG: a character without a code in the codepage is refused" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":\"1100005\",\"type\":\"alphanumeric\",\"text\":\"$GRUSSE\"}")" = 400 ]'
+check "POCSAG: a FLEX codepage is refused" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":\"1100005\",\"type\":\"alphanumeric\",\"charset\":$CYRILLIC,\"text\":\"x\"}")" = 400 ]'
+check "POCSAG: German text with the German codepage is accepted" '[ "$(tx 1 "{\"protocol\":\"pocsag\",\"address\":\"1100005\",\"type\":\"alphanumeric\",\"charset\":$GERMAN,\"text\":\"$GRUSSE\"}")" = 202 ]'
 check "the codepage setting of a transmitter must be one of the protocol" '[ "$(curl_code PATCH /deviceset/0/channel/0/settings "{\"channelType\":\"RadioPagingMod\",\"direction\":1,\"RadioPagingModSettings\":{\"flexCharset\":$GERMAN}}")" = 400 ]'
 curl_code PATCH /deviceset/0/channel/0/settings "{\"channelType\":\"RadioPagingMod\",\"direction\":1,\"RadioPagingModSettings\":{\"flexCharset\":$CYRILLIC}}" > /dev/null
-check "FLEX: a Ukrainian i without a code in the codepage of the channel is refused" '[ "$(tx 0 "{\"protocol\":\"flex\",\"capcode\":1100006,\"type\":\"alphanumeric\",\"text\":\"$PRYVIT\"}")" = 400 ]'
-check "FLEX: Ukrainian text with the codepage of the channel is accepted" '[ "$(tx 0 "{\"protocol\":\"flex\",\"capcode\":1100006,\"type\":\"alphanumeric\",\"text\":\"$DOBRYI\"}")" = 202 ]'
+check "FLEX: a Ukrainian i without a code in the codepage of the channel is refused" '[ "$(tx 0 "{\"protocol\":\"flex\",\"address\":\"1100006\",\"type\":\"alphanumeric\",\"text\":\"$PRYVIT\"}")" = 400 ]'
+check "FLEX: Ukrainian text with the codepage of the channel is accepted" '[ "$(tx 0 "{\"protocol\":\"flex\",\"address\":\"1100006\",\"type\":\"alphanumeric\",\"text\":\"$DOBRYI\"}")" = 202 ]'
 # BeepwearPRO alarm: a codepage with a special format, the text key=value
 BEEPWEAR='{"vendor":"timex","model":"beepwear-pro","codepage":"alarm"}'
-check "FLEX: a BeepwearPRO alarm without its minute is refused" '[ "$(tx 0 "{\"protocol\":\"flex\",\"capcode\":1100007,\"type\":\"alphanumeric\",\"charset\":$BEEPWEAR,\"text\":\"hour=7 msg=Wake up\"}")" = 400 ]'
-check "FLEX: a BeepwearPRO alarm is accepted" '[ "$(tx 0 "{\"protocol\":\"flex\",\"capcode\":1100007,\"type\":\"alphanumeric\",\"charset\":$BEEPWEAR,\"text\":\"hour=7 min=0 msg=Wake up\"}")" = 202 ]'
+check "FLEX: a BeepwearPRO alarm without its minute is refused" '[ "$(tx 0 "{\"protocol\":\"flex\",\"address\":\"1100007\",\"type\":\"alphanumeric\",\"charset\":$BEEPWEAR,\"text\":\"hour=7 msg=Wake up\"}")" = 400 ]'
+check "FLEX: a BeepwearPRO alarm is accepted" '[ "$(tx 0 "{\"protocol\":\"flex\",\"address\":\"1100007\",\"type\":\"alphanumeric\",\"charset\":$BEEPWEAR,\"text\":\"hour=7 min=0 msg=Wake up\"}")" = 202 ]'
 # Japanese Text Service: the text is sent as a HEX/binary message of 16-bit Shift JIS characters
 KANJI='{"vendor":"generic","model":"generic","codepage":"kanji"}'
 NIHON=$(printf '\346\227\245\346\234\254')
-check "FLEX: Ukrainian text is refused with Kanji" '[ "$(tx 0 "{\"protocol\":\"flex\",\"capcode\":1100008,\"type\":\"alphanumeric\",\"charset\":$KANJI,\"text\":\"$PRYVIT\"}")" = 400 ]'
-check "FLEX: Japanese text with Kanji is accepted" '[ "$(tx 0 "{\"protocol\":\"flex\",\"capcode\":1100008,\"type\":\"alphanumeric\",\"charset\":$KANJI,\"text\":\"$NIHON\"}")" = 202 ]'
+check "FLEX: Ukrainian text is refused with Kanji" '[ "$(tx 0 "{\"protocol\":\"flex\",\"address\":\"1100008\",\"type\":\"alphanumeric\",\"charset\":$KANJI,\"text\":\"$PRYVIT\"}")" = 400 ]'
+check "FLEX: Japanese text with Kanji is accepted" '[ "$(tx 0 "{\"protocol\":\"flex\",\"address\":\"1100008\",\"type\":\"alphanumeric\",\"charset\":$KANJI,\"text\":\"$NIHON\"}")" = 202 ]'
 
 # The page waits for the modulator to announce itself (every 5 s)
 check "a page with a copy is accepted by the message center" '[ "$(curl_code POST /featureset/feature/0/actions "{\"featureType\":\"MessageCenter\",\"MessageCenterActions\":{\"post\":{\"id\":\"p-rep\",\"transmitter\":\"tp\",\"protocol\":\"pocsag\",\"address\":\"1100004\",\"type\":\"alphanumeric\",\"retransmit\":1,\"retransmitInterval\":2,\"text\":\"PAGE COPY\"}}}")" = 202 ]'

@@ -1715,7 +1715,7 @@ int RadioPagingMod::webapiActionsPost(
 
     if (!swgActions->getTx())
     {
-        errorMessage = "tx needs a message: POCSAG address, function, type, text; FLEX capcode, type, text";
+        errorMessage = "tx needs a message: protocol, address (a string), type, text; POCSAG and GSC also function";
         return 400;
     }
 

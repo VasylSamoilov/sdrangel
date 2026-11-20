@@ -55,22 +55,22 @@ check "largest message number 64 is refused" '[ "$(curl_code PATCH /deviceset/0/
 
 # 64 bits B=8 (fill); 84 bits B=4 ending exactly at a word end with a uniform last character (padding
 # word); B=7 right to left with M H; secure alphanumeric; secure binary at an exact word end (termination word)
-check "binary B=8 is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000001,\"type\":\"binary\",\"blocking\":8,\"text\":\"0123456789ABCDEF\"}")" = 202 ]'
-check "binary B=4 exact end is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000002,\"type\":\"binary\",\"blocking\":4,\"text\":\"123456789ABCDEF12345F\"}")" = 202 ]'
-check "binary B=7 D M H is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000003,\"type\":\"binary\",\"blocking\":7,\"rightToLeft\":1,\"mailDrop\":1,\"headerMessage\":1,\"text\":\"1234567\"}")" = 202 ]'
-check "secure alphanumeric is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000004,\"type\":\"secure\",\"secureType\":0,\"text\":\"Secure text\"}")" = 202 ]'
-check "secure binary is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000005,\"type\":\"secure\",\"secureType\":2,\"text\":\"123456789ABCDEF123455\"}")" = 202 ]'
-check "binary bits not a multiple of B are refused" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000006,\"type\":\"binary\",\"blocking\":8,\"text\":\"123\"}")" = 400 ]'
-check "binary right to left with B=1 is refused" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000006,\"type\":\"binary\",\"rightToLeft\":1,\"text\":\"12\"}")" = 400 ]'
-check "binary not hex is refused" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000006,\"type\":\"binary\",\"text\":\"12G4\"}")" = 400 ]'
-check "secure type 3 is refused" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000006,\"type\":\"secure\",\"secureType\":3,\"text\":\"12\"}")" = 400 ]'
+check "binary B=8 is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"address\":\"1000001\",\"type\":\"binary\",\"blocking\":8,\"text\":\"0123456789ABCDEF\"}")" = 202 ]'
+check "binary B=4 exact end is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"address\":\"1000002\",\"type\":\"binary\",\"blocking\":4,\"text\":\"123456789ABCDEF12345F\"}")" = 202 ]'
+check "binary B=7 D M H is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"address\":\"1000003\",\"type\":\"binary\",\"blocking\":7,\"rightToLeft\":1,\"mailDrop\":1,\"headerMessage\":1,\"text\":\"1234567\"}")" = 202 ]'
+check "secure alphanumeric is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"address\":\"1000004\",\"type\":\"secure\",\"secureType\":0,\"text\":\"Secure text\"}")" = 202 ]'
+check "secure binary is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"address\":\"1000005\",\"type\":\"secure\",\"secureType\":2,\"text\":\"123456789ABCDEF123455\"}")" = 202 ]'
+check "binary bits not a multiple of B are refused" '[ "$(tx "{\"protocol\":\"flex\",\"address\":\"1000006\",\"type\":\"binary\",\"blocking\":8,\"text\":\"123\"}")" = 400 ]'
+check "binary right to left with B=1 is refused" '[ "$(tx "{\"protocol\":\"flex\",\"address\":\"1000006\",\"type\":\"binary\",\"rightToLeft\":1,\"text\":\"12\"}")" = 400 ]'
+check "binary not hex is refused" '[ "$(tx "{\"protocol\":\"flex\",\"address\":\"1000006\",\"type\":\"binary\",\"text\":\"12G4\"}")" = 400 ]'
+check "secure type 3 is refused" '[ "$(tx "{\"protocol\":\"flex\",\"address\":\"1000006\",\"type\":\"secure\",\"secureType\":3,\"text\":\"12\"}")" = 400 ]'
 # Longer than a frame: 600 digits B=8 in 2 fragments (1720 and 680 bits); 600 secure characters in 3, 600
 # alphanumeric characters in 3 (251, 252 and 97)
 HEX600=$(for i in $(seq 75); do printf '1A2B3C4D'; done)
 ALPHA600=$(for i in $(seq 60); do printf 'abcdefghij'; done)
-check "binary of 600 digits (fragmented) is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000009,\"type\":\"binary\",\"blocking\":8,\"text\":\"$HEX600\"}")" = 202 ]'
-check "secure alphanumeric of 600 characters (fragmented) is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000010,\"type\":\"secure\",\"secureType\":0,\"text\":\"$ALPHA600\"}")" = 202 ]'
-check "alphanumeric of 600 characters (fragmented) is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"capcode\":1000011,\"type\":\"alphanumeric\",\"text\":\"$ALPHA600\"}")" = 202 ]'
+check "binary of 600 digits (fragmented) is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"address\":\"1000009\",\"type\":\"binary\",\"blocking\":8,\"text\":\"$HEX600\"}")" = 202 ]'
+check "secure alphanumeric of 600 characters (fragmented) is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"address\":\"1000010\",\"type\":\"secure\",\"secureType\":0,\"text\":\"$ALPHA600\"}")" = 202 ]'
+check "alphanumeric of 600 characters (fragmented) is accepted" '[ "$(tx "{\"protocol\":\"flex\",\"address\":\"1000011\",\"type\":\"alphanumeric\",\"text\":\"$ALPHA600\"}")" = 202 ]'
 
 # A page of the message center, claimed by the modulator once it has announced itself (every 5 s)
 check "a binary page is accepted by the message center" '[ "$(curl_code POST /featureset/feature/0/actions "{\"featureType\":\"MessageCenter\",\"MessageCenterActions\":{\"post\":{\"id\":\"p-bin\",\"transmitter\":\"t1\",\"protocol\":\"flex\",\"address\":\"1000007\",\"type\":\"binary\",\"blocking\":8,\"mailDrop\":1,\"text\":\"A5A5\"}}}")" = 202 ]'

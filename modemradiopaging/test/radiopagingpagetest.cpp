@@ -144,7 +144,7 @@ void testRoundTrips()
 
     // Without a protocol the tx action is of the channel's
     SWGSDRangel::SWGRadioPagingModTx bare;
-    bare.setCapcode(42);
+    bare.setAddress(new QString("42"));
     bare.setType(new QString("tone"));
     RadioPagingPage channel = RadioPagingPage::fromTx(bare, "flex");
     check((channel.m_protocol == "flex") && (channel.m_address == "42") && (channel.m_retransmitInterval < 0.0),

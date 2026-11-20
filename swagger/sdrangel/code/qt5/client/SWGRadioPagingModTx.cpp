@@ -28,12 +28,10 @@ SWGRadioPagingModTx::SWGRadioPagingModTx(QString* json) {
 }
 
 SWGRadioPagingModTx::SWGRadioPagingModTx() {
-    address = 0;
+    address = nullptr;
     m_address_isSet = false;
     function = 0;
     m_function_isSet = false;
-    capcode = 0L;
-    m_capcode_isSet = false;
     priority = 0;
     m_priority_isSet = false;
     protocol = nullptr;
@@ -82,12 +80,10 @@ SWGRadioPagingModTx::~SWGRadioPagingModTx() {
 
 void
 SWGRadioPagingModTx::init() {
-    address = 0;
+    address = new QString("");
     m_address_isSet = false;
     function = 0;
     m_function_isSet = false;
-    capcode = 0L;
-    m_capcode_isSet = false;
     priority = 0;
     m_priority_isSet = false;
     protocol = new QString("");
@@ -132,8 +128,9 @@ SWGRadioPagingModTx::init() {
 
 void
 SWGRadioPagingModTx::cleanup() {
-
-
+    if(address != nullptr) { 
+        delete address;
+    }
 
 
     if(protocol != nullptr) { 
@@ -182,11 +179,9 @@ SWGRadioPagingModTx::fromJson(QString &json) {
 
 void
 SWGRadioPagingModTx::fromJsonObject(QJsonObject &pJson) {
-    ::SWGSDRangel::setValue(&address, pJson["address"], "qint32", "");
+    ::SWGSDRangel::setValue(&address, pJson["address"], "QString", "QString");
     
     ::SWGSDRangel::setValue(&function, pJson["function"], "qint32", "");
-    
-    ::SWGSDRangel::setValue(&capcode, pJson["capcode"], "qint64", "");
     
     ::SWGSDRangel::setValue(&priority, pJson["priority"], "qint32", "");
     
@@ -244,14 +239,11 @@ SWGRadioPagingModTx::asJson ()
 QJsonObject*
 SWGRadioPagingModTx::asJsonObject() {
     QJsonObject* obj = new QJsonObject();
-    if(m_address_isSet){
-        obj->insert("address", QJsonValue(address));
+    if(address != nullptr && *address != QString("")){
+        toJsonValue(QString("address"), address, obj, QString("QString"));
     }
     if(m_function_isSet){
         obj->insert("function", QJsonValue(function));
-    }
-    if(m_capcode_isSet){
-        obj->insert("capcode", QJsonValue(capcode));
     }
     if(m_priority_isSet){
         obj->insert("priority", QJsonValue(priority));
@@ -317,12 +309,12 @@ SWGRadioPagingModTx::asJsonObject() {
     return obj;
 }
 
-qint32
+QString*
 SWGRadioPagingModTx::getAddress() {
     return address;
 }
 void
-SWGRadioPagingModTx::setAddress(qint32 address) {
+SWGRadioPagingModTx::setAddress(QString* address) {
     this->address = address;
     this->m_address_isSet = true;
 }
@@ -335,16 +327,6 @@ void
 SWGRadioPagingModTx::setFunction(qint32 function) {
     this->function = function;
     this->m_function_isSet = true;
-}
-
-qint64
-SWGRadioPagingModTx::getCapcode() {
-    return capcode;
-}
-void
-SWGRadioPagingModTx::setCapcode(qint64 capcode) {
-    this->capcode = capcode;
-    this->m_capcode_isSet = true;
 }
 
 qint32
@@ -552,13 +534,10 @@ bool
 SWGRadioPagingModTx::isSet(){
     bool isObjectUpdated = false;
     do{
-        if(m_address_isSet){
+        if(address && *address != QString("")){
             isObjectUpdated = true; break;
         }
         if(m_function_isSet){
-            isObjectUpdated = true; break;
-        }
-        if(m_capcode_isSet){
             isObjectUpdated = true; break;
         }
         if(m_priority_isSet){

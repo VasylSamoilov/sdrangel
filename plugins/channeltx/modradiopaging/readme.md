@@ -115,7 +115,7 @@ Settings: `RadioPagingModSettings` (channel type `RadioPagingMod`), all the sett
 
 Actions: `RadioPagingModActions`:
 
-* `tx`: a message. POCSAG: `address`, `function`, `speed`. FLEX: `capcode`, `priority`, `groupMembers`, `shortType`, `source`, `blocking`, `mailDrop`, `rightToLeft`, `headerMessage`, `statusInfo`, `secureType`. GSC: `capcode`, `function`. All: `protocol`, `type`, `text`, `polarity` (normal or inverted), `charset`, `retransmit`, `retransmitInterval`, `sendDelay`, `id`. 202 when queued, 400 with the reason when it is not valid for the channel or when 100 messages are waiting.
+* `tx`: a message. `address` is a string for every protocol, as in the posts of the Message Center: the POCSAG address, the FLEX capcode (digits or a form with letters) or the GSC cap code, for example `{"protocol":"flex","address":"1234567","type":"alphanumeric","text":"Hello"}`. POCSAG: `function`, `speed`. FLEX: `priority`, `groupMembers`, `shortType`, `source`, `blocking`, `mailDrop`, `rightToLeft`, `headerMessage`, `statusInfo`, `secureType`. GSC: `function`. All: `protocol`, `type`, `text`, `polarity` (normal or inverted), `charset`, `retransmit`, `retransmitInterval`, `sendDelay`, `id`. 202 when queued, 400 with the reason when it is not valid for the channel or when 100 messages are waiting.
 * `clear`: 1 to drop the messages waiting.
 * `abort`: 1 to drop them and end the one being sent.
 * `systemEvent` and `systemEventFrames`: start the FLEX System Event Notification of the events (0 stops it).

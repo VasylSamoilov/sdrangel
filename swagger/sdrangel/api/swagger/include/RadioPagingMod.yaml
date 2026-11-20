@@ -291,17 +291,12 @@ RadioPagingModTx:
   type: object
   properties:
     address:
-      description: "POCSAG: 21-bit address"
-      type: integer
-      format: int32
+      description: "The address as a string, as in the posts of the Message Center. POCSAG: the 21-bit address 0 to 2097151. FLEX: the capcode, short 1 to 1933312 or long 2101249 to 4297068542, digits or a form with letters of STD-43A Appendix A ([P|Q|R|S][fff][b]<letter><address>, e.g. 3E005237593); only the address is sent. GSC: the cap code, up to 6 digits zero padded (index, group, 3 address digits; 5 digits: index 0) or 7 digits with the suffix digit, that gives the function (1-4 and 5-8: A-D, 9 and 0: A and B) over function"
+      type: string
     function:
       description: "POCSAG: function 0 to 3 (A to D). GSC: function 0 to 3 (A to D), the address number 1 to 4"
       type: integer
       format: int32
-    capcode:
-      description: "FLEX: capcode, short 1 to 1933312 or long 2101249 to 4297068542. GSC: cap code, up to 6 digits sent zero padded (index, group, 3 address digits), or above 999999 the 7 digits with the suffix digit, that gives the function (1-4 and 5-8: A-D, 9 and 0: A and B) over function"
-      type: integer
-      format: int64
     priority:
       description: "FLEX: address in the priority part of the address field (1 for yes, 0 for no)"
       type: integer
