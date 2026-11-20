@@ -228,6 +228,7 @@ public:
         int m_hexNibbleBits = 0;
         bool m_hexLsbFirst = true;          //!< The first bit of a digit is its least significant bit
         bool m_payloadUnknown = false;      //!< The layout of the payload is not published
+        bool m_noWords = false;             //!< The vector gives a message of no words (no header, no data): raw is the vector
         std::string m_wordMap;              //!< One character for each message word: . clean, c corrected, X lost; fragments split by |
         //! Alphanumeric and secure characters: one for each byte of m_text, . received, c in a word that was corrected,
         //! u in a received word that could not be corrected (its received bits), X lost ('?'), G a lost fragment of unknown length (its byte in m_text is m_gapCode, not a character).

@@ -1283,6 +1283,11 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
     record.m_protocolData.insert("fragment_gap", message.m_fragmentGap);
     record.m_protocolData.insert("payload_unknown", message.m_payloadUnknown);
 
+    // A vector of a message of no words: no header, no data; the raw data is the vector
+    if (message.m_noWords) {
+        record.m_protocolData.insert("no_words", true);
+    }
+
     // Alphanumeric fragment control bits U0 V0 (3.10.1.3): "00" enhanced fragmentation not supported, "01" reserved,
     // "10" default character mode, "11" alternative character mode. Fragments after the first only
     if (message.m_fragmentControl >= 0)

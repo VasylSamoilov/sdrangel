@@ -552,6 +552,14 @@ void RadioPagingFlexDecoder::walkAddresses(unsigned addressStart, unsigned vecto
             continue;
         }
 
+        // A vector word whose checksum fails (STD-43A 3.5.1) is in error, as the BCH code may correct a word wrong
+        // (an all zero word passes the code): what it says is not read
+        if (!RadioPagingFlex::checksumValid(m_w[j].m_data))
+        {
+            m_status.m_invalidVectors++;
+            continue;
+        }
+
         processVector(a, j);
     }
 
@@ -718,6 +726,23 @@ void RadioPagingFlexDecoder::processVector(const AddressContext& a, int j)
 
     if (a.m_type == AddressTemporary) {
         handleTemporaryAddress(a, j, vecType, mw1, proto);
+    }
+
+    // A message vector of no words: the message has none, not even its header (the words at its start are those of
+    // another message). The vector is all there is: no header nor data are read
+    if ((length == 0) && ((vecType == 0) || (vecType == 5) || (vecType == 6)))
+    {
+        std::vector<uint32_t> raw(1, viw);
+
+        if (a.m_long && (j + 1 < wordsPerFrame)) {
+            raw.push_back(m_w[j + 1].m_data);
+        }
+
+        proto.m_type = (vecType == 0) ? TypeSecure : (vecType == 5) ? TypeAlphanumeric : TypeBinary;
+        proto.m_noWords = true;
+        setRaw(proto, raw);
+        emitMessage(proto);
+        return;
     }
 
     switch (vecType)

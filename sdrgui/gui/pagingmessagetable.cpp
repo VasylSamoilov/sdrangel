@@ -592,6 +592,10 @@ QString PagingMessageTable::recordText(const MessageRecord& record)
     if (record.m_text.isEmpty() && ((record.m_msgType == "tone") || d.value("tone_only").toBool())) {
         return QString("(tone only)");
     }
+    // A FLEX message vector of no words: there is nothing but the vector
+    if (record.m_text.isEmpty() && d.value("no_words").toBool()) {
+        return QString("(type:%1, no message words)").arg(record.m_msgType);
+    }
     // A FLEX short message without digits (STD-43A Table 3.9.2-1): type 1 is a source alone (the pager shows the
     // message it has for it), type 2 a source with a message number and the retrieval flag, type 3 is reserved
     if (record.m_text.isEmpty() && (record.m_msgType == "short_message") && d.contains("short_type"))

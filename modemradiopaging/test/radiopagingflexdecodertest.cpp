@@ -1718,6 +1718,81 @@ void testRoaming()
 // Short message vector (STD-43A 3.9.2): digits in the vector, no digits = tone only payload
 // ---------------------------------------------------------------------------
 
+// A message vector of no words (length 0): no header is read (the words at its start are another message's), the
+// record is a message of no words whose raw data is the vector
+void testVectorOfNoWords()
+{
+    for (Flex::MessageType type : {Flex::Secure, Flex::Alphanumeric, Flex::Binary})
+    {
+        Enc enc;
+        Dec dec;
+        Enc::TxMessage m;
+        m.m_capcode = 924693;
+        m.m_type = type;
+        m.m_text = (type == Flex::Binary) ? "ABCD" : "SOME TEXT";
+        Dec::RxFrame frame = encoderFrame(enc, {m});
+        std::vector<uint32_t> words = codewords(frame.m_phases[0]);
+        const uint32_t biw = Flex::wordData(words[0]);
+        const int vectorIndex = (int) ((biw >> 10) & 0x3f);
+        const uint32_t vector = Flex::wordData(words[vectorIndex]);
+        // Length (bits 14-20) 0, the checksum again
+        const uint32_t zeroLength = Flex::addChecksum((vector & 0x3fff) & ~0xfu);
+        words[vectorIndex] = Flex::encodeWord(zeroLength);
+        frame.m_phases[0].m_words = interleaved(words);
+        std::vector<Dec::Message> out = dec.decodeFrame(frame);
+
+        bool ok = (out.size() == 1);
+
+        if (ok)
+        {
+            const Dec::Message& r = out[0];
+            ok = (r.m_capcode == 924693) && r.m_noWords && r.m_text.empty() && (r.m_messageNumber < 0) && (r.m_rawBits == 21)
+                && (r.m_type == ((type == Flex::Secure) ? Dec::TypeSecure : (type == Flex::Alphanumeric) ? Dec::TypeAlphanumeric : Dec::TypeBinary));
+        }
+
+        char buf[160];
+        std::snprintf(buf, sizeof(buf), "a %s vector of no words: a message of no words, its vector as raw data, no header read",
+            (type == Flex::Secure) ? "secure" : (type == Flex::Alphanumeric) ? "alphanumeric" : "binary");
+        check(ok, buf);
+    }
+
+    // A vector word whose checksum fails is in error (an all zero word passes the code): no message from it; the
+    // message of the next vector is decoded
+    for (uint32_t bad : {0u, 0x00010u})
+    {
+        Enc enc;
+        Dec dec;
+        Enc::TxMessage first;
+        first.m_capcode = 924693;
+        first.m_type = Flex::Alphanumeric;
+        first.m_text = "FIRST";
+        Enc::TxMessage second = first;
+        second.m_capcode = 924694;
+        second.m_text = "SECOND";
+        Dec::RxFrame frame = encoderFrame(enc, {first, second});
+        std::vector<uint32_t> words = codewords(frame.m_phases[0]);
+        const int vectorStart = (int) ((Flex::wordData(words[0]) >> 10) & 0x3f);
+        const int addressStart = (int) ((Flex::wordData(words[0]) >> 8) & 3) + 1;
+        // The vector of the first address
+        int index = -1;
+
+        for (int a = addressStart; a < vectorStart; a++)
+        {
+            if (Flex::wordData(words[a]) == 924693 + 32768) {
+                index = vectorStart + (a - addressStart);
+            }
+        }
+
+        words[index >= 0 ? index : vectorStart] = Flex::encodeWord(bad);
+        frame.m_phases[0].m_words = interleaved(words);
+        std::vector<Dec::Message> out = dec.decodeFrame(frame);
+        check((index >= 0) && (out.size() == 1) && (out[0].m_capcode == 924694) && (out[0].m_text == "SECOND")
+            && (dec.status().m_invalidVectors >= 1),
+            bad ? "a vector word whose checksum fails: no message from it, the next one decoded"
+                : "an all zero vector word (it passes the code, not the checksum): no message from it, the next one decoded");
+    }
+}
+
 void testShortMessage()
 {
     // Layout of Fig. 3.9.2-1: type 010, t = 00, digits a b c in d0-d11 (bits 9-20); second word d12-d31, d32 = 0
@@ -3839,6 +3914,7 @@ int main()
     testReferenceFrames();
     testRoaming();
     testShortMessage();
+    testVectorOfNoWords();
     testBiw();
     testRoundTrip();
     testErrors();
