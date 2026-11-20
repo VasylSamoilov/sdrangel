@@ -170,6 +170,7 @@ private:
     uint32_t m_s2Reg = 0;               //!< Bits of the second sync, newest in bit 0
     std::vector<uint8_t> m_s2Tail;      //!< Symbols around the nominal end of the second sync
     std::vector<float> m_s2TailSoft;    //!< Their normalised values
+    std::vector<uint8_t> m_s2TailCentre;    //!< Their decisions on the centre of the symbol
     int m_s2TailStart = 0;
     int m_s2ExactEnd = -1;              //!< Symbol count at which inverted C ended without errors, -1 if not seen
 
@@ -178,6 +179,8 @@ private:
     int m_bitIndex = 0;                 //!< Bit index in the phase words
     bool m_secondOfPair = false;        //!< 6400/4 and 3200/2: second symbol of a pair
     std::vector<std::vector<uint32_t>> m_words;
+    //! The same words from the decisions on the centre of the symbols (RadioPagingFskDemod::Symbol::m_centreValue)
+    std::vector<std::vector<uint32_t>> m_centreWords;
     //! Reliability of each bit of m_words (bit index of the phase): distance of its symbol from the decision
     //! threshold of the bit, 100 = the outer level deviation, at most 255
     std::vector<std::vector<uint8_t>> m_reliability;
@@ -216,9 +219,9 @@ private:
     bool m_levelsMeasured = false;
     float m_measuredDc = 0.0f;
     void startData(float offset);
-    void dataSymbol(int symbol, float error, float soft, float magsq);
-    void sync2Symbol(int symbol, float soft);
-    void storeDataSymbol(int symbol, float soft, float magsq);
+    void dataSymbol(int symbol, float error, float soft, int centre, float magsq);
+    void sync2Symbol(int symbol, float soft, int centre);
+    void storeDataSymbol(int symbol, float soft, int centre, float magsq);
     void endFrame(bool partial = false);
     void backToHunting(bool keepHistory = false);
     int mirror(int symbol, int levels) const { return m_inverted ? (levels - 1 - symbol) : symbol; }

@@ -42,7 +42,8 @@ RadioPagingFskDemod::RadioPagingFskDemod() :
     m_matchedFilter(1),
     m_huntDc(defaultHuntWindow),
     m_huntDeviation(defaultHuntWindow),
-    m_history(historySize, 0.0f)
+    m_history(historySize, 0.0f),
+    m_inputPos(0)
 {
     reset();
 }
@@ -125,7 +126,31 @@ void RadioPagingFskDemod::create(double sampleRate, double symbolRate, int level
     m_samplesPerSymbol = sampleRate / symbolRate;
     m_levels = (levels == 4) ? 4 : 2;
     m_matchedFilter.resize(std::max(1, (int) std::lround(m_samplesPerSymbol)));
+    m_input.assign((size_t) std::ceil(m_samplesPerSymbol) + 4, 0.0f);
     reset();
+}
+
+// Linear interpolation between the samples: the part of each sample between back1 and back2 counts
+float RadioPagingFskDemod::inputMean(double back1, double back2) const
+{
+    const size_t size = m_input.size();
+    double sum = 0.0;
+    double weight = 0.0;
+
+    for (int k = (int) std::floor(back1); (k <= (int) std::ceil(back2)) && (k < (int) size); k++)
+    {
+        // Sample k samples before the last one covers [k - 0.5, k + 0.5] of that axis
+        double lo = std::max(back1, k - 0.5);
+        double hi = std::min(back2, k + 0.5);
+
+        if ((hi > lo) && (k >= 0))
+        {
+            sum += m_input[(m_inputPos + size - 1 - (size_t) k) % size] * (hi - lo);
+            weight += hi - lo;
+        }
+    }
+
+    return (weight > 0.0) ? (float) (sum / weight) : 0.0f;
 }
 
 void RadioPagingFskDemod::reset()
@@ -147,6 +172,8 @@ void RadioPagingFskDemod::reset()
     std::fill(m_history.begin(), m_history.end(), 0.0f);
     m_historyPos = 0;
     m_historyCount = 0;
+    std::fill(m_input.begin(), m_input.end(), 0.0f);
+    m_inputPos = 0;
 }
 
 void RadioPagingFskDemod::setLevels(float dc, float deviation)
@@ -202,6 +229,12 @@ bool RadioPagingFskDemod::process(float sample, Symbol& symbol)
     m_matchedFilter(sample);
     float filtered = m_matchedFilter.asFloat();
 
+    if (!m_input.empty())
+    {
+        m_input[m_inputPos] = sample;
+        m_inputPos = (m_inputPos + 1) % m_input.size();
+    }
+
     m_timeToNext -= 1.0;
 
     while (m_timeToNext <= 0.0)
@@ -249,6 +282,13 @@ bool RadioPagingFskDemod::process(float sample, Symbol& symbol)
             symbol.m_soft = normalised;
             symbol.m_error = normalised - level;
             symbol.m_offset = (float) -m_timeToNext;
+
+            // The matched filter at the instant averages the symbol: the input from b to b + one symbol before the
+            // last sample (a sample k before it covers k - 0.5 to k + 0.5). Its centre half without the transitions
+            const double b = (1.0 - fraction) - 0.5;
+            const float centre = inputMean(b + m_samplesPerSymbol / 4.0, b + 3.0 * m_samplesPerSymbol / 4.0) - m_dc;
+            symbol.m_centreSoft = centre / m_deviation;
+            symbol.m_centreValue = decide(symbol.m_centreSoft);
             produced = true;
 
             m_timeToNext += halfSymbol + correction;

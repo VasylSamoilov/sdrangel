@@ -494,8 +494,18 @@ void RadioPagingFlexDecoder::decodePhase(const RxPhase& phase)
         erased[i] = ((size_t) i >= phase.m_words.size());
     }
 
-    for (int b = 0; b < RadioPagingFlex::m_blocksPerFrame; b++) {
+    // The codewords of the other decision on the symbols (their centre)
+    uint32_t centre[wordsPerFrame];
+    const bool haveCentre = phase.m_centreWords.size() >= (size_t) wordsPerFrame;
+
+    for (int i = 0; i < wordsPerFrame; i++) {
+        centre[i] = haveCentre ? phase.m_centreWords[i] : 0;
+    }
+
+    for (int b = 0; b < RadioPagingFlex::m_blocksPerFrame; b++)
+    {
         RadioPagingFlex::deinterleaveBlock(raw + b * RadioPagingFlex::m_wordsPerBlock);
+        RadioPagingFlex::deinterleaveBlock(centre + b * RadioPagingFlex::m_wordsPerBlock);
     }
 
     for (int i = 0; i < wordsPerFrame; i++)
@@ -503,12 +513,80 @@ void RadioPagingFlexDecoder::decodePhase(const RxPhase& phase)
         if (((size_t) i < phase.m_erased.size()) && phase.m_erased[i]) {
             erased[i] = true;
         }
+    }
 
-        m_w[i] = decodeWord(raw[i], erased[i]);
+    // The decision of the phase is the one with fewer codewords that cannot be corrected: the whole symbol in noise,
+    // its centre when the band of the signal is narrow for the symbol rate. The other fills in below
+    bool centreFirst = false;
+
+    if (haveCentre)
+    {
+        int lostWhole = 0;
+        int lostCentre = 0;
+
+        for (int i = 0; i < wordsPerFrame; i++)
+        {
+            if (!erased[i])
+            {
+                lostWhole += (RadioPagingBCH::decode(raw[i]).m_bitErrors < 0) ? 1 : 0;
+                lostCentre += (RadioPagingBCH::decode(centre[i]).m_bitErrors < 0) ? 1 : 0;
+            }
+        }
+
+        if (lostCentre < lostWhole)
+        {
+            std::swap(raw, centre);
+            centreFirst = true;
+            m_status.m_phasesFromCentre++;
+        }
+    }
+
+    // A codeword that cannot be corrected is taken from the other decision if it can be, except in the address field:
+    // there a codeword corrected wrong is a message to another pager (the block information word gives the field; not
+    // known: all the words after it are taken as addresses)
+    unsigned addressStart = 1;
+    unsigned vectorStart = wordsPerFrame;
+
+    auto decodeBest = [&](int i) {
+        Word word = decodeWord(raw[i], erased[i]);
+        const bool addressField = ((unsigned) i >= addressStart) && ((unsigned) i < vectorStart);
+
+        if ((word.m_status == WordUncorrectable) && haveCentre && !erased[i] && !addressField)
+        {
+            Word other = decodeWord(centre[i], false);
+
+            if ((other.m_status == WordClean) || (other.m_status == WordCorrected))
+            {
+                raw[i] = centre[i];
+                m_status.m_codewordsFromCentre++;
+                return other;
+            }
+        }
+
+        return word;
+    };
+
+    Word biw = decodeBest(0);
+
+    if ((biw.m_status == WordClean) || (biw.m_status == WordCorrected))
+    {
+        addressStart = ((biw.m_data >> 8) & 3) + 1;
+        vectorStart = (biw.m_data >> 10) & 0x3f;
+
+        if ((vectorStart <= addressStart) || (vectorStart > (unsigned) wordsPerFrame)) {
+            vectorStart = wordsPerFrame;
+        }
+    }
+
+    for (int i = 0; i < wordsPerFrame; i++)
+    {
+        m_w[i] = (i == 0) ? biw : decodeBest(i);
         m_status.m_codewords++;
 
-        // A received word that cannot be corrected: its characters are those of the most likely word
-        if ((m_w[i].m_status == WordUncorrectable) && m_w[i].m_hasReceived && (phase.m_reliability.size() >= 32 * (size_t) wordsPerFrame))
+        // A received word that cannot be corrected: its characters are those of the most likely word (the reliabilities
+        // are those of the decision on the whole symbol)
+        if ((m_w[i].m_status == WordUncorrectable) && m_w[i].m_hasReceived && !centreFirst
+            && (phase.m_reliability.size() >= 32 * (size_t) wordsPerFrame))
         {
             // Deinterleaved word i = block * 8 + k: its bit 31 - j is bit j of byte j of the block (interleaved
             // word j / 4, bit 31 - 8 * (j % 4) - k), transmitted as bit index (block * 8 + j / 4) * 32 + 8 * (j % 4) + k

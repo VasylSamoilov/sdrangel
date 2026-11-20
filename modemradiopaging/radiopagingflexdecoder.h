@@ -98,6 +98,10 @@ public:
     {
         char m_name = 'A';                  //!< 'A' to 'D'
         std::vector<uint32_t> m_words;      //!< 88 interleaved codewords (see class description)
+        //! The same codewords from another decision on the symbols (their centre, may be empty = none): a codeword
+        //! that cannot be corrected is taken from here if it can (in the address field only if it is received without
+        //! error and differs from the other by one bit at most: a wrong address would be a message to another pager)
+        std::vector<uint32_t> m_centreWords;
         //! 88 flags (may be empty = none): non zero if the codeword is lost (carrier lost). The
         //! index is the codeword index after deinterleaving, block * 8 + word in block
         std::vector<uint8_t> m_erased;
@@ -333,6 +337,8 @@ public:
         uint32_t m_codewordsCorrected = 0;
         uint32_t m_codewordsUncorrectable = 0;  //!< Includes erased
         uint32_t m_codewordsErased = 0;
+        uint32_t m_codewordsFromCentre = 0;     //!< Not correctable, taken from the other decision (RxPhase::m_centreWords)
+        uint32_t m_phasesFromCentre = 0;        //!< Phases decoded from the decision on the centre of the symbols
         uint32_t m_messages = 0;
         uint32_t m_duplicates = 0;              //!< Retransmissions of messages already output (marked duplicate)
         uint32_t m_recovered = 0;               //!< Messages repaired with words of an earlier copy

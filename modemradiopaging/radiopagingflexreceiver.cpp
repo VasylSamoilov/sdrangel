@@ -243,7 +243,7 @@ void RadioPagingFlexReceiver::process(float sample, float magsq)
     if ((m_state == Sync2) || (m_state == Data))
     {
         if (m_dataDemod.process(sample, symbol)) {
-            dataSymbol(symbol.m_value, symbol.m_error, symbol.m_soft, magsq);
+            dataSymbol(symbol.m_value, symbol.m_error, symbol.m_soft, symbol.m_centreValue, magsq);
         }
         if ((m_state == Data) && (m_dataCount < m_dataSymbols))
         {
@@ -494,6 +494,7 @@ void RadioPagingFlexReceiver::startData(float offset)
     m_s2Reg = 0;
     m_s2Tail.clear();
     m_s2TailSoft.clear();
+    m_s2TailCentre.clear();
     m_s2TailStart = m_s2Symbols - 2;
     m_s2ExactEnd = -1;
 
@@ -502,6 +503,7 @@ void RadioPagingFlexReceiver::startData(float offset)
     m_bitIndex = 0;
     m_secondOfPair = false;
     m_words.assign(RadioPagingFlex::phaseCount(m_mode), std::vector<uint32_t>(RadioPagingFlex::m_wordsPerFrame, 0));
+    m_centreWords = m_words;
     m_reliability.assign(RadioPagingFlex::phaseCount(m_mode), std::vector<uint8_t>(32 * RadioPagingFlex::m_wordsPerFrame, 0));
     m_blockPower.assign(RadioPagingFlex::m_blocksPerFrame, 0.0);
     m_blockSamples.assign(RadioPagingFlex::m_blocksPerFrame, 0);
@@ -517,28 +519,29 @@ bool RadioPagingFlexReceiver::isReceivingFrame() const
     return ((m_state == Sync2) || (m_state == Data)) && (m_recentError2 < m_receivingErrorRms * m_receivingErrorRms);
 }
 
-void RadioPagingFlexReceiver::dataSymbol(int symbol, float error, float soft, float magsq)
+void RadioPagingFlexReceiver::dataSymbol(int symbol, float error, float soft, int centre, float magsq)
 {
     int levels = RadioPagingFlex::levels(m_mode);
     int sym = mirror(symbol, levels);
+    int centreSym = mirror(centre, levels);
 
     if (m_state == Sync2)
     {
-        sync2Symbol(sym, soft);
+        sync2Symbol(sym, soft, centreSym);
         return;
     }
 
     m_errorSum += (double) error * error;
     m_errorCount++;
     m_recentError2 += ((double) error * error - m_recentError2) / 32.0;
-    storeDataSymbol(sym, soft, magsq);
+    storeDataSymbol(sym, soft, centreSym, magsq);
 
     if (++m_dataCount >= m_dataSymbols) {
         endFrame();
     }
 }
 
-void RadioPagingFlexReceiver::sync2Symbol(int sym, float soft)
+void RadioPagingFlexReceiver::sync2Symbol(int sym, float soft, int centre)
 {
     int levels = RadioPagingFlex::levels(m_mode);
 
@@ -553,6 +556,7 @@ void RadioPagingFlexReceiver::sync2Symbol(int sym, float soft)
     if ((m_s2Count >= m_s2TailStart) && (m_s2Tail.size() < 4)) {
         m_s2Tail.push_back((uint8_t) sym);
         m_s2TailSoft.push_back(soft);
+        m_s2TailCentre.push_back((uint8_t) centre);
     }
     if ((m_s2ExactEnd < 0) && (m_s2Count >= m_s2Symbols - 1) && (m_s2Reg == syncCInv)) {
         m_s2ExactEnd = m_s2Count;
@@ -575,7 +579,7 @@ void RadioPagingFlexReceiver::sync2Symbol(int sym, float soft)
             int position = m_s2TailStart + (int) k;
             if (position > boundary)
             {
-                storeDataSymbol(m_s2Tail[k], m_s2TailSoft[k], (float) m_syncPower);
+                storeDataSymbol(m_s2Tail[k], m_s2TailSoft[k], m_s2TailCentre[k], (float) m_syncPower);
                 m_dataCount++;
             }
         }
@@ -584,7 +588,7 @@ void RadioPagingFlexReceiver::sync2Symbol(int sym, float soft)
 
 // soft: the normalised symbol value (outer levels +/-1). The reliability of a bit is the distance of the symbol from
 // the threshold that decides it: 0 for 2-level symbols and the first bit of 4-level symbols, +/-2/3 for the second
-void RadioPagingFlexReceiver::storeDataSymbol(int sym, float soft, float magsq)
+void RadioPagingFlexReceiver::storeDataSymbol(int sym, float soft, int centre, float magsq)
 {
     (void) magsq;
 
@@ -603,22 +607,26 @@ void RadioPagingFlexReceiver::storeDataSymbol(int sym, float soft, float magsq)
     const uint8_t outer = (uint8_t) std::min(255.0f, 100.0f * magnitude);
     const uint8_t inner = (uint8_t) std::min(255.0f, 100.0f * std::fabs(magnitude - 2.0f / 3.0f));
 
-    auto setBit = [&](int phase, unsigned value, uint8_t reliability) {
+    // The bit of each decision: the whole symbol (m_words) and its centre (m_centreWords)
+    auto setBit = [&](int phase, unsigned value, unsigned centreValue, uint8_t reliability) {
         if (value) {
             m_words[phase][word] |= (1u << bit);
+        }
+        if (centreValue) {
+            m_centreWords[phase][word] |= (1u << bit);
         }
         m_reliability[phase][m_bitIndex] = reliability;
     };
 
     if (phases == 1)
     {
-        setBit(0, sym & 1, outer);
+        setBit(0, sym & 1, centre & 1, outer);
         m_bitIndex++;
     }
     else if (levels == 2)
     {
         // 3200/2: bits alternate between phase A and phase C
-        setBit(m_secondOfPair ? 1 : 0, sym & 1, outer);
+        setBit(m_secondOfPair ? 1 : 0, sym & 1, centre & 1, outer);
         if (m_secondOfPair) {
             m_bitIndex++;
         }
@@ -628,17 +636,19 @@ void RadioPagingFlexReceiver::storeDataSymbol(int sym, float soft, float magsq)
     {
         // 3200/4: a symbol carries a bit of phase A and a bit of phase C
         unsigned dibit = grayToDibit[sym & 3];
-        setBit(0, dibit >> 1, outer);
-        setBit(1, dibit & 1, inner);
+        unsigned centreDibit = grayToDibit[centre & 3];
+        setBit(0, dibit >> 1, centreDibit >> 1, outer);
+        setBit(1, dibit & 1, centreDibit & 1, inner);
         m_bitIndex++;
     }
     else
     {
         // 6400/4: symbols alternate between (A, B) and (C, D)
         unsigned dibit = grayToDibit[sym & 3];
+        unsigned centreDibit = grayToDibit[centre & 3];
         int first = m_secondOfPair ? 2 : 0;
-        setBit(first, dibit >> 1, outer);
-        setBit(first + 1, dibit & 1, inner);
+        setBit(first, dibit >> 1, centreDibit >> 1, outer);
+        setBit(first + 1, dibit & 1, centreDibit & 1, inner);
         if (m_secondOfPair) {
             m_bitIndex++;
         }
@@ -682,6 +692,7 @@ void RadioPagingFlexReceiver::endFrame(bool partial)
         RadioPagingFlexDecoder::RxPhase phase;
         phase.m_name = (phases == 1) ? 'A' : (phases == 2) ? names2[p] : names4[p];
         phase.m_words = m_words[p];
+        phase.m_centreWords = m_centreWords[p];
         phase.m_erased = erased;
         phase.m_reliability = m_reliability[p];
         frame.m_phases.push_back(phase);

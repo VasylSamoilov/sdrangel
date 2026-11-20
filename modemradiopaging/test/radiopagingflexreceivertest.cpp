@@ -63,6 +63,8 @@ struct Signal
     float m_dc = 0.05f;
     float m_noise = 0.08f;
     unsigned m_seed = 1;
+    //! Time constant of the smoothing of the levels, in symbols at 3200 baud: a larger one is a narrower audio band
+    double m_smoothing = 0.1;
 };
 
 // Discriminator samples for a sequence of symbol blocks sent back to back
@@ -79,7 +81,7 @@ std::vector<float> makeSamples(const std::vector<RadioPagingFlex::SymbolBlock>& 
     }
 
     float smoothed = 0.0f;
-    float alpha = (float) (1.0 - std::exp(-1.0 / (0.1 * signal.m_sampleRate / 3200.0)));
+    float alpha = (float) (1.0 - std::exp(-1.0 / (signal.m_smoothing * signal.m_sampleRate / 3200.0)));
     double t = 0.0;     // Time in samples since the start of the first block
     double start = 0.0; // Start of the current symbol
     size_t n = 0;
@@ -111,7 +113,7 @@ std::vector<float> makeSamples(const std::vector<RadioPagingFlex::SymbolBlock>& 
     return samples;
 }
 
-void testMode(RadioPagingFlex::Mode mode, bool inverted, double sampleRate)
+void testMode(RadioPagingFlex::Mode mode, bool inverted, double sampleRate, double smoothing = 0.1)
 {
     RadioPagingFlexEncoder encoder;
     encoder.setMode(mode);
@@ -169,6 +171,7 @@ void testMode(RadioPagingFlex::Mode mode, bool inverted, double sampleRate)
     Signal signal;
     signal.m_sampleRate = sampleRate;
     signal.m_seed = 5 + (unsigned) mode;
+    signal.m_smoothing = smoothing;
     std::vector<float> samples = makeSamples(blocks, signal, 3000);
 
     RadioPagingFlexReceiver receiver;
@@ -201,9 +204,20 @@ void testMode(RadioPagingFlex::Mode mode, bool inverted, double sampleRate)
     std::vector<std::string> extra;
     std::set_difference(received.begin(), received.end(), sent.begin(), sent.end(), std::back_inserter(extra));
 
-    std::snprintf(what, sizeof(what), "FLEX RX %s %s at %.0f Hz: %zu messages sent, %zu missing, %zu unexpected, %d wrong polarity",
-        RadioPagingFlex::modeName(mode), inverted ? "inverted" : "normal", sampleRate, sent.size(), missing.size(), extra.size(), wrongPolarity);
+    std::snprintf(what, sizeof(what), "FLEX RX %s %s at %.0f Hz%s: %zu messages sent, %zu missing, %zu unexpected, %d wrong polarity",
+        RadioPagingFlex::modeName(mode), inverted ? "inverted" : "normal", sampleRate, smoothing > 0.1 ? " narrow band" : "",
+        sent.size(), missing.size(), extra.size(), wrongPolarity);
     check(missing.empty() && extra.empty() && (wrongPolarity == 0), what);
+
+    // A narrow band (the audio filter of a receiver): the symbols run into each other, the decisions on their centre
+    // decode what the decisions on the whole symbol lose
+    if (smoothing > 0.1)
+    {
+        const RadioPagingFlexDecoder::Status& d = receiver.decoder().status();
+        std::snprintf(what, sizeof(what), "FLEX RX %s narrow band: phases decoded from the centre of the symbols (%u), "
+            "codewords taken from the other decision (%u)", RadioPagingFlex::modeName(mode), d.m_phasesFromCentre, d.m_codewordsFromCentre);
+        check(d.m_phasesFromCentre > 0, what);
+    }
 
     for (const auto& m : missing) {
         std::printf("   missing %s\n", m.c_str());
@@ -526,6 +540,9 @@ int main()
         testMode(mode, true, 38400.0);
         testMode(mode, false, 44100.0);
     }
+
+    // 4-level at 3200 baud through a narrow audio band
+    testMode(RadioPagingFlex::Mode6400_4, false, 38400.0, 0.45);
     testNoiseOnly();
     testPolarityFilter();
     testTwoNetworks();

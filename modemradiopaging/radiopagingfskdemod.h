@@ -52,6 +52,11 @@ public:
         float m_soft;       //!< Normalised symbol value: outer levels +/-1, inner +/-1/3
         float m_error;      //!< Distance from the decided level, normalised
         float m_offset;     //!< The symbol instant lies this many samples (0 to 1) before the last input sample
+        //! The decision on the mean of the centre half of the symbol (the same levels): without the transitions,
+        //! better when the band of the signal is narrow for the symbol rate (intersymbol interference), the whole
+        //! symbol (m_value) better in noise
+        int m_centreValue;
+        float m_centreSoft;
     };
 
     RadioPagingFskDemod();
@@ -112,6 +117,11 @@ private:
     std::vector<float> m_history;                           //!< Last symbol values (DC included), ring
     size_t m_historyPos;
     size_t m_historyCount;
+    std::vector<float> m_input;                             //!< Last input samples, ring (the centre of the symbol)
+    size_t m_inputPos;
+
+    //! The mean of the input samples from back1 to back2 samples before the last one (back1 < back2)
+    float inputMean(double back1, double back2) const;
 
     int decide(float normalised) const;
     static float levelValue(int symbol, int levels);
