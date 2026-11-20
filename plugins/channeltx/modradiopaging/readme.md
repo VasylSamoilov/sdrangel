@@ -102,7 +102,7 @@ The composer of a message:
 * State (idle, ramp up, transmitting, ramp down), the message being sent, the messages waiting and sent.
 * Clear drops the messages waiting. Abort drops them and, in one-shot mode, ends the transmission being sent.
 * Message Center opens the Message Center (and adds it when there is none).
-* The table of the last messages transmitted: queued, sent or dropped, with the message number, fragments and copies of FLEX messages. A click on the icon of a voice message plays the voice sent. Double click on a message opens all the fields of its record. Right click on the header selects the columns.
+* The table of the last messages transmitted: queued, sent or dropped, with the message number, fragments and copies of FLEX messages. A click on the icon of a voice message plays the voice sent. Double click on a message opens all the fields of its record. Right click on the header selects the columns. While a row is selected or the table is scrolled up, the new rows wait (a button in the corner counts them) so that the rows do not move.
 * The log of the messages queued and of the requests refused. A page from the Message Center or the API is logged with its address, type and text.
 
 <h2>Message records</h2>
@@ -123,4 +123,4 @@ Actions: `RadioPagingModActions`:
 Example: send an alphanumeric message to POCSAG address 1234567, function D, on channel 0 of device set 1:
 
     curl -X POST "http://127.0.0.1:8091/sdrangel/deviceset/1/channel/0/actions" \
-      -d '{"channelType": "RadioPagingMod", "direction": 1, "RadioPagingModActions": {"tx": {"address": 1234567, "function": 3, "type": "alphanumeric", "text": "HELLO"}}}'
+      -d '{"channelType": "RadioPagingMod", "direction": 1, "RadioPagingModActions": {"tx": {"address": "1234567", "function": 3, "type": "alphanumeric", "text": "HELLO"}}}'

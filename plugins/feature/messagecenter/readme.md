@@ -15,7 +15,7 @@ The channels publish their messages as message records on the "messages" pipe, a
 
 <h2>Interface</h2>
 
-![Message Center plugin GUI: the messages received over the air from a Radio Paging modulator, POCSAG at 512, 1200 and 2400 baud (one inverted), FLEX 1600/2, 3200/4 and 6400/4 and GSC, with their contacts](../../../doc/img/MessageCenter_plugin.png)
+![Message Center plugin GUI: the messages received over the air from a Radio Paging modulator, POCSAG at 512, 1200 and 2400 baud (one inverted), FLEX 1600/2, 3200/4 and 6400/4 and GSC, with their contacts and the marks of the Emergency preset](../../../doc/img/MessageCenter_plugin.png)
 
 The window has a tab for each section: Log, Channels, Queue, Page, Contacts, Routes and I/O. The button at the right of the tabs opens the options.
 
@@ -26,13 +26,15 @@ The messages received and sent, newest at the bottom.
 * Live: the newest 100 messages the filters select, as they come. While a row is selected or the table is scrolled up, the rows stay where they are: the new messages wait, and a button in the corner of the table counts them; they come when it is clicked, or when the table is at the bottom again with no row selected.
 * Query: the messages of a time range the filters select, over the history (the log when the history is not kept): the last 5 minutes, hour, day, 7 days, all, or from a time to a time. The range is fixed when the query is run (Run, a filter changed), so the pages keep it: how many messages it selects, and a page of 100 of them, newest first (Newer, Older). It stays as it is until it is run again; the auto-refresh runs it again every 5 to 60 s (none by default; not while a row is selected).
 
+![Message Center log, a query: the messages received of the last day, 21 of them](../../../doc/img/MessageCenter_plugin_query.png)
+
 * Filters: contact, protocol, direction (RX, TX or both), polarity, message type (the types of the protocol chosen), channel name, address, text, one more field, hide duplicates, voice pages with a file only. All the filters set must match.
   * Address: a regular expression the whole address must match, as the filters of the other plugins of SDRangel: 12345.. for the addresses 1234500 to 1234599.
   * Text: a regular expression found anywhere in the text, not case sensitive: fire, or fire|smoke (^ and $ for its start and end).
   * One more field: a field of the message or of its protocol (the details of a message show them all: capcode, ric, function, mode, group_capcodes...), chosen in the list or typed, and a regular expression its whole value must match: capcode 4071410.. for a range of capcodes. A list (the members of a group message): one of its values.
   
   An expression that is not valid is shown in red and selects nothing. Only the messages the filters select are shown. An address selects the FLEX group messages of which it is a member too (the members received with the assignments).
-* The table has the columns of the message tables of the channels: time, direction, channel, protocol, rate, polarity, address, type, message, fragment, info, errors and state. Right click on the header selects the columns. The direction is RX (received) or TX (sent by its channel); a page posted to the Message Center that is not sent yet is QU while it is in the queue and NS (not sent) when it failed, was cancelled or is no longer queued (the queue is not kept when SDRangel is restarted). The tooltip of QU and NS gives the state and the reason, e.g. "waiting: tx1 sends pocsag now, not flex".
+* The table has the columns of the message tables of the channels: date, time, direction, channel, protocol, rate, polarity, contact, address, type, message, fragment, info, errors and state. Right click on the header selects the columns. The direction is RX (received) or TX (sent by its channel); a page posted to the Message Center that is not sent yet is QU while it is in the queue and NS (not sent) when it failed, was cancelled or is no longer queued (the queue is not kept when SDRangel is restarted). The tooltip of QU and NS gives the state and the reason, e.g. "waiting: tx1 sends pocsag now, not flex".
 * A click on the icon of a voice message plays its file. Double click on a message opens a window with all the fields of its record: the common fields, protocolData (the flags and parameters of the protocol) and the raw payload, also as bits.
 * Right click on a message: details, copy the cell, the row or the record as JSON, play the voice, select the audio output, and decode a received message again as the other type or with another codepage of its protocol.
 * Decode as, All codepages...: a window with the message decoded with every codepage of its protocol (and as numeric, POCSAG and GSC), a row each; the reading shown is in bold. Right click on a row: Create route..., the route dialog filled to decode the messages of the address so.
@@ -91,9 +93,9 @@ A page can go to a contact instead of a transmitter and an address (`contact` in
 
 Every message is checked against all the routes in their number order (#), not only the first. Each route whose filter selects the message sends it to the sinks of the route: the log, the transmit queue or the sinks of I/O. A route with Stop ends the check for the messages it selects, so the routes after it do not see them. The log is a sink as the others: a message no route sends to it is not logged. A new Message Center has one route, 1 "All messages to the log", without a filter. A sink takes only what a route sends to it.
 
-![Message Center routes: all the messages to the log; those of two contacts to a file, highlighted and said; FLEX warnings highlighted; every message received to a log of the Pager demodulator format](../../../doc/img/MessageCenter_plugin_routes.png)
+![Message Center routes: the Emergency preset, all the messages to the log and a mark for each kind of message](../../../doc/img/MessageCenter_plugin_routes.png)
 
-![A route: the messages received of two contacts](../../../doc/img/MessageCenter_plugin_route.png)
+![A route: the messages whose text has brand, fire or smoke, to the mark Fire](../../../doc/img/MessageCenter_plugin_route.png)
 
 A filter on several contacts (set through the WebAPI) is one item of the contact list. Editing a route keeps what its dialog does not show of its filter.
 
@@ -109,9 +111,9 @@ The filter of a route has the fields of the filter of the log, and the source of
 
 <h3>I/O</h3>
 
-![Message Center sinks and sources: the built in ones, a Pager CSV log, a JSON lines file, a highlight and speech](../../../doc/img/MessageCenter_plugin_io.png)
+![Message Center sinks and sources: the built in ones and the marks of the Emergency preset, with the messages each took](../../../doc/img/MessageCenter_plugin_io.png)
 
-The sources and sinks: where messages come from besides the channels (files read as they grow, UDP), and where the routes send them besides the log and the queue (files, UDP, commands, speech, highlight in the log, the Map). Each has a name and a type. The built in ones come first: the sinks log and queue, the sources channels and api. Double click to edit; a sink renamed is renamed in the routes too. The editor of a sink also chooses the routes that send to it, and can add a route that sends every message to it. The table of the sinks gives the records each took and refused and the routes that send to it (none: it takes nothing). Plus adds a sink or a source, bin removes the one selected. The errors of the sinks and sources are shown below them from the first one.
+The sources and sinks: where messages come from besides the channels (files read as they grow, UDP), and where the routes send them besides the log and the queue (files, UDP, commands, speech, marks in the log, the Map). Each has a name and a type. The built in ones come first: the sinks log and queue, the sources channels and api. Double click to edit; a sink renamed is renamed in the routes too. The editor of a sink also chooses the routes that send to it, and can add a route that sends every message to it. The table of the sinks gives the records each took and refused and the routes that send to it (none: it takes nothing). Plus adds a sink or a source, bin removes the one selected. The errors of the sinks and sources are shown below them from the first one.
 
 Sinks:
 
@@ -120,6 +122,8 @@ Sinks:
 * command: a command run for each message. The command is split into the program and its arguments first, then ${address}, ${message}, ${protocol}, ${type}, ${channel}, ${mode}, ${id}, ${frequency}, ${time} (UTC) and ${0}, ${1}... (the captures of the route) are replaced in the arguments, so a message cannot add arguments or change the program. At most 5 are run in a second; the others are refused and reported.
 * speech: the text, with the same replacements, is said (when SDRangel is built with text to speech).
 * mark: an icon (the icons of the contacts, or an image file), a colour of the text and a colour of the row, each optional (right click on its button: none). The mark is written into the record (protocolData marks) before it is logged: the history, the exports and the WebAPI have it, and it is there again after a restart.
+
+  ![A mark sink: its icon, the colours of the text and of the row (none here), the routes that send to it](../../../doc/img/MessageCenter_plugin_sink.png)
 * map: the position (latitude and longitude) in the text of the message is put on the Map, named by the address.
 
 The actions (command, speech, mark, map) are taken on messages only: not on events, nor on the end of a GSC voice message, which completes its page.
