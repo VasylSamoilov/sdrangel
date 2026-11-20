@@ -1130,6 +1130,9 @@ int RadioPagingGsc::scoreAlphanumeric(const std::vector<uint8_t>& packed, int nb
             continue;
         }
 
+        // Null is the padding at the end: one followed by a character is a sign of the wrong type
+        score -= 5 * fill;
+        fill = 0;
         char c = alphaChars[code];
         unsigned char u = (unsigned char) c;
 
@@ -1179,8 +1182,14 @@ int RadioPagingGsc::scoreNumeric(const std::vector<uint8_t>& packed, int nbBits)
         if (n == 0xa)
         {
             fill++;
+            continue;
         }
-        else if (n <= 9)
+
+        // Null is the padding at the end: one followed by a digit is a sign of the wrong type
+        score -= 5 * fill;
+        fill = 0;
+
+        if (n <= 9)
         {
             score += 3;
         }
@@ -1200,6 +1209,7 @@ int RadioPagingGsc::scoreNumeric(const std::vector<uint8_t>& packed, int nbBits)
 int RadioPagingGsc::longNumericPenalty(const std::string& numeric)
 {
     int nbChars = 0;
+    bool plain = true;
 
     // Characters, not bytes: the triple bar is UTF-8
     for (char c : numeric)
@@ -1207,6 +1217,13 @@ int RadioPagingGsc::longNumericPenalty(const std::string& numeric)
         if ((((unsigned char) c) & 0xc0) != 0x80) {
             nbChars++;
         }
+        plain = plain && (((c >= '0') && (c <= '9')) || (c == ' ') || (c == '-'));
+    }
+
+    // Only digits, spaces and hyphens: the bits of an alphanumeric message are almost never that (3/4 of the codes
+    // a digit, to the power of the length), a long number is a number
+    if (plain) {
+        return 0;
     }
 
     // Numeric pages are short; a long one is most likely an alphanumeric message. Each digit

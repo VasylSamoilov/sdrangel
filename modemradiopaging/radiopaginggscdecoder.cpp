@@ -815,7 +815,11 @@ bool RadioPagingGscDecoder::processNext()
         }
     }
 
-    if (w1 && isWord1(r.m_data) && parseAddress(m_pos, message, e1, e2))
+    // The address after a message has its comma too (as the first one): a pair of words with many bits corrected
+    // and no comma before them is what the end of a transmission (a carrier without modulation, noise) decodes to
+    const bool comma = commaErrors(&m_buf[m_pos], RadioPagingGsc::m_commaBits) <= m_maxCommaErrors;
+
+    if (w1 && isWord1(r.m_data) && parseAddress(m_pos, message, e1, e2) && (comma || (e1 + e2 <= m_maxErrorsWithoutComma)))
     {
         m_current = message;
         m_current.m_errorsCorrected = e1 + e2;

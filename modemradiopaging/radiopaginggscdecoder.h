@@ -191,6 +191,8 @@ public:
     //!< code or preamble that follows a tone only address at once, and of the first address
     //!< after the non battery saver pattern
     static const int m_maxCommaErrors = 2;
+    //!< An address after a message without its comma: taken with this many bits corrected in its two words at most
+    static const int m_maxErrorsWithoutComma = 2;
     //!< Alert time after the activation code in which tone only addresses may be interleaved:
     //!< 2 s at 600 bit/s (Motorola GSC manual, Figure 6-1)
     static const int m_alertSymbols = 1200;

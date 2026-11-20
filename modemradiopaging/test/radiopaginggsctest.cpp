@@ -684,6 +684,18 @@ void testInterpretation()
     G::Interpretation fi = G::interpret(f.m_messages[0].m_rawData, f.m_messages[0].m_rawBits);
     check(!f.m_messages.empty() && ((fi.m_type == "alphanumeric" ? fi.m_text : fi.m_altText) == "ABCDEFGH"),
         "A message that fills a block (no padding) keeps the alphanumeric reading as a candidate");
+    // Its numeric reading has Null nibbles between digits, which padding never is
+    check((fi.m_type == "alphanumeric") && (fi.m_text == "ABCDEFGH"), "A full block of letters is alphanumeric");
+
+    // A long number of digits only: the bits of an alphanumeric message are almost never digits only
+    for (const char *number : {"123456789012345678901234", "555 123-4567 555 123-4567"})
+    {
+        std::vector<G::TxMessage> digitsOnly = { tx("100123", 1, G::Numeric, number) };
+        Decoded dd = decode(G::encode(digitsOnly).m_bits, D::Normal, false, 0, 1);
+        G::Interpretation di = G::interpret(dd.m_messages[0].m_rawData, dd.m_messages[0].m_rawBits);
+        check(!dd.m_messages.empty() && (di.m_type == "numeric") && (di.m_text == number),
+            (std::string("A long number of digits only is numeric: ") + number).c_str());
+    }
 
     std::vector<G::TxMessage> letters = { tx("100123", 1, G::Numeric, "ABCDEFGHJLNPR U-0123") };
     check(allMatch(decode(G::encode(letters).m_bits, D::Normal, false, 0, 1), letters), "Numeric letters through the shift nibble");
