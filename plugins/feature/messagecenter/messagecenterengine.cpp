@@ -881,6 +881,20 @@ bool MessageCenterFileSink::accept(const MessageRecord& record, QString& error)
     if (m_format == JsonLines) {
         line = record.toJsonLine();
     }
+    else if (m_format == PagerCsv)
+    {
+        QString row = RadioPagingPagerFormat::csvRow(record);
+
+        // Not a message: nothing in that log
+        if (row.isEmpty()) {
+            return true;
+        }
+        if (file.size() == 0) {
+            line += RadioPagingPagerFormat::csvHeader().join(',').toUtf8() + "\n";
+        }
+
+        line += row.toUtf8() + "\n";
+    }
     else
     {
         if (file.size() == 0) {

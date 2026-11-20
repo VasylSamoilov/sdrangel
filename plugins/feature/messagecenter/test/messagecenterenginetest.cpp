@@ -911,6 +911,30 @@ void testCsvSources()
         check(records[1].m_protocol == "flex" && records[1].m_msgType == "numeric" && records[1].m_text == "5551234", "Pager FLEX row");
     }
 
+    // The Pager CSV sink writes that log: its header, its messages only, and it reads back
+    QString pagerOutPath = dir.filePath("pager-out.csv");
+    MessageCenterFileSink pagerSink("pagercsv", pagerOutPath, MessageCenterFileSink::PagerCsv);
+    MessageRecord p = rx("p", "pocsag", "1234568", "HELLO, \"PAGER\"", "ch1");
+    p.m_msgType = "alphanumeric";
+    p.m_speed = 1200;
+    p.m_errorsCorrected = 2;
+    p.m_protocolData["ric"] = 1234568;
+    p.m_protocolData["function"] = 3;
+    MessageRecord event = rx("e", "flex", "", "", "ch1");
+    event.m_kind = MessageRecord::KindEvent;
+    check(pagerSink.accept(p, error) && pagerSink.accept(event, error), "Pager CSV: written");
+    QFile pagerOut(pagerOutPath);
+    pagerOut.open(QIODevice::ReadOnly | QIODevice::Text);
+    QStringList lines = QString::fromUtf8(pagerOut.readAll()).split('\n', Qt::SkipEmptyParts);
+    pagerOut.close();
+    check(lines.size() == 2 && lines[0] == "Date,Time,Address,Function Bits,Alpha,Numeric,Even Parity Errors,BCH Parity Errors,Baud,Protocol,Type,Frame",
+        "Pager CSV: the header of the Pager demodulator, then the message only (not the event)");
+    MessageCenterCsvSource pagerOutSource("pagerout", pagerOutPath);
+    records.clear();
+    check(pagerOutSource.poll(records, error) && (records.size() == 1) && (records[0].m_address == "1234568")
+        && (records[0].m_text == p.m_text) && (records[0].m_speed == 1200) && (records[0].m_errorsCorrected == 2)
+        && (records[0].m_protocolData.value("function").toInt() == 3), "Pager CSV: read back as the log of the Pager demodulator");
+
     // A CSV that is not a log of messages
     QString otherPath = dir.filePath("other.csv");
     QFile other(otherPath);

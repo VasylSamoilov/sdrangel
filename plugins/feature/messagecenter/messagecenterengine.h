@@ -223,11 +223,12 @@ public:
     virtual bool more() const { return false; }
 };
 
-// Records appended to a file, one JSON object per line (lossless) or CSV (the columns of MessageRecord)
+// Records appended to a file, one JSON object per line (lossless), CSV (the columns of MessageRecord), or the CSV log of
+// the Pager demodulator (its messages only)
 class MessageCenterFileSink : public MessageCenterSink
 {
 public:
-    enum Format { JsonLines, Csv };
+    enum Format { JsonLines, Csv, PagerCsv };
 
     MessageCenterFileSink(const QString& name, const QString& path, Format format);
     QString name() const override { return m_name; }

@@ -104,7 +104,7 @@ The sources and sinks: where messages come from besides the channels (files read
 
 Sinks:
 
-* file: records written to a file, in JSON lines (one record a line, lossless) or CSV (the columns of the record, header first).
+* file: records written to a file, in JSON lines (one record a line, lossless), CSV (the columns of the record, header first), or Pager CSV: the log the Pager demodulator writes, its columns (date, time, address, function bits, alphanumeric, numeric, even parity errors, BCH parity errors, baud, protocol, type, frame) and its messages only, for the tools that read that log. Even parity errors are the uncorrectable errors of the message, BCH parity errors its corrected bits.
 * udp: a datagram for each message to an address and port. Pager format: the fields of the Pager demodulator, each ended by a NUL (date, time, address, function bits, alphanumeric, numeric, protocol, type); the address has 7 digits for POCSAG and 9 for FLEX, the function bits are POCSAG only, and the other reading of a message (numeric or alphanumeric) is in the other field. JSON format: the record as one line.
 * command: a command run for each message. The command is split into the program and its arguments first, then ${address}, ${message}, ${protocol}, ${type}, ${channel}, ${mode}, ${id}, ${frequency}, ${time} (UTC) and ${0}, ${1}... (the captures of the route) are replaced in the arguments, so a message cannot add arguments or change the program. At most 5 are run in a second; the others are refused and reported.
 * speech: the text, with the same replacements, is said (when SDRangel is built with text to speech).

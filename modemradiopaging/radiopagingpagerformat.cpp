@@ -15,9 +15,13 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.          //
 ///////////////////////////////////////////////////////////////////////////////////
 
+#include <algorithm>
+
 #include <QDateTime>
 #include <QUuid>
 #include <QVariantMap>
+
+#include "util/csv.h"
 
 #include "radiopagingpagerformat.h"
 
@@ -26,10 +30,10 @@ bool RadioPagingPagerFormat::isCompletion(const MessageRecord& record)
     return record.m_protocolData.contains("voice_end") && record.m_text.isEmpty();
 }
 
-QByteArray RadioPagingPagerFormat::datagram(const MessageRecord& record)
+QStringList RadioPagingPagerFormat::fields(const MessageRecord& record)
 {
     if ((record.m_kind != MessageRecord::KindMessage) || isCompletion(record)) {
-        return QByteArray();
+        return QStringList();
     }
 
     const QVariantMap& d = record.m_protocolData;
@@ -68,22 +72,45 @@ QByteArray RadioPagingPagerFormat::datagram(const MessageRecord& record)
         }
     }
 
+    return {dateTime.date().toString(), dateTime.time().toString(), address, functionBits, alpha, numeric,
+        record.m_protocol.toUpper(), record.m_msgType};
+}
+
+QByteArray RadioPagingPagerFormat::datagram(const MessageRecord& record)
+{
     QByteArray datagram;
-    auto field = [&datagram](const QString& text) {
+
+    for (const QString& text : fields(record))
+    {
         datagram.append(text.toLatin1());
         datagram.append('\0');
-    };
-
-    field(dateTime.date().toString());
-    field(dateTime.time().toString());
-    field(address);
-    field(functionBits);
-    field(alpha);
-    field(numeric);
-    field(record.m_protocol.toUpper());
-    field(record.m_msgType);
+    }
 
     return datagram;
+}
+
+QStringList RadioPagingPagerFormat::csvHeader()
+{
+    return csvColumns() + QStringList{"Baud", "Protocol", "Type", "Frame"};
+}
+
+QString RadioPagingPagerFormat::csvRow(const MessageRecord& record)
+{
+    QStringList f = fields(record);
+
+    if (f.isEmpty()) {
+        return QString();
+    }
+
+    QVariant frame = record.m_protocolData.value("frame");
+    QStringList row = {
+        f[0], f[1], f[2], f[3], CSV::escape(f[4]), CSV::escape(f[5]),
+        // Unknown (negative) is none, as the Pager demodulator writes it
+        QString::number(std::max(0, record.m_errorsUncorrectable)), QString::number(std::max(0, record.m_errorsCorrected)),
+        QString::number(std::max(0, record.m_speed)), f[6], CSV::escape(f[7]), frame.isValid() ? frame.toString() : QString()
+    };
+
+    return row.join(',');
 }
 
 namespace {

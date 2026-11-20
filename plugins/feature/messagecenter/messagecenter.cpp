@@ -550,7 +550,7 @@ std::unique_ptr<MessageCenterSink> MessageCenter::makeSink(const MessageCenterFi
     if (type == "file")
     {
         return std::unique_ptr<MessageCenterSink>(new MessageCenterFileSink(setting.m_name, setting.m_path,
-            (MessageCenterFileSink::Format) std::max(0, std::min(1, setting.m_format))));
+            (MessageCenterFileSink::Format) std::max(0, std::min((int) MessageCenterFileSink::PagerCsv, setting.m_format))));
     }
     if (type == "udp")
     {

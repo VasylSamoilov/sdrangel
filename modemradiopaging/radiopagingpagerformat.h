@@ -38,12 +38,21 @@ public:
     //! numeric message is in the numeric field and its alphanumeric reading in the other, and the other way round.
     //! Empty for what is not a message (an event, a diagnostic, the end of a voice message)
     static QByteArray datagram(const MessageRecord& record);
+    //! The header of the CSV log the Pager demodulator writes (csvColumns, then baud, protocol, type and frame)
+    static QStringList csvHeader();
+    //! The row of a message in that log: even parity errors are the uncorrectable errors, BCH parity errors the
+    //! corrected bits. Empty for what is not a message
+    static QString csvRow(const MessageRecord& record);
     //! The message of a datagram of a Pager demodulator; the time is that of the datagram, else now (ms since the epoch)
     static bool fromDatagram(const QByteArray& datagram, qint64 now, MessageRecord& record);
     //! The header of the CSV log of the Pager demodulator has these columns
     static QStringList csvColumns();
     //! The message of a row of that log (columns: what CSV::readHeader found)
     static bool fromCsvRow(const QHash<QString, int>& columns, const QStringList& row, MessageRecord& record);
+
+private:
+    //! Date, time, address, function bits, alphanumeric, numeric, protocol and type of a message; empty if not one
+    static QStringList fields(const MessageRecord& record);
 };
 
 #endif // MODEMRADIOPAGING_RADIOPAGINGPAGERFORMAT_H

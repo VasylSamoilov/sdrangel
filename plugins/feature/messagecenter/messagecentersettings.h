@@ -30,7 +30,7 @@
 class Serializable;
 
 // A sink the routes send records to, or a source records are read from. The type tells which:
-//   sinks:   "file" (default: path, format 0 JSON lines or 1 CSV), "udp" (address, port, format 0 Pager
+//   sinks:   "file" (default: path, format 0 JSON lines, 1 CSV or 2 Pager CSV), "udp" (address, port, format 0 Pager
 //            demodulator or 1 JSON), "command" (text: the command, the text of the message goes into its
 //            arguments), "speech" (text: what is said), "highlight" (color of the row in the log), "map" (the
 //            position in the text of the message on the Map)

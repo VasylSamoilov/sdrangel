@@ -1774,7 +1774,7 @@ QString fileFormat(const MessageCenterFileSetting& f)
     const QString type = f.typeOrDefault();
 
     if (type == "file") {
-        return f.m_format == 0 ? "JSON lines" : "CSV";
+        return f.m_format == 0 ? "JSON lines" : f.m_format == 2 ? "Pager CSV" : "CSV";
     }
     if (type == "udp") {
         return f.m_format == 0 ? "Pager" : "JSON";
@@ -2187,7 +2187,7 @@ void MessageCenterGUI::editFile(bool sink, int index)
     type->addItems(sink ? MessageCenterFileSetting::sinkTypes() : MessageCenterFileSetting::sourceTypes());
     type->setCurrentIndex(std::max(0, type->findText(setting.typeOrDefault())));
     type->setToolTip(sink
-        ? "file: written as JSON lines or CSV. udp: a datagram for each message.\n"
+        ? "file: written as JSON lines, CSV or the CSV log of the Pager demodulator. udp: a datagram for each message.\n"
           "command: run for each message. speech: said for each message.\n"
           "highlight: the row of the message in the log. map: the position in the message, on the Map"
         : "file: a JSON lines file, read as it grows. csv: a CSV log of a message center or of the Pager\n"
@@ -2260,19 +2260,20 @@ void MessageCenterGUI::editFile(bool sink, int index)
             format->setToolTip(sink ? "Pager: the fields of the Pager demodulator, each ended by a NUL. JSON: the record as one line"
                 : "The datagrams are read in either format");
         } else {
-            format->addItems({"JSON lines", "CSV"});
-            format->setToolTip("JSON lines: one record a line, nothing lost. CSV: the columns of the record");
+            format->addItems({"JSON lines", "CSV", "Pager CSV"});
+            format->setToolTip("JSON lines: one record a line, nothing lost. CSV: the columns of the record.\n"
+                "Pager CSV: the log of the Pager demodulator (its columns, its messages only)");
         }
 
-        format->setCurrentIndex(std::max(0, std::min(1, current)));
+        format->setCurrentIndex(std::max(0, std::min(format->count() - 1, current)));
         format->blockSignals(false);
         text->setPlaceholderText(t == "command" ? "program argument ${message} ..." : "${message}");
     };
 
-    format->addItems({"JSON lines", "CSV"});
-    format->setCurrentIndex(std::max(0, std::min(1, setting.m_format)));
+    format->addItems({"JSON lines", "CSV", "Pager CSV"});
+    format->setCurrentIndex(std::max(0, std::min(format->count() - 1, setting.m_format)));
     showFields();
-    format->setCurrentIndex(std::max(0, std::min(1, setting.m_format)));
+    format->setCurrentIndex(std::max(0, std::min(format->count() - 1, setting.m_format)));
 
     QPushButton *ok = new QPushButton("OK", &dialog);
     QPushButton *cancel = new QPushButton("Cancel", &dialog);
