@@ -108,8 +108,8 @@ void testFilter()
     f.m_address = "([";
     check(!f.matches(a) && !f.errors().isEmpty(), "Filter: an address expression that is not valid matches nothing");
     f = MessageCenterFilter();
-    f.m_text = "(?i).*hello.*";
-    check(f.matches(a) && !f.matches(b), "Filter: text, a regular expression on the whole text");
+    f.m_text = "hello";
+    check(f.matches(a) && !f.matches(b), "Filter: text, a regular expression found anywhere in it");
     f = MessageCenterFilter();
     f.m_polarity = (int) MessageRecord::PolarityInverted;
     f.m_speeds = {3200, 6400};
@@ -416,30 +416,42 @@ void testRegExp()
     MessageCenterFilter f;
     MessageRecord r = rx("a", "pocsag", "0001234A", "Fire at 12 Main St", "ch1");
 
-    f.m_regExp = "Fire at (\\d+)";
-    f.m_matchField = MessageCenterFilter::MatchMessage;
-    check(f.matches(r), "regular expression on the message matches");
-    check(f.captures(r) == QStringList({"Fire at 12", "12"}), "captures of the expression");
-    f.m_regExp = "fire";
-    check(!f.matches(r), "regular expression is case sensitive");
-    f.m_regExp = "(?i)fire";
-    check(f.matches(r), "(?i) makes it not");
-    f.m_matchField = MessageCenterFilter::MatchAddress;
-    f.m_regExp = "^0001234";
-    check(f.matches(r), "regular expression on the address");
-    f.m_matchField = MessageCenterFilter::MatchAny;
-    f.m_regExp = "pocsag.*ch1";
-    check(f.matches(r), "regular expression on any field");
-    f.m_matchField = MessageCenterFilter::MatchProtocol;
-    f.m_regExp = "^flex$";
-    check(!f.matches(r) && f.captures(r).isEmpty(), "regular expression on the protocol that does not match");
-    f.m_regExp = "([";
-    check(!f.matches(r) && !f.regExpError().isEmpty(), "a regular expression that is not valid matches nothing and says why");
+    r.m_protocolData.insert("ric", 1234);
+    r.m_protocolData.insert("function", 0);
 
-    f.m_regExp = "^pocsag$";
+    // The text: found anywhere, not case sensitive, its captures those of the actions
+    f.m_text = "at (\\d+)";
+    check(f.matches(r), "the expression of the text is found anywhere in it");
+    check(f.captures(r) == QStringList({"at 12", "12"}), "captures of the expression of the text");
+    f.m_text = "fire";
+    check(f.matches(r), "the text is not case sensitive");
+    f.m_text = "^main";
+    check(!f.matches(r) && f.captures(r).isEmpty(), "^ anchors it at the start");
+    f.m_text = "([";
+    check(!f.matches(r) && !f.errors().isEmpty(), "a text expression that is not valid matches nothing and says why");
+    f.m_text.clear();
+
+    // One more field: any field of the record or of its protocol data, its whole value
+    f.m_field = "ric";
+    f.m_value = "12..";
+    check(f.matches(r), "a field of the protocol data, its whole value");
+    f.m_value = "123";
+    check(!f.matches(r), "the whole value: a part does not match");
+    f.m_field = "channel";
+    f.m_value = "ch\\d";
+    check(f.matches(r), "a field of the record");
+    f.m_field = "capcode";
+    f.m_value = ".*";
+    check(!f.matches(r), "a field the record does not have: no match");
+    f.m_field = "ric";
+    f.m_value = "([";
+    check(!f.matches(r) && !f.errors().isEmpty(), "a field expression that is not valid matches nothing and says why");
+
+    f.m_value = "1234";
+    f.m_text = "fire";
     MessageCenterFilter g = MessageCenterFilter::fromJson(f.toJson());
-    check(g.m_regExp == f.m_regExp && g.m_matchField == f.m_matchField && g.matches(r), "regular expression in the JSON of the filter");
-    check(!MessageCenterFilter().isEmpty() || MessageCenterFilter().toJson().isEmpty(), "no regular expression, empty filter");
+    check((g.m_field == "ric") && (g.m_value == "1234") && (g.m_text == "fire") && g.matches(r), "text and field in the JSON of the filter");
+    check(!MessageCenterFilter().isEmpty() || MessageCenterFilter().toJson().isEmpty(), "nothing set, empty filter");
 
     MessageRecord q = rx("b", "flex", "000999", "${0} text", "c");
     check(messageCenterSubstitute("${address}: ${message} (${protocol}/${type}/${channel}) ${1} ${2}", q, QStringList({"x", "y"}))
@@ -520,8 +532,7 @@ void testRoutesWithActions()
 
     MessageCenterEngine::Route route;
     route.m_name = "fire";
-    route.m_filter.m_regExp = "Fire (\\w+)";
-    route.m_filter.m_matchField = MessageCenterFilter::MatchMessage;
+    route.m_filter.m_text = "^Fire (\\w+)";
     route.m_filter.m_hideDuplicates = true;
     route.m_sinks = QStringList({"alert"});
     engine.setRoutes({MessageCenterEngine::defaultRoutes()[0], route});
@@ -606,9 +617,9 @@ void testGroupMembers()
     f.m_address = "0002101249";
     check(f.matches(group) && !f.matches(rx("o", "flex", "0002029570", "other", "c")), "an address filter selects a group message to a member");
     MessageCenterFilter r;
-    r.m_matchField = MessageCenterFilter::MatchAddress;
-    r.m_regExp = "^0000(00)(20)20$";
-    check(f.matches(group) && r.matches(group) && (r.captures(group).value(2) == "20"), "an expression on the address tries the members, with its captures");
+    r.m_field = "group_capcodes";
+    r.m_value = "0*2020";
+    check(f.matches(group) && r.matches(group), "a field that is a list: one of its values (the members of a group)");
 }
 
 // The channels: one entry for a channel whose alias changed; removed by key or when offline

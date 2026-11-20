@@ -23,7 +23,12 @@ The window has a tab for each section: Log, Channels, Queue, Page, Contacts, Rou
 
 The messages received and sent, newest at the bottom (at most the log size, the oldest go first).
 
-* Filters: protocol, direction (RX, TX or both), polarity, message type, channel name, address and text, hide duplicates, voice pages with a file only, and a regular expression on a field (see Routes). Address and text are regular expressions the whole field must match, as the filters of the other plugins of SDRangel: 12345.. for the addresses 1234500 to 1234599, .*FIRE.* for a text that contains FIRE, (?i) at the start for not case sensitive. An expression that is not valid is shown in red and selects nothing. Only the messages the filters select are shown. An address selects the FLEX group messages of which it is a member too (the members received with the assignments).
+* Filters: contact, protocol, direction (RX, TX or both), polarity, message type (the types of the protocol chosen), channel name, address, text, one more field, hide duplicates, voice pages with a file only. All the filters set must match.
+  * Address: a regular expression the whole address must match, as the filters of the other plugins of SDRangel: 12345.. for the addresses 1234500 to 1234599.
+  * Text: a regular expression found anywhere in the text, not case sensitive: fire, or fire|smoke (^ and $ for its start and end).
+  * One more field: a field of the message or of its protocol (the details of a message show them all: capcode, ric, function, mode, group_capcodes...), chosen in the list or typed, and a regular expression its whole value must match: capcode 4071410.. for a range of capcodes. A list (the members of a group message): one of its values.
+  
+  An expression that is not valid is shown in red and selects nothing. Only the messages the filters select are shown. An address selects the FLEX group messages of which it is a member too (the members received with the assignments).
 * The table has the columns of the message tables of the channels: time, direction, channel, protocol, rate, polarity, address, type, message, fragment, info, errors and state. Right click on the header selects the columns. The direction is RX (received) or TX (sent by its channel); a page posted to the Message Center that is not sent yet is QU while it is in the queue and NS (not sent) when it failed, was cancelled or is no longer queued (the queue is not kept when SDRangel is restarted). The tooltip of QU and NS gives the state and the reason, e.g. "waiting: tx1 sends pocsag now, not flex".
 * A click on the icon of a voice message plays its file. Double click on a message opens a window with all the fields of its record: the common fields, protocolData (the flags and parameters of the protocol) and the raw payload, also as bits.
 * Right click on a message: details, copy the cell, the row or the record as JSON, play the voice, select the audio output, and decode a received message again as the other type or with another codepage of its protocol.
@@ -96,7 +101,7 @@ The tool tip of the table of the routes recalls how they work.
 * Decode as codepage and type: the messages the route selects are decoded again with the codepage and as the type before they go to its sinks; the routes after it get them as they were received. A message that cannot be decoded so (a codepage of another protocol, a transmitted message) is sent as it is.
 * Export (save icon) saves the routes, the sinks and the sources to a JSON file; Import (open icon) replaces them with those of a file, after a check and a confirmation.
 
-The filter of a route has the fields of the filter of the log, and the source of the message: the channels, the API (ingest) or a source of I/O. Its regular expression on a field of the message (address, message, protocol, type, channel, or any of them separated by spaces) matches anywhere in the field (^ and $ to anchor), as the notifications of the other plugins, and is case sensitive ((?i) at the start for not). Its captures are ${1}, ${2}... in the texts of the sinks the route sends to.
+The filter of a route has the fields of the filter of the log, and the source of the message: the channels, the API (ingest) or a source of I/O. The captures of its text expression are ${1}, ${2}... in the texts of the sinks the route sends to: text Fire at (.*) gives the place as ${1}. Decode as type is for POCSAG and GSC: a FLEX message is sent with its type, it keeps it.
 
 <h3>I/O</h3>
 

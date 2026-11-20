@@ -60,6 +60,9 @@ signals:
     void changed();
 
 private:
+    //! The message types of a protocol (lower case, empty for any) in the type list, the current one kept if it has it
+    void fillTypes(const QString& protocol);
+
     QComboBox *m_contact;
     QComboBox *m_protocol;
     QComboBox *m_direction;
@@ -70,8 +73,8 @@ private:
     QLineEdit *m_text;
     QCheckBox *m_hideDuplicates;
     QCheckBox *m_voiceOnly;
-    QComboBox *m_matchField;
-    QLineEdit *m_regExp;
+    QComboBox *m_field;                 //!< Any field of a record (editable): the condition of m_value
+    QLineEdit *m_value;
     QComboBox *m_source;
     bool m_sourcesShown = false;
     //! The filter set: what the widgets do not show of it (more than one contact, protocol, channel or source, the

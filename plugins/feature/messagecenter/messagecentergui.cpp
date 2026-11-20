@@ -98,7 +98,7 @@ QString filterSummary(const MessageCenterFilter& f)
         parts << "contact " + f.m_contacts.join(", ");
     }
     if (!f.m_protocols.isEmpty()) {
-        parts << f.m_protocols.join("/");
+        parts << f.m_protocols.join("/").toUpper();
     }
     if (f.m_direction >= 0) {
         parts << (f.m_direction == (int) MessageRecord::DirectionRX ? "RX" : "TX");
@@ -135,7 +135,7 @@ QString filterSummary(const MessageCenterFilter& f)
         parts << f.m_msgType;
     }
     if (!f.m_text.isEmpty()) {
-        parts << "text /" + f.m_text + "/";
+        parts << "text has /" + f.m_text + "/";
     }
     if (!f.m_sources.isEmpty()) {
         parts << "from " + f.m_sources.join(",");
@@ -146,8 +146,8 @@ QString filterSummary(const MessageCenterFilter& f)
     if (f.m_voiceOnly) {
         parts << "voice files";
     }
-    if (!f.m_regExp.isEmpty()) {
-        parts << QString("%1 ~ /%2/").arg(MessageCenterFilter::matchFieldName(f.m_matchField).toLower()).arg(f.m_regExp);
+    if (!f.m_field.isEmpty()) {
+        parts << QString("%1 /%2/").arg(f.m_field, f.m_value);
     }
 
     return parts.isEmpty() ? QString("everything") : parts.join(", ");
@@ -179,14 +179,18 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     m_contact->addItem("Any contact");
     m_contact->setToolTip("The messages of a contact of the address book (the Contacts tab): of any of its addresses");
     m_contact->setVisible(false);
+    // Protocols and types shown by name, kept as the records have them; the types are those of the protocol chosen
     m_protocol = new QComboBox(this);
-    m_protocol->addItems({"Any protocol", "pocsag", "flex", "gsc"});
+    m_protocol->addItem("Any protocol", QString());
+    m_protocol->addItem("POCSAG", QString("pocsag"));
+    m_protocol->addItem("FLEX", QString("flex"));
+    m_protocol->addItem("GSC", QString("gsc"));
     m_direction = new QComboBox(this);
     m_direction->addItems({"RX and TX", "RX", "TX"});
     m_polarity = new QComboBox(this);
     m_polarity->addItems({"Any polarity", "Normal", "Inverted"});
     m_type = new QComboBox(this);
-    m_type->addItems({"Any type", "alphanumeric", "numeric", "tone", "voice", "short_message", "binary", "secure"});
+    fillTypes(QString());
     m_channel = new QLineEdit(this);
     m_channel->setPlaceholderText("channel name");
     m_address = new QLineEdit(this);
@@ -198,14 +202,16 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     m_source->setVisible(false);
     m_hideDuplicates = new QCheckBox("Hide duplicates", this);
     m_voiceOnly = new QCheckBox("Voice files", this);
-    m_matchField = new QComboBox(this);
-
-    for (int field = MessageCenterFilter::MatchAddress; field <= MessageCenterFilter::MatchAny; field++) {
-        m_matchField->addItem(MessageCenterFilter::matchFieldName(field));
-    }
-
-    m_regExp = new QLineEdit(this);
-    m_regExp->setPlaceholderText("regular expression");
+    // One more field: those the other filters do not have, the record and its protocol data; any other can be typed
+    m_field = new QComboBox(this);
+    m_field->setEditable(true);
+    m_field->setInsertPolicy(QComboBox::NoInsert);
+    m_field->addItem(QString());
+    m_field->addItems({"capcode", "ric", "function", "group_capcodes", "mode", "speed", "frequency", "kind", "contact",
+        "priority", "cycle", "frame", "phase", "errorsUncorrectable", "errorsCorrected", "duplicate"});
+    m_field->lineEdit()->setPlaceholderText("field");
+    m_value = new QLineEdit(this);
+    m_value->setPlaceholderText("regular expression");
 
     m_protocol->setToolTip("Protocol of the messages: any, POCSAG, FLEX or GSC");
     m_direction->setToolTip("Received (RX), transmitted (TX) or both");
@@ -214,15 +220,15 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     m_channel->setToolTip("Name of the channel (its title), or the transmitter of a page (exact). Empty: any channel");
     m_address->setToolTip("Regular expression the whole address must match, as the filters of the other channels:\n"
         "e.g. 1234567 for that RIC, 12345.. for 1234500 to 1234599, 001001/. for a GSC cap code. Empty: any address");
-    m_text->setToolTip("Regular expression the whole text must match: e.g. .*FIRE.* for a text that contains FIRE,\n"
-        "(?i).*fire.* not case sensitive. Empty: any text");
+    m_text->setToolTip("Regular expression found anywhere in the text, not case sensitive: e.g. fire, or fire|smoke.\n"
+        "^ and $ for the start and the end. Its captures are ${1}, ${2}... in the texts of the actions. Empty: any text");
     m_source->setToolTip("Where the message comes from: the channels, the API (ingest), or a source of I/O");
     m_hideDuplicates->setToolTip("Hide the messages marked as duplicates (copies received again)");
     m_voiceOnly->setToolTip("Only the GSC voice pages that have a sound file");
-    m_matchField->setToolTip("Field the regular expression is matched on: address, message, protocol, type, channel,\n"
-        "or any of them (separated by spaces)");
-    m_regExp->setToolTip("Regular expression the field must match, anywhere in it (^ and $ to anchor). Case sensitive,\n"
-        "(?i) at the start for not. Its captures are ${1}, ${2}... in the texts of the actions. Empty: no expression");
+    m_field->setToolTip("One more field to filter on: a field of the message or of its protocol (the details of a message\n"
+        "in the log show them all), e.g. capcode, ric, function, mode. Empty: none");
+    m_value->setToolTip("Regular expression the whole value of the field must match, e.g. 4071410.. for a range of capcodes.\n"
+        "Numbers as they are in the details of the message. A list (the members of a group message): one of its values");
 
     // The text fields with their names (a placeholder alone is hard to see), at a width that fits an expression
     auto labelled = [this](const QString& name, QWidget *field, QLineEdit *edit, int chars) {
@@ -258,12 +264,17 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     layout->addWidget(labelled("Channel", nullptr, m_channel, 14));
     layout->addWidget(labelled("Address", nullptr, m_address, 14));
     layout->addWidget(labelled("Text", nullptr, m_text, 16));
-    layout->addWidget(labelled(QString(), m_matchField, m_regExp, 16));
+    m_field->setFixedWidth(m_field->fontMetrics().averageCharWidth() * 16);
+    layout->addWidget(labelled(QString(), m_field, m_value, 14));
 
     for (QComboBox *combo : {m_contact, m_protocol, m_direction, m_polarity, m_type, m_source}) {
         connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MessageCenterFilterWidget::changed);
     }
-    connect(m_matchField, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MessageCenterFilterWidget::changed);
+    connect(m_field, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MessageCenterFilterWidget::changed);
+    connect(m_field->lineEdit(), &QLineEdit::editingFinished, this, &MessageCenterFilterWidget::changed);
+    connect(m_protocol, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
+        fillTypes(m_protocol->currentData().toString());
+    });
 
     // A regular expression that is not valid is shown in red with its error, and matches nothing
     auto validate = [](QLineEdit *edit, bool anchored, const QString& help) {
@@ -273,18 +284,55 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
         edit->setToolTip(valid ? help : expression.errorString());
     };
 
-    for (QLineEdit *edit : {m_address, m_text, m_regExp})
+    for (QLineEdit *edit : {m_address, m_text, m_value})
     {
         const QString help = edit->toolTip();
-        const bool anchored = (edit != m_regExp);
+        const bool anchored = (edit != m_text);
         connect(edit, &QLineEdit::textChanged, this, [validate, edit, anchored, help]() { validate(edit, anchored, help); });
     }
 
-    for (QLineEdit *edit : {m_channel, m_address, m_text, m_regExp}) {
+    for (QLineEdit *edit : {m_channel, m_address, m_text, m_value}) {
         connect(edit, &QLineEdit::editingFinished, this, &MessageCenterFilterWidget::changed);
     }
     for (QCheckBox *check : {m_hideDuplicates, m_voiceOnly}) {
         connect(check, &QCheckBox::toggled, this, &MessageCenterFilterWidget::changed);
+    }
+}
+
+void MessageCenterFilterWidget::fillTypes(const QString& protocol)
+{
+    // The types the decoders and encoders give each protocol, as they name them
+    static const QList<QPair<QString, QString>> names = {
+        {"alphanumeric", "Alphanumeric"}, {"numeric", "Numeric"}, {"special_numeric", "Special numeric"},
+        {"numbered_numeric", "Numbered numeric"}, {"numbered_special_numeric", "Numbered special numeric"},
+        {"binary", "Binary"}, {"secure", "Secure"}, {"short_message", "Short message"},
+        {"short_instruction", "Short instruction"}, {"tone", "Tone"}, {"voice", "Voice"}
+    };
+    static const QMap<QString, QStringList> byProtocol = {
+        {"pocsag", {"alphanumeric", "numeric", "tone"}},
+        {"flex", {"alphanumeric", "numeric", "special_numeric", "numbered_numeric", "numbered_special_numeric", "binary",
+            "secure", "short_message", "short_instruction", "tone"}},
+        {"gsc", {"alphanumeric", "numeric", "tone", "voice"}}
+    };
+    const QString current = m_type->currentData().toString();
+    const QStringList types = byProtocol.value(protocol);
+
+    m_type->blockSignals(true);
+    m_type->clear();
+    m_type->addItem("Any type", QString());
+
+    for (const auto& name : names)
+    {
+        if (types.isEmpty() || types.contains(name.first)) {
+            m_type->addItem(name.second, name.first);
+        }
+    }
+
+    m_type->setCurrentIndex(std::max(0, m_type->findData(current)));
+    m_type->blockSignals(false);
+
+    if (m_type->currentData().toString() != current) {
+        emit changed();
     }
 }
 
@@ -311,7 +359,7 @@ MessageCenterFilter MessageCenterFilterWidget::filter() const
         f.m_contacts = QStringList(m_contact->currentText());
     }
 
-    f.m_protocols = list(m_base.m_protocols, m_protocol->currentIndex() > 0 ? m_protocol->currentText() : QString());
+    f.m_protocols = list(m_base.m_protocols, m_protocol->currentData().toString());
     f.m_direction = -1;
     f.m_polarity = -1;
     f.m_msgType.clear();
@@ -325,16 +373,14 @@ MessageCenterFilter MessageCenterFilterWidget::filter() const
     if (m_polarity->currentIndex() > 0) {
         f.m_polarity = (m_polarity->currentIndex() == 1) ? (int) MessageRecord::PolarityNormal : (int) MessageRecord::PolarityInverted;
     }
-    if (m_type->currentIndex() > 0) {
-        f.m_msgType = m_type->currentText();
-    }
+    f.m_msgType = m_type->currentData().toString();
 
     f.m_address = m_address->text().trimmed();
     f.m_text = m_text->text();
     f.m_hideDuplicates = m_hideDuplicates->isChecked();
     f.m_voiceOnly = m_voiceOnly->isChecked();
-    f.m_regExp = m_regExp->text();
-    f.m_matchField = m_matchField->currentIndex();
+    f.m_field = m_field->currentText().trimmed();
+    f.m_value = f.m_field.isEmpty() ? QString() : m_value->text();
     return f;
 }
 
@@ -364,17 +410,23 @@ void MessageCenterFilterWidget::setFilter(const MessageCenterFilter& f)
     }
 
     m_contact->setVisible(m_contact->count() > 1);
-    m_protocol->setCurrentIndex(f.m_protocols.isEmpty() ? 0 : std::max(0, m_protocol->findText(f.m_protocols.first())));
+    m_protocol->setCurrentIndex(f.m_protocols.isEmpty() ? 0 : std::max(0, m_protocol->findData(f.m_protocols.first().toLower())));
+    fillTypes(m_protocol->currentData().toString());
     m_direction->setCurrentIndex(f.m_direction < 0 ? 0 : (f.m_direction == (int) MessageRecord::DirectionRX ? 1 : 2));
     m_polarity->setCurrentIndex(f.m_polarity < 0 ? 0 : (f.m_polarity == (int) MessageRecord::PolarityNormal ? 1 : 2));
-    m_type->setCurrentIndex(f.m_msgType.isEmpty() ? 0 : std::max(0, m_type->findText(f.m_msgType)));
+    // A type the protocol list does not have (set through the WebAPI) is kept in the list
+    if (!f.m_msgType.isEmpty() && (m_type->findData(f.m_msgType) < 0)) {
+        m_type->addItem(f.m_msgType, f.m_msgType);
+    }
+
+    m_type->setCurrentIndex(f.m_msgType.isEmpty() ? 0 : std::max(0, m_type->findData(f.m_msgType)));
     m_channel->setText(f.m_channels.isEmpty() ? QString() : f.m_channels.first());
     m_address->setText(f.m_address);
     m_text->setText(f.m_text);
     m_hideDuplicates->setChecked(f.m_hideDuplicates);
     m_voiceOnly->setChecked(f.m_voiceOnly);
-    m_matchField->setCurrentIndex(f.m_matchField);
-    m_regExp->setText(f.m_regExp);
+    m_field->setCurrentText(f.m_field);
+    m_value->setText(f.m_value);
 
     if (!f.m_sources.isEmpty() && (m_source->findText(f.m_sources.first()) < 0)) {
         m_source->addItem(f.m_sources.first());
@@ -2081,11 +2133,26 @@ void MessageCenterGUI::editRoute(int index, const MessageCenterEngine::Route *pr
 
     decodeCharset->setCurrentIndex(std::max(0, (int) keys.indexOf(route.m_decodeCharset)));
     QComboBox *decodeType = new QComboBox(&dialog);
-    decodeType->setToolTip("The type the messages are decoded as (POCSAG and GSC; FLEX alphanumeric only)");
     decodeType->addItem("As received", QString());
     decodeType->addItem("Alphanumeric", QString("alphanumeric"));
     decodeType->addItem("Numeric", QString("numeric"));
     decodeType->setCurrentIndex(std::max(0, decodeType->findData(route.m_decodeType)));
+
+    // FLEX sends the type of a message with it: its messages are not read as another type
+    auto showDecodeType = [filter, decodeType]() {
+        const bool flex = filter->filter().m_protocols == QStringList("flex");
+
+        if (flex) {
+            decodeType->setCurrentIndex(0);
+        }
+
+        decodeType->setEnabled(!flex);
+        decodeType->setToolTip(flex ? QString("FLEX sends the type of a message with it: its messages keep their type")
+            : QString("The type POCSAG and GSC messages are decoded as. FLEX messages keep their type (it is sent with them)"));
+    };
+
+    showDecodeType();
+    connect(filter, &MessageCenterFilterWidget::changed, &dialog, showDecodeType);
     decodeForm->addRow("Decode as codepage", decodeCharset);
     decodeForm->addRow("Decode as type", decodeType);
 

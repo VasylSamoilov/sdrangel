@@ -134,20 +134,15 @@ struct MessageCenterFilter
     int m_polarity = -1;                //!< MessageRecord::Polarity, -1 for all
     QList<int> m_speeds;                //!< Bits per second, empty for all
     QString m_address;                  //!< Regular expression the whole address must match (as the filters of SDRangel), empty for all
-    QString m_text;                     //!< Regular expression the whole text must match, . matches line ends too, empty for all
+    //! Regular expression found anywhere in the text, not case sensitive, . matches line ends too; its captures are
+    //! those of the actions. Empty for all
+    QString m_text;
+    //! One more condition, on any field of the record or of its protocol data (capcode, ric, function, mode...): its
+    //! whole value matches the regular expression m_value (a list: one of its values). Empty field: none
+    QString m_field;
+    QString m_value;
     QStringList m_sources;              //!< Where the record comes from: channels, api or the name of a source; empty for all
     QString m_msgType;                  //!< Message type (alphanumeric, numeric, tone, voice, short_message, binary, secure), empty for all
-    //! A regular expression a field of the message must match (anywhere in it, case sensitive, (?i) for the other)
-    enum MatchField {
-        MatchAddress,
-        MatchMessage,
-        MatchProtocol,                  //!< pocsag, flex, gsc
-        MatchType,
-        MatchChannel,                   //!< The channel alias
-        MatchAny                        //!< Address, message, protocol, type and channel, separated by spaces
-    };
-    int m_matchField = MatchAddress;
-    QString m_regExp;                   //!< Empty for none; one that is not valid matches nothing
     qint64 m_frequencyMin = -1;         //!< Hz, -1: no lower limit
     qint64 m_frequencyMax = -1;
     qint64 m_timeFrom = -1;             //!< Milliseconds since the epoch, -1: no limit
@@ -159,18 +154,12 @@ struct MessageCenterFilter
     bool matches(const MessageRecord& record) const;
     //!< The record from a source matches: source is channels, api or the name of a source
     bool matches(const MessageRecord& record, const QString& source) const;
-    //!< What the regular expression captured in the message (0 the whole match); empty if there is none or it did not match
+    //!< What the expression of the text captured (0 the whole match); empty if there is none or it did not match
     QStringList captures(const MessageRecord& record) const;
     bool isEmpty() const;
     QJsonObject toJson() const;
     static MessageCenterFilter fromJson(const QJsonObject& json);
-    static QString fieldText(const MessageRecord& record, int field);
-    //!< The texts of a field the expression is tried on: the address and the members of a group message, else the field
-    static QStringList fieldTexts(const MessageRecord& record, int field);
-    static QString matchFieldName(int field);
-    //!< The error of the regular expression, empty if it is valid or there is none
-    QString regExpError() const;
-    //!< The errors of the regular expressions of the address, the text and the match, empty if they are all valid
+    //!< The errors of the regular expressions of the address, the text and the field, empty if they are all valid
     QString errors() const;
 
 private:
@@ -182,10 +171,9 @@ private:
         bool m_done = false;
         QRegularExpression m_expression;
     };
-    mutable Compiled m_compiled;            //!< m_regExp, anywhere in the field
     mutable Compiled m_compiledAddress;     //!< m_address, the whole address
-    mutable Compiled m_compiledText;        //!< m_text, the whole text
-    const QRegularExpression& compiled() const;
+    mutable Compiled m_compiledText;        //!< m_text, anywhere in the text
+    mutable Compiled m_compiledValue;       //!< m_value, the whole value of the field
     static const QRegularExpression& compile(Compiled& compiled, const QString& pattern, bool anchored,
         QRegularExpression::PatternOptions options = QRegularExpression::NoPatternOption);
 };

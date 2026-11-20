@@ -105,19 +105,34 @@ bool MessageCenterFilter::matches(const MessageRecord& record) const
     }
     if (!m_text.isEmpty())
     {
-        const QRegularExpression& expression = compile(m_compiledText, m_text, true, QRegularExpression::DotMatchesEverythingOption);
+        const QRegularExpression& expression = compile(m_compiledText, m_text, false,
+            QRegularExpression::DotMatchesEverythingOption | QRegularExpression::CaseInsensitiveOption);
 
         if (!expression.isValid() || !expression.match(record.m_text).hasMatch()) {
             return false;
         }
     }
-    if (!m_regExp.isEmpty())
+    // Any field of the record or of its protocol data, its whole value; a list (the members of a group message): one
+    // of its values
+    if (!m_field.isEmpty())
     {
-        const QRegularExpression& expression = compiled();
-        const QStringList texts = fieldTexts(record, m_matchField);
+        const QRegularExpression& expression = compile(m_compiledValue, m_value, true);
+        const QJsonValue value = MessageCenterContact::recordFields(record).value(m_field);
+        QStringList values;
 
-        if (!expression.isValid() || std::none_of(texts.begin(), texts.end(),
-            [&expression](const QString& t) { return expression.match(t).hasMatch(); })) {
+        if (value.isArray())
+        {
+            for (const QJsonValue& v : value.toArray()) {
+                values.append(v.toVariant().toString());
+            }
+        }
+        else if (!value.isUndefined() && !value.isNull())
+        {
+            values.append(value.toVariant().toString());
+        }
+
+        if (!expression.isValid() || std::none_of(values.begin(), values.end(),
+            [&expression](const QString& v) { return expression.match(v).hasMatch(); })) {
             return false;
         }
     }
@@ -167,33 +182,20 @@ const QRegularExpression& MessageCenterFilter::compile(Compiled& compiled, const
     return compiled.m_expression;
 }
 
-const QRegularExpression& MessageCenterFilter::compiled() const
-{
-    return compile(m_compiled, m_regExp, false);
-}
-
-QString MessageCenterFilter::regExpError() const
-{
-    if (m_regExp.isEmpty()) {
-        return QString();
-    }
-
-    const QRegularExpression& expression = compiled();
-    return expression.isValid() ? QString() : expression.errorString();
-}
-
 QString MessageCenterFilter::errors() const
 {
     QStringList errors;
+    const QRegularExpression::PatternOptions textOptions = QRegularExpression::DotMatchesEverythingOption
+        | QRegularExpression::CaseInsensitiveOption;
 
     if (!m_address.isEmpty() && !compile(m_compiledAddress, m_address, true).isValid()) {
         errors.append(QString("address: %1").arg(compile(m_compiledAddress, m_address, true).errorString()));
     }
-    if (!m_text.isEmpty() && !compile(m_compiledText, m_text, true, QRegularExpression::DotMatchesEverythingOption).isValid()) {
-        errors.append(QString("text: %1").arg(compile(m_compiledText, m_text, true, QRegularExpression::DotMatchesEverythingOption).errorString()));
+    if (!m_text.isEmpty() && !compile(m_compiledText, m_text, false, textOptions).isValid()) {
+        errors.append(QString("text: %1").arg(compile(m_compiledText, m_text, false, textOptions).errorString()));
     }
-    if (!regExpError().isEmpty()) {
-        errors.append(QString("match: %1").arg(regExpError()));
+    if (!m_field.isEmpty() && !compile(m_compiledValue, m_value, true).isValid()) {
+        errors.append(QString("%1: %2").arg(m_field, compile(m_compiledValue, m_value, true).errorString()));
     }
 
     return errors.join("; ");
@@ -201,65 +203,14 @@ QString MessageCenterFilter::errors() const
 
 QStringList MessageCenterFilter::captures(const MessageRecord& record) const
 {
-    if (m_regExp.isEmpty()) {
+    if (m_text.isEmpty()) {
         return QStringList();
     }
 
-    const QRegularExpression& expression = compiled();
-
-    if (!expression.isValid()) {
-        return QStringList();
-    }
-
-    // The first text of the field that matches: the address, else a member of the group
-    for (const QString& text : fieldTexts(record, m_matchField))
-    {
-        QRegularExpressionMatch match = expression.match(text);
-
-        if (match.hasMatch()) {
-            return match.capturedTexts();
-        }
-    }
-
-    return QStringList();
-}
-
-QStringList MessageCenterFilter::fieldTexts(const MessageRecord& record, int field)
-{
-    if (field == MatchAddress)
-    {
-        const QStringList addresses = record.addresses();
-        return addresses.isEmpty() ? QStringList(QString()) : addresses;
-    }
-
-    return QStringList(fieldText(record, field));
-}
-
-QString MessageCenterFilter::fieldText(const MessageRecord& record, int field)
-{
-    switch (field)
-    {
-    case MatchAddress:
-        return record.m_address;
-    case MatchMessage:
-        return record.m_text;
-    case MatchProtocol:
-        return record.m_protocol;
-    case MatchType:
-        return record.m_msgType;
-    case MatchChannel:
-        return record.m_channel;
-    case MatchAny:
-        return (record.addresses() + QStringList({record.m_text, record.m_protocol, record.m_msgType, record.m_channel})).join(' ');
-    default:
-        return QString();
-    }
-}
-
-QString MessageCenterFilter::matchFieldName(int field)
-{
-    static const char *names[] = {"Address", "Message", "Protocol", "Type", "Channel", "Any"};
-    return ((field >= 0) && (field <= MatchAny)) ? QString(names[field]) : QString();
+    const QRegularExpression& expression = compile(m_compiledText, m_text, false,
+        QRegularExpression::DotMatchesEverythingOption | QRegularExpression::CaseInsensitiveOption);
+    QRegularExpressionMatch match = expression.isValid() ? expression.match(record.m_text) : QRegularExpressionMatch();
+    return match.hasMatch() ? match.capturedTexts() : QStringList();
 }
 
 QString messageCenterSubstitute(const QString& text, const MessageRecord& record, const QStringList& captures)
@@ -358,10 +309,10 @@ QJsonObject MessageCenterFilter::toJson() const
     if (!m_msgType.isEmpty()) {
         json["msgType"] = m_msgType;
     }
-    if (!m_regExp.isEmpty())
+    if (!m_field.isEmpty())
     {
-        json["regExp"] = m_regExp;
-        json["matchField"] = m_matchField;
+        json["field"] = m_field;
+        json["value"] = m_value;
     }
     if (m_frequencyMin >= 0) {
         json["frequencyMin"] = (double) m_frequencyMin;
@@ -410,8 +361,8 @@ MessageCenterFilter MessageCenterFilter::fromJson(const QJsonObject& json)
     f.m_address = json["address"].toString();
     f.m_text = json["text"].toString();
     f.m_msgType = json["msgType"].toString();
-    f.m_regExp = json["regExp"].toString();
-    f.m_matchField = std::max((int) MatchAddress, std::min((int) MatchAny, json["matchField"].toInt(MatchAddress)));
+    f.m_field = json["field"].toString().trimmed();
+    f.m_value = json["value"].toVariant().toString();
     f.m_frequencyMin = json.contains("frequencyMin") ? (qint64) json["frequencyMin"].toDouble(-1) : -1;
     f.m_frequencyMax = json.contains("frequencyMax") ? (qint64) json["frequencyMax"].toDouble(-1) : -1;
     f.m_timeFrom = json.contains("timeFrom") ? (qint64) json["timeFrom"].toDouble(-1) : -1;
