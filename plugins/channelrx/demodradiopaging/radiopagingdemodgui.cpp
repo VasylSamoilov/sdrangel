@@ -1085,6 +1085,10 @@ RadioPagingDemodGUI::RadioPagingDemodGUI(PluginAPI* pluginAPI, DeviceUISet *devi
     RollupContents *rollupContents = getRollupContents();
     ui->setupUi(rollupContents);
     setSizePolicy(rollupContents->sizePolicy());
+    // A new window shows a few messages: the table is the part that grows with the window (the waveforms do not).
+    // Set before the rollups are arranged, so that the window is sized for it
+    ui->messages->setMinimumHeight(ui->messages->horizontalHeader()->sizeHint().height()
+        + 6 * ui->messages->verticalHeader()->defaultSectionSize() + 2 * ui->messages->frameWidth());
     // Output and waveforms are rolled up until the user opens them (a state saved before wins)
     ui->outputContainer->hide();
     ui->scopeContainer->hide();
@@ -2042,6 +2046,12 @@ void RadioPagingDemodGUI::updateStatus()
     // Green while the voice is played
     bool playing = status.m_enabled[2] && status.m_gscAudio;
     ui->gscAudio->setStyleSheet(playing ? "QToolButton { background-color : green; }" : "");
+
+    // The status lines come and go with what is received: a window too short for them grows (its minimum size follows
+    // its contents), else its last sections would be under its bottom bar
+    if (!isMaximized() && (getRollupContents()->minimumHeight() + getAdditionalHeight() > height())) {
+        sizeToContents();
+    }
 }
 
 // FLEX: the group slots of each polarity received, while a slot is in use or has an outcome to show. The colour of a
