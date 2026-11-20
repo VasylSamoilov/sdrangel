@@ -84,6 +84,16 @@ if(NOT SERVER_MODE)
     )
     target_include_directories(messagecenterenginetest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/modemradiopaging)
     target_link_libraries(messagecenterenginetest Qt::Core Qt::Network sdrbase modemradiopaging)
+
+    # Self test of the archive (files by day and size, queries), not built by default:
+    #   cmake --build <build dir> --target messagecenterarchivetest
+    add_executable(messagecenterarchivetest EXCLUDE_FROM_ALL
+        test/messagecenterarchivetest.cpp
+        messagecenterarchive.cpp
+        messagecenterengine.cpp
+    )
+    target_include_directories(messagecenterarchivetest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/modemradiopaging)
+    target_link_libraries(messagecenterarchivetest Qt::Core Qt::Network sdrbase modemradiopaging)
 endif()
 
 # Self test of the table of paging messages (offscreen), not built by default:
