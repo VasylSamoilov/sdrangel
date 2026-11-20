@@ -92,6 +92,16 @@ if(NOT SERVER_MODE)
     )
     target_include_directories(radiopagingdemodparitytest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(radiopagingdemodparitytest Qt::Core sdrbase modemradiopaging)
+
+    # Decoding of a recording of FM discriminator audio (as multimon-ng reads) with the sink, not built by default:
+    #   cmake --build <build dir> --target radiopagingaudiodecode
+    add_executable(radiopagingaudiodecode EXCLUDE_FROM_ALL
+        test/radiopagingaudiodecode.cpp
+        radiopagingdemodsink.cpp
+        radiopagingdemodsettings.cpp
+    )
+    target_include_directories(radiopagingaudiodecode PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(radiopagingaudiodecode Qt::Core sdrbase modemradiopaging)
 endif()
 
 # Install debug symbols
