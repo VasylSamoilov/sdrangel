@@ -15,8 +15,13 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.          //
 ///////////////////////////////////////////////////////////////////////////////////
 
+#include <QApplication>
 #include <QDateTime>
+#include <QDateTimeEdit>
+#include <QPointer>
 #include <QSet>
+#include <QThreadPool>
+#include <QTimer>
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -619,6 +624,8 @@ void MessageCenterGUI::buildLog(QWidget *container)
         PagingMessageTable::ColProtocol, PagingMessageTable::ColRate, PagingMessageTable::ColPolarity, PagingMessageTable::ColContact,
         PagingMessageTable::ColAddress, PagingMessageTable::ColType, PagingMessageTable::ColMessage, PagingMessageTable::ColInfo});
     m_logTable->setToolTip("The messages the routes put in the log. Click the icon of a voice message to play it.\nDouble-click a message for all its fields. Right click the header to choose the columns");
+    buildQueryBar(container);
+    layout->addWidget(m_queryBar);
     layout->addWidget(m_logFilter);
     layout->addWidget(m_logTable);
 
@@ -655,7 +662,17 @@ void MessageCenterGUI::buildLog(QWidget *container)
             m_center->getInputMessageQueue()->push(MessageCenter::MsgClearLog::create(history && history->isChecked()));
         }
     });
-    connect(m_logFilter, &MessageCenterFilterWidget::changed, this, [this]() { m_shownLogged = -1; refreshLog(); });
+    connect(m_logFilter, &MessageCenterFilterWidget::changed, this, [this]() {
+        if (m_queryMode)
+        {
+            runQuery(true);
+        }
+        else
+        {
+            m_shownLogged = -1;
+            refreshLog();
+        }
+    });
     connect(m_logTable, &PagingMessageTable::columnsChanged, this, [this]() {
         m_settings.m_logColumns = m_logTable->columns();
         applySettings(QStringList("logColumns"));
@@ -1696,8 +1713,230 @@ void MessageCenterGUI::refresh()
 }
 
 // The newest messages of the log that the filter selects; made again when the log changed
+// The bar above the filters: Live or Query, and the range, the pages and the refresh of a query
+void MessageCenterGUI::buildQueryBar(QWidget *container)
+{
+    m_queryBar = new QWidget(container);
+    QHBoxLayout *bar = new QHBoxLayout(m_queryBar);
+    bar->setContentsMargins(0, 0, 0, 0);
+
+    m_liveButton = new QToolButton(m_queryBar);
+    m_liveButton->setText("Live");
+    m_liveButton->setCheckable(true);
+    m_liveButton->setChecked(true);
+    m_liveButton->setToolTip(QString("The newest %1 messages the filters select, as they come").arg(m_maxLogRows));
+    m_queryButton = new QToolButton(m_queryBar);
+    m_queryButton->setText("Query");
+    m_queryButton->setCheckable(true);
+    m_queryButton->setToolTip(QString("The messages of a time range the filters select, over the history: a page of %1, "
+        "newest first,\nand how many there are. They stay as they are until Run, a page or the auto-refresh").arg(m_pageRows));
+
+    m_range = new QComboBox(m_queryBar);
+    m_range->addItem("Last 5 min", 5 * 60);
+    m_range->addItem("Last hour", 3600);
+    m_range->addItem("Last day", 24 * 3600);
+    m_range->addItem("Last 7 days", 7 * 24 * 3600);
+    m_range->addItem("All", 0);
+    m_range->addItem("From - to", -1);
+    m_range->setCurrentIndex(2);
+    m_range->setToolTip("The time range of the messages: from now, fixed when the query is run (the pages keep it)");
+    m_from = new QDateTimeEdit(QDateTime::currentDateTime().addSecs(-3600), m_queryBar);
+    m_to = new QDateTimeEdit(QDateTime::currentDateTime(), m_queryBar);
+
+    for (QDateTimeEdit *edit : {m_from, m_to})
+    {
+        edit->setDisplayFormat("yyyy-MM-dd HH:mm:ss");
+        edit->setCalendarPopup(true);
+        edit->setVisible(false);
+    }
+
+    QPushButton *run = new QPushButton("Run", m_queryBar);
+    run->setToolTip("Run the query: the range from now, the first page");
+    m_refresh = new QComboBox(m_queryBar);
+    m_refresh->addItem("No refresh", 0);
+    m_refresh->addItem("Every 5 s", 5);
+    m_refresh->addItem("Every 10 s", 10);
+    m_refresh->addItem("Every 30 s", 30);
+    m_refresh->addItem("Every 60 s", 60);
+    m_refresh->setToolTip("Run the query again by itself (the range from now, the first page)");
+    m_newer = new QToolButton(m_queryBar);
+    m_newer->setText("Newer");
+    m_newer->setToolTip(QString("The %1 newer messages").arg(m_pageRows));
+    m_older = new QToolButton(m_queryBar);
+    m_older->setText("Older");
+    m_older->setToolTip(QString("The %1 older messages").arg(m_pageRows));
+    m_queryStatus = new QLabel(m_queryBar);
+    m_refreshTimer = new QTimer(this);
+
+    bar->addWidget(m_liveButton);
+    bar->addWidget(m_queryButton);
+    bar->addWidget(m_range);
+    bar->addWidget(m_from);
+    bar->addWidget(m_to);
+    bar->addWidget(run);
+    bar->addWidget(m_refresh);
+    bar->addWidget(m_queryStatus);
+    bar->addStretch(1);
+    bar->addWidget(m_newer);
+    bar->addWidget(m_older);
+
+    connect(m_liveButton, &QToolButton::clicked, this, [this]() { setLogMode(false); });
+    connect(m_queryButton, &QToolButton::clicked, this, [this]() { setLogMode(true); });
+    connect(m_range, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
+        const bool custom = m_range->currentData().toInt() < 0;
+        m_from->setVisible(m_queryMode && custom);
+        m_to->setVisible(m_queryMode && custom);
+        runQuery(true);
+    });
+    connect(run, &QPushButton::clicked, this, [this]() { runQuery(true); });
+    connect(m_newer, &QToolButton::clicked, this, [this]() {
+        m_queryOffset = std::max(0, m_queryOffset - m_pageRows);
+        runQuery(false);
+    });
+    connect(m_older, &QToolButton::clicked, this, [this]() {
+        m_queryOffset += m_pageRows;
+        runQuery(false);
+    });
+    connect(m_refresh, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
+        const int seconds = m_refresh->currentData().toInt();
+
+        if (seconds > 0) {
+            m_refreshTimer->start(seconds * 1000);
+        } else {
+            m_refreshTimer->stop();
+        }
+    });
+    connect(m_refreshTimer, &QTimer::timeout, this, [this]() {
+        // Not over a query being made, nor while a row is looked at
+        if (m_queryMode && !m_queryBusy && m_logTable->selectedId().isEmpty())
+        {
+            m_queryOffset = 0;
+            runQuery(true);
+        }
+    });
+
+    setLogMode(false);
+}
+
+void MessageCenterGUI::setLogMode(bool query)
+{
+    m_queryMode = query;
+    m_liveButton->setChecked(!query);
+    m_queryButton->setChecked(query);
+    const bool custom = m_range->currentData().toInt() < 0;
+
+    for (QWidget *w : std::initializer_list<QWidget*>{m_range, m_refresh, m_queryStatus, m_newer, m_older}) {
+        w->setVisible(query);
+    }
+    for (QWidget *w : m_queryBar->findChildren<QPushButton*>()) {
+        w->setVisible(query);
+    }
+
+    m_from->setVisible(query && custom);
+    m_to->setVisible(query && custom);
+
+    if (query)
+    {
+        m_queryOffset = 0;
+        runQuery(true);
+    }
+    else
+    {
+        m_refreshTimer->stop();
+        m_refresh->setCurrentIndex(0);
+        m_shownLogged = -1;
+        refreshLog();
+    }
+}
+
+void MessageCenterGUI::runQuery(bool resolve)
+{
+    if (!m_queryMode) {
+        return;
+    }
+
+    if (resolve)
+    {
+        const int seconds = m_range->currentData().toInt();
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        m_queryOffset = 0;
+
+        if (seconds > 0)
+        {
+            m_queryFrom = now - (qint64) seconds * 1000;
+            m_queryTo = now;
+        }
+        else if (seconds == 0)
+        {
+            m_queryFrom = -1;
+            m_queryTo = -1;
+        }
+        else
+        {
+            m_queryFrom = m_from->dateTime().toMSecsSinceEpoch();
+            m_queryTo = m_to->dateTime().toMSecsSinceEpoch();
+        }
+    }
+
+    // The files are read in a thread of the pool; the result comes back here. A newer query drops the older result
+    const int number = ++m_queryRunning;
+    const MessageCenterFilter filter = m_logFilter->filter();
+    const qint64 from = m_queryFrom;
+    const qint64 to = m_queryTo;
+    const int offset = m_queryOffset;
+    MessageCenter *center = m_center;
+    QPointer<MessageCenterGUI> self(this);
+    m_queryBusy = true;
+    m_queryStatus->setText("Running...");
+
+    QThreadPool::globalInstance()->start([=]() {
+        MessageCenterArchiveResult result = center->queryMessages(from, to, filter, offset, m_pageRows);
+
+        QMetaObject::invokeMethod(qApp, [self, number, result]() {
+            if (self) {
+                self->showQueryResult(number, result);
+            }
+        }, Qt::QueuedConnection);
+    });
+}
+
+void MessageCenterGUI::showQueryResult(int number, const MessageCenterArchiveResult& result)
+{
+    if ((number != m_queryRunning) || !m_queryMode) {
+        return;
+    }
+
+    m_queryBusy = false;
+    m_queryTotal = result.m_total;
+    QString selected = m_logTable->selectedId();
+
+    // The page newest at the bottom, as the live log
+    m_logTable->setUpdatesEnabled(false);
+    m_logTable->setRowCount(0);
+
+    for (auto it = result.m_records.rbegin(); it != result.m_records.rend(); ++it) {
+        m_logTable->addRecord(*it);
+    }
+
+    m_logTable->selectId(selected);
+    m_logTable->setUpdatesEnabled(true);
+    m_logTable->scrollToBottom();
+
+    const int first = result.m_records.empty() ? 0 : m_queryOffset + 1;
+    const int last = m_queryOffset + (int) result.m_records.size();
+    m_queryStatus->setText(QString("%1 found, %2-%3").arg(result.m_total).arg(first).arg(last));
+    m_queryStatus->setToolTip(QString("%1 messages the query selects; %2 to %3 of them shown, newest first%4").arg(result.m_total)
+        .arg(first).arg(last).arg(m_center->engine().archive() ? QString(" (over the history)") : QString(" (no history: over the log)")));
+    m_newer->setEnabled(m_queryOffset > 0);
+    m_older->setEnabled(last < result.m_total);
+}
+
 void MessageCenterGUI::refreshLog()
 {
+    if (m_queryMode) {
+        return;     // A query stays as it is until it is run again
+    }
+
     const MessageCenterEngine& engine = m_center->engine();
 
     if (engine.logged() == m_shownLogged) {

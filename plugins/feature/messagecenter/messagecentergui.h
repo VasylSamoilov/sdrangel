@@ -42,6 +42,10 @@
 
 class PluginAPI;
 class FeatureUISet;
+class QDateTimeEdit;
+class QLabel;
+class QTimer;
+class QToolButton;
 
 // The fields of a filter of the message center: the view of the log and the routes use it
 class MessageCenterFilterWidget : public QWidget
@@ -113,7 +117,35 @@ private:
     MessageQueue m_inputMessageQueue;
     bool m_doApplySettings;
     int m_shownLogged;                  //!< Records of the log when the table was made
-    static const int m_maxLogRows = 1000;
+    static const int m_maxLogRows = 100;        //!< Live: the newest messages
+    static const int m_pageRows = 100;          //!< Query: a page
+
+    // The log: live (the newest messages, as they come) or a query (a time range, a page of the messages it selects,
+    // newest first, over the history)
+    bool m_queryMode = false;
+    QToolButton *m_liveButton;
+    QToolButton *m_queryButton;
+    QWidget *m_queryBar;
+    QComboBox *m_range;
+    QDateTimeEdit *m_from;
+    QDateTimeEdit *m_to;
+    QComboBox *m_refresh;
+    QLabel *m_queryStatus;
+    QToolButton *m_newer;
+    QToolButton *m_older;
+    QTimer *m_refreshTimer;
+    qint64 m_queryFrom = -1;            //!< The range of the query run, fixed when it is run (the pages keep it)
+    qint64 m_queryTo = -1;
+    int m_queryOffset = 0;
+    int m_queryTotal = 0;
+    int m_queryRunning = 0;             //!< Number of the last query started; a result of an older one is dropped
+    bool m_queryBusy = false;
+
+    void buildQueryBar(QWidget *container);
+    void setLogMode(bool query);
+    //!< resolve: the range from now (Run, auto-refresh); else the range of the last run (pages)
+    void runQuery(bool resolve);
+    void showQueryResult(int number, const MessageCenterArchiveResult& result);
     static const int m_builtInSinks = 2;      //!< log and queue, first in the table of the sinks
     static const int m_builtInSources = 2;    //!< channels and api, first in the table of the sources
 
