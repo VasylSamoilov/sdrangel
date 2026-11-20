@@ -85,6 +85,7 @@ void CellularNetworkSettings::resetToDefaults()
     m_system = 0;
     m_country = "DK";
     m_area = 1;
+    m_y1 = -1;
     m_areaNo = 0;
     m_msPower = 1;
     m_carriers = "1:cctc, 5:tc";
@@ -104,6 +105,7 @@ QByteArray CellularNetworkSettings::serialize() const
     s.writeS32(1, m_id);
     s.writeString(2, m_name);
     s.writeBool(3, m_enabled);
+    s.writeS32(4, m_y1);
     writeNetwork(s, *this, 10);
     return s.final();
 }
@@ -118,6 +120,7 @@ bool CellularNetworkSettings::deserialize(const QByteArray& data)
     d.readS32(1, &m_id, 1);
     d.readString(2, &m_name, QString("Network %1").arg(m_id));
     d.readBool(3, &m_enabled, true);
+    d.readS32(4, &m_y1, -1);
     readNetwork(d, *this, 10);
     return m_id >= 1 && m_id <= kMaxNetworkId;
 }
@@ -125,7 +128,7 @@ bool CellularNetworkSettings::deserialize(const QByteArray& data)
 bool CellularNetworkSettings::sameNetwork(const CellularNetworkSettings& o) const
 {
     return m_id == o.m_id && m_system == o.m_system && m_country == o.m_country && m_area == o.m_area
-        && m_areaNo == o.m_areaNo && m_msPower == o.m_msPower && m_carriers == o.m_carriers
+        && m_y1 == o.m_y1 && m_areaNo == o.m_areaNo && m_msPower == o.m_msPower && m_carriers == o.m_carriers
         && m_compandor == o.m_compandor && m_sendCallerId == o.m_sendCallerId && m_sendClock == o.m_sendClock
         && m_smscNumber == o.m_smscNumber && m_fallback == o.m_fallback
         && m_rxDeviceSetIndex == o.m_rxDeviceSetIndex && m_txDeviceSetIndex == o.m_txDeviceSetIndex;
@@ -240,6 +243,7 @@ bool CellularNetworkSettings::networkConfig(modemnmt::NmtNetworkConfig& config, 
     config.system = m_system == 1 ? modemnmt::System::Nmt900 : modemnmt::System::Nmt450;
     config.country = m_country.trimmed().toStdString();
     config.area = m_area;
+    config.y1 = m_y1;
     config.areaNo = m_areaNo;
     config.msPower = m_msPower;
     config.compandor = m_compandor;

@@ -161,6 +161,34 @@ static void testPlanErrors()
     CHECK(hasIssue(area.issues(), true));
     CHECK(!area.bind({kRx}, {kTx}));
 
+    // a test network: Y1 0..15 in place of the country's, Y2 0..15, with a warning
+    c = network({1});
+    c.y1 = 0;
+    c.area = 0;
+    NmtBaseStation y1zero(c);
+    CHECK(!hasIssue(y1zero.issues(), true) && hasIssue(y1zero.issues(), false));
+    CHECK(y1zero.bind({kRx}, {kTx}));
+    CHECK(y1zero.system()->channel(0).config().trafficArea == 0x00);
+
+    c = network({1});
+    c.y1 = 15;
+    c.area = 3;
+    NmtBaseStation y1high(c);
+    CHECK(y1high.bind({kRx}, {kTx}));
+    CHECK(y1high.system()->channel(0).config().trafficArea == 0xf3);
+
+    c = network({1});
+    c.y1 = 16;
+    NmtBaseStation y1bad(c);
+    CHECK(hasIssue(y1bad.issues(), true));
+    CHECK(!y1bad.bind({kRx}, {kTx}));
+
+    c = network({1});
+    c.system = System::Nmt900;
+    c.y1 = 8;
+    NmtBaseStation y1nine(c);
+    CHECK(hasIssue(y1nine.issues(), true));
+
     // the clock on a combined channel is a warning only
     c = network({1});
     c.sendClock = true;

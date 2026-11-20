@@ -40,6 +40,7 @@ Changes of a running network are taken at once: the network starts again with th
 * On the air while the controller runs: switch a network on or off without touching the others.
 * System: NMT-450 or NMT-900.
 * Country: the frequency plan (channel numbers and frequencies) and the country digit of the traffic area. Countries that were not tried with a phone are marked untested.
+* Country digit Y1: "country" sends the first digit of the traffic area that belongs to the country (DK 5, SE 6, NO 7, FI 8 ...). A value 0..15 (NMT-900 0..7) makes a test network with that digit on the frequency plan of the country. A phone takes only calling channels with the Y1 of its country selector, so test networks with different Y1 at the same time show which one a phone is set to.
 * Traffic area: the second digit of the traffic area (1 to 9, up to 15 in some countries). Phones that were registered in another area register again.
 * Area number: 1 to 4 keeps the phones of that area, none takes every phone.
 * Phone power: the power level the phones send with, 3 is the highest.

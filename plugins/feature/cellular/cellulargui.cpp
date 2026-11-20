@@ -83,8 +83,15 @@ CellularNetworkTab::CellularNetworkTab(QWidget *parent) :
     m_country = new QComboBox(this);
     m_country->setToolTip("The frequency plan of the country (the channel numbers, the country digit of the traffic area)");
     form->addRow("Country", m_country);
+    m_y1 = new QSpinBox(this);
+    m_y1->setRange(-1, 15);
+    m_y1->setSpecialValueText("country");
+    m_y1->setToolTip("Country digit Y1 of the traffic area. country: the one of the country (DK 5, SE 6, NO 7, FI 8 ...). "
+        "0..15 (NMT-900 0..7) makes a test network: a phone only takes calling channels with the Y1 of its country selector, "
+        "so networks with different Y1 show which one the phone is set to");
+    form->addRow("Country digit Y1", m_y1);
     m_area = new QSpinBox(this);
-    m_area->setRange(1, 15);
+    m_area->setRange(0, 15);
     m_area->setToolTip("Traffic area within the country (the second digit Y2): phones of a network with another area see a new network and roam");
     form->addRow("Traffic area", m_area);
     m_areaNo = new QSpinBox(this);
@@ -143,6 +150,7 @@ CellularNetworkTab::CellularNetworkTab(QWidget *parent) :
     connect(m_name, &QLineEdit::editingFinished, this, &CellularNetworkTab::onChanged);
     connect(m_enabled, &QCheckBox::toggled, this, &CellularNetworkTab::onChanged);
     connect(m_country, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &CellularNetworkTab::onChanged);
+    connect(m_y1, QOverload<int>::of(&QSpinBox::valueChanged), this, &CellularNetworkTab::onChanged);
     connect(m_area, QOverload<int>::of(&QSpinBox::valueChanged), this, &CellularNetworkTab::onChanged);
     connect(m_areaNo, QOverload<int>::of(&QSpinBox::valueChanged), this, &CellularNetworkTab::onChanged);
     connect(m_msPower, QOverload<int>::of(&QSpinBox::valueChanged), this, &CellularNetworkTab::onChanged);
@@ -191,6 +199,7 @@ void CellularNetworkTab::display(const CellularNetworkSettings& s)
     m_enabled->setChecked(s.m_enabled);
     m_system->setCurrentIndex(s.m_system == 1 ? 1 : 0);
     fillCountries(s.m_country);
+    m_y1->setValue(s.m_y1);
     m_area->setValue(s.m_area);
     m_areaNo->setValue(s.m_areaNo);
     m_msPower->setValue(s.m_msPower);
@@ -212,6 +221,7 @@ void CellularNetworkTab::read(CellularNetworkSettings& s) const
     s.m_enabled = m_enabled->isChecked();
     s.m_system = m_system->currentIndex();
     s.m_country = m_country->currentData().toString();
+    s.m_y1 = m_y1->value();
     s.m_area = m_area->value();
     s.m_areaNo = m_areaNo->value();
     s.m_msPower = m_msPower->value();

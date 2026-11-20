@@ -541,6 +541,7 @@ void Cellular::webapiFormatFeatureSettings(SWGSDRangel::SWGFeatureSettings& resp
         item->setSystem(n.m_system);
         *item->getCountry() = n.m_country;
         item->setArea(n.m_area);
+        item->setY1(n.m_y1);
         item->setAreaNo(n.m_areaNo);
         item->setMsPower(n.m_msPower);
         *item->getCarriers() = n.m_carriers;
@@ -612,6 +613,9 @@ void Cellular::webapiUpdateFeatureSettings(CellularSettings& settings, const QSt
         }
         if (given("area")) {
             n.m_area = item->getArea();
+        }
+        if (given("y1")) {
+            n.m_y1 = item->getY1();
         }
         if (given("areaNo")) {
             n.m_areaNo = item->getAreaNo();

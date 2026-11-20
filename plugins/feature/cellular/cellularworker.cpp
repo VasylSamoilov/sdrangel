@@ -15,7 +15,9 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.          //
 ///////////////////////////////////////////////////////////////////////////////////
 
+#include <algorithm>
 #include <cmath>
+#include <string>
 
 #include <QDebug>
 
@@ -150,6 +152,59 @@ void CellularWorker::log(int network, const QString& text)
     if (m_reports) {
         m_reports->push(Cellular::MsgReportLog::create(network, text));
     }
+}
+
+// Every frame from the phones; the frames to the phones while the channel is not idle (an idle
+// calling channel sends without end), a frame sent again and again once with its count.
+void CellularWorker::traceFrame(Network& n, size_t index, bool toPhone, const modemnmt::Frame& frame, double quality, double level)
+{
+    if (!n.station || !n.station->system() || index >= n.traces.size()) {
+        return;
+    }
+
+    const modemnmt::NmtChannel& channel = n.station->system()->channel(index);
+    Network::Trace& trace = n.traces[index];
+    const int number = channel.config().channel;
+
+    if (toPhone)
+    {
+        if (channel.state() == modemnmt::NmtChannel::State::Idle)
+        {
+            flushTrace(n, index);
+            return;
+        }
+
+        std::string text = modemnmt::describeFrame(frame);
+
+        if (text == trace.last)
+        {
+            trace.repeats++;
+            return;
+        }
+        flushTrace(n, index);
+        log(n.id, QString("ch %1 > %2").arg(number).arg(QString::fromStdString(text)));
+        trace.last = std::move(text);
+        trace.repeats = 1;
+        return;
+    }
+
+    flushTrace(n, index);
+    log(n.id, QString("ch %1 < %2 (quality %3, level %4 dB)")
+        .arg(number)
+        .arg(QString::fromStdString(modemnmt::describeFrame(frame)))
+        .arg(quality, 0, 'f', 2)
+        .arg(20.0 * std::log10(std::max(level, 1e-6)), 0, 'f', 1));
+}
+
+void CellularWorker::flushTrace(Network& n, size_t index)
+{
+    Network::Trace& trace = n.traces[index];
+
+    if (trace.repeats > 1 && n.station && n.station->system()) {
+        log(n.id, QString("ch %1 > the frame above %2 times").arg(n.station->system()->channel(index).config().channel).arg(trace.repeats));
+    }
+    trace.last.clear();
+    trace.repeats = 0;
 }
 
 void CellularWorker::sendTo(ChannelAPI *channel, const std::vector<uint8_t>& wire)
@@ -561,6 +616,15 @@ void CellularWorker::tryBind(Network& n)
     n.boundRx = rxSpan;
     n.boundTx = txSpan;
     n.levels.assign(n.station->system()->channelCount(), -100.0f);
+    n.traces.assign(n.station->system()->channelCount(), Network::Trace());
+    for (size_t i = 0; i < n.station->system()->channelCount(); i++)
+    {
+        Network *network = &n;
+        n.station->system()->channel(i).setFrameTap(
+            [this, network, i](bool toPhone, const modemnmt::Frame& frame, double quality, double level) {
+                traceFrame(*network, i, toPhone, frame, quality, level);
+            });
+    }
     n.batches = 0;
     n.gaps = 0;
     updateTuning(*n.rx);

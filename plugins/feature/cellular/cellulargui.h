@@ -65,6 +65,7 @@ private:
     QCheckBox *m_enabled;
     QComboBox *m_system;
     QComboBox *m_country;
+    QSpinBox *m_y1;
     QSpinBox *m_area;
     QSpinBox *m_areaNo;
     QSpinBox *m_msPower;

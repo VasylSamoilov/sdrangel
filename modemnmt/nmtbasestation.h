@@ -53,6 +53,9 @@ struct NmtNetworkConfig
     System system = System::Nmt450;
     std::string country = "DK";     // short name of the plan
     int area = 1;                   // traffic area Y2 within the country
+    // Country digit Y1 sent in place of the country's (NMT-450 0..15, NMT-900 0..7), -1 for the
+    // country's: a test network for the country selector of a phone. Y2 may then be 0..15.
+    int y1 = -1;
     int areaNo = 0;                 // area number 1..4, 0 for none
     int msPower = 1;
     bool compandor = true;
