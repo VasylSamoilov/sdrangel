@@ -735,7 +735,7 @@ void MessageCenter::webapiUpdateFeatureSettings(MessageCenterSettings& settings,
         settings.m_rgbColor = (quint32) swg->getRgbColor();
     }
     if (featureSettingsKeys.contains("logSize")) {
-        settings.m_logSize = std::max(100, std::min(1000000, swg->getLogSize()));
+        settings.m_logSize = std::max(MessageCenterEngine::m_minLogSize, std::min(MessageCenterEngine::m_maxLogSize, swg->getLogSize()));
     }
     if (featureSettingsKeys.contains("historyEnabled")) {
         settings.m_historyEnabled = swg->getHistoryEnabled() != 0;

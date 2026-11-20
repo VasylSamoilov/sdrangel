@@ -279,9 +279,17 @@ void testPages()
     check(engine.page(id) && (engine.page(id)->m_state == MessageCenterPage::Pending) && engine.dispatch(101).empty(),
         "Page: pending while no transmitter can take it");
     check(engine.find(id) && (engine.find(id)->m_direction == MessageRecord::DirectionTX), "Page: also in the log");
+    const int versionBefore = engine.logged();
     check((engine.syncLoggedPages() == 1) && (engine.find(id)->m_protocolData.value("page_state").toString() == "pending")
         && (engine.find(id)->m_protocolData.value("page_reason").toString() == "waiting: no transmitter tx1") && (engine.syncLoggedPages() == 0),
         "Page: its record in the log has its state and reason, changed once");
+    {
+        // The views take the changes since the version they show, or show all again
+        QStringList ids;
+        check(engine.changedSince(versionBefore, ids) && (ids == QStringList({id})), "Log: a page state change is a change of its record");
+        check(engine.changedSince(engine.logged(), ids) && ids.isEmpty(), "Log: no change since the last version");
+        check(!engine.changedSince(-5, ids), "Log: a version older than the changes kept: all again");
+    }
 
     MessageEndpoint tx = transmitter("tx1", {"pocsag"});
     tx.m_capacity = 2;

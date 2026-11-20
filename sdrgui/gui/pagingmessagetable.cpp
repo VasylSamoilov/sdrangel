@@ -111,20 +111,43 @@ public:
             return QStyledItemDelegate::sizeHint(option, index);
         }
 
+        // The message: as high as its text wrapped to the width of its column
+        const QTableView *view = qobject_cast<const QTableView *>(parent());
+        const int textWidth = (view && (index.column() == PagingMessageTable::ColMessage))
+            ? std::max(20, view->columnWidth(index.column()) - 8) : -1;
+
+        // Laying out HTML is slow: the size of the same HTML at the same width and font is kept (the chips and the
+        // colours of thousands of rows are a few hundred different cells)
+        const QString key = QString::number(textWidth) + '|' + option.font.key() + '|' + html;
+        auto cached = m_sizes.constFind(key);
+
+        if (cached != m_sizes.constEnd()) {
+            return cached.value();
+        }
+
         QTextDocument doc;
         doc.setDocumentMargin(1);
         doc.setDefaultFont(option.font);
         doc.setHtml(html);
         int width = (int) doc.idealWidth() + 4;
 
-        // The message: as high as its text wrapped to the width of its column
-        const QTableView *view = qobject_cast<const QTableView *>(parent());
-        if (view && (index.column() == PagingMessageTable::ColMessage)) {
-            doc.setTextWidth(std::max(20, view->columnWidth(index.column()) - 8));
+        if (textWidth > 0) {
+            doc.setTextWidth(textWidth);
         }
 
-        return QSize(width, std::max((int) doc.size().height(), QStyledItemDelegate::sizeHint(option, index).height()));
+        QSize size(width, std::max((int) doc.size().height(), QStyledItemDelegate::sizeHint(option, index).height()));
+
+        if (m_sizes.size() > m_maxSizes) {
+            m_sizes.clear();
+        }
+
+        m_sizes.insert(key, size);
+        return size;
     }
+
+private:
+    static const int m_maxSizes = 20000;
+    mutable QHash<QString, QSize> m_sizes;
 };
 
 QString chip(const QString& text, const QString& fg, const QString& bg)
@@ -272,11 +295,31 @@ bool PagingMessageTable::setColumns(const QByteArray& state)
     return restored;
 }
 
-// The narrow columns (direction, polarity) are as wide as their content, whatever was saved
+// The narrow columns (direction, polarity) are as wide as their widest content, whatever was saved. A fixed width:
+// a column sized to its contents measures all its rows at each row added
 void PagingMessageTable::fitNarrowColumns()
 {
-    horizontalHeader()->setSectionResizeMode(ColDirection, QHeaderView::ResizeToContents);
-    horizontalHeader()->setSectionResizeMode(ColPolarity, QHeaderView::ResizeToContents);
+    auto chipWidth = [this](const QString& html) {
+        QTextDocument doc;
+        doc.setDocumentMargin(1);
+        doc.setDefaultFont(font());
+        doc.setHtml(html);
+        return (int) doc.idealWidth() + 4;
+    };
+    const int padding = 2 * style()->pixelMetric(QStyle::PM_FocusFrameHMargin, nullptr, this) + 8;
+    auto headerWidth = [this, padding](int column) {
+        const QTableWidgetItem *header = horizontalHeaderItem(column);
+        return header ? horizontalHeader()->fontMetrics().horizontalAdvance(header->text()) + padding + 8 : 0;
+    };
+    const int direction = std::max({chipWidth(chip("QU", "#1a1a0d", "#cccc66")), chipWidth(chip("NS", "#2a0d0d", "#ff7777")),
+        fontMetrics().horizontalAdvance("RX") + padding, fontMetrics().horizontalAdvance("TX") + padding, headerWidth(ColDirection)});
+    const int polarity = std::max({chipWidth(chip("I", "#2a1f00", "#ffcc44")), chipWidth(chip("N", "#0d1a2a", "#88aacc")),
+        headerWidth(ColPolarity)});
+
+    horizontalHeader()->setSectionResizeMode(ColDirection, QHeaderView::Fixed);
+    horizontalHeader()->setSectionResizeMode(ColPolarity, QHeaderView::Fixed);
+    horizontalHeader()->resizeSection(ColDirection, direction);
+    horizontalHeader()->resizeSection(ColPolarity, polarity);
 }
 
 // The columns sized to the usual content: a row of the longest values, taken out again
@@ -313,16 +356,24 @@ int PagingMessageTable::findRow(const QString& id) const
         return -1;
     }
 
-    for (int row = rowCount() - 1; row >= 0; row--)
-    {
-        QTableWidgetItem *item = this->item(row, ColTime);
+    // The rows are added by addRecord, which keeps their index; a row removed (or all of them) leaves its index
+    // not valid
+    auto it = m_rowsById.find(id);
 
-        if (item && (item->data(Qt::UserRole).toString() == id)) {
-            return row;
-        }
+    if (it == m_rowsById.end()) {
+        return -1;
     }
 
-    return -1;
+    const int row = it->isValid() ? it->row() : -1;
+    const QTableWidgetItem *item = (row >= 0) ? this->item(row, ColTime) : nullptr;
+
+    if (!item || (item->data(Qt::UserRole).toString() != id))
+    {
+        m_rowsById.erase(it);
+        return -1;
+    }
+
+    return row;
 }
 
 void PagingMessageTable::setRowBackground(const QString& id, const QColor& color)
@@ -884,6 +935,19 @@ void PagingMessageTable::addRecord(const MessageRecord& record, const QString& s
     row = rowCount();
     setRowCount(row + 1);
     fillRow(row, record, state);
+
+    if (!record.m_id.isEmpty())
+    {
+        // The ids of the rows gone (the table emptied, the oldest rows dropped) are forgotten from time to time
+        if (m_rowsById.size() > 2 * std::max(m_maxRows, rowCount()))
+        {
+            for (auto it = m_rowsById.begin(); it != m_rowsById.end();) {
+                it = it->isValid() ? std::next(it) : m_rowsById.erase(it);
+            }
+        }
+
+        m_rowsById.insert(record.m_id, QPersistentModelIndex(model()->index(row, ColTime)));
+    }
 
     while (rowCount() > m_maxRows) {
         removeRow(0);

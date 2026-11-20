@@ -273,7 +273,7 @@ bool MessageCenterSettings::deserialize(const QByteArray& data)
         d.readS32(3, &m_logSize, MessageCenterEngine::m_defaultLogSize);
         d.readS32(4, &m_claimTimeoutSec, 10);
         d.readS32(5, &m_silentSec, 20);
-        m_logSize = std::max(100, std::min(1000000, m_logSize));
+        m_logSize = std::max(MessageCenterEngine::m_minLogSize, std::min(MessageCenterEngine::m_maxLogSize, m_logSize));
         m_claimTimeoutSec = std::max(1, std::min(3600, m_claimTimeoutSec));
         m_silentSec = std::max(6, std::min(3600, m_silentSec));
         d.readBlob(6, &bytes);

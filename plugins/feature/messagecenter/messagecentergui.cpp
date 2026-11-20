@@ -16,6 +16,7 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include <QDateTime>
+#include <QSet>
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -774,9 +775,10 @@ void MessageCenterGUI::buildOptions(QWidget *container)
     layout->setContentsMargins(2, 2, 2, 2);
 
     m_logSize = new QSpinBox(container);
-    m_logSize->setRange(100, 1000000);
-    m_logSize->setSingleStep(100);
-    m_logSize->setToolTip("Messages kept in the log; the oldest go first");
+    m_logSize->setRange(MessageCenterEngine::m_minLogSize, MessageCenterEngine::m_maxLogSize);
+    m_logSize->setSingleStep(1000);
+    m_logSize->setToolTip(QString("Messages kept in the log (in memory), %1 to %2; the oldest go first. The table shows the "
+        "newest %3 the filters select").arg(MessageCenterEngine::m_minLogSize).arg(MessageCenterEngine::m_maxLogSize).arg(m_maxLogRows));
     m_claimTimeout = new QSpinBox(container);
     m_claimTimeout->setRange(1, 3600);
     m_claimTimeout->setSuffix(" s");
@@ -978,6 +980,52 @@ void MessageCenterGUI::refreshLog()
     const MessageCenterEngine& engine = m_center->engine();
 
     if (engine.logged() == m_shownLogged) {
+        return;
+    }
+
+    // The records stored or changed since the table was shown: their rows only. Making all the rows again at each
+    // change of a large log froze the GUI
+    QStringList changed;
+
+    if ((m_shownLogged >= 0) && engine.changedSince(m_shownLogged, changed))
+    {
+        const MessageCenterFilter filter = m_logFilter->filter();
+        QSet<QString> done;
+
+        m_shownLogged = engine.logged();
+
+        for (const QString& id : changed)
+        {
+            if (done.contains(id)) {
+                continue;
+            }
+
+            done.insert(id);
+            const MessageRecord *record = engine.find(id);
+
+            if (record && filter.matches(*record))
+            {
+                m_logTable->addRecord(*record);
+                auto highlight = m_highlights.constFind(id);
+
+                if (highlight != m_highlights.constEnd())
+                {
+                    QColor color = QColor::fromRgba(highlight.value());
+                    color.setAlpha(110);
+                    m_logTable->setRowBackground(id, color);
+                }
+            }
+            else
+            {
+                // A record the filter no longer selects (decoded again), or gone from the log
+                const int row = m_logTable->findRow(id);
+
+                if (row >= 0) {
+                    m_logTable->removeRow(row);
+                }
+            }
+        }
+
         return;
     }
 

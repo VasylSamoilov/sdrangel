@@ -20,6 +20,7 @@
 
 #include <QHeaderView>
 #include <QApplication>
+#include <QElapsedTimer>
 #include <QTemporaryDir>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
@@ -109,6 +110,45 @@ int main(int argc, char **argv)
         p.m_channel = "tx1";
         pages.addRecord(p);
         check(cell(pages, 0, PagingMessageTable::ColDirection) == "TX", "a page its channel sent is TX");
+    }
+
+    // Speed: 1000 rows of FLEX messages with chips, then the same records again (a view made again), shown
+    {
+        PagingMessageTable big;
+        big.setMaxRows(1000);
+        big.resize(1200, 600);
+        big.show();
+        std::vector<MessageRecord> records;
+
+        for (int i = 0; i < 1200; i++)
+        {
+            MessageRecord r = record(QString("big%1").arg(i), "flex", QString("%1").arg(1000000 + i, 10, 10, QChar('0')),
+                QString("Message %1 of a large FLEX transmission with some text to wrap in its column").arg(i));
+            r.m_mode = "1600/2";
+            r.m_polarity = MessageRecord::PolarityNormal;
+            r.m_protocolData.insert("capcode", 1000000 + i);
+            r.m_protocolData.insert("frame", i % 128);
+            r.m_protocolData.insert("phase", "A");
+            r.m_protocolData.insert("char_status", QString(r.m_text.size(), QChar('.')));
+            records.push_back(r);
+        }
+
+        QElapsedTimer timer;
+        timer.start();
+        for (const MessageRecord& r : records) {
+            big.addRecord(r);
+        }
+        QApplication::processEvents();
+        const qint64 addMs = timer.restart();
+        big.setRowCount(0);
+        for (size_t i = 200; i < records.size(); i++) {
+            big.addRecord(records[i]);
+        }
+        QApplication::processEvents();
+        const qint64 rebuildMs = timer.elapsed();
+        std::printf("      1200 records added in %lld ms, 1000 rows made again in %lld ms\n", (long long) addMs, (long long) rebuildMs);
+        check((big.rowCount() == 1000) && (addMs < 3000) && (rebuildMs < 2000),
+            "a large transmission: 1200 records and a view of 1000 rows made again in less than 3 s and 2 s");
     }
 
     // A FLEX short instruction of a reserved type: its data bits in the message, the type explained in the info

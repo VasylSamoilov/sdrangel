@@ -19,7 +19,9 @@
 #define SDRGUI_GUI_PAGINGMESSAGETABLE_H_
 
 #include <QByteArray>
+#include <QHash>
 #include <QList>
+#include <QPersistentModelIndex>
 #include <QMenu>
 #include <QString>
 #include <QTableWidget>
@@ -129,6 +131,8 @@ protected:
 
 private:
     int m_maxRows = 1000;
+    //!< The row of each id (its time cell), kept by the model when rows go; an id not there has no row
+    mutable QHash<QString, QPersistentModelIndex> m_rowsById;
     QList<Column> m_defaultColumns;
     QMenu *m_columnMenu;
     PagingVoicePlayer *m_player;

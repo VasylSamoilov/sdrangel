@@ -7,7 +7,7 @@ MessageCenterSettings:
       type: integer
       format: int64
     logSize:
-      description: "Messages kept in the log"
+      description: "Messages kept in the log (in memory), 100 to 10000; the GUI shows the newest 1000 its filters select"
       type: integer
     historyEnabled:
       description: "1 the log is kept in the history file (messagecenter/history.jsonl in the application data folder) and is there again when the message center starts; 0 the log is in memory only. One message center keeps the history"

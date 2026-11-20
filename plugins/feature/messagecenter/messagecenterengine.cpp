@@ -904,6 +904,10 @@ QString MessageCenterPage::stateName(State state)
 // Engine
 // ---------------------------------------------------------------------------
 
+// Taken by reference (std::max, std::min): defined here
+const int MessageCenterEngine::m_minLogSize;
+const int MessageCenterEngine::m_maxLogSize;
+
 MessageCenterEngine::MessageCenterEngine() :
     m_logSize(m_defaultLogSize),
     m_routes(defaultRoutes())
@@ -1000,16 +1004,58 @@ void MessageCenterEngine::setLogSize(int size)
 {
     m_logSize = std::max(1, size);
 
-    while ((int) m_log.size() > m_logSize) {
-        m_log.pop_front();
+    if ((int) m_log.size() > m_logSize)
+    {
+        while ((int) m_log.size() > m_logSize) {
+            m_log.pop_front();
+        }
+
+        noteReset();
     }
 }
 
 // The same id is the same message: the later record (a voice message that ended, a page that was
 // sent) completes the earlier one
-void MessageCenterEngine::store(const MessageRecord& record)
+void MessageCenterEngine::noteChange(const QString& id)
 {
     m_logged++;
+    m_changes.emplace_back(m_logged, id);
+
+    while ((int) m_changes.size() > m_maxChanges) {
+        m_changes.pop_front();
+    }
+}
+
+void MessageCenterEngine::noteReset()
+{
+    m_logged++;
+    m_resetVersion = m_logged;
+    m_changes.clear();
+}
+
+bool MessageCenterEngine::changedSince(int version, QStringList& ids) const
+{
+    ids.clear();
+
+    // All the changes after version are kept: the oldest one kept is version + 1 or older
+    if ((version < m_resetVersion) || (version > m_logged)
+        || (!m_changes.empty() && (m_changes.front().first > version + 1)) || (m_changes.empty() && (version != m_logged))) {
+        return false;
+    }
+
+    for (const auto& change : m_changes)
+    {
+        if (change.first > version) {
+            ids.append(change.second);
+        }
+    }
+
+    return true;
+}
+
+void MessageCenterEngine::store(const MessageRecord& record)
+{
+    noteChange(record.m_id);
 
     if (!record.m_id.isEmpty())
     {
@@ -1085,7 +1131,7 @@ bool MessageCenterEngine::replace(const MessageRecord& record)
         if (it->m_id == record.m_id)
         {
             *it = record;
-            m_logged++;
+            noteChange(record.m_id);
             appendHistory(record);
             return true;
         }
@@ -1099,7 +1145,7 @@ void MessageCenterEngine::clearLog()
     QString error;
 
     m_log.clear();
-    m_logged++;     // The views show the empty log
+    noteReset();    // The views show the empty log
     if (!m_historyPath.isEmpty() && !writeHistory(error)) {
         qWarning("MessageCenterEngine::clearLog: %s", qPrintable(error));
     }
@@ -1177,7 +1223,7 @@ bool MessageCenterEngine::setHistory(const QString& path, qint64 maxBytes, QStri
         m_log.push_back(records[i]);
     }
 
-    m_logged += (int) m_log.size();     // The views show the log loaded
+    noteReset();    // The views show the log loaded
 
     // Other versions of the messages or older messages in the file: written again with the log alone
     if ((lines != (int) m_log.size()) || (m_historyBytes > m_historyMaxBytes)) {
@@ -1458,6 +1504,7 @@ bool MessageCenterEngine::markLogged(const QString& id, const QString& state, co
             it->m_protocolData.insert("page_reason", reason);
         }
 
+        noteChange(id);     // The views show the new state
         return true;
     }
 

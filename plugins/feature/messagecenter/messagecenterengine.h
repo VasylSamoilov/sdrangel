@@ -338,6 +338,9 @@ class MessageCenterEngine
 public:
     static const int m_maxAttempts = 3;         //!< First try and two retransmits
     static const int m_defaultLogSize = 10000;
+    static const int m_minLogSize = 100;
+    //!< A FLEX record is a few kB (its words, codes and raw data): 10000 of them are some tens of MB
+    static const int m_maxLogSize = 10000;
     static const int m_defaultHistoryMB = 50;          //!< Size limit of the history file
 
     MessageCenterEngine();
@@ -441,13 +444,24 @@ public:
     int removeFinished();                       //!< Sent pages are forgotten; returns how many
 
     // Counters
+    //!< The version of the log: one more for each record stored or changed, and when it is emptied or loaded
     int logged() const { return m_logged; }
     int routed() const { return m_routed; }
+    //!< The ids of the records stored or changed since the version given, oldest first (an id may be there more
+    //!< than once). False when the log was emptied or loaded since, or the changes are no longer all kept: the
+    //!< views show the log again
+    bool changedSince(int version, QStringList& ids) const;
 
 private:
     std::deque<MessageRecord> m_log;
     int m_logSize;
     int m_logged = 0;
+    std::deque<std::pair<int, QString>> m_changes;  //!< Version and id of the last records stored or changed
+    int m_resetVersion = 0;                         //!< Version of the last time the log was emptied or loaded
+    static const int m_maxChanges = 4096;
+
+    void noteChange(const QString& id);             //!< A record stored or changed: a new version
+    void noteReset();                               //!< The log emptied, loaded or cut: a new version
     QString m_historyPath;
     qint64 m_historyMaxBytes = 0;
     qint64 m_historyBytes = 0;
