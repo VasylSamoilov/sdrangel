@@ -92,7 +92,7 @@ The bit error rate (BER) is the bits the code corrected over the bits received, 
 
 The top and bottom bars of the channel window are described [here](../../../sdrgui/channel/readme.md)
 
-![Radio Paging Demodulator plugin GUI](../../../doc/img/RadioPagingDemod_plugin.png)
+![Radio Paging Demodulator plugin GUI: pages received over the air from the Radio Paging modulator (USRP B210, transmit cabled to receive), POCSAG at 1200, 512 and 2400 baud (inverted), FLEX 1600/2 with a group message](../../../doc/img/RadioPagingDemod_plugin.png)
 
 The window has a settings section and a section for the received messages. Each section can be rolled up.
 

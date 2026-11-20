@@ -15,9 +15,9 @@ The channels publish their messages as message records on the "messages" pipe, a
 
 <h2>Interface</h2>
 
-![Message Center plugin GUI](../../../doc/img/MessageCenter_plugin.png)
+![Message Center plugin GUI: the messages received over the air from a Radio Paging modulator, POCSAG at 512, 1200 and 2400 baud (one inverted), FLEX 1600/2, 3200/4 and 6400/4 and GSC, with their contacts](../../../doc/img/MessageCenter_plugin.png)
 
-The window has a tab for each section: Log, Channels, Queue, Page, Routes and I/O. The button at the right of the tabs opens the options.
+The window has a tab for each section: Log, Channels, Queue, Page, Contacts, Routes and I/O. The button at the right of the tabs opens the options.
 
 <h3>Log</h3>
 
@@ -52,7 +52,7 @@ The pages to transmit, with the transmitter (its name), protocol, address, text,
 
 <h3>Page</h3>
 
-![Message Center page composer](../../../doc/img/MessageCenter_plugin_page.png)
+![Message Center page composer: a page to a contact, its destination filled in](../../../doc/img/MessageCenter_plugin_page.png)
 
 The composer of a page, the same as in the Radio Paging modulator: transmitter (its name), protocol, address, type, text and the fields of the protocol. Table opens the codepage table of the text. Post the page queues the page for the transmitter.
 
@@ -83,9 +83,11 @@ A page can go to a contact instead of a transmitter and an address (`contact` in
 
 Every message is checked against all the routes in their number order (#), not only the first. Each route whose filter selects the message sends it to the sinks of the route: the log, the transmit queue or the sinks of I/O. A route with Stop ends the check for the messages it selects, so the routes after it do not see them. The log is a sink as the others: a message no route sends to it is not logged. A new Message Center has one route, 1 "All messages to the log", without a filter. A sink takes only what a route sends to it.
 
-![Message Center routes: all the messages to the log, the messages of the fire service to a CSV file and highlighted](../../../doc/img/MessageCenter_plugin_routes.png)
+![Message Center routes: all the messages to the log; those of two contacts to a file, highlighted and said; FLEX warnings highlighted; every message received to a log of the Pager demodulator format](../../../doc/img/MessageCenter_plugin_routes.png)
 
-![A route](../../../doc/img/MessageCenter_plugin_route.png)
+![A route: the messages received of two contacts](../../../doc/img/MessageCenter_plugin_route.png)
+
+A filter on several contacts (set through the WebAPI) is one item of the contact list. Editing a route keeps what its dialog does not show of its filter.
 
 The tool tip of the table of the routes recalls how they work.
 
@@ -98,7 +100,7 @@ The filter of a route has the fields of the filter of the log, and the source of
 
 <h3>I/O</h3>
 
-![Message Center sinks and sources: the built in ones, a CSV file and a highlight](../../../doc/img/MessageCenter_plugin_io.png)
+![Message Center sinks and sources: the built in ones, a Pager CSV log, a JSON lines file, a highlight and speech](../../../doc/img/MessageCenter_plugin_io.png)
 
 The sources and sinks: where messages come from besides the channels (files read as they grow, UDP), and where the routes send them besides the log and the queue (files, UDP, commands, speech, highlight in the log, the Map). Each has a name and a type. The built in ones come first: the sinks log and queue, the sources channels and api. Double click to edit; a sink renamed is renamed in the routes too. The editor of a sink also chooses the routes that send to it, and can add a route that sends every message to it. The table of the sinks gives the records each took and refused and the routes that send to it (none: it takes nothing). Plus adds a sink or a source, bin removes the one selected. The errors of the sinks and sources are shown below them from the first one.
 
