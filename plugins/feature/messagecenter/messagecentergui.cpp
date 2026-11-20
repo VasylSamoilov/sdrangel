@@ -41,6 +41,7 @@
 #include "feature/featureuiset.h"
 #include "gui/basicfeaturesettingsdialog.h"
 #include "gui/dialogpositioner.h"
+#include "gui/flowlayout.h"
 #include "gui/pagingmessagetable.h"
 
 #include "radiopagingpage.h"
@@ -122,6 +123,15 @@ QString filterSummary(const MessageCenterFilter& f)
     return parts.isEmpty() ? QString("everything") : parts.join(", ");
 }
 
+// A button with an icon of the project and its tool tip, as the buttons of the log of the Pager demodulator
+QToolButton *iconButton(QWidget *parent, const char *icon, const QString& tip)
+{
+    QToolButton *button = new QToolButton(parent);
+    button->setIcon(QIcon(icon));
+    button->setToolTip(tip);
+    return button;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -131,8 +141,9 @@ QString filterSummary(const MessageCenterFilter& f)
 MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     QWidget(parent)
 {
-    QGridLayout *layout = new QGridLayout(this);
-    layout->setContentsMargins(0, 0, 0, 0);
+    // The filters in a line that wraps at the width of the window (two lines in the default width of the Message
+    // Center, one when it is wide enough), each at its size, as the settings lines of the channels
+    FlowLayout *layout = new FlowLayout(this, 0, 6, 3);
 
     m_protocol = new QComboBox(this);
     m_protocol->addItems({"Any protocol", "pocsag", "flex", "gsc"});
@@ -166,7 +177,7 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     m_direction->setToolTip("Received (RX), transmitted (TX) or both");
     m_polarity->setToolTip("Polarity the message was received or sent with");
     m_type->setToolTip("Message type as the decoder or encoder names it");
-    m_alias->setToolTip("Alias of the channel, or the transmitter of a page (exact). Empty: any channel");
+    m_alias->setToolTip("Name of the channel (its title), or the transmitter of a page (exact). Empty: any channel");
     m_address->setToolTip("Regular expression the whole address must match, as the filters of the other channels:\n"
         "e.g. 1234567 for that RIC, 12345.. for 1234500 to 1234599, 001001/. for a GSC cap code. Empty: any address");
     m_text->setToolTip("Regular expression the whole text must match: e.g. .*FIRE.* for a text that contains FIRE,\n"
@@ -179,30 +190,40 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     m_regExp->setToolTip("Regular expression the field must match, anywhere in it (^ and $ to anchor). Case sensitive,\n"
         "(?i) at the start for not. Its captures are ${1}, ${2}... in the texts of the actions. Empty: no expression");
 
-    // The text fields with their names: a placeholder alone is hard to see
-    auto labelled = [this](const QString& name, QLineEdit *edit) {
+    // The text fields with their names (a placeholder alone is hard to see), at a width that fits an expression
+    auto labelled = [this](const QString& name, QWidget *field, QLineEdit *edit, int chars) {
         QWidget *w = new QWidget(this);
         QHBoxLayout *l = new QHBoxLayout(w);
         l->setContentsMargins(0, 0, 0, 0);
-        QLabel *label = new QLabel(name, w);
-        label->setToolTip(edit->toolTip());
-        l->addWidget(label);
-        l->addWidget(edit, 1);
+        l->setSpacing(3);
+
+        if (!name.isEmpty())
+        {
+            QLabel *label = new QLabel(name, w);
+            label->setToolTip(edit->toolTip());
+            l->addWidget(label);
+        }
+
+        if (field) {
+            l->addWidget(field);
+        }
+
+        edit->setFixedWidth(edit->fontMetrics().averageCharWidth() * chars);
+        l->addWidget(edit);
         return w;
     };
 
-    layout->addWidget(m_protocol, 0, 0);
-    layout->addWidget(m_direction, 0, 1);
-    layout->addWidget(m_polarity, 0, 2);
-    layout->addWidget(m_type, 0, 3);
-    layout->addWidget(labelled("Channel", m_alias), 1, 0);
-    layout->addWidget(labelled("Address", m_address), 1, 1);
-    layout->addWidget(labelled("Text", m_text), 1, 2, 1, 2);
-    layout->addWidget(m_hideDuplicates, 2, 0, 1, 2);
-    layout->addWidget(m_voiceOnly, 2, 2);
-    layout->addWidget(m_source, 2, 3);
-    layout->addWidget(m_matchField, 3, 0);
-    layout->addWidget(m_regExp, 3, 1, 1, 3);
+    layout->addWidget(m_protocol);
+    layout->addWidget(m_direction);
+    layout->addWidget(m_polarity);
+    layout->addWidget(m_type);
+    layout->addWidget(m_hideDuplicates);
+    layout->addWidget(m_voiceOnly);
+    layout->addWidget(m_source);
+    layout->addWidget(labelled("Channel", nullptr, m_alias, 14));
+    layout->addWidget(labelled("Address", nullptr, m_address, 14));
+    layout->addWidget(labelled("Text", nullptr, m_text, 16));
+    layout->addWidget(labelled(QString(), m_matchField, m_regExp, 16));
 
     for (QComboBox *combo : {m_protocol, m_direction, m_polarity, m_type, m_source}) {
         connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MessageCenterFilterWidget::changed);
@@ -448,19 +469,22 @@ void MessageCenterGUI::buildLog(QWidget *container)
     layout->addWidget(m_logFilter);
     layout->addWidget(m_logTable);
 
+    // Icon buttons, as those of the log of the Pager demodulator
     QHBoxLayout *buttons = new QHBoxLayout();
-    QPushButton *import = new QPushButton("Import...", container);
-    import->setToolTip("Read the messages of a file into the log: a JSON lines file, or a CSV log of a message center\n"
-        "or of the Pager demodulator. They are not routed: no action is taken on them again");
-    QPushButton *clear = new QPushButton("Clear", container);
-    clear->setToolTip("Remove all the messages of the log, and of the history file when it is kept");
+    QToolButton *import = iconButton(container, ":/load.png", "Read the messages of a file into the log: a JSON lines file, "
+        "or a CSV log of a message center\nor of the Pager demodulator. They are not routed: no action is taken on them again");
+    QToolButton *exportLog = iconButton(container, ":/save.png", "Save the messages the filters select to a CSV file\n"
+        "(it can be imported again, here or in another message center)");
+    QToolButton *clear = iconButton(container, ":/bin.png", "Remove all the messages of the log, and of the history file when it is kept");
     buttons->addWidget(import);
+    buttons->addWidget(exportLog);
     buttons->addStretch(1);
     buttons->addWidget(clear);
-    connect(import, &QPushButton::clicked, this, &MessageCenterGUI::importFile);
+    connect(import, &QToolButton::clicked, this, &MessageCenterGUI::importFile);
+    connect(exportLog, &QToolButton::clicked, this, &MessageCenterGUI::exportLog);
     layout->addLayout(buttons);
 
-    connect(clear, &QPushButton::clicked, this, [this]() {
+    connect(clear, &QToolButton::clicked, this, [this]() {
         QString text = m_settings.m_historyEnabled
             ? QString("Remove all the messages of the log and of the history file?\n%1").arg(MessageCenter::historyFilePath())
             : QString("Remove all the messages of the log?");
@@ -563,43 +587,40 @@ void MessageCenterGUI::buildRoutes(QWidget *container)
 {
     QVBoxLayout *layout = new QVBoxLayout(container);
     layout->setContentsMargins(2, 2, 2, 2);
-    QLabel *help = new QLabel("Every message is checked against all the routes, in their number order (#), not only the first. "
-        "Each route whose filter selects it sends it to the route's sinks: the log, the queue or the sinks of Files. A route "
-        "with Stop ends the check for the messages it selects. The log is a sink too: a message no route sends to it is not "
-        "logged (route 1, All messages to the log, does it by default). A sink takes only what a route sends to it.", container);
-    help->setWordWrap(true);
+    // How the routes work: in the tool tip of the table (and the readme, from the help button of the window)
     m_routesTable = makeTable({"#", "Route", "Filter", "Sinks", "Stop", "On"}, container);
+    m_routesTable->setToolTip("Every message is checked against all the routes, in their number order (#), not only the first.\n"
+        "Each route whose filter selects it sends it to the route's sinks: the log, the queue or the sinks of Files.\n"
+        "A route with Stop ends the check for the messages it selects.\n"
+        "The log is a sink too: a message no route sends to it is not logged\n"
+        "(route 1, All messages to the log, does it by default). A sink takes only what a route sends to it.\n"
+        "Double-click a route to edit it");
     QHBoxLayout *buttons = new QHBoxLayout();
-    QPushButton *add = new QPushButton("Add...", container);
-    QPushButton *edit = new QPushButton("Edit...", container);
-    QPushButton *remove = new QPushButton("Remove", container);
-    QPushButton *up = new QPushButton("Up", container);
-    up->setToolTip("Move the route up: it is checked earlier");
-    QPushButton *down = new QPushButton("Down", container);
-    down->setToolTip("Move the route down: it is checked later");
-    QPushButton *exportRouting = new QPushButton("Export...", container);
-    exportRouting->setToolTip("Save the routes, the sinks and the sources to a JSON file");
-    QPushButton *importRouting = new QPushButton("Import...", container);
-    importRouting->setToolTip("Replace the routes, the sinks and the sources with those of a JSON file");
+    QToolButton *add = iconButton(container, ":/plus.png", "Add a route");
+    QToolButton *edit = iconButton(container, ":/edit.png", "Edit the route selected");
+    QToolButton *remove = iconButton(container, ":/bin.png", "Remove the route selected");
+    QToolButton *up = iconButton(container, ":/arrow_up.png", "Move the route up: it is checked earlier");
+    QToolButton *down = iconButton(container, ":/arrow_down.png", "Move the route down: it is checked later");
+    QToolButton *exportRouting = iconButton(container, ":/save.png", "Save the routes, the sinks and the sources to a JSON file");
+    QToolButton *importRouting = iconButton(container, ":/load.png", "Replace the routes, the sinks and the sources with those of a JSON file");
     buttons->addWidget(add);
     buttons->addWidget(edit);
     buttons->addWidget(remove);
     buttons->addWidget(up);
     buttons->addWidget(down);
     buttons->addStretch();
-    buttons->addWidget(exportRouting);
     buttons->addWidget(importRouting);
-    layout->addWidget(help);
+    buttons->addWidget(exportRouting);
     layout->addWidget(m_routesTable);
     layout->addLayout(buttons);
 
-    connect(add, &QPushButton::clicked, this, &MessageCenterGUI::addRoute);
-    connect(edit, &QPushButton::clicked, this, &MessageCenterGUI::editSelectedRoute);
-    connect(remove, &QPushButton::clicked, this, &MessageCenterGUI::removeRoute);
-    connect(up, &QPushButton::clicked, this, [this]() { moveRoute(-1); });
-    connect(down, &QPushButton::clicked, this, [this]() { moveRoute(1); });
-    connect(exportRouting, &QPushButton::clicked, this, &MessageCenterGUI::exportRouting);
-    connect(importRouting, &QPushButton::clicked, this, &MessageCenterGUI::importRouting);
+    connect(add, &QToolButton::clicked, this, &MessageCenterGUI::addRoute);
+    connect(edit, &QToolButton::clicked, this, &MessageCenterGUI::editSelectedRoute);
+    connect(remove, &QToolButton::clicked, this, &MessageCenterGUI::removeRoute);
+    connect(up, &QToolButton::clicked, this, [this]() { moveRoute(-1); });
+    connect(down, &QToolButton::clicked, this, [this]() { moveRoute(1); });
+    connect(exportRouting, &QToolButton::clicked, this, &MessageCenterGUI::exportRouting);
+    connect(importRouting, &QToolButton::clicked, this, &MessageCenterGUI::importRouting);
     connect(m_routesTable, &QTableWidget::cellDoubleClicked, this, &MessageCenterGUI::editSelectedRoute);
 }
 
@@ -696,19 +717,22 @@ void MessageCenterGUI::buildFiles(QWidget *container)
     m_sourcesTable = makeTable({"Source", "Type", "Target"}, container);
     m_sourcesTable->setToolTip("The sources messages are read from, as if they came from the channels: files (read as they\n"
         "grow) and UDP. Double-click to edit");
+    // The errors of the sinks and the sources: shown from the first one
     m_errors = new QPlainTextEdit(container);
     m_errors->setReadOnly(true);
     m_errors->setMaximumBlockCount(200);
-    m_errors->setMaximumHeight(70);
+    m_errors->setMaximumHeight(m_errors->fontMetrics().lineSpacing() * 3 + 2 * m_errors->frameWidth() + 8);
+    m_errors->setToolTip("Errors of the sinks and the sources");
+    m_errors->setVisible(false);
     QHBoxLayout *sinkButtons = new QHBoxLayout();
-    QPushButton *addSink = new QPushButton("Add sink...", container);
-    QPushButton *removeSink = new QPushButton("Remove", container);
+    QToolButton *addSink = iconButton(container, ":/plus.png", "Add a sink");
+    QToolButton *removeSink = iconButton(container, ":/bin.png", "Remove the sink selected; the routes no longer send to it");
     sinkButtons->addWidget(addSink);
     sinkButtons->addWidget(removeSink);
     sinkButtons->addStretch();
     QHBoxLayout *sourceButtons = new QHBoxLayout();
-    QPushButton *addSource = new QPushButton("Add source...", container);
-    QPushButton *removeSource = new QPushButton("Remove", container);
+    QToolButton *addSource = iconButton(container, ":/plus.png", "Add a source");
+    QToolButton *removeSource = iconButton(container, ":/bin.png", "Remove the source selected");
     sourceButtons->addWidget(addSource);
     sourceButtons->addWidget(removeSource);
     sourceButtons->addStretch();
@@ -720,10 +744,10 @@ void MessageCenterGUI::buildFiles(QWidget *container)
 
     connect(m_sinksTable, &QTableWidget::cellDoubleClicked, this, &MessageCenterGUI::editSelectedSink);
     connect(m_sourcesTable, &QTableWidget::cellDoubleClicked, this, &MessageCenterGUI::editSelectedSource);
-    connect(addSink, &QPushButton::clicked, this, &MessageCenterGUI::addSink);
-    connect(removeSink, &QPushButton::clicked, this, &MessageCenterGUI::removeSink);
-    connect(addSource, &QPushButton::clicked, this, &MessageCenterGUI::addSource);
-    connect(removeSource, &QPushButton::clicked, this, &MessageCenterGUI::removeSource);
+    connect(addSink, &QToolButton::clicked, this, &MessageCenterGUI::addSink);
+    connect(removeSink, &QToolButton::clicked, this, &MessageCenterGUI::removeSink);
+    connect(addSource, &QToolButton::clicked, this, &MessageCenterGUI::addSource);
+    connect(removeSource, &QToolButton::clicked, this, &MessageCenterGUI::removeSource);
 }
 
 void MessageCenterGUI::buildOptions(QWidget *container)
@@ -911,6 +935,7 @@ void MessageCenterGUI::refresh()
 
     for (const QString& error : m_center->takeErrors()) {
         m_errors->appendPlainText(QString("%1 %2").arg(QDateTime::currentDateTime().toString("HH:mm:ss")).arg(error));
+        m_errors->setVisible(true);
     }
 }
 
@@ -1709,6 +1734,7 @@ void MessageCenterGUI::speak(const QString& text)
 #else
     m_errors->appendPlainText(QString("%1 Text to speech is not in this build: %2")
         .arg(QDateTime::currentDateTime().toString("HH:mm:ss")).arg(text));
+    m_errors->setVisible(true);
 #endif
 }
 
@@ -1718,6 +1744,28 @@ void MessageCenterGUI::importFile()
 
     if (!path.isEmpty()) {
         m_center->getInputMessageQueue()->push(MessageCenter::MsgImportFile::create(path));
+    }
+}
+
+void MessageCenterGUI::exportLog()
+{
+    QString path = QFileDialog::getSaveFileName(this, "Export messages", "messages.csv", "CSV (*.csv)");
+
+    if (path.isEmpty()) {
+        return;
+    }
+
+    const std::vector<MessageRecord> records = m_center->engine().select(m_logFilter->filter());
+    QFile file(path);
+    bool written = file.open(QIODevice::WriteOnly | QIODevice::Truncate)
+        && (file.write(MessageRecord::csvHeader().join(',').toUtf8() + "\n") >= 0);
+
+    for (size_t i = 0; written && (i < records.size()); i++) {
+        written = file.write(records[i].toCSV().toUtf8() + "\n") >= 0;
+    }
+
+    if (!written) {
+        QMessageBox::warning(this, "Export messages", QString("Cannot write %1").arg(path));
     }
 }
 

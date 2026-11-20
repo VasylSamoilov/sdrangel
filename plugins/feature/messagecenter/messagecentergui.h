@@ -163,6 +163,8 @@ private:
     void editFile(bool sink, int index);
     void speak(const QString& text);
     void importFile();
+    //! The messages the log filters select to a CSV file (columns of MessageRecord), as a CSV sink writes them
+    void exportLog();
 
 private slots:
     void handleInputMessages();

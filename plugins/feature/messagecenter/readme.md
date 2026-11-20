@@ -29,8 +29,10 @@ The messages received and sent, newest at the bottom (at most the log size, the 
 * Right click on a message: details, copy the cell, the row or the record as JSON, play the voice, select the audio output, and decode a received message again as the other type or with another codepage of its protocol.
 * Decode as, All codepages...: a window with the message decoded with every codepage of its protocol (and as numeric, POCSAG and GSC), a row each; the reading shown is in bold. Right click on a row: Create route..., the route dialog filled to decode the messages of the address so.
 * Create route... (right click on a message): the route dialog filled from the message: its protocol, polarity, type and address, to the log, with Stop. The tables of the Radio Paging channels have both too, for the Message Center there is (none: they are greyed out).
-* Import: reads the messages of a file into the log: a JSON lines file, or a CSV log of a message center or of the Pager demodulator. They are logged, not routed, so no action is taken on them again.
-* Clear: removes all the messages of the log, and of the history file when it is kept, after a confirmation. The items the map sinks put on the Map are removed too.
+* The filters are on a line that wraps at the width of the window.
+* Import (open icon): reads the messages of a file into the log: a JSON lines file, or a CSV log of a message center or of the Pager demodulator. They are logged, not routed, so no action is taken on them again.
+* Export (save icon): saves the messages the filters select to a CSV file, which Import reads again.
+* Clear (bin icon): removes all the messages of the log, and of the history file when it is kept, after a confirmation. The items the map sinks put on the Map are removed too.
 * A message a highlight sink took has its row in the colour of the sink.
 
 <h3>Channels</h3>
@@ -62,16 +64,18 @@ Every message is checked against all the routes in their number order (#), not o
 
 ![A route](../../../doc/img/MessageCenter_plugin_route.png)
 
-* Add, Edit (or double click) and Remove manage the routes; a route can be switched off. Up and Down change the order.
+The tool tip of the table of the routes recalls how they work.
+
+* Add (plus icon), Edit (pencil icon, or double click) and Remove (bin icon) manage the routes; a route can be switched off. Up and Down (arrows) change the order.
 * Insert: where a new route goes, before route 1 by default, or before or after another.
 * Decode as codepage and type: the messages the route selects are decoded again with the codepage and as the type before they go to its sinks; the routes after it get them as they were received. A message that cannot be decoded so (a codepage of another protocol, a transmitted message) is sent as it is.
-* Export saves the routes, the sinks and the sources to a JSON file; Import replaces them with those of a file, after a check and a confirmation.
+* Export (save icon) saves the routes, the sinks and the sources to a JSON file; Import (open icon) replaces them with those of a file, after a check and a confirmation.
 
 The filter of a route has the fields of the filter of the log, and the source of the message: the channels, the API (ingest) or a source of Files. Its regular expression on a field of the message (address, message, protocol, type, channel, or any of them separated by spaces) matches anywhere in the field (^ and $ to anchor), as the notifications of the other plugins, and is case sensitive ((?i) at the start for not). Its captures are ${1}, ${2}... in the texts of the sinks the route sends to.
 
 <h3>Files</h3>
 
-The sinks and sources, each with a name and a type. The built in ones come first: the sinks log and queue, the sources channels and api. Double click to edit; a sink renamed is renamed in the routes too. The editor of a sink also chooses the routes that send to it, and can add a route that sends every message to it. The table of the sinks gives the records each took and refused and the routes that send to it (none: it takes nothing); the errors of the sinks and sources are below.
+The sinks and sources, each with a name and a type. The built in ones come first: the sinks log and queue, the sources channels and api. Double click to edit; a sink renamed is renamed in the routes too. The editor of a sink also chooses the routes that send to it, and can add a route that sends every message to it. The table of the sinks gives the records each took and refused and the routes that send to it (none: it takes nothing). Plus adds a sink or a source, bin removes the one selected. The errors of the sinks and sources are shown below them from the first one.
 
 Sinks:
 
