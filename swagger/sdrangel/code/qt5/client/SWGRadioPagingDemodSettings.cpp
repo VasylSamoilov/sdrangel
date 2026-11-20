@@ -356,7 +356,6 @@ SWGRadioPagingDemodSettings::fromJsonObject(QJsonObject &pJson) {
     
     ::SWGSDRangel::setValue(&gsc_dc_correction, pJson["gscDcCorrection"], "qint32", "");
     
-    
     ::SWGSDRangel::setValue(&volume, pJson["volume"], "float", "");
     
     ::SWGSDRangel::setValue(&audio_device_name, pJson["audioDeviceName"], "QString", "QString");

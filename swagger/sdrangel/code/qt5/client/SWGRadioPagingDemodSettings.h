@@ -115,7 +115,6 @@ public:
     qint32 getGscDcCorrection();
     void setGscDcCorrection(qint32 gsc_dc_correction);
 
-
     float getVolume();
     void setVolume(float volume);
 
@@ -254,7 +253,6 @@ private:
 
     qint32 gsc_dc_correction;
     bool m_gsc_dc_correction_isSet;
-
 
     float volume;
     bool m_volume_isSet;
