@@ -1285,7 +1285,9 @@ void MessageCenterGUI::editRoute(int index, const MessageCenterEngine::Route *pr
 
     filter->showSources(sources);
     filter->setFilter(route.m_filter);
-    layout->addWidget(name);
+    QFormLayout *nameForm = new QFormLayout();
+    nameForm->addRow("Name", name);
+    layout->addLayout(nameForm);
     layout->addWidget(filter);
     QList<QCheckBox*> sinkChecks;
 
@@ -1295,14 +1297,23 @@ void MessageCenterGUI::editRoute(int index, const MessageCenterEngine::Route *pr
         sinks.append(f.m_name);
     }
 
+    // The sinks on a line that wraps, after what they are for
+    QWidget *sinkLine = new QWidget(&dialog);
+    FlowLayout *sinkFlow = new FlowLayout(sinkLine, 0, 10, 3);
+    QLabel *sendTo = new QLabel("Send to", sinkLine);
+    sendTo->setToolTip("The sinks the messages the route selects go to: the log, the transmit queue and the sinks of I/O");
+    sinkFlow->addWidget(sendTo);
+
     for (const QString& sink : sinks)
     {
-        QCheckBox *check = new QCheckBox(QString("Send to %1").arg(sink), &dialog);
+        QCheckBox *check = new QCheckBox(sink, sinkLine);
         check->setProperty("sink", sink);
         check->setChecked(route.m_sinks.contains(sink));
-        layout->addWidget(check);
+        sinkFlow->addWidget(check);
         sinkChecks.append(check);
     }
+
+    layout->addWidget(sinkLine);
 
     QCheckBox *stop = new QCheckBox("Stop: the routes after this one are not checked for the messages it selects", &dialog);
     stop->setChecked(route.m_stop);

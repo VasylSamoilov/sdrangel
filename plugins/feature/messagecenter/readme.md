@@ -52,7 +52,7 @@ The pages to transmit, with the transmitter (its name), protocol, address, text,
 
 <h3>Page</h3>
 
-![Message Center page composer and codepage table](../../../doc/img/MessageCenter_plugin_page.png)
+![Message Center page composer](../../../doc/img/MessageCenter_plugin_page.png)
 
 The composer of a page, the same as in the Radio Paging modulator: transmitter (its name), protocol, address, type, text and the fields of the protocol. Table opens the codepage table of the text. Post the page queues the page for the transmitter.
 
@@ -60,7 +60,7 @@ The composer of a page, the same as in the Radio Paging modulator: transmitter (
 
 Every message is checked against all the routes in their number order (#), not only the first. Each route whose filter selects the message sends it to the sinks of the route: the log, the transmit queue or the sinks of I/O. A route with Stop ends the check for the messages it selects, so the routes after it do not see them. The log is a sink as the others: a message no route sends to it is not logged. A new Message Center has one route, 1 "All messages to the log", without a filter. A sink takes only what a route sends to it.
 
-![Message Center routes, sinks and sources](../../../doc/img/MessageCenter_plugin_routes.png)
+![Message Center routes: all the messages to the log, the messages of the fire service to a CSV file and highlighted](../../../doc/img/MessageCenter_plugin_routes.png)
 
 ![A route](../../../doc/img/MessageCenter_plugin_route.png)
 
@@ -74,6 +74,8 @@ The tool tip of the table of the routes recalls how they work.
 The filter of a route has the fields of the filter of the log, and the source of the message: the channels, the API (ingest) or a source of I/O. Its regular expression on a field of the message (address, message, protocol, type, channel, or any of them separated by spaces) matches anywhere in the field (^ and $ to anchor), as the notifications of the other plugins, and is case sensitive ((?i) at the start for not). Its captures are ${1}, ${2}... in the texts of the sinks the route sends to.
 
 <h3>I/O</h3>
+
+![Message Center sinks and sources: the built in ones, a CSV file and a highlight](../../../doc/img/MessageCenter_plugin_io.png)
 
 The sources and sinks: where messages come from besides the channels (files read as they grow, UDP), and where the routes send them besides the log and the queue (files, UDP, commands, speech, highlight in the log, the Map). Each has a name and a type. The built in ones come first: the sinks log and queue, the sources channels and api. Double click to edit; a sink renamed is renamed in the routes too. The editor of a sink also chooses the routes that send to it, and can add a route that sends every message to it. The table of the sinks gives the records each took and refused and the routes that send to it (none: it takes nothing). Plus adds a sink or a source, bin removes the one selected. The errors of the sinks and sources are shown below them from the first one.
 
