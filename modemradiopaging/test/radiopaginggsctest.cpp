@@ -953,6 +953,30 @@ void testCharacterSets()
     p = packValues({ 0x21, 0x3c, 0x3f, 0x3e, 0x22, 0x3e, 0x3e }, 6, n);
     check(G::decodeAlphanumeric(p, n) == "A\xE2\x90\x8D_B", "Alphanumeric: the Table VII glyphs (0x3C CR/LF as the symbol for CR, 0x3F _), Null/EOM gives no character");
 
+    // The status of each character: a code point each, c for the bits of a corrected codeword, X lost ('?')
+    {
+        std::string status;
+        int m;
+        p = packValues({ 1, 2, 3, 4, 0xe, 0xf, 0x0 }, 4, n);
+        std::vector<uint8_t> corrected = packValues({ 0, 0xf, 0, 0, 0, 0, 0xf }, 4, m);
+        std::vector<uint8_t> lost = packValues({ 0, 0, 0xf, 0, 0, 0, 0 }, 4, m);
+        std::string text = G::decodeNumeric(p, n, &lost, &corrected, &status);
+        check((text == "12?4" + bar + "A") && (status == ".cX..c"),
+            "Numeric status: a digit corrected, one lost, the triple bar one character, a shifted digit as its worst nibble");
+
+        p = packValues({ 0x21, 0x22, 0x23, 0x3c, 0x24 }, 6, n);
+        corrected = packValues({ 0, 0x3f, 0, 0, 0 }, 6, m);
+        lost = packValues({ 0, 0, 0, 0, 0x3f }, 6, m);
+        text = G::decodeAlphanumeric(p, n, nullptr, &lost, &corrected, &status);
+        check((text == "ABC\xE2\x90\x8D?") && (status == ".c..X"), "Alphanumeric status: one for each code point, the lost one X");
+
+        G::Interpretation in = G::interpret(p, n, nullptr, &lost, &corrected);
+        std::string numericStatus;
+        G::decodeNumeric(p, n, &lost, &corrected, &numericStatus);
+        check(in.m_status == ((in.m_type == "alphanumeric") ? std::string(".c..X") : numericStatus),
+            "Interpretation: the status of the text chosen");
+    }
+
     std::vector<G::TxMessage> sent = { tx("100123", 1, G::Numeric, ("12" + bar + "34").c_str()) };
     check(allMatch(decode(G::encode(sent).m_bits, D::Normal, false, 0, 1), sent), "Numeric triple bar in UTF-8 round trip");
     G::EncodeResult eq = G::encode({ tx("100123", 1, G::Numeric, "1=2*3") });

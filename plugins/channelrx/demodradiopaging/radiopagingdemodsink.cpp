@@ -1172,7 +1172,22 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
         {
             // Lost characters are '?', a lost fragment of unknown length is <...>; char_status colours them
             QString charStatus;
-            record.m_text = RadioPagingRecode::decodeWithStatus(message.m_text, message.m_charStatus, charset, charStatus);
+
+            if (!charset && (message.m_charStatus.size() == message.m_text.size()))
+            {
+                // Digits (numeric, HEX/binary, secure binary): the text as it is, a status for each digit; a lost
+                // fragment of hex ('|', G) is coloured as lost
+                record.m_text = RadioPagingRecode::escapeText(message.m_text);
+                charStatus = QString::fromStdString(message.m_charStatus).replace('G', 'X');
+
+                if (charStatus.size() != record.m_text.size()) {
+                    charStatus.clear();
+                }
+            }
+            else
+            {
+                record.m_text = RadioPagingRecode::decodeWithStatus(message.m_text, message.m_charStatus, charset, charStatus);
+            }
 
             if (charset && charset->m_rtl) {
                 RadioPagingRecode::reverseText(record.m_text, charStatus);
@@ -1381,15 +1396,21 @@ void RadioPagingDemodSink::sendGsc(const RadioPagingGscDecoder::Message& message
     {
         const RadioPagingCharset::Codepage *charset = codepage(m_settings.m_gscCharset, "gsc");
         RadioPagingGsc::Interpretation interpretation = RadioPagingGsc::interpret(message.m_rawData, message.m_rawBits, charset,
-            &message.m_rawLost);
+            &message.m_rawLost, &message.m_rawCorrected);
 
         record.m_msgType = QString::fromStdString(interpretation.m_type);
         record.m_text = escapeText(interpretation.m_text);
+        // The status of each character colours it (corrected, lost); none when escaping changed the length
+        QString charStatus = QString::fromStdString(interpretation.m_status);
 
-        if (charset->m_rtl && (interpretation.m_type == "alphanumeric"))
-        {
-            QString noStatus;
-            RadioPagingRecode::reverseText(record.m_text, noStatus);
+        if (charStatus.size() != record.m_text.size()) {
+            charStatus.clear();
+        }
+        if (charset->m_rtl && (interpretation.m_type == "alphanumeric")) {
+            RadioPagingRecode::reverseText(record.m_text, charStatus);
+        }
+        if (!charStatus.isEmpty()) {
+            record.m_protocolData.insert("char_status", charStatus);
         }
 
         insertCustomCodes(record, charset, 2);

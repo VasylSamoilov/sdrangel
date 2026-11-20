@@ -159,6 +159,7 @@ public:
     {
         std::string m_type;         //!< alphanumeric, numeric or tone
         std::string m_text;
+        std::string m_status;       //!< Of m_text, one for each code point: . received, c corrected, X lost ('?')
         int m_score = 0;            //!< Content score of the winner, higher is better, can be negative
         std::string m_altType;      //!< The other candidate, empty if none
         std::string m_altText;
@@ -217,10 +218,13 @@ public:
     //!< most significant bit of byte 0. Alphanumeric: the glyphs of the codepage (RadioPagingCharset::decode), the default
     //!< one (Table VII) without one; Null is padding and gives no character
     //!< lost: bits from codewords that could not be corrected, packed as packed (none if null): the characters
-    //!< with such a bit are '?'
-    static std::string decodeNumeric(const std::vector<uint8_t>& packed, int nbBits, const std::vector<uint8_t> *lost = nullptr);
+    //!< with such a bit are '?'. corrected: bits from codewords that were corrected, packed the same way.
+    //!< status (if not null): one character for each character (code point) of the text, . received, c with a bit of
+    //!< a corrected codeword, X lost
+    static std::string decodeNumeric(const std::vector<uint8_t>& packed, int nbBits, const std::vector<uint8_t> *lost = nullptr,
+        const std::vector<uint8_t> *corrected = nullptr, std::string *status = nullptr);
     static std::string decodeAlphanumeric(const std::vector<uint8_t>& packed, int nbBits, const RadioPagingCharset::Codepage *codepage = nullptr,
-        const std::vector<uint8_t> *lost = nullptr);
+        const std::vector<uint8_t> *lost = nullptr, const std::vector<uint8_t> *corrected = nullptr, std::string *status = nullptr);
     static int scoreNumeric(const std::vector<uint8_t>& packed, int nbBits);
     static int scoreAlphanumeric(const std::vector<uint8_t>& packed, int nbBits);
     //!< Numeric pages longer than this many characters lean heavily towards alphanumeric
@@ -229,7 +233,7 @@ public:
     static int longNumericPenalty(const std::string& numeric);
     //!< Decide between numeric and alphanumeric by content. No bits means tone only
     static Interpretation interpret(const std::vector<uint8_t>& packed, int nbBits, const RadioPagingCharset::Codepage *codepage = nullptr,
-        const std::vector<uint8_t> *lost = nullptr);
+        const std::vector<uint8_t> *lost = nullptr, const std::vector<uint8_t> *corrected = nullptr);
 
     //!< Replace characters below 0x20 and 0x7f by <0xNN>
     static std::string escapeControl(const std::string& text);

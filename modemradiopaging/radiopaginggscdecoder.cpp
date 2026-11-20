@@ -89,6 +89,7 @@ void RadioPagingGscDecoder::reset()
     m_current = Message();
     m_currentBits.clear();
     m_currentLost.clear();
+    m_currentCorrected.clear();
     m_blocks = 0;
     m_codewords = 0;
     m_codewordsCorrected = 0;
@@ -552,6 +553,7 @@ void RadioPagingGscDecoder::finishMessage(bool truncated)
     m_current.m_rawBits = (int) m_currentBits.size();
     m_current.m_rawData.assign((m_currentBits.size() + 7) / 8, 0);
     m_current.m_rawLost.assign((m_currentBits.size() + 7) / 8, 0);
+    m_current.m_rawCorrected.assign((m_currentBits.size() + 7) / 8, 0);
 
     for (size_t i = 0; i < m_currentBits.size(); i++)
     {
@@ -561,12 +563,16 @@ void RadioPagingGscDecoder::finishMessage(bool truncated)
         if ((i < m_currentLost.size()) && m_currentLost[i]) {
             m_current.m_rawLost[i >> 3] |= (uint8_t) (0x80 >> (i & 7));
         }
+        if ((i < m_currentCorrected.size()) && m_currentCorrected[i]) {
+            m_current.m_rawCorrected[i >> 3] |= (uint8_t) (0x80 >> (i & 7));
+        }
     }
 
     m_messages.push_back(m_current);
     m_messageCount++;
     m_currentBits.clear();
     m_currentLost.clear();
+    m_currentCorrected.clear();
     m_active = false;
 }
 
@@ -815,6 +821,7 @@ bool RadioPagingGscDecoder::processNext()
         m_current.m_errorsCorrected = e1 + e2;
         m_currentBits.clear();
         m_currentLost.clear();
+        m_currentCorrected.clear();
         m_active = true;
         m_slot++;
         m_codewords += 2;
@@ -972,6 +979,7 @@ bool RadioPagingGscDecoder::processData()
     uint16_t codewords[8];
     uint8_t words[8];
     bool lost[8] = {};
+    bool corrected[8] = {};
     bool bad = false;
 
     RadioPagingGsc::deinterleaveBlock(&m_buf[m_pos + 1], codewords);
@@ -1017,6 +1025,7 @@ bool RadioPagingGscDecoder::processData()
             {
                 m_current.m_errorsCorrected += b.m_bitErrors;
                 m_codewordsCorrected++;
+                corrected[k] = true;
             }
         }
     }
@@ -1041,12 +1050,14 @@ bool RadioPagingGscDecoder::processData()
         {
             m_currentBits.push_back((words[k] >> i) & 1);
             m_currentLost.push_back(lost[k] ? 1 : 0);
+            m_currentCorrected.push_back(corrected[k] ? 1 : 0);
         }
     }
     for (int i = 0; i < 6; i++)
     {
         m_currentBits.push_back((words[6] >> i) & 1);
         m_currentLost.push_back(lost[6] ? 1 : 0);
+        m_currentCorrected.push_back(corrected[6] ? 1 : 0);
     }
 
     // The last bit of word 6 tells whether a block follows: lost, the end of the message is not known

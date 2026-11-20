@@ -226,8 +226,9 @@ public:
         bool m_payloadUnknown = false;      //!< The layout of the payload is not published
         std::string m_wordMap;              //!< One character for each message word: . clean, c corrected, X lost; fragments split by |
         //! Alphanumeric and secure characters: one for each byte of m_text, . received, c in a word that was corrected,
-        //! u in a received word that could not be corrected (its received bits), X lost ('?'), G a lost fragment of unknown length (its byte in m_text is m_gapCode, not a character). Empty
-        //! otherwise
+        //! u in a received word that could not be corrected (its received bits), X lost ('?'), G a lost fragment of unknown length (its byte in m_text is m_gapCode, not a character).
+        //! Numeric digits and the hex digits of HEX/binary and secure binary messages too (a hex digit: the worst of its 4 bits,
+        //! G its lost fragment mark '|'). Empty otherwise
         std::string m_charStatus;
 
         // Errors in the address, vector and message words
@@ -511,6 +512,7 @@ private:
         bool m_wordsOk = true;              //!< No lost words in the fragment
         std::vector<uint32_t> m_raw;        //!< Message words of the fragment
         std::vector<int8_t> m_bits;         //!< Data bits of a secure hex fragment: 0, 1, -1 lost
+        std::string m_bitStatus;            //!< Of m_bits: the status of the word of each bit (., c, X)
     };
 
     static const int m_maxSubframeWords = 44;   //!< Subframe of a 2x multiple transmission
@@ -567,6 +569,7 @@ private:
         std::string m_text;
         std::vector<uint32_t> m_raw;
         std::vector<int8_t> m_bits;         //!< Secure hex: data bits of the fragments, 2 where fragments are lost
+        std::string m_bitStatus;            //!< Of m_bits: the status of the word of each bit, G where fragments are lost
         std::string m_charStatus;           //!< Of m_text: see Message::m_charStatus
         Message m_message;                  //!< Fields of the first fragment, counters of all
     };

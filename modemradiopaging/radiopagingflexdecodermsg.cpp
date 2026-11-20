@@ -215,6 +215,50 @@ std::string hexFromBits(const std::vector<int8_t>& bits)
     return hex;
 }
 
+// Status of each digit of hexFromBits(bits) from the status of each bit (that of its word: . received, c corrected,
+// X lost): the worst of its bits; G for a lost fragment mark
+std::string hexStatusFromBits(const std::vector<int8_t>& bits, const std::string& bitStatus)
+{
+    std::string status;
+    char worst = '.';
+    int count = 0;
+
+    auto rank = [](char c) { return (c == 'X') ? 2 : (c == 'c') ? 1 : 0; };
+    auto flush = [&]() {
+        if (count > 0) {
+            status += worst;
+        }
+        worst = '.';
+        count = 0;
+    };
+
+    for (size_t i = 0; i < bits.size(); i++)
+    {
+        if (bits[i] == 2)
+        {
+            flush();
+            status += 'G';
+            continue;
+        }
+
+        // A bit without a status (none given) is received; a lost bit is lost whatever its word says
+        char s = (bits[i] < 0) ? 'X' : (i < bitStatus.size()) ? bitStatus[i] : '.';
+
+        if ((s != '.') && (s != 'c')) {
+            s = 'X';
+        }
+        if (rank(s) > rank(worst)) {
+            worst = s;
+        }
+        if (++count == 4) {
+            flush();
+        }
+    }
+
+    flush();
+    return status;
+}
+
 // Number of data bits in a stream, without the lost fragment marks
 int dataBitCount(const std::vector<int8_t>& bits)
 {
@@ -869,6 +913,7 @@ void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& 
         slot.m_charStatus = msg.m_charStatus;
         slot.m_raw = info.m_raw;
         slot.m_bits = info.m_bits;
+        slot.m_bitStatus = info.m_bitStatus;
         slot.m_fragments = 1;
         slot.m_expected = 0;
         slot.m_message = msg;
@@ -907,15 +952,21 @@ void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& 
         {
             slot.m_gap = true;
 
-            if (secureHex) {
+            if (secureHex)
+            {
                 slot.m_bits.push_back(2);
-            } else {
+                slot.m_bitStatus.push_back('G');
+            }
+            else
+            {
                 appendGap(slot);
             }
         }
 
-        if (secureHex) {
+        if (secureHex)
+        {
             slot.m_bits.insert(slot.m_bits.end(), info.m_bits.begin(), info.m_bits.end());
+            slot.m_bitStatus += info.m_bitStatus;
         }
 
         slot.m_signatureSum += info.m_signatureSum;
@@ -926,7 +977,7 @@ void RadioPagingFlexDecoder::handleFragment(Message& msg, const AddressContext& 
 
         // The hex of a secure message is made of the joined bit stream: a fragment need not end on a digit
         slot.m_text = secureHex ? hexFromBits(slot.m_bits) : (slot.m_text + msg.m_text);
-        slot.m_charStatus = secureHex ? std::string() : (slot.m_charStatus + msg.m_charStatus);
+        slot.m_charStatus = secureHex ? hexStatusFromBits(slot.m_bits, slot.m_bitStatus) : (slot.m_charStatus + msg.m_charStatus);
         slot.m_raw.insert(slot.m_raw.end(), info.m_raw.begin(), info.m_raw.end());
         slot.m_fragments++;
         slot.m_lastFrame = m_ctx.m_frame;
@@ -1304,6 +1355,7 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
     // termination of 01 is not defined. Type 01 on a network address is the System NID Change Instruction
     // (FLEX-93001 3.9.7 p.48)
     std::vector<int8_t> secureBits;
+    std::string secureBitStatus;
 
     if (secure && hdrOk && (secureType != 0))
     {
@@ -1314,6 +1366,8 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
             for (int b = 0; b < 21; b++) {
                 secureBits.push_back(lost ? -1 : (int8_t) ((m_w[w].m_data >> b) & 1));
             }
+
+            secureBitStatus.append(21, lost ? 'X' : statusChar(m_w[w].m_status));
         }
 
         // Binary data (t1t0 = 10): the termination of 3.10.1.4 p.70, characters of 1 bit. The termination of
@@ -1326,7 +1380,10 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
 
         msg.m_fillState = secureFill;
 
+        secureBitStatus.resize(secureBits.size());
         msg.m_text = hexFromBits(secureBits);
+        // The digits coloured as the characters are: the status of the words of their bits
+        msg.m_charStatus = hexStatusFromBits(secureBits, secureBitStatus);
         msg.m_hexNibbleBits = 4;
         msg.m_hexLsbFirst = true;
         msg.m_dataBits = dataBitCount(secureBits);
@@ -1355,6 +1412,7 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
     info.m_signatureSum = sum;
     info.m_wordsOk = wordsOk;
     info.m_bits = secureBits;
+    info.m_bitStatus = secureBitStatus;
 
     handleFragment(msg, a, vecType, info);
 }
@@ -1682,6 +1740,7 @@ void RadioPagingFlexDecoder::decodeBinary(Message& proto, const AddressContext& 
     }
 
     std::vector<int8_t> bits;
+    std::string bitStatus;
 
     for (int w = dataStart; (w <= mw2) && (w < wordsPerFrame); w++)
     {
@@ -1690,11 +1749,14 @@ void RadioPagingFlexDecoder::decodeBinary(Message& proto, const AddressContext& 
         for (int b = 0; b < 21; b++) {
             bits.push_back(lost ? -1 : (int8_t) ((m_w[w].m_data >> b) & 1));
         }
+
+        bitStatus.append(21, lost ? 'X' : statusChar(m_w[w].m_status));
     }
 
     int fillState = 0;
 
     bits.resize(terminateBits(bits, blockingKnown ? (blockingValue ? blockingValue : 16) : 0, hexC == 0, fillState));
+    bitStatus.resize(bits.size());
 
     std::string hex = hexFromBits(bits);
 
@@ -1743,6 +1805,7 @@ void RadioPagingFlexDecoder::decodeBinary(Message& proto, const AddressContext& 
     msg.m_type = TypeBinary;
     msg.m_checksum = kCheck;
     msg.m_text = hex;
+    msg.m_charStatus = hexStatusFromBits(bits, bitStatus);
     msg.m_hexNibbleBits = 4;
     msg.m_hexLsbFirst = true;
     msg.m_dataBits = (int) bits.size();
@@ -1775,6 +1838,7 @@ void RadioPagingFlexDecoder::decodeBinary(Message& proto, const AddressContext& 
     FragmentInfo info;
 
     info.m_bits = bits;
+    info.m_bitStatus = bitStatus;
     info.m_signature = signature;
     info.m_wordsOk = initial ? hasSignature : true;
 

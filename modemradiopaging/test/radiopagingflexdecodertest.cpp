@@ -2102,6 +2102,120 @@ void testHexBits()
 }
 
 // HEX/binary and secure messages of the encoder, decoded: text, data bits, header fields, K and signature
+// The hex digits of HEX/binary and secure binary messages have a status, as characters do: . received, c in a
+// corrected word, X lost ('?'). In one frame and over fragments
+void testHexStatus()
+{
+    struct Case
+    {
+        const char *m_label;
+        Flex::MessageType m_type;
+        Flex::BinaryParams m_binary;
+        std::string m_text;
+    };
+
+    Flex::BinaryParams hex;
+    hex.m_blocking = 8;
+    Flex::BinaryParams sec;
+    sec.m_secureType = Flex::SecureBinary;
+    std::string digits40;
+    std::string digits600;
+
+    for (int i = 0; i < 40; i++) {
+        digits40 += "0123456789ABCDEF"[(i * 7) % 16];
+    }
+    for (int i = 0; i < 600; i++) {
+        digits600 += "0123456789ABCDEF"[(i * 5) % 16];
+    }
+
+    const Case cases[] = {
+        {"hex", Flex::Binary, hex, digits40},
+        {"secure binary", Flex::Secure, sec, digits40},
+        {"hex in fragments", Flex::Binary, hex, digits600},
+    };
+
+    for (const Case& c : cases)
+    {
+        Enc enc;
+        Dec clean;
+        Enc::TxMessage m;
+        m.m_capcode = 1234567;
+        m.m_type = c.m_type;
+        m.m_text = c.m_text;
+        m.m_binary = c.m_binary;
+        enc.enqueue(m);
+        std::vector<Dec::RxFrame> frames;
+        std::vector<Dec::Message> out = runEncoder(enc, clean, &frames);
+        const std::string label = std::string("hex status, ") + c.m_label;
+
+        check((out.size() == 1) && (out[0].m_text == c.m_text) && (out[0].m_charStatus == std::string(c.m_text.size(), '.')),
+            (label + ": every digit received").c_str());
+
+        // Each message word of each frame in turn: a bit error (corrected) or the word lost
+        bool corrected = false;
+        bool lost = false;
+        bool consistent = true;
+
+        for (size_t f = 0; f < frames.size(); f++)
+        {
+            for (int w = 0; w < Flex::m_wordsPerFrame; w++)
+            {
+                for (bool erase : {false, true})
+                {
+                    std::vector<Dec::RxFrame> damaged = frames;
+
+                    if (erase)
+                    {
+                        damaged[f].m_phases[0].m_erased.assign(Flex::m_wordsPerFrame, 0);
+                        damaged[f].m_phases[0].m_erased[w] = 1;
+                    }
+                    else
+                    {
+                        editWords(damaged[f].m_phases[0], {{w, 0x00000400u}});
+                    }
+
+                    Dec d;
+                    std::vector<Dec::Message> r;
+
+                    for (const Dec::RxFrame& rx : damaged)
+                    {
+                        std::vector<Dec::Message> o = d.decodeFrame(rx);
+                        r.insert(r.end(), o.begin(), o.end());
+                    }
+                    for (const Dec::Message& msg : r)
+                    {
+                        if ((msg.m_type != Dec::TypeBinary) && (msg.m_type != Dec::TypeSecure)) {
+                            continue;
+                        }
+
+                        consistent = consistent && (msg.m_charStatus.size() == msg.m_text.size());
+
+                        for (size_t i = 0; consistent && (i < msg.m_text.size()); i++)
+                        {
+                            // A lost digit is '?' and X; a lost fragment '|' and G; the others the digit sent
+                            const char s = msg.m_charStatus[i];
+                            consistent = (msg.m_text[i] == '?') ? (s == 'X') : (msg.m_text[i] == '|') ? (s == 'G') : (s != 'X');
+                        }
+
+                        const size_t cCount = (size_t) std::count(msg.m_charStatus.begin(), msg.m_charStatus.end(), 'c');
+
+                        if (!erase && (msg.m_text == c.m_text) && (cCount >= 5) && (cCount <= 7)) {
+                            corrected = true;
+                        }
+                        if (erase && (msg.m_text.find('?') != std::string::npos)) {
+                            lost = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        check(corrected, (label + ": the digits of a corrected word are c, the text unchanged").c_str());
+        check(lost, (label + ": the digits of a lost word are X").c_str());
+        check(consistent, (label + ": a status for each digit, X for each '?' and only for it").c_str());
+    }
+}
+
 void testBinaryTx()
 {
     struct Case
@@ -3711,6 +3825,7 @@ int main()
     testNumericFormats();
     testFragmentScheduling();
     testBinaryTx();
+    testHexStatus();
     testHexBits();
     testReferenceFrames();
     testRoaming();

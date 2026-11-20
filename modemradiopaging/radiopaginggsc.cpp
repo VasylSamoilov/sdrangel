@@ -17,6 +17,7 @@
 
 #include "radiopaginggsc.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 
@@ -933,25 +934,64 @@ RadioPagingGsc::EncodeResult RadioPagingGsc::encode(const std::vector<TxMessage>
     return encode(messages, EncodeOptions());
 }
 
-std::string RadioPagingGsc::decodeNumeric(const std::vector<uint8_t>& packed, int nbBits, const std::vector<uint8_t> *lost)
+namespace {
+
+// Code points of a UTF-8 string
+int utf8Length(const std::string& s)
+{
+    return (int) std::count_if(s.begin(), s.end(), [](char c) { return (((unsigned char) c) & 0xc0) != 0x80; });
+}
+
+// The worse of two statuses: X lost, c corrected, . received
+char worseStatus(char a, char b)
+{
+    auto rank = [](char c) { return (c == 'X') ? 2 : (c == 'c') ? 1 : 0; };
+    return (rank(b) > rank(a)) ? b : a;
+}
+
+} // namespace
+
+std::string RadioPagingGsc::decodeNumeric(const std::vector<uint8_t>& packed, int nbBits, const std::vector<uint8_t> *lost,
+    const std::vector<uint8_t> *corrected, std::string *status)
 {
     // 0x0-0xd, Null (0xa) is not looked up
     static const char numericChars[] = "0123456789\0U -";
     std::string text;
     bool shifted = false;
+    char shiftStatus = '.';
+    int length = 0;
 
     if (lost && (lost->size() < packed.size())) {
         lost = nullptr;
     }
+    if (corrected && (corrected->size() < packed.size())) {
+        corrected = nullptr;
+    }
+    if (status) {
+        status->clear();
+    }
+
+    // The characters added to the text take the status s
+    auto mark = [&](char s) {
+        const int now = utf8Length(text);
+
+        if (status) {
+            status->append((size_t) (now - length), s);
+        }
+
+        length = now;
+    };
 
     for (int i = 0; i + 4 <= nbBits; i += 4)
     {
         unsigned v = streamValue(packed, i, 4);
+        const char digitStatus = (corrected && (streamValue(*corrected, i, 4) != 0)) ? 'c' : '.';
 
         // A digit of a codeword that could not be corrected, and the shift state with it, are not known
         if (lost && (streamValue(*lost, i, 4) != 0))
         {
             text.push_back('?');
+            mark('X');
             shifted = false;
             continue;
         }
@@ -959,6 +999,7 @@ std::string RadioPagingGsc::decodeNumeric(const std::vector<uint8_t>& packed, in
         if (shifted)
         {
             shifted = false;
+            const char s = worseStatus(shiftStatus, digitStatus);
 
             // A shift followed by Null is the E of the pagers without the shifted set
             if (v == (unsigned) numericNull) {
@@ -968,39 +1009,82 @@ std::string RadioPagingGsc::decodeNumeric(const std::vector<uint8_t>& packed, in
             } else {
                 text.push_back(numericShiftChars[v]);
             }
+
+            mark(s);
         }
         else if (v == (unsigned) numericShift)
         {
             shifted = true;
+            shiftStatus = digitStatus;
         }
         else if (v == (unsigned) numericTripleBar)
         {
             text += tripleBarUtf8;
+            mark(digitStatus);
         }
         else if (v != (unsigned) numericNull)
         {
             text.push_back(numericChars[v]);
+            mark(digitStatus);
         }
     }
 
     // A shift at the end has no character to shift
-    if (shifted) {
+    if (shifted)
+    {
         text.push_back('E');
+        mark(shiftStatus);
     }
 
     return text;
 }
 
 std::string RadioPagingGsc::decodeAlphanumeric(const std::vector<uint8_t>& packed, int nbBits, const RadioPagingCharset::Codepage *codepage,
-    const std::vector<uint8_t> *lost)
+    const std::vector<uint8_t> *lost, const std::vector<uint8_t> *corrected, std::string *status)
 {
     const RadioPagingCharset::Codepage& page = codepage ? *codepage : *RadioPagingCharset::defaultFor("gsc");
     std::string text;
     std::vector<uint8_t> codes;
+    std::string codeStatus;
 
     if (lost && (lost->size() < packed.size())) {
         lost = nullptr;
     }
+    if (corrected && (corrected->size() < packed.size())) {
+        corrected = nullptr;
+    }
+    if (status) {
+        status->clear();
+    }
+
+    // A run of codes decoded together (a codepage may join codes): its characters take the status of their code
+    // when there is one character a code, else the worst of the run
+    auto flush = [&]() {
+        const std::string piece = RadioPagingCharset::decode(page, codes);
+        const int n = utf8Length(piece);
+
+        if (status)
+        {
+            if (n == (int) codeStatus.size())
+            {
+                *status += codeStatus;
+            }
+            else
+            {
+                char worst = '.';
+
+                for (char s : codeStatus) {
+                    worst = worseStatus(worst, s);
+                }
+
+                status->append((size_t) n, worst);
+            }
+        }
+
+        text += piece;
+        codes.clear();
+        codeStatus.clear();
+    };
 
     for (int i = 0; i + 6 <= nbBits; i += 6)
     {
@@ -1009,19 +1093,26 @@ std::string RadioPagingGsc::decodeAlphanumeric(const std::vector<uint8_t>& packe
         // A character of a codeword that could not be corrected is not known: the run before it is decoded
         if (lost && (streamValue(*lost, i, 6) != 0))
         {
-            text += RadioPagingCharset::decode(page, codes);
-            codes.clear();
+            flush();
             text.push_back('?');
+
+            if (status) {
+                status->push_back('X');
+            }
+
             continue;
         }
 
         // Null/EOM is padding and does not give a character
-        if (code != (unsigned) alphaNull) {
+        if (code != (unsigned) alphaNull)
+        {
             codes.push_back((uint8_t) code);
+            codeStatus.push_back((corrected && (streamValue(*corrected, i, 6) != 0)) ? 'c' : '.');
         }
     }
 
-    return text + RadioPagingCharset::decode(page, codes);
+    flush();
+    return text;
 }
 
 int RadioPagingGsc::scoreAlphanumeric(const std::vector<uint8_t>& packed, int nbBits)
@@ -1124,7 +1215,7 @@ int RadioPagingGsc::longNumericPenalty(const std::string& numeric)
 }
 
 RadioPagingGsc::Interpretation RadioPagingGsc::interpret(const std::vector<uint8_t>& packed, int nbBits,
-    const RadioPagingCharset::Codepage *codepage, const std::vector<uint8_t> *lost)
+    const RadioPagingCharset::Codepage *codepage, const std::vector<uint8_t> *lost, const std::vector<uint8_t> *corrected)
 {
     Interpretation result;
 
@@ -1134,8 +1225,10 @@ RadioPagingGsc::Interpretation RadioPagingGsc::interpret(const std::vector<uint8
         return result;
     }
 
-    std::string alpha = decodeAlphanumeric(packed, nbBits, codepage, lost);
-    std::string numeric = decodeNumeric(packed, nbBits, lost);
+    std::string alphaStatus;
+    std::string numericStatus;
+    std::string alpha = decodeAlphanumeric(packed, nbBits, codepage, lost, corrected, &alphaStatus);
+    std::string numeric = decodeNumeric(packed, nbBits, lost, corrected, &numericStatus);
     int alphaScore = scoreAlphanumeric(packed, nbBits);
     int numericScore = scoreNumeric(packed, nbBits) - longNumericPenalty(numeric);
 
@@ -1144,6 +1237,7 @@ RadioPagingGsc::Interpretation RadioPagingGsc::interpret(const std::vector<uint8
     {
         result.m_type = "numeric";
         result.m_text = numeric;
+        result.m_status = numericStatus;
         result.m_score = numericScore;
         result.m_altType = "alphanumeric";
         result.m_altText = alpha;
@@ -1153,6 +1247,7 @@ RadioPagingGsc::Interpretation RadioPagingGsc::interpret(const std::vector<uint8
     {
         result.m_type = "alphanumeric";
         result.m_text = alpha;
+        result.m_status = alphaStatus;
         result.m_score = alphaScore;
         result.m_altType = "numeric";
         result.m_altText = numeric;
