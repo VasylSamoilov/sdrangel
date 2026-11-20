@@ -450,7 +450,8 @@ RadioPagingGsc::BchResult RadioPagingGsc::bchDecode(uint16_t word)
 
 uint16_t RadioPagingGsc::preambleValue(int index)
 {
-    return preambleValues[index];
+    const int count = (int) (sizeof(preambleValues) / sizeof(preambleValues[0]));
+    return ((index >= 0) && (index < count)) ? preambleValues[index] : preambleValues[0];
 }
 
 int RadioPagingGsc::preambleIndex(uint16_t value)

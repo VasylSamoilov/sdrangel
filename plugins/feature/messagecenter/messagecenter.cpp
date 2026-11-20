@@ -1119,6 +1119,11 @@ int MessageCenter::webapiActionsPost(const QStringList& featureActionsKeys, SWGS
         const MessageRecord *record = m_engine.find(id);
         MessageRecord out;
 
+        if (!redecode)
+        {
+            errorMessage = "No redecode in the request";
+            return 400;
+        }
         if (!record)
         {
             errorMessage = QString("No record %1 in the log").arg(id);

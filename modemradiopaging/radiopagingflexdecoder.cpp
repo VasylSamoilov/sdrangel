@@ -592,7 +592,6 @@ void RadioPagingFlexDecoder::combineSubframes(SubframeStore& store, Word *out, i
             if (w.m_status == WordClean)
             {
                 best = w;
-                bestCopy = c;
                 break;
             }
 

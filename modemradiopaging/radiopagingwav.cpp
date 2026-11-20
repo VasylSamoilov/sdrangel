@@ -51,7 +51,7 @@ bool RadioPagingWav::decode(const std::vector<uint8_t>& file, Audio& audio, std:
 {
     audio = Audio();
 
-    if ((file.size() < 12) || std::memcmp(file.data(), "RIFF", 4) || std::memcmp(file.data() + 8, "WAVE", 4))
+    if ((file.size() < 12) || (std::memcmp(file.data(), "RIFF", 4) != 0) || (std::memcmp(file.data() + 8, "WAVE", 4) != 0))
     {
         error = "Not a WAV file";
         return false;
