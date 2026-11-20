@@ -169,6 +169,9 @@ constexpr int kFrameBits = kBitSyncBits + kFrameSyncBits + kEncodedBits;
 using FrameBits = std::array<uint8_t, kFrameBits>;     // one bit per element, in transmission order
 
 MODEMNMT_API FrameBits encodeFrame(const Frame& frame);
+// "5a Line signal: N=016 P=6 Y=81 Z=8 X=123456 L=666": the number and description of the frame
+// type and its information elements as the digits on the air (hexadecimal, one per digit).
+MODEMNMT_API std::string describeFrame(const Frame& frame);
 // The 140 bits after the synchronisation. There is no error detection, so a frame always
 // decodes; the receiver has to check the information elements.
 MODEMNMT_API Frame decodeFrame(const EncodedBits& bits, Direction direction, bool callAck);

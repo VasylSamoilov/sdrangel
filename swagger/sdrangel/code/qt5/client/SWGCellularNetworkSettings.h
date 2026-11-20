@@ -60,6 +60,9 @@ public:
     qint32 getArea();
     void setArea(qint32 area);
 
+    qint32 getY1();
+    void setY1(qint32 y1);
+
     qint32 getAreaNo();
     void setAreaNo(qint32 area_no);
 
@@ -111,6 +114,9 @@ private:
 
     qint32 area;
     bool m_area_isSet;
+
+    qint32 y1;
+    bool m_y1_isSet;
 
     qint32 area_no;
     bool m_area_no_isSet;

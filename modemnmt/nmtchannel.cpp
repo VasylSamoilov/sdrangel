@@ -494,6 +494,9 @@ bool NmtChannel::nextFrame(FrameBits& bits)
     }
 
     bits = encodeFrame(frame);
+    if (m_tap) {
+        m_tap(true, frame, 1.0, 1.0);
+    }
     return true;
 }
 
@@ -649,6 +652,9 @@ void NmtChannel::receiveFrame(const RxFrame& rx)
     received.framesElapsed = rx.framesElapsed;
     received.leadingZeros = rx.leadingZeros;
 
+    if (m_tap) {
+        m_tap(false, received.frame, rx.quality, rx.level);
+    }
     if (m_listener) {
         m_listener(received);
     }

@@ -452,6 +452,43 @@ Frame disassembleDigits(const FrameDigits& digits, Direction direction, bool cal
     return frame;
 }
 
+std::string describeFrame(const Frame& frame)
+{
+    static const char kHex[] = "0123456789ABCDEF";
+    const FrameDef& def = frameDef(frame.mt);
+    const FrameDigits digits = assembleDigits(frame);
+    std::string text = def.number[0] ? def.number : "?";
+
+    text += " ";
+    text += def.description;
+    text += ":";
+
+    for (int i = 0; i < 16; )
+    {
+        const char letter = def.digits[i];
+        int j = i;
+
+        while (j < 16 && def.digits[j] == letter) {
+            j++;
+        }
+        if (letter != '-')
+        {
+            text += ' ';
+            text += letter;
+            text += '=';
+            for (int k = i; k < j; k++)
+            {
+                // a received frame carries the prefix it came with
+                const int digit = (letter == 'P' && frame.prefix) ? (frame.prefix & 0xf) : digits[k];
+                text += kHex[digit & 0xf];
+            }
+        }
+        i = j;
+    }
+
+    return text;
+}
+
 FrameBits encodeFrame(const Frame& frame)
 {
     static const char kSync[] = "10101010101010111100010010";     // bit sync 101010101010101, frame sync 11100010010

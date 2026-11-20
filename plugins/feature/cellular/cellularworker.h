@@ -110,6 +110,12 @@ private:
         modemcellular::WireSpan boundTx;
         modemcellular::CarrierBatch txBatch;
         std::vector<float> levels;              // per carrier on air
+        struct Trace
+        {
+            std::string last;                   // the last frame to the phone that was logged
+            int repeats = 0;                    // times it was sent
+        };
+        std::vector<Trace> traces;              // per carrier on air
         uint64_t batches = 0;
         uint64_t gaps = 0;                      // batches of the receiver that did not arrive
         uint64_t nextSample = 0;
@@ -132,6 +138,9 @@ private:
     void sendTo(ChannelAPI *channel, const std::vector<uint8_t>& wire);
     void sendAudio(ChannelAPI *channel, const std::vector<uint8_t>& wire);
     void log(int network, const QString& text);
+    // the frames of a carrier into the event log of its network
+    void traceFrame(Network& n, size_t index, bool toPhone, const modemnmt::Frame& frame, double quality, double level);
+    void flushTrace(Network& n, size_t index);
 
     MessageQueue m_inputMessageQueue;
     MessageQueue *m_reports;

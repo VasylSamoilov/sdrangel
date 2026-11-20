@@ -57,6 +57,22 @@ NmtBaseStation::NmtBaseStation(const NmtNetworkConfig& config) :
     if (!country) {
         m_issues.push_back({true, "no NMT-" + std::to_string(static_cast<int>(config.system)) + " plan for country " + config.country});
     }
+    else if (config.y1 >= 0)
+    {
+        const int maxY1 = (config.system == System::Nmt450) ? 15 : 7;
+
+        if (config.y1 > maxY1 || config.area < 0 || config.area > 15)
+        {
+            m_issues.push_back({true, "Y1 " + std::to_string(config.y1) + " and Y2 " + std::to_string(config.area)
+                + " are not a traffic area (Y1 0.." + std::to_string(maxY1) + ", Y2 0..15)"});
+        }
+        else
+        {
+            m_trafficArea = (config.y1 << 4) | config.area;
+            m_issues.push_back({false, "test network: country digit Y1 " + std::to_string(config.y1)
+                + " on the plan of " + config.country});
+        }
+    }
     else
     {
         m_trafficArea = nmtTrafficArea(config.system, config.country + "," + std::to_string(config.area));

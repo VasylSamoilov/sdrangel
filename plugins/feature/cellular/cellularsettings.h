@@ -42,6 +42,7 @@ struct CellularNetworkSettings
     int m_system;               // 0: NMT-450, 1: NMT-900
     QString m_country;          // short name of the plan: DK, SE, NO, FI, NL, HU ...
     int m_area;                 // traffic area Y2 within the country
+    int m_y1;                   // country digit Y1 in place of the country's (test network), -1: the country's
     int m_areaNo;               // area number 1..4, 0 for none
     int m_msPower;              // power level of the phones 0..3
     QString m_carriers;         // "1:cctc:1, 5:tc:2, 6:tc:3" (see parseCarriers)

@@ -40,6 +40,8 @@ SWGCellularNetworkSettings::SWGCellularNetworkSettings() {
     m_country_isSet = false;
     area = 0;
     m_area_isSet = false;
+    y1 = 0;
+    m_y1_isSet = false;
     area_no = 0;
     m_area_no_isSet = false;
     ms_power = 0;
@@ -80,6 +82,8 @@ SWGCellularNetworkSettings::init() {
     m_country_isSet = false;
     area = 0;
     m_area_isSet = false;
+    y1 = 0;
+    m_y1_isSet = false;
     area_no = 0;
     m_area_no_isSet = false;
     ms_power = 0;
@@ -113,6 +117,7 @@ SWGCellularNetworkSettings::cleanup() {
     if(country != nullptr) { 
         delete country;
     }
+
 
 
 
@@ -152,6 +157,8 @@ SWGCellularNetworkSettings::fromJsonObject(QJsonObject &pJson) {
     ::SWGSDRangel::setValue(&country, pJson["country"], "QString", "QString");
     
     ::SWGSDRangel::setValue(&area, pJson["area"], "qint32", "");
+    
+    ::SWGSDRangel::setValue(&y1, pJson["y1"], "qint32", "");
     
     ::SWGSDRangel::setValue(&area_no, pJson["areaNo"], "qint32", "");
     
@@ -206,6 +213,9 @@ SWGCellularNetworkSettings::asJsonObject() {
     }
     if(m_area_isSet){
         obj->insert("area", QJsonValue(area));
+    }
+    if(m_y1_isSet){
+        obj->insert("y1", QJsonValue(y1));
     }
     if(m_area_no_isSet){
         obj->insert("areaNo", QJsonValue(area_no));
@@ -299,6 +309,16 @@ void
 SWGCellularNetworkSettings::setArea(qint32 area) {
     this->area = area;
     this->m_area_isSet = true;
+}
+
+qint32
+SWGCellularNetworkSettings::getY1() {
+    return y1;
+}
+void
+SWGCellularNetworkSettings::setY1(qint32 y1) {
+    this->y1 = y1;
+    this->m_y1_isSet = true;
 }
 
 qint32
@@ -422,6 +442,9 @@ SWGCellularNetworkSettings::isSet(){
             isObjectUpdated = true; break;
         }
         if(m_area_isSet){
+            isObjectUpdated = true; break;
+        }
+        if(m_y1_isSet){
             isObjectUpdated = true; break;
         }
         if(m_area_no_isSet){

@@ -746,9 +746,35 @@ static void testAnyBitsDecode()
     }
 }
 
+// The text of a frame shows the digits on the air per element (the frame of the example in
+// NMT Doc 450-1: channel 135, traffic area 64, prefix 12).
+static void testDescribeFrame()
+{
+    Frame f;
+    f.mt = MT::Frame1a;
+    f.channelNo = static_cast<uint16_t>(encodeChannel(System::Nmt450, 135, 0));
+    f.trafficArea = static_cast<uint8_t>(encodeTrafficArea(System::Nmt450, 135, 0x64));
+    CHECK(describeFrame(f) == "1a Calling channel indication: N=135 P=C Y=64 H=0000000000");
+
+    // a received frame shows the prefix it came with, the number in the digits of the air
+    Frame r;
+    r.mt = MT::Frame10b;
+    r.channelNo = static_cast<uint16_t>(encodeChannel(System::Nmt450, 16, 0));
+    r.prefix = 1;
+    r.msCountry = 8;
+    r.msNumber = 0x12345a;
+    r.areaInfo = 0;
+    r.trafficArea = 1;
+    r.msPassword = 0x123;
+    const std::string text = describeFrame(r);
+    CHECK(text.rfind("10b ", 0) == 0);
+    CHECK(text.find(" N=016 P=1 Z=8 X=12345A T=0 Y=1 K=123") != std::string::npos);
+}
+
 int main()
 {
     testFrameTable();
+    testDescribeFrame();
     testStandardExampleFrame();
     testANumberExample();
     testANumberFrameCount();

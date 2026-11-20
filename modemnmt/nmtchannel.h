@@ -305,6 +305,9 @@ public:
         bool leadingZeros;
     };
     using FrameListener = std::function<void(const ReceivedFrame&)>;
+    // Every frame of the channel: received ones after decoding (with their quality and level),
+    // sent ones when they go on the air (quality and level 1).
+    using FrameTap = std::function<void(bool toPhone, const Frame& frame, double quality, double level)>;
 
     // sampleRate of the audio, deviationFactor scales the signalling level to the transmitter.
     NmtChannel(const ChannelConfig& config, double sampleRate, double deviationFactor);
@@ -343,6 +346,7 @@ public:
 
     void setTimeOfDay(TimeOfDay timeOfDay) { m_timeOfDay = std::move(timeOfDay); }
     void setFrameListener(FrameListener listener) { m_listener = std::move(listener); }
+    void setFrameTap(FrameTap tap) { m_tap = std::move(tap); }
 
     // Next idle frame of the channel, counts the idle frames sent. The additional information
     // alternates between channel band advertisement and battery saving if both are configured.
@@ -457,6 +461,7 @@ private:
     bool m_valid;
     TimeOfDay m_timeOfDay;
     FrameListener m_listener;
+    FrameTap m_tap;
     NmtModem m_modem;
     uint64_t m_framesSent;
 
