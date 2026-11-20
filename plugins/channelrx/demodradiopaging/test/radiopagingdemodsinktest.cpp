@@ -273,6 +273,111 @@ std::vector<int> receiveWithOffset(double offset, float rfBandwidth, std::vector
     return received;
 }
 
+// One carrier is one protocol at a time: the data of FLEX frames (any bits, among them by chance a POCSAG sync codeword
+// and an address of 2 corrected bits) gives no POCSAG or GSC message, and a POCSAG and a GSC transmission after them are
+// received (the decoders kept hunting). Found with a radio round trip: POCSAG tone pages in a FLEX group transmission
+void testNoFalseLocks()
+{
+    Modulator mod;
+    std::set<std::string> sent;
+    std::mt19937 rng(20261120);
+    std::uniform_int_distribution<int> character(32, 126);
+    static const float levels4[4] = {-1.0f, -1.0f/3.0f, 1.0f/3.0f, 1.0f};
+
+    mod.noise(3000);
+
+    for (RadioPagingFlex::Mode mode : {RadioPagingFlex::Mode1600_2, RadioPagingFlex::Mode3200_2, RadioPagingFlex::Mode3200_4, RadioPagingFlex::Mode6400_4})
+    {
+        RadioPagingFlexEncoder encoder;
+        encoder.setMode(mode);
+
+        // Frames full of text of every character: the bits of a lot of different words
+        for (int i = 0; i < 24; i++)
+        {
+            RadioPagingFlexEncoder::TxMessage m;
+            m.m_capcode = 300000 + 17 * i + 1000 * (int) mode;
+            m.m_type = RadioPagingFlex::Alphanumeric;
+
+            for (int c = 0; c < 200; c++) {
+                m.m_text += (char) character(rng);
+            }
+
+            if (encoder.enqueue(m).m_ok)
+            {
+                char a[16];
+                std::snprintf(a, sizeof(a), "%010llu", (unsigned long long) m.m_capcode);
+                sent.insert(key("flex", RadioPagingFlex::modeName(mode), a, false));
+            }
+        }
+
+        for (uint64_t index = 0; (encoder.pending() > 0) && (index < 100); index++)
+        {
+            for (const auto& block : encoder.buildFrame(index).m_blocks)
+            {
+                std::vector<float> levels;
+                for (uint8_t s : block.m_symbols) {
+                    levels.push_back((block.m_levels == 4) ? levels4[s & 3] : ((s & 1) ? 1.0f : -1.0f));
+                }
+                mod.symbols(levels, block.m_baud, 4800.0);
+            }
+        }
+    }
+
+    // Right after the last frame: the other protocols are received
+    addPocsag(mod, sent, 1200, 1234567, "POCSAG AFTER THE FLEX FRAMES", false);
+    addGsc(mod, sent, { gsc("100123", 3, RadioPagingGsc::Alphanumeric, "GSC AFTER FLEX") });
+
+    MessageQueue queue;
+    RadioPagingDemodSink sink;
+    RadioPagingDemodSettings settings;
+    sink.setMessageQueueToChannel(&queue);
+    sink.applyChannelSettings((int) sampleRate, 0, true);
+    sink.applySettings(QStringList(), settings, true);
+
+    for (size_t i = 0; i < mod.m_samples.size(); i += 4096)
+    {
+        size_t end = std::min(mod.m_samples.size(), i + 4096);
+        sink.feed(mod.m_samples.begin() + i, mod.m_samples.begin() + end);
+    }
+
+    int flex = 0;
+    int pocsag = 0;
+    int gscReceived = 0;
+    int unexpected = 0;
+    Message *message;
+
+    while ((message = queue.pop()))
+    {
+        if (MainCore::MsgMessageRecord::match(*message))
+        {
+            const MessageRecord& r = ((MainCore::MsgMessageRecord *) message)->getRecord();
+            const bool expected = sent.count(key(r.m_protocol.toStdString(), r.m_mode.toStdString(), r.m_address.toStdString(),
+                r.m_polarity == MessageRecord::PolarityInverted)) > 0;
+
+            if (r.m_kind != MessageRecord::KindMessage) {
+                // Events
+            } else if (!expected) {
+                unexpected++;
+                std::printf("      unexpected: %s %s %s %s\n", qPrintable(r.m_protocol), qPrintable(r.m_mode), qPrintable(r.m_address),
+                    qPrintable(r.m_msgType));
+            } else if (r.m_protocol == "flex") {
+                flex++;
+            } else if (r.m_protocol == "pocsag") {
+                pocsag++;
+            } else {
+                gscReceived++;
+            }
+        }
+        delete message;
+    }
+
+    RadioPagingDemodSink::Status status = sink.getStatus();
+    std::printf("      FLEX %d/96, POCSAG %d/1, GSC %d/1, locks dropped in FLEX frames: POCSAG %u, GSC %u\n", flex, pocsag, gscReceived,
+        status.m_locksDropped[0], status.m_locksDropped[2]);
+    check(unexpected == 0, "FLEX frames of any data: no POCSAG or GSC message decoded in them");
+    check((flex == 96) && (pocsag == 1) && (gscReceived == 1), "FLEX received, then POCSAG and GSC right after the frames");
+}
+
 void testFrequencyOffset()
 {
     const double offsets[] = {0.0, 1000.0, -1000.0, 2000.0, -2000.0, 3000.0, -3000.0};
@@ -986,6 +1091,7 @@ int main(int argc, char **argv)
     testVoiceAudio();
     testVoiceRecording();
     testVoiceStore();
+    testNoFalseLocks();
     testFrequencyOffset();
 
     std::printf("%d passed, %d failed\n", passes, failures);

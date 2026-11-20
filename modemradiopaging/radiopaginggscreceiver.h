@@ -64,6 +64,9 @@ public:
     //!< sampleRate in Hz
     void create(double sampleRate);
     void reset();
+    //!< The decoders back to hunting, what they were receiving dropped without a message: a lock the receiver of
+    //!< the channel does not take (another protocol is receiving). The demodulator, the time and the duplicates stay
+    void dropLock();
     void setPolarities(bool normal, bool inverted) { m_normalEnabled = normal; m_invertedEnabled = inverted; }
     //!< Enable the detection of the non battery saver pattern. Off by default
     void setNonBatterySaver(bool enable);

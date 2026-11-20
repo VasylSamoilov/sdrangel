@@ -61,6 +61,14 @@ void RadioPagingPocsagReceiver::reset()
     m_measuredDc = 0.0f;
 }
 
+void RadioPagingPocsagReceiver::dropLock()
+{
+    m_normal.reset();
+    m_inverted.reset();
+    m_preambleLocked = false;
+    m_bitsSincePreamble = 0;
+}
+
 // The last 32 symbols were the sync codeword, sent most significant bit first; a binary 1
 // is a negative deviation in normal polarity
 void RadioPagingPocsagReceiver::fitSyncCodeword(bool inverted)

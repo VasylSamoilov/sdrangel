@@ -327,6 +327,11 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
     Real fms[3] = {0.0f, 0.0f, 0.0f};
     bool syncs[3] = {false, false, false};
 
+    // One carrier is one protocol at a time: while a FLEX frame is being received (its symbols those of its carrier),
+    // the POCSAG and GSC decoders keep hunting, but a lock they find is dropped: it is in the FLEX data. Once the frame
+    // ends, or its carrier is lost or replaced, they lock on whatever comes
+    const bool flexReceiving = m_settings.m_flexEnabled && m_flex.isReceivingFrame();
+
     if (m_settings.m_pocsagEnabled)
     {
         Real fm = m_pocsagLeg.demod(ci);
@@ -337,10 +342,16 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
         {
             m_pocsag[i].process(fm);
 
+            if (flexReceiving && m_pocsag[i].isSynced())
+            {
+                m_pocsag[i].dropLock();
+                m_status.m_locksDropped[ProtocolPocsag]++;
+            }
+
             while (m_pocsag[i].hasMessage()) {
                 sendPocsag(m_pocsag[i].takeMessage(), RadioPagingDemodSettings::m_pocsagSpeeds[i]);
             }
-            if (m_pocsag[i].takeLevelsMeasured(dc)) {
+            if (m_pocsag[i].takeLevelsMeasured(dc) && !flexReceiving) {
                 legMeasured(m_pocsagLeg, ProtocolPocsag, dc);
             }
             synced = synced || m_pocsag[i].isSynced();
@@ -383,12 +394,19 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
         Real fm = m_gscLeg.demod(ci);
         m_gsc.process(fm);
         fms[ProtocolGsc] = fm;
+
+        if (flexReceiving && m_gsc.locked())
+        {
+            m_gsc.dropLock();
+            m_status.m_locksDropped[ProtocolGsc]++;
+        }
+
         syncs[ProtocolGsc] = m_gsc.locked();
 
         while (m_gsc.hasMessage()) {
             sendGsc(m_gsc.takeMessage());
         }
-        if (m_gsc.takeLevelsMeasured(dc)) {
+        if (m_gsc.takeLevelsMeasured(dc) && !flexReceiving) {
             legMeasured(m_gscLeg, ProtocolGsc, dc);
         }
         if (!m_gsc.locked()) {

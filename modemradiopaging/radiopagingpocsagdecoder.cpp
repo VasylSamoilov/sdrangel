@@ -296,8 +296,22 @@ bool RadioPagingPocsagDecoder::decodeUnconfirmedBatch(int received)
 {
     int cut = 0;
 
+    // A sync codeword alone (no preamble before it, no sync codeword one batch after it) is all that says the signal is
+    // POCSAG: in noise, a carrier or the data of another protocol one is found now and then, and the code corrects half
+    // of the words that follow it to some codeword. A codeword that needs a correction ends it: the codewords are taken
+    // as received (an undecodable one is a lost codeword of the message, it says nothing)
+    const bool alone = (m_batch == 0) && !m_leadingConfirmed && !m_preambleBefore;
+
     for (int slot = 0; slot < received; slot++)
     {
+        if (alone)
+        {
+            RadioPagingBCH::Result result = RadioPagingBCH::decode(m_batchWords[slot]);
+
+            if ((result.m_bitErrors > 0) || ((result.m_bitErrors == 0) && result.m_parityError)) {
+                break;
+            }
+        }
         if (decipherable(slot)) {
             cut = slot + 1;
         }

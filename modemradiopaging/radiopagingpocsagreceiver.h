@@ -59,6 +59,9 @@ public:
     //!< sampleRate in Hz, baud 512, 1200 or 2400
     void create(double sampleRate, int baud);
     void reset();
+    //!< The decoders back to hunting, what they were receiving dropped without a message: a lock the receiver of
+    //!< the channel does not take (another protocol is receiving). The demodulator, the time and the duplicates stay
+    void dropLock();
     void setPolarities(bool normal, bool inverted) { m_normalEnabled = normal; m_invertedEnabled = inverted; }
     //!< Messages remembered for duplicates: the last ones of each pager, within this time (default 60 s)
     void setDuplicateWindow(double seconds) { m_dedup.setWindow(seconds); }

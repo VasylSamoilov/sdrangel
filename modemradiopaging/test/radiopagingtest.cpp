@@ -797,6 +797,19 @@ void testPocsagStandardRules()
         && (RadioPagingPocsag::interpret(badDecoded[0].m_rawData, badDecoded[0].m_rawBits).m_text.compare(0, 6, "single") == 0)
         && (badDecoded[0].m_wordStatus.back() == 'X'), "POCSAG decoder: an unconfirmed batch with an undecodable codeword is decoded");
 
+    // A sync codeword alone whose address needs a correction: what noise, a carrier or the data of another protocol give
+    // (the code corrects half of the words to some codeword). No message (found with a radio round trip: tone pages
+    // of 2 corrected bits in a FLEX transmission)
+    for (int errors : {1, 2})
+    {
+        std::vector<uint8_t> corrected = single.m_bits;
+        for (int i = 0; i < errors; i++) {
+            corrected[32 + 3 + 11 * i] ^= 1;    // The address codeword, the first after the sync codeword
+        }
+        check(decodeBits(corrected).empty(), (std::string("POCSAG decoder: a sync codeword alone with an address of ") + std::to_string(errors)
+            + " corrected bits gives no message").c_str());
+    }
+
     // A sync codeword pattern alone, noise after it: not decoded
     std::vector<uint8_t> syncAlone(single.m_bits.begin(), single.m_bits.begin() + 32);
     std::mt19937 noiseRng(5);

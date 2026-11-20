@@ -506,8 +506,14 @@ void RadioPagingFlexReceiver::startData(float offset)
     m_blockSamples.assign(RadioPagingFlex::m_blocksPerFrame, 0);
     m_errorSum = 0.0;
     m_errorCount = 0;
+    m_recentError2 = 0.0;       // The frame starts on its sync: clean
 
     m_state = Sync2;
+}
+
+bool RadioPagingFlexReceiver::isReceivingFrame() const
+{
+    return ((m_state == Sync2) || (m_state == Data)) && (m_recentError2 < m_receivingErrorRms * m_receivingErrorRms);
 }
 
 void RadioPagingFlexReceiver::dataSymbol(int symbol, float error, float soft, float magsq)
@@ -523,6 +529,7 @@ void RadioPagingFlexReceiver::dataSymbol(int symbol, float error, float soft, fl
 
     m_errorSum += (double) error * error;
     m_errorCount++;
+    m_recentError2 += ((double) error * error - m_recentError2) / 32.0;
     storeDataSymbol(sym, soft, magsq);
 
     if (++m_dataCount >= m_dataSymbols) {

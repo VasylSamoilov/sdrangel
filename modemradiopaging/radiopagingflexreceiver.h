@@ -134,6 +134,11 @@ public:
 
     //!< Hunting for sync 1 (not in a frame)
     bool isHunting() const { return m_state == Hunting; }
+    //!< In a frame, its symbols still those of a FLEX signal (their recent error small): the carrier of the
+    //!< frame is on the channel. False when it is lost, or another signal (of another speed) took its place
+    bool isReceivingFrame() const;
+    //!< The recent error (RMS) of the data symbols isReceivingFrame accepts at most (frame quality 0.55)
+    static constexpr double m_receivingErrorRms = 0.3;
     //!< DC offset and deviation were just measured on sync 1: the DC offset, discriminator units
     bool takeLevelsMeasured(float& dc);
     //!< The input was moved by delta (frequency correction before the discriminator)
@@ -180,6 +185,7 @@ private:
     std::vector<int> m_blockSamples;
     double m_errorSum;
     int m_errorCount;
+    double m_recentError2 = 0.0;        //!< Of the data symbols: exponential average of their squared error (32 symbols)
 
     uint64_t m_syncSymbols;             //!< Symbols of the sync demodulator
     uint64_t m_ersFirst;                //!< Symbol at which the current or last re-synchronization started

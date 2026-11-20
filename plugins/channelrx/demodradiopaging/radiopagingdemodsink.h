@@ -86,6 +86,7 @@ public:
         bool m_gscAudio;                //!< The voice message is being played
         bool m_gscInverted;
         quint32 m_messages[3];          //!< POCSAG, FLEX, GSC records sent since start
+        quint32 m_locksDropped[3] = {0, 0, 0};  //!< Locks found in the data of a FLEX frame being received, dropped
         int m_remembered[3];            //!< Messages remembered for duplicate detection
         qint64 m_resetTime[3];          //!< When the state of the protocol was last reset, ms since epoch
 

@@ -48,6 +48,14 @@ void RadioPagingGscReceiver::reset()
     m_time = 0.0;
 }
 
+void RadioPagingGscReceiver::dropLock()
+{
+    m_normal.reset();
+    m_inverted.reset();
+    m_nbsPending[0].clear();
+    m_nbsPending[1].clear();
+}
+
 void RadioPagingGscReceiver::setNonBatterySaver(bool enable)
 {
     m_normal.setNonBatterySaver(enable);
