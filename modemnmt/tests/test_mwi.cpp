@@ -512,6 +512,66 @@ static void testIndicatorsAtClearing()
         CHECK(s.reports.size() == 1 && s.reports[0].result == NmtServiceEnd::Ok);
     }
 
+    // in the conversation only: 5c twice at once, the clearing is a plain one; the result is
+    // "sent, not acknowledged" (no acknowledgement in a conversation)
+    for (const bool phoneClears : {false, true})
+    {
+        Station s;
+
+        s.connectCall();
+        CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiSms, MwiWhen::InCall));
+        CHECK(s.tc->state() == State::MwiInCall);
+        checkIndicators(pull(*s.tc), s.phone, MwiSms);
+        checkIndicators(pull(*s.tc), s.phone, MwiSms);
+        CHECK(!moreFrames(*s.tc));
+        CHECK(s.tc->state() == State::Active);
+        if (phoneClears)
+        {
+            phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0x11111), 1);
+            CHECK(s.tc->state() == State::MoRelease);
+        }
+        else
+        {
+            CHECK(s.system.releaseCall(s.phone.country, s.phone.number));
+            CHECK(s.tc->state() == State::MtRelease);
+        }
+        CHECK(isLineSignal(pull(*s.tc), 15));
+        if (!phoneClears) {
+            phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0x11111), 1);
+        }
+        for (int i = 0; i < 10 && s.system.transactionCount(); i++) {
+            pull(*s.tc);
+        }
+        CHECK(s.system.transactionCount() == 0);
+        CHECK(s.reports.size() == 1 && !s.reports.empty() && s.reports[0].result == NmtServiceEnd::NoAck);
+    }
+
+    // at the clearing only: nothing in the conversation, 5c in the clearing sequence
+    {
+        Station s;
+
+        s.connectCall();
+        CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiSms, MwiWhen::Clearing));
+        CHECK(s.tc->state() == State::Active);
+        CHECK(s.tc->dspMode() == DspMode::Audio);
+        phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0x11111), 1);
+        CHECK(s.tc->state() == State::MwiClear);
+        checkIndicators(pull(*s.tc), s.phone, MwiSms);
+        checkIndicators(pull(*s.tc), s.phone, MwiSms);
+        CHECK(s.system.transactionCount() == 1);
+    }
+
+    // in the conversation only, when the phone is in a procedure of the call: refused
+    {
+        Station s;
+
+        s.connectCall();
+        phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0x88888), 1);
+        CHECK(s.tc->state() == State::MftIn);
+        CHECK(!s.system.sendMwi(s.phone.country, s.phone.number, MwiSms, MwiWhen::InCall));
+        CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiSms, MwiWhen::Clearing));
+    }
+
     // a phone that is not in a conversation is busy
     {
         Station s;

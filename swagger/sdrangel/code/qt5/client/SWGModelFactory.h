@@ -92,9 +92,11 @@
 #include "SWGBladeRF2OutputSettings.h"
 #include "SWGCWKeyerSettings.h"
 #include "SWGCapture.h"
+#include "SWGCellularActions.h"
 #include "SWGCellularCarrierReport.h"
 #include "SWGCellularNetworkReport.h"
 #include "SWGCellularNetworkSettings.h"
+#include "SWGCellularPhoneReport.h"
 #include "SWGCellularReport.h"
 #include "SWGCellularSettings.h"
 #include "SWGChannel.h"
@@ -879,6 +881,11 @@ namespace SWGSDRangel {
       obj->init();
       return obj;
     }
+    if(QString("SWGCellularActions").compare(type) == 0) {
+      SWGCellularActions *obj = new SWGCellularActions();
+      obj->init();
+      return obj;
+    }
     if(QString("SWGCellularCarrierReport").compare(type) == 0) {
       SWGCellularCarrierReport *obj = new SWGCellularCarrierReport();
       obj->init();
@@ -891,6 +898,11 @@ namespace SWGSDRangel {
     }
     if(QString("SWGCellularNetworkSettings").compare(type) == 0) {
       SWGCellularNetworkSettings *obj = new SWGCellularNetworkSettings();
+      obj->init();
+      return obj;
+    }
+    if(QString("SWGCellularPhoneReport").compare(type) == 0) {
+      SWGCellularPhoneReport *obj = new SWGCellularPhoneReport();
       obj->init();
       return obj;
     }

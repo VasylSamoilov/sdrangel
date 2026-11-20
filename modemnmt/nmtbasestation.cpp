@@ -258,6 +258,7 @@ bool NmtBaseStation::bind(const std::vector<NmtStreamSpan>& rxStreams, const std
         cc.batteryGroup = m_config.batteryGroup;
         cc.supervisory = c.config.supervisory;
         cc.sendCallerId = m_config.sendCallerId;
+        cc.roundTripFrames = m_config.roundTripFrames;
         cc.ccBandStart = m_config.ccBandStart;
         cc.ccBandEnd = m_config.ccBandEnd;
         cc.tcBandStart = m_config.tcBandStart;

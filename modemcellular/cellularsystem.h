@@ -79,7 +79,8 @@ public:
     void detach(MobileLeg& leg);
 
     // Calls, as in CallRouter.
-    CallRouter::SetupResult setup(MobileLeg& origin, const std::string& callerId, const std::string& dialed);
+    CallRouter::SetupResult setup(MobileLeg& origin, const std::string& callerId, const std::string& dialed,
+                                  MobileLeg* called = nullptr);
     void alerting(CallRef callref);
     void answer(CallRef callref);
     void release(CallRef callref, Cause cause);

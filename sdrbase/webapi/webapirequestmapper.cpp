@@ -5960,6 +5960,11 @@ bool WebAPIRequestMapper::getFeatureActions(
             featureActions->setLimeRfeActions(new SWGSDRangel::SWGLimeRFEActions());
             featureActions->getLimeRfeActions()->fromJsonObject(actionsJsonObject);
         }
+        else if (featureActionsKey == "CellularActions")
+        {
+            featureActions->setCellularActions(new SWGSDRangel::SWGCellularActions());
+            featureActions->getCellularActions()->fromJsonObject(actionsJsonObject);
+        }
         else if (featureActionsKey == "MapActions")
         {
             featureActions->setMapActions(new SWGSDRangel::SWGMapActions());
@@ -6326,6 +6331,7 @@ void WebAPIRequestMapper::resetFeatureActions(SWGSDRangel::SWGFeatureActions& fe
     featureActions.setFeatureType(nullptr);
     featureActions.setAfcActions(nullptr);
     featureActions.setAircraftActions(nullptr);
+    featureActions.setCellularActions(nullptr);
     featureActions.setGs232ControllerActions(nullptr);
     featureActions.setMapActions(nullptr);
     featureActions.setPerTesterActions(nullptr);

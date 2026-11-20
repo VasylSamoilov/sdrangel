@@ -68,6 +68,7 @@ struct NmtNetworkConfig
     int tcBandStart = 0;
     int tcBandEnd = 0;
     std::string smscNumber;         // empty: no short messages from the phones
+    int roundTripFrames = 0;        // round trip of the radio in frame periods (ChannelConfig)
     std::vector<NmtCarrierConfig> carriers;
 };
 

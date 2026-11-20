@@ -12,6 +12,7 @@ set(modemcellular_SOURCES
     echoendpoint.cpp
     firfilter.cpp
     musicendpoint.cpp
+    testcaller.cpp
     timer.cpp
     tonegenerator.cpp
 )
@@ -32,6 +33,7 @@ set(modemcellular_HEADERS
     firfilter.h
     mobileleg.h
     musicendpoint.h
+    testcaller.h
     timer.h
     tonegenerator.h
 )

@@ -143,13 +143,14 @@ void CellularSystem::detach(MobileLeg& leg)
     flush();
 }
 
-CallRouter::SetupResult CellularSystem::setup(MobileLeg& origin, const std::string& callerId, const std::string& dialed)
+CallRouter::SetupResult CellularSystem::setup(MobileLeg& origin, const std::string& callerId, const std::string& dialed,
+                                              MobileLeg* called)
 {
     CallRouter::SetupResult result;
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        result = m_router.setup(origin, callerId, dialed);
+        result = m_router.setup(origin, callerId, dialed, called);
     }
 
     flush();

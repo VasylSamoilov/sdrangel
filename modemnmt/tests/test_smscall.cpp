@@ -71,6 +71,9 @@ struct Station
         uint8_t cause;
     };
     std::vector<Result> results;
+    std::vector<SmsRpKind> requests;
+    std::string requestNumber;
+    std::vector<SmsDeliver> held;           // what the centre keeps for the phone
 
     Station() :
         clock(kRate),
@@ -91,6 +94,16 @@ struct Station
             [this](const NmtSubscriber&, NmtServiceEnd result, uint8_t cause) {
                 results.push_back({result, cause});
             });
+        system.setSmsRequestHandler([this](const NmtSubscriber& subscriber, SmsRpKind kind, SmsDeliver& message) {
+            requests.push_back(kind);
+            requestNumber = subscriber.number;
+            if (kind != SmsRpKind::ReadyToReceive || held.empty()) {
+                return false;
+            }
+            message = held.front();
+            held.erase(held.begin());
+            return true;
+        });
     }
 
     ~Station()
@@ -239,6 +252,94 @@ static void testFromPhone()
     CHECK(s.calls.cleared == 0);
 }
 
+// The phone calls the centre for its waiting messages (Annex 24 1.1, 2.3.7) after a message
+// waiting indicator: the request is told, the phone hears there are none (2.3.8). Memory
+// available is told and acknowledged.
+static void testPhoneAsks()
+{
+    const Bytes ready = {0x07, 0x03, 0x0c, 0x91, 0x3d, 0x85, 0x94, 0x21, 0x43, 0x65};
+    const struct
+    {
+        uint8_t mti;
+        SmsRpKind kind;
+        Bytes answer;
+    } cases[] = {
+        {0x07, SmsRpKind::ReadyToReceive, smsRpNoMessages(0x03)},
+        {0x06, SmsRpKind::MemoryAvailable, smsRpAckToPhone(0x03)},
+    };
+
+    for (const auto& c : cases)
+    {
+        Station s;
+        Bytes request = ready;
+
+        request[0] = c.mti;
+        s.system.setSmscNumber("1234");
+        s.dialCentre("1234");
+        CHECK(s.tc->state() == State::Sms);
+        s.air.link.startAsCaller();
+        s.air.link.queueData(request.data(), request.size());
+        const Bytes answer = withHeader(c.answer);
+        int steps = 0;
+
+        while (s.air.received != answer && steps++ < 100) {
+            s.run(0.1);
+        }
+        CHECK(s.air.received == answer);
+        CHECK(s.requests.size() == 1 && !s.requests.empty() && s.requests[0] == c.kind);
+        CHECK(s.requestNumber == s.phone.number);
+        CHECK(s.submitted.empty());
+    }
+}
+
+// A message waits in the centre: the phone calls for it (READY-TO-RECEIVE), gets it in its own
+// call (RP-MT-DATA), and its acknowledgement is the result; then the call is released. Memory
+// available never takes a waiting message.
+static void testPhoneFetches()
+{
+    const Bytes ready = {0x07, 0x03, 0x0c, 0x91, 0x3d, 0x85, 0x94, 0x21, 0x43, 0x65};
+    Station s;
+    const SmsDeliver m = hello();
+
+    s.held.push_back(m);
+    s.system.setSmscNumber("1234");
+    s.dialCentre("1234");
+    CHECK(s.tc->state() == State::Sms);
+    s.air.link.startAsCaller();
+
+    Bytes memory = ready;
+    memory[0] = 0x06;
+    s.air.link.queueData(memory.data(), memory.size());
+    s.air.link.queueData(ready.data(), ready.size());
+    Bytes rp;
+    CHECK(smsBuildDeliver(m, 0, rp));
+    Bytes expected = withHeader(smsRpAckToPhone(0x03));
+    const Bytes deliver = withHeader(rp);
+    expected.insert(expected.end(), deliver.begin(), deliver.end());
+    int steps = 0;
+
+    while (s.air.received != expected && steps++ < 100) {
+        s.run(0.1);
+    }
+    CHECK(s.air.received == expected);
+    CHECK(s.held.empty());
+    CHECK(s.requests.size() == 2);
+    CHECK(s.tc->state() == State::Sms);
+    CHECK(s.results.empty());
+
+    const Bytes ack = {0x02, 0x00};
+    s.air.link.queueData(ack.data(), ack.size());
+    steps = 0;
+    while (s.tc->state() == State::Sms && steps++ < 100) {
+        s.run(0.1);
+    }
+    CHECK(s.tc->state() == State::MtRelease);
+    phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0x11111), 1);
+    CHECK(s.system.transactionCount() == 0);
+    CHECK(s.results.size() == 1 && !s.results.empty() && s.results[0].result == NmtServiceEnd::Ok);
+    CHECK(s.calls.cleared == 0);
+}
+
 // The handler refuses the message, or there is no handler: the phone gets an RP-ERROR.
 static void testRefused()
 {
@@ -381,6 +482,8 @@ static void testToPhoneFails()
 int main()
 {
     testFromPhone();
+    testPhoneAsks();
+    testPhoneFetches();
     testRefused();
     testNumbersAndSilence();
     testToPhone();

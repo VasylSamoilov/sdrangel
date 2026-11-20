@@ -19,6 +19,7 @@
 #include <QComboBox>
 #include <QDateTime>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
@@ -28,6 +29,7 @@
 #include <QSpinBox>
 #include <QTabWidget>
 #include <QTableWidget>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include "feature/featureuiset.h"
@@ -51,7 +53,22 @@ enum Column
     ColRxLevel,
     ColTxFill,
     ColUnderruns,
+    ColPhone,
     ColCount
+};
+
+enum PhoneColumn
+{
+    PhoneNumber,
+    PhoneRegistered,
+    PhoneChannel,
+    PhoneState,
+    PhoneLastHeard,
+    PhoneLevel,
+    PhoneQuality,
+    PhonePower,
+    PhoneLastFrame,
+    PhoneColCount
 };
 
 QString timeStamp()
@@ -70,8 +87,24 @@ CellularNetworkTab::CellularNetworkTab(QWidget *parent) :
 {
     QVBoxLayout *layout = new QVBoxLayout(this);
     layout->setContentsMargins(3, 3, 3, 3);
-    QFormLayout *form = new QFormLayout();
-    layout->addLayout(form);
+    // the settings fold away while the network is tested, so the phones and the log have the room
+    QToolButton *fold = new QToolButton(this);
+    fold->setText("Settings");
+    fold->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    fold->setArrowType(Qt::DownArrow);
+    fold->setCheckable(true);
+    fold->setChecked(true);
+    fold->setAutoRaise(true);
+    fold->setToolTip("Show or hide the settings of the network");
+    layout->addWidget(fold);
+    QWidget *settings = new QWidget(this);
+    QFormLayout *form = new QFormLayout(settings);
+    form->setContentsMargins(0, 0, 0, 0);
+    layout->addWidget(settings);
+    connect(fold, &QToolButton::toggled, this, [fold, settings](bool open) {
+        settings->setVisible(open);
+        fold->setArrowType(open ? Qt::DownArrow : Qt::RightArrow);
+    });
 
     m_name = new QLineEdit(this);
     form->addRow("Name", m_name);
@@ -101,7 +134,9 @@ CellularNetworkTab::CellularNetworkTab(QWidget *parent) :
     form->addRow("Area number", m_areaNo);
     m_msPower = new QSpinBox(this);
     m_msPower->setRange(0, 3);
-    m_msPower->setToolTip("Power level the phones send with: 3 is the highest, 0 the lowest");
+    m_msPower->setToolTip("Power level the phones send with (NMT Doc 450-3 5.7.1): 3 high (15 W or 7 W), "
+        "2 medium (10 dB less), 1 and 0 low (20 dB less). A phone that receives the network strongly in a call "
+        "goes to low power by itself");
     form->addRow("Phone power", m_msPower);
     m_carriers = new QLineEdit(this);
     m_carriers->setToolTip("channel:type[:supervisory], comma separated; every channel needs its type. Types: cc (calling), "
@@ -133,18 +168,117 @@ CellularNetworkTab::CellularNetworkTab(QWidget *parent) :
     m_summary = new QLabel("Not running", this);
     m_summary->setWordWrap(true);
     layout->addWidget(m_summary);
+
+    // what the tester does with a phone of this network
+    QGridLayout *actions = new QGridLayout();
+    layout->addLayout(actions);
+    m_phone = new QLineEdit(this);
+    m_phone->setPlaceholderText("3726136");
+    m_phone->setToolTip("Number of the phone: the country digit and the six digits (Z X1..X6). "
+        "Click a row of the Phones tab to take its number");
+    actions->addWidget(new QLabel("Phone", this), 0, 0);
+    actions->addWidget(m_phone, 0, 1);
+    QPushButton *call = new QPushButton("Call", this);
+    call->setToolTip("The network calls the phone: it is paged, registered or not, and rings. "
+        "When it answers it hears the echo of itself or music, as set in Other numbers");
+    QPushButton *hangUp = new QPushButton("Hang up", this);
+    hangUp->setToolTip("Ends the call the network made to the phone");
+    QPushButton *release = new QPushButton("Release", this);
+    release->setToolTip("Releases any call of the phone from the network side");
+    actions->addWidget(call, 0, 2);
+    actions->addWidget(hangUp, 0, 3);
+    actions->addWidget(release, 0, 4);
+    m_smsText = new QLineEdit(this);
+    m_smsText->setPlaceholderText("Short message to the phone");
+    m_smsText->setToolTip("Text of a short message to the phone (NMT Doc 450-3 Annex 24): the phone is paged "
+        "and called without ringing, the message goes over the data link of the call");
+    QPushButton *sms = new QPushButton("Send", this);
+    sms->setToolTip("Sends the short message to the phone; the log tells whether the phone took it");
+    actions->addWidget(new QLabel("SMS", this), 1, 0);
+    actions->addWidget(m_smsText, 1, 1, 1, 3);
+    actions->addWidget(sms, 1, 4);
+    m_mwiKind = new QComboBox(this);
+    m_mwiKind->addItem("SMS waiting", 0x01);
+    m_mwiKind->addItem("Voice mail waiting", 0x02);
+    m_mwiKind->addItem("Fax waiting", 0x04);
+    m_mwiKind->addItem("E-mail waiting", 0x08);
+    m_mwiKind->addItem("Data waiting", 0x10);
+    m_mwiKind->setToolTip("Message waiting indicator to show on the phone (frame 5c, NMT Doc 450-1 4.4.1.16). "
+        "A phone in a call gets it when the call is cleared, an idle phone is called without ringing. "
+        "The network can only set an indicator: the user clears it on the phone");
+    QPushButton *mwi = new QPushButton("Send", this);
+    mwi->setToolTip("Sends the message waiting indicator to the phone");
+    actions->addWidget(new QLabel("Indicator", this), 2, 0);
+    actions->addWidget(m_mwiKind, 2, 1, 1, 3);
+    actions->addWidget(mwi, 2, 4);
+    m_powerLevel = new QComboBox(this);
+    m_powerLevel->addItem("High", 3);
+    m_powerLevel->addItem("Medium", 2);
+    m_powerLevel->addItem("Low", 1);
+    m_powerLevel->setToolTip("Power level ordered to the phone in its call (NMT Doc 450-1 4.4.1.8): high 15 W or 7 W, "
+        "medium 10 dB less, low 20 dB less");
+    QPushButton *power = new QPushButton("Power", this);
+    power->setToolTip("Orders the power level to the phone in its call; the log tells whether it took it");
+    m_moveChannel = new QSpinBox(this);
+    m_moveChannel->setRange(0, 2023);
+    m_moveChannel->setSpecialValueText("any");
+    m_moveChannel->setToolTip("Traffic channel to move the call to; any: the first free one");
+    QPushButton *move = new QPushButton("Move", this);
+    move->setToolTip("Moves the call of the phone to another traffic channel of the network (switching a call in progress, SCIP)");
+    actions->addWidget(new QLabel("In call", this), 3, 0);
+    actions->addWidget(m_powerLevel, 3, 1);
+    actions->addWidget(power, 3, 2);
+    actions->addWidget(m_moveChannel, 3, 3);
+    actions->addWidget(move, 3, 4);
+    actions->setColumnStretch(1, 1);
+
+    m_views = new QTabWidget(this);
+    layout->addWidget(m_views);
     m_table = new QTableWidget(0, ColCount, this);
-    m_table->setHorizontalHeaderLabels({"Ch", "Type", "Down MHz", "Up MHz", "State", "Rx dB", "Tx ms", "Empty"});
+    m_table->setHorizontalHeaderLabels({"Ch", "Type", "Down MHz", "Up MHz", "State", "Rx dB", "Tx ms", "Empty", "Phone"});
     m_table->verticalHeader()->setVisible(false);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->horizontalHeader()->setStretchLastSection(true);
     m_table->setMinimumHeight(110);
-    layout->addWidget(m_table);
+    m_views->addTab(m_table, "Carriers");
+    m_phones = new QTableWidget(0, PhoneColCount, this);
+    m_phones->setHorizontalHeaderLabels({"Number", "Registered", "Ch", "State", "Last heard", "Rx dB", "Quality",
+        "Power", "Last frame"});
+    m_phones->horizontalHeaderItem(PhoneRegistered)->setToolTip("Yes: the phone made a roaming update to this network; "
+        "no: it was only heard (a call, an answer)");
+    m_phones->horizontalHeaderItem(PhoneLevel)->setToolTip("Received level of its channel when it was last heard, dB of full scale");
+    m_phones->horizontalHeaderItem(PhoneQuality)->setToolTip("Quality of its last frame, 0..1");
+    m_phones->horizontalHeaderItem(PhonePower)->setToolTip("Power level in its frames: high, medium or low");
+    m_phones->verticalHeader()->setVisible(false);
+    m_phones->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_phones->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_phones->horizontalHeader()->setStretchLastSection(true);
+    m_phones->setMinimumHeight(110);
+    m_views->addTab(m_phones, "Phones");
     m_log = new QPlainTextEdit(this);
     m_log->setReadOnly(true);
     m_log->setMaximumBlockCount(2000);
     m_log->setMinimumHeight(100);
-    layout->addWidget(m_log);
+    m_views->addTab(m_log, "Log");
+
+    connect(m_phones, &QTableWidget::cellClicked, this, [this](int row, int) {
+        if (QTableWidgetItem *item = m_phones->item(row, PhoneNumber)) {
+            m_phone->setText(item->text());
+        }
+    });
+    connect(call, &QPushButton::clicked, this, [this]() { requestAction(Cellular::MsgAction::Call, QString(), 0); });
+    connect(hangUp, &QPushButton::clicked, this, [this]() { requestAction(Cellular::MsgAction::HangUp, QString(), 0); });
+    connect(release, &QPushButton::clicked, this, [this]() { requestAction(Cellular::MsgAction::Release, QString(), 0); });
+    connect(sms, &QPushButton::clicked, this, [this]() { requestAction(Cellular::MsgAction::Sms, m_smsText->text(), 0); });
+    connect(mwi, &QPushButton::clicked, this, [this]() {
+        requestAction(Cellular::MsgAction::Mwi, QString(), m_mwiKind->currentData().toInt());
+    });
+    connect(power, &QPushButton::clicked, this, [this]() {
+        requestAction(Cellular::MsgAction::Power, QString(), m_powerLevel->currentData().toInt());
+    });
+    connect(move, &QPushButton::clicked, this, [this]() {
+        requestAction(Cellular::MsgAction::Move, QString(), m_moveChannel->value());
+    });
 
     connect(m_system, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &CellularNetworkTab::onSystemChanged);
     connect(m_name, &QLineEdit::editingFinished, this, &CellularNetworkTab::onChanged);
@@ -253,9 +387,64 @@ void CellularNetworkTab::appendLog(const QString& line)
     m_log->appendPlainText(timeStamp() + line);
 }
 
+void CellularNetworkTab::requestAction(int action, const QString& text, int value)
+{
+    emit actionRequested(m_id, action, m_phone->text().trimmed(), text, value);
+}
+
+static QString powerName(int level)
+{
+    switch (level)
+    {
+    case 3: return "high";
+    case 2: return "medium";
+    case 1:
+    case 0: return "low";
+    default: return QString();
+    }
+}
+
+// A phone keeps its row: rows are updated in place and new phones come at the end, so the view
+// does not move under the user.
+void CellularNetworkTab::showPhones(const QList<Cellular::MsgReportStatus::Phone>& phones)
+{
+    for (const Cellular::MsgReportStatus::Phone& p : phones)
+    {
+        int row = 0;
+        while (row < m_phones->rowCount() && (!m_phones->item(row, PhoneNumber) || m_phones->item(row, PhoneNumber)->text() != p.number)) {
+            row++;
+        }
+        if (row == m_phones->rowCount()) {
+            m_phones->insertRow(row);
+        }
+        const QStringList cells = {
+            p.number,
+            p.registered ? "yes" : "no",
+            p.channel ? QString::number(p.channel) : QString(),
+            p.state,
+            p.lastHeard.isValid() ? p.lastHeard.toString("HH:mm:ss") : QString(),
+            p.lastHeard.isValid() ? QString::number(p.level, 'f', 1) : QString(),
+            p.lastHeard.isValid() ? QString::number(p.quality, 'f', 2) : QString(),
+            powerName(p.power),
+            p.lastFrame
+        };
+        for (int col = 0; col < PhoneColCount; col++)
+        {
+            QTableWidgetItem *item = m_phones->item(row, col);
+            if (!item)
+            {
+                item = new QTableWidgetItem();
+                m_phones->setItem(row, col, item);
+            }
+            item->setText(cells[col]);
+        }
+    }
+}
+
 void CellularNetworkTab::showStatus(const Cellular::MsgReportStatus& report)
 {
     m_summary->setText(report.m_summary);
+    showPhones(report.m_phones);
     m_table->setRowCount(report.m_carriers.size());
     for (int row = 0; row < report.m_carriers.size(); row++)
     {
@@ -269,7 +458,8 @@ void CellularNetworkTab::showStatus(const Cellular::MsgReportStatus& report)
             c.state,
             on ? QString::number(c.rxLevel, 'f', 1) : QString(),
             on ? QString::number(c.txFillMs, 'f', 0) : QString(),
-            on ? QString::number(c.underruns) : QString()
+            on ? QString::number(c.underruns) : QString(),
+            c.phone
         };
         for (int col = 0; col < ColCount; col++)
         {
@@ -397,6 +587,11 @@ void CellularGUI::addTab(const CellularNetworkSettings& network)
     tab->display(network);
     m_tabs->addTab(tab, network.m_name + (network.m_enabled ? "" : " (off)"));
     connect(tab, &CellularNetworkTab::changed, this, &CellularGUI::onNetworkChanged);
+    connect(tab, &CellularNetworkTab::actionRequested, this,
+        [this](int network, int action, const QString& number, const QString& text, int value) {
+            m_cellular->getInputMessageQueue()->push(Cellular::MsgAction::create(network,
+                static_cast<Cellular::MsgAction::Action>(action), number, text, value));
+        });
 }
 
 void CellularGUI::displaySettings()

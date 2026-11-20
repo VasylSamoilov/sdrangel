@@ -377,6 +377,7 @@ const QMap<QString, QString> WebAPIUtils::m_featureTypeToActionsKey = {
     {"AFC", "AFCActions"},
     {"Aircraft", "AircraftActions"},
     {"AMBE", "AMBEActions"},
+    {"Cellular", "CellularActions"},
     {"GS232Controller", "GS232ControllerActions"},
     {"LimeRFE", "LimeRFEActions"},
     {"Map", "MapActions"},

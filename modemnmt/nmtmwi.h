@@ -39,6 +39,17 @@ enum MwiFlag : uint8_t
     MwiAll = 0x1f
 };
 
+// When the indicators reach a phone that is in a conversation: at once (5c twice in the
+// conversation, NMT Doc 450-1 4.4.1.12) and again in the clearing sequence (4.4.1.16), only at
+// once, or only in the clearing sequence. A phone that is not in a call gets them in the
+// clearing of a message call in any case.
+enum class MwiWhen
+{
+    InCallAndClearing,
+    InCall,
+    Clearing
+};
+
 // How a message waiting delivery ended.
 enum class NmtServiceEnd
 {

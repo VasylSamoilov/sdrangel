@@ -63,6 +63,9 @@ public:
     qint32 getUnderruns();
     void setUnderruns(qint32 underruns);
 
+    QString* getPhone();
+    void setPhone(QString* phone);
+
 
     virtual bool isSet() override;
 
@@ -87,6 +90,9 @@ private:
 
     qint32 underruns;
     bool m_underruns_isSet;
+
+    QString* phone;
+    bool m_phone_isSet;
 
 };
 

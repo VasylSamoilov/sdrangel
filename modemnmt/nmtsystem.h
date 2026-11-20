@@ -83,7 +83,9 @@ public:
     // is paged and called without ringing (4.4.1.12). False if the phone is busy with something
     // else, the calling channel carousel has no room for it (see capacity()), or the flags are
     // invalid. The handler tells how it ended: Undelivered flags can be sent again.
-    bool sendMwi(char country, const std::string& number, uint8_t flags);
+    // `when`: for a phone in a conversation, at once and at the clearing (the default), at once
+    // only (false if the phone is in a procedure of the call now), or at the clearing only.
+    bool sendMwi(char country, const std::string& number, uint8_t flags, MwiWhen when = MwiWhen::InCallAndClearing);
     using MwiHandler = std::function<void(const NmtSubscriber& subscriber, uint8_t flags, NmtServiceEnd result)>;
     void setMwiHandler(MwiHandler handler) { m_mwiHandler = std::move(handler); }
 
@@ -104,6 +106,12 @@ public:
         m_smsSubmitHandler = std::move(submit);
         m_smsResultHandler = std::move(result);
     }
+    // The phone called the centre to fetch its waiting messages (ReadyToReceive) or to tell it
+    // has memory again (MemoryAvailable). For ReadyToReceive the handler returns true and fills
+    // the message when one waits: it goes to the phone in this call and its result is told to
+    // the SMS result handler. Otherwise the phone is told that no messages wait.
+    using SmsRequestHandler = std::function<bool(const NmtSubscriber& subscriber, SmsRpKind kind, SmsDeliver& message)>;
+    void setSmsRequestHandler(SmsRequestHandler handler) { m_smsRequestHandler = std::move(handler); }
 
     // Orders the phone of a connected call to another power level 0..3 (NMT Doc 450-1 4.4.1.8).
     // False if the phone has no connected call, or it has that level already. The result is
@@ -193,6 +201,7 @@ public:
     void callCleared(NmtTransaction& transaction) override;
     bool isSmsCenter(const std::string& dialled) override;
     uint8_t smsSubmitted(NmtTransaction& transaction, const SmsSubmit& message) override;
+    bool smsRequested(NmtTransaction& transaction, SmsRpKind kind) override;
     void audioFromMobile(NmtTransaction& transaction, const float* samples, int count) override;
     void audioToMobile(NmtTransaction& transaction, float* samples, int count) override;
     NmtChannel* findTrafficChannel(NmtChannel& from) override;
@@ -257,6 +266,7 @@ private:
     MwiHandler m_mwiHandler;
     std::string m_smscNumber;
     SmsSubmitHandler m_smsSubmitHandler;
+    SmsRequestHandler m_smsRequestHandler;
     SmsResultHandler m_smsResultHandler;
     uint8_t m_smsRef = 0;
     PowerHandler m_powerHandler;

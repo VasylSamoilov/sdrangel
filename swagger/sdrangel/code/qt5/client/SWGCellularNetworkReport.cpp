@@ -40,6 +40,8 @@ SWGCellularNetworkReport::SWGCellularNetworkReport() {
     m_calls_isSet = false;
     carriers = nullptr;
     m_carriers_isSet = false;
+    phones = nullptr;
+    m_phones_isSet = false;
 }
 
 SWGCellularNetworkReport::~SWGCellularNetworkReport() {
@@ -60,6 +62,8 @@ SWGCellularNetworkReport::init() {
     m_calls_isSet = false;
     carriers = new QList<SWGCellularCarrierReport*>();
     m_carriers_isSet = false;
+    phones = new QList<SWGCellularPhoneReport*>();
+    m_phones_isSet = false;
 }
 
 void
@@ -77,6 +81,13 @@ SWGCellularNetworkReport::cleanup() {
             delete o;
         }
         delete carriers;
+    }
+    if(phones != nullptr) { 
+        auto arr = phones;
+        for(auto o: *arr) { 
+            delete o;
+        }
+        delete phones;
     }
 }
 
@@ -103,6 +114,8 @@ SWGCellularNetworkReport::fromJsonObject(QJsonObject &pJson) {
     
     
     ::SWGSDRangel::setValue(&carriers, pJson["carriers"], "QList", "SWGCellularCarrierReport");
+    
+    ::SWGSDRangel::setValue(&phones, pJson["phones"], "QList", "SWGCellularPhoneReport");
 }
 
 QString
@@ -136,6 +149,9 @@ SWGCellularNetworkReport::asJsonObject() {
     }
     if(carriers && carriers->size() > 0){
         toJsonArray((QList<void*>*)carriers, obj, "carriers", "SWGCellularCarrierReport");
+    }
+    if(phones && phones->size() > 0){
+        toJsonArray((QList<void*>*)phones, obj, "phones", "SWGCellularPhoneReport");
     }
 
     return obj;
@@ -201,6 +217,16 @@ SWGCellularNetworkReport::setCarriers(QList<SWGCellularCarrierReport*>* carriers
     this->m_carriers_isSet = true;
 }
 
+QList<SWGCellularPhoneReport*>*
+SWGCellularNetworkReport::getPhones() {
+    return phones;
+}
+void
+SWGCellularNetworkReport::setPhones(QList<SWGCellularPhoneReport*>* phones) {
+    this->phones = phones;
+    this->m_phones_isSet = true;
+}
+
 
 bool
 SWGCellularNetworkReport::isSet(){
@@ -222,6 +248,9 @@ SWGCellularNetworkReport::isSet(){
             isObjectUpdated = true; break;
         }
         if(carriers && (carriers->size() > 0)){
+            isObjectUpdated = true; break;
+        }
+        if(phones && (phones->size() > 0)){
             isObjectUpdated = true; break;
         }
     }while(false);
