@@ -119,6 +119,8 @@ private:
     QTableWidget *m_queueTable;
     // The page to compose
     PagingComposer *m_composer;
+    QComboBox *m_toContact;             //!< The page to the address of the composer, or to a contact
+    QLabel *m_toWhere;                  //!< Where the page to the contact goes
     // The routes and the files
     QTableWidget *m_routesTable;
     QTableWidget *m_contactsTable;
@@ -181,6 +183,8 @@ private slots:
     void onMenuDialogCalled(const QPoint &p);
     void onWidgetRolled(QWidget* widget, bool rollDown);
     void post();
+    bool contactPage(RadioPagingPage& page, QString& error) const;
+    void showContactPage();
     void pageAction(int action);
     void addRoute();
     void removeRoute();

@@ -624,6 +624,20 @@ void MessageCenterGUI::buildCompose(QWidget *container)
     QVBoxLayout *layout = new QVBoxLayout(container);
     layout->setContentsMargins(2, 2, 2, 2);
 
+    // To a contact: its send to gives the transmitter and the address of the page composed below
+    QHBoxLayout *toLayout = new QHBoxLayout();
+    QLabel *toLabel = new QLabel("To", container);
+    m_toContact = new QComboBox(container);
+    m_toContact->setToolTip("The transmitter and the address below, or a contact of the address book: its send to for the page "
+        "(its type, protocol...) gives them");
+    m_toWhere = new QLabel(container);
+    m_toWhere->setToolTip("Where the page goes: the transmitter, protocol and address the send to of the contact gives");
+    toLayout->addWidget(toLabel);
+    toLayout->addWidget(m_toContact);
+    toLayout->addWidget(m_toWhere, 1);
+    layout->addLayout(toLayout);
+    connect(m_toContact, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MessageCenterGUI::showContactPage);
+
     // The transmitters say what they can send; the page is checked by the one that takes it (its mode, numbering)
     m_composer = new PagingComposer(container);
     m_composer->setNetworkMode(true);
@@ -634,7 +648,68 @@ void MessageCenterGUI::buildCompose(QWidget *container)
     layout->addStretch(1);
 
     connect(m_composer, &PagingComposer::selectionChanged, this, &MessageCenterGUI::transmitterChanged);
+    connect(m_composer, &PagingComposer::selectionChanged, this, &MessageCenterGUI::showContactPage);
     connect(m_composer, &PagingComposer::sendRequested, this, &MessageCenterGUI::post);
+}
+
+// The page composed, to the contact chosen: the fields its send to gives. False and why if there is none for it
+bool MessageCenterGUI::contactPage(RadioPagingPage& page, QString& error) const
+{
+    const QString name = m_toContact->currentData().toString();
+
+    for (const MessageCenterContact& contact : m_settings.m_contacts)
+    {
+        if (contact.m_name != name) {
+            continue;
+        }
+
+        // The fields of the page as a post has them, that the conditions of the send to look at
+        QJsonObject message;
+        message["contact"] = name;
+        message["protocol"] = page.m_protocol;
+        message["type"] = page.m_type.isEmpty() ? QString("alphanumeric") : page.m_type;
+        message["text"] = page.m_text;
+        message["priority"] = page.m_priority ? 1 : 0;
+        message["speed"] = page.m_speed;
+        QJsonObject sent;
+
+        if (!contact.pageFor(message, sent, &error)) {
+            return false;
+        }
+
+        page.m_transmitter = sent.value("transmitter").toString();
+        page.m_protocol = sent.value("protocol").toString(page.m_protocol).toLower();
+        page.m_address = sent.value("address").toVariant().toString();
+        page.m_function = sent.value("function").toInt(page.m_function);
+        return true;
+    }
+
+    error = QString("No contact %1").arg(name);
+    return false;
+}
+
+void MessageCenterGUI::showContactPage()
+{
+    if (m_toContact->currentIndex() <= 0)
+    {
+        m_toWhere->clear();
+        return;
+    }
+
+    RadioPagingPage page = m_composer->page();
+    QString error;
+
+    if (contactPage(page, error))
+    {
+        m_toWhere->setText(QString("%1, %2 %3").arg(page.m_transmitter, page.m_protocol.toUpper(),
+            QString::fromStdString(page.toRecord().m_address.toStdString())));
+        m_toWhere->setStyleSheet(QString());
+    }
+    else
+    {
+        m_toWhere->setText(error);
+        m_toWhere->setStyleSheet("QLabel { color: red; }");
+    }
 }
 
 void MessageCenterGUI::buildRoutes(QWidget *container)
@@ -741,6 +816,23 @@ void MessageCenterGUI::refreshContacts()
     }
 
     m_logFilter->setContacts(m_settings.m_contacts);
+
+    // The contacts a page can go to: those with a send to
+    const QString to = m_toContact->currentData().toString();
+    QSignalBlocker blocker(m_toContact);
+    m_toContact->clear();
+    m_toContact->addItem("the address below", QString());
+
+    for (const MessageCenterContact& c : m_settings.m_contacts)
+    {
+        if (!c.m_sendTo.isEmpty()) {
+            m_toContact->addItem(MessageCenterContactIcons::icon(c.m_icon), c.m_name, c.m_name);
+        }
+    }
+
+    m_toContact->setCurrentIndex(std::max(0, m_toContact->findData(to)));
+    blocker.unblock();
+    showContactPage();
 }
 
 void MessageCenterGUI::editContact(int index)
@@ -1543,14 +1635,25 @@ void MessageCenterGUI::transmitterChanged()
 
 void MessageCenterGUI::post()
 {
-    if (m_composer->transmitter().isEmpty())
+    RadioPagingPage page = m_composer->page();
+    QString error;
+
+    // To a contact: the transmitter and the address of its send to
+    if (m_toContact->currentIndex() > 0)
+    {
+        if (!contactPage(page, error))
+        {
+            QMessageBox::information(this, "Page", error);
+            return;
+        }
+    }
+    else if (m_composer->transmitter().isEmpty())
     {
         QMessageBox::information(this, "Page", "No transmitter has announced itself.");
         return;
     }
 
-    RadioPagingPage page = m_composer->page();
-    QString error = page.check();
+    error = page.check();
 
     if (!error.isEmpty())
     {
