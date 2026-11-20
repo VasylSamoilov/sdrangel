@@ -94,11 +94,33 @@ QString filterSummary(const MessageCenterFilter& f)
 {
     QStringList parts;
 
+    if (!f.m_contacts.isEmpty()) {
+        parts << "contact " + f.m_contacts.join(", ");
+    }
     if (!f.m_protocols.isEmpty()) {
         parts << f.m_protocols.join("/");
     }
     if (f.m_direction >= 0) {
         parts << (f.m_direction == (int) MessageRecord::DirectionRX ? "RX" : "TX");
+    }
+    if (f.m_kind >= 0) {
+        parts << MessageRecord::kindToString((MessageRecord::Kind) f.m_kind);
+    }
+    if (!f.m_speeds.isEmpty())
+    {
+        QStringList speeds;
+
+        for (int speed : f.m_speeds) {
+            speeds << QString::number(speed);
+        }
+
+        parts << speeds.join("/") + " bps";
+    }
+    if ((f.m_frequencyMin >= 0) || (f.m_frequencyMax >= 0))
+    {
+        parts << QString("%1 to %2 Hz")
+            .arg(f.m_frequencyMin >= 0 ? QString::number(f.m_frequencyMin) : QString("0"))
+            .arg(f.m_frequencyMax >= 0 ? QString::number(f.m_frequencyMax) : QString("any"));
     }
     if (f.m_polarity >= 0) {
         parts << (f.m_polarity == (int) MessageRecord::PolarityInverted ? "inverted" : "normal");
