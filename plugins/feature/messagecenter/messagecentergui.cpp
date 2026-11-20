@@ -290,14 +290,35 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
 
 MessageCenterFilter MessageCenterFilterWidget::filter() const
 {
-    MessageCenterFilter f;
+    MessageCenterFilter f = m_base;
 
-    if (m_contact->currentIndex() > 0) {
+    // A list of the filter set whose first entry the widget still shows is kept whole
+    auto list = [](const QStringList& base, const QString& shown) {
+        if (shown.isEmpty()) {
+            return QStringList();
+        }
+        return (!base.isEmpty() && (base.first() == shown)) ? base : QStringList(shown);
+    };
+
+    // An item of several contacts has them as its data
+    QStringList contacts = m_contact->currentData().toStringList();
+
+    if (m_contact->currentIndex() <= 0) {
+        f.m_contacts.clear();
+    } else if (!contacts.isEmpty()) {
+        f.m_contacts = contacts;
+    } else {
         f.m_contacts = QStringList(m_contact->currentText());
     }
-    if (m_protocol->currentIndex() > 0) {
-        f.m_protocols = QStringList(m_protocol->currentText());
-    }
+
+    f.m_protocols = list(m_base.m_protocols, m_protocol->currentIndex() > 0 ? m_protocol->currentText() : QString());
+    f.m_direction = -1;
+    f.m_polarity = -1;
+    f.m_msgType.clear();
+    f.m_channels = list(m_base.m_channels, m_channel->text().trimmed());
+    f.m_sources = m_sourcesShown ? list(m_base.m_sources, m_source->currentIndex() > 0 ? m_source->currentText() : QString())
+        : m_base.m_sources;
+
     if (m_direction->currentIndex() > 0) {
         f.m_direction = (m_direction->currentIndex() == 1) ? (int) MessageRecord::DirectionRX : (int) MessageRecord::DirectionTX;
     }
@@ -307,17 +328,9 @@ MessageCenterFilter MessageCenterFilterWidget::filter() const
     if (m_type->currentIndex() > 0) {
         f.m_msgType = m_type->currentText();
     }
-    if (!m_channel->text().trimmed().isEmpty()) {
-        f.m_channels = QStringList(m_channel->text().trimmed());
-    }
 
     f.m_address = m_address->text().trimmed();
     f.m_text = m_text->text();
-
-    if (m_sourcesShown && (m_source->currentIndex() > 0)) {
-        f.m_sources = QStringList(m_source->currentText());
-    }
-
     f.m_hideDuplicates = m_hideDuplicates->isChecked();
     f.m_voiceOnly = m_voiceOnly->isChecked();
     f.m_regExp = m_regExp->text();
@@ -327,12 +340,29 @@ MessageCenterFilter MessageCenterFilterWidget::filter() const
 
 void MessageCenterFilterWidget::setFilter(const MessageCenterFilter& f)
 {
-    // A contact the address book no longer has is kept in the list: the filter keeps it
-    if (!f.m_contacts.isEmpty() && (m_contact->findText(f.m_contacts.first()) < 0)) {
-        m_contact->addItem(f.m_contacts.first());
+    m_base = f;
+
+    // Several contacts are one item of the list, with them as its data; a contact the address book no longer has is
+    // kept in the list too: the filter keeps it
+    if (f.m_contacts.size() > 1)
+    {
+        const QString all = f.m_contacts.join(", ");
+
+        if (m_contact->findText(all) < 0) {
+            m_contact->addItem(all, f.m_contacts);
+        }
+
+        m_contact->setCurrentIndex(m_contact->findText(all));
+    }
+    else
+    {
+        if (!f.m_contacts.isEmpty() && (m_contact->findText(f.m_contacts.first()) < 0)) {
+            m_contact->addItem(f.m_contacts.first());
+        }
+
+        m_contact->setCurrentIndex(f.m_contacts.isEmpty() ? 0 : std::max(0, m_contact->findText(f.m_contacts.first())));
     }
 
-    m_contact->setCurrentIndex(f.m_contacts.isEmpty() ? 0 : std::max(0, m_contact->findText(f.m_contacts.first())));
     m_contact->setVisible(m_contact->count() > 1);
     m_protocol->setCurrentIndex(f.m_protocols.isEmpty() ? 0 : std::max(0, m_protocol->findText(f.m_protocols.first())));
     m_direction->setCurrentIndex(f.m_direction < 0 ? 0 : (f.m_direction == (int) MessageRecord::DirectionRX ? 1 : 2));
@@ -358,6 +388,7 @@ void MessageCenterFilterWidget::setContacts(const QList<MessageCenterContact>& c
 {
     m_contact->blockSignals(true);
     const QString current = m_contact->currentIndex() > 0 ? m_contact->currentText() : QString();
+    const QVariant currentData = m_contact->currentData();
     m_contact->clear();
     m_contact->addItem("Any contact");
 
@@ -365,7 +396,7 @@ void MessageCenterFilterWidget::setContacts(const QList<MessageCenterContact>& c
         m_contact->addItem(MessageCenterContactIcons::icon(contact.m_icon), contact.m_name);
     }
     if (!current.isEmpty() && (m_contact->findText(current) < 0)) {
-        m_contact->addItem(current);
+        m_contact->addItem(current, currentData);
     }
 
     m_contact->setCurrentIndex(current.isEmpty() ? 0 : std::max(0, m_contact->findText(current)));

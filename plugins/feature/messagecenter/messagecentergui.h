@@ -74,6 +74,9 @@ private:
     QLineEdit *m_regExp;
     QComboBox *m_source;
     bool m_sourcesShown = false;
+    //! The filter set: what the widgets do not show of it (more than one contact, protocol, channel or source, the
+    //! kind, speeds, frequencies and times) is kept unless the widget showing its first entry is changed
+    MessageCenterFilter m_base;
 };
 
 class QTabWidget;
