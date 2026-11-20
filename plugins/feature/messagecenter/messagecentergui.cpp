@@ -60,6 +60,8 @@ QTableWidget *makeTable(const QStringList& headers, QWidget *parent)
     table->setSelectionBehavior(QAbstractItemView::SelectRows);
     table->setSelectionMode(QAbstractItemView::SingleSelection);
     table->verticalHeader()->setVisible(false);
+    // Each column as wide as its contents (a number, yes or no, a name), the last one takes the width left
+    table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     table->horizontalHeader()->setStretchLastSection(true);
     table->setMinimumHeight(60);
     table->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -581,6 +583,8 @@ void MessageCenterGUI::buildCompose(QWidget *container)
     m_composer->setSendText("Post the page");
     m_composer->setTransmitters(QStringList());
     layout->addWidget(m_composer);
+    // Its lines together at the top of the tab, not spread over its height
+    layout->addStretch(1);
 
     connect(m_composer, &PagingComposer::selectionChanged, this, &MessageCenterGUI::transmitterChanged);
     connect(m_composer, &PagingComposer::sendRequested, this, &MessageCenterGUI::post);
@@ -592,6 +596,9 @@ void MessageCenterGUI::buildRoutes(QWidget *container)
     layout->setContentsMargins(2, 2, 2, 2);
     // How the routes work: in the tool tip of the table (and the readme, from the help button of the window)
     m_routesTable = makeTable({"#", "Route", "Filter", "Sinks", "Stop", "On"}, container);
+    // The filter, the longest text, takes the width left
+    m_routesTable->horizontalHeader()->setStretchLastSection(false);
+    m_routesTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
     m_routesTable->setToolTip("Every message is checked against all the routes, in their number order (#), not only the first.\n"
         "Each route whose filter selects it sends it to the route's sinks: the log, the queue or the sinks of I/O.\n"
         "A route with Stop ends the check for the messages it selects.\n"
@@ -900,6 +907,21 @@ void MessageCenterGUI::handleInputMessages()
 
 bool MessageCenterGUI::handleMessage(const Message& message)
 {
+    // Settings changed from the WebAPI or the MCP server (routes, sinks, sources...): shown at once
+    if (MessageCenter::MsgConfigureMessageCenter::match(message))
+    {
+        const MessageCenter::MsgConfigureMessageCenter& cfg = (const MessageCenter::MsgConfigureMessageCenter&) message;
+
+        if (cfg.getForce()) {
+            m_settings = cfg.getSettings();
+        } else {
+            m_settings.applySettings(cfg.getSettingsKeys(), cfg.getSettings());
+        }
+
+        m_settings.setRollupState(&m_rollupState);
+        displaySettings();
+        return true;
+    }
     if (MessageCenter::MsgUpdated::match(message))
     {
         refresh();
