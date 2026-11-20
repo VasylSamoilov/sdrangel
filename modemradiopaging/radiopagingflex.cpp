@@ -1618,7 +1618,6 @@ RadioPagingFlex::PhaseResult RadioPagingFlex::buildPhase(const PhaseParams& para
 
     std::vector<Info> info(messages.size());
     std::vector<int> order;
-    std::vector<int> tones;
 
     // Priority addresses first, then the others; tone only addresses (no vector) last
     for (int pass = 0; pass < 3; pass++)

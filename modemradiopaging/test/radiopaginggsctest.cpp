@@ -681,8 +681,8 @@ void testInterpretation()
     // A full block of alphanumeric text has no padding
     std::vector<G::TxMessage> full = { tx("100123", 1, G::Alphanumeric, "ABCDEFGH") };
     Decoded f = decode(G::encode(full).m_bits, D::Normal, false, 0, 1);
-    G::Interpretation fi = G::interpret(f.m_messages[0].m_rawData, f.m_messages[0].m_rawBits);
-    check(!f.m_messages.empty() && ((fi.m_type == "alphanumeric" ? fi.m_text : fi.m_altText) == "ABCDEFGH"),
+    G::Interpretation fi = f.m_messages.empty() ? G::Interpretation() : G::interpret(f.m_messages[0].m_rawData, f.m_messages[0].m_rawBits);
+    check(!f.m_messages.empty() &&((fi.m_type == "alphanumeric" ? fi.m_text : fi.m_altText) == "ABCDEFGH"),
         "A message that fills a block (no padding) keeps the alphanumeric reading as a candidate");
     // Its numeric reading has Null nibbles between digits, which padding never is
     check((fi.m_type == "alphanumeric") && (fi.m_text == "ABCDEFGH"), "A full block of letters is alphanumeric");
@@ -692,7 +692,7 @@ void testInterpretation()
     {
         std::vector<G::TxMessage> digitsOnly = { tx("100123", 1, G::Numeric, number) };
         Decoded dd = decode(G::encode(digitsOnly).m_bits, D::Normal, false, 0, 1);
-        G::Interpretation di = G::interpret(dd.m_messages[0].m_rawData, dd.m_messages[0].m_rawBits);
+        G::Interpretation di = dd.m_messages.empty() ? G::Interpretation() : G::interpret(dd.m_messages[0].m_rawData, dd.m_messages[0].m_rawBits);
         check(!dd.m_messages.empty() && (di.m_type == "numeric") && (di.m_text == number),
             (std::string("A long number of digits only is numeric: ") + number).c_str());
     }

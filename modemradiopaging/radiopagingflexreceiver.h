@@ -160,31 +160,31 @@ private:
     double m_syncPower;                 //!< Mean magnitude squared over sync 1
     std::deque<float> m_recentPower;    //!< Magnitude squared of the last sync 1 duration
 
-    RadioPagingFlex::Mode m_mode;
-    bool m_inverted;
+    RadioPagingFlex::Mode m_mode{};
+    bool m_inverted = false;
     uint32_t m_fiw = 0;
     int m_fiwBits = 0;
 
     int m_s2Symbols;                    //!< Nominal second sync length in symbols
     int m_s2Count;
-    uint32_t m_s2Reg;                   //!< Bits of the second sync, newest in bit 0
+    uint32_t m_s2Reg = 0;               //!< Bits of the second sync, newest in bit 0
     std::vector<uint8_t> m_s2Tail;      //!< Symbols around the nominal end of the second sync
     std::vector<float> m_s2TailSoft;    //!< Their normalised values
-    int m_s2TailStart;
-    int m_s2ExactEnd;                   //!< Symbol count at which inverted C ended without errors, -1 if not seen
+    int m_s2TailStart = 0;
+    int m_s2ExactEnd = -1;              //!< Symbol count at which inverted C ended without errors, -1 if not seen
 
-    int m_dataSymbols;                  //!< Data symbols of the mode
-    int m_dataCount;
-    int m_bitIndex;                     //!< Bit index in the phase words
-    bool m_secondOfPair;                //!< 6400/4 and 3200/2: second symbol of a pair
+    int m_dataSymbols = 0;              //!< Data symbols of the mode
+    int m_dataCount = 0;
+    int m_bitIndex = 0;                 //!< Bit index in the phase words
+    bool m_secondOfPair = false;        //!< 6400/4 and 3200/2: second symbol of a pair
     std::vector<std::vector<uint32_t>> m_words;
     //! Reliability of each bit of m_words (bit index of the phase): distance of its symbol from the decision
     //! threshold of the bit, 100 = the outer level deviation, at most 255
     std::vector<std::vector<uint8_t>> m_reliability;
     std::vector<double> m_blockPower;
     std::vector<int> m_blockSamples;
-    double m_errorSum;
-    int m_errorCount;
+    double m_errorSum = 0.0;
+    int m_errorCount = 0;
     double m_recentError2 = 0.0;        //!< Of the data symbols: exponential average of their squared error (32 symbols)
 
     uint64_t m_syncSymbols;             //!< Symbols of the sync demodulator

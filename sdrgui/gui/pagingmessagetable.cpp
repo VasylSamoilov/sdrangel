@@ -836,13 +836,13 @@ void PagingMessageTable::fillRow(int row, const MessageRecord& record, const QSt
     }
     else
     {
-        const QString state = d.value("page_state").toString();
+        const QString pageState = d.value("page_state").toString();
         const QString reason = d.value("page_reason").toString();
         const QString transmitter = d.value("transmitter").toString();
-        const bool queued = (state == "pending") || (state == "queued") || (state == "claimed") || (state == "transmitted");
-        QString tip = queued ? tr("In the queue of the Message Center for %1: %2").arg(transmitter, state)
-            : (state == "dead") ? tr("Not sent by %1: it failed").arg(transmitter)
-            : (state == "cancelled") ? tr("Not sent by %1: cancelled").arg(transmitter)
+        const bool queued = (pageState == "pending") || (pageState == "queued") || (pageState == "claimed") || (pageState == "transmitted");
+        QString tip = queued ? tr("In the queue of the Message Center for %1: %2").arg(transmitter, pageState)
+            : (pageState == "dead") ? tr("Not sent by %1: it failed").arg(transmitter)
+            : (pageState == "cancelled") ? tr("Not sent by %1: cancelled").arg(transmitter)
             : tr("Not sent by %1: no longer in the queue (Message Center restarted)").arg(transmitter);
 
         if (!reason.isEmpty()) {
