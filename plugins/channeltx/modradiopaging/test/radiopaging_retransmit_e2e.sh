@@ -62,8 +62,8 @@ for ds in 0 1; do
     curl_code PATCH "/deviceset/$ds/device/settings" "{\"deviceHwType\":\"FileOutput\",\"direction\":1,\"fileOutputSettings\":{\"fileName\":\"$out\",\"sampleRate\":48000,\"log2Interp\":0}}" > /dev/null
     curl_code POST "/deviceset/$ds/channel" '{"channelType":"RadioPagingMod","direction":1}' > /dev/null
 done
-curl_code PATCH /deviceset/0/channel/0/settings '{"channelType":"RadioPagingMod","direction":1,"RadioPagingModSettings":{"protocol":1,"mode":1,"flexMode":0,"flexCollapse":0,"channelAlias":"tf","deviation":4800}}' > /dev/null
-curl_code PATCH /deviceset/1/channel/0/settings '{"channelType":"RadioPagingMod","direction":1,"RadioPagingModSettings":{"protocol":0,"mode":1,"pocsagSpeed":1200,"channelAlias":"tp","deviation":4500}}' > /dev/null
+curl_code PATCH /deviceset/0/channel/0/settings '{"channelType":"RadioPagingMod","direction":1,"RadioPagingModSettings":{"protocol":1,"mode":1,"flexMode":0,"flexCollapse":0,"title":"tf","deviation":4800}}' > /dev/null
+curl_code PATCH /deviceset/1/channel/0/settings '{"channelType":"RadioPagingMod","direction":1,"RadioPagingModSettings":{"protocol":0,"mode":1,"pocsagSpeed":1200,"title":"tp","deviation":4500}}' > /dev/null
 
 # Refused: out of range, a type FLEX does not number, GSC, one-shot
 check "FLEX: 16 copies are refused" '[ "$(tx 0 "{\"protocol\":\"flex\",\"capcode\":1100001,\"type\":\"alphanumeric\",\"retransmit\":16,\"text\":\"x\"}")" = 400 ]'
@@ -153,8 +153,8 @@ for ds in 2 3; do
     curl_code PATCH "/deviceset/$ds/device/settings" "{\"deviceHwType\":\"FileInput\",\"direction\":0,\"fileInputSettings\":{\"fileName\":\"$in\",\"accelerationFactor\":1,\"loop\":0}}" > /dev/null
     curl_code POST "/deviceset/$ds/channel" '{"channelType":"RadioPagingDemod","direction":0}' > /dev/null
 done
-curl_code PATCH /deviceset/2/channel/0/settings '{"channelType":"RadioPagingDemod","direction":0,"RadioPagingDemodSettings":{"pocsagEnabled":0,"flexEnabled":1,"gscEnabled":0,"flexDeviation":4800,"channelAlias":"rf","flexCharset":{"vendor":"motorola","model":"linguist","codepage":"cyrillic"}}}' > /dev/null
-curl_code PATCH /deviceset/3/channel/0/settings '{"channelType":"RadioPagingDemod","direction":0,"RadioPagingDemodSettings":{"pocsagEnabled":1,"flexEnabled":0,"gscEnabled":0,"pocsagDeviation":4500,"channelAlias":"rp","pocsagCharset":{"vendor":"generic","model":"generic","codepage":"latin-german"}}}' > /dev/null
+curl_code PATCH /deviceset/2/channel/0/settings '{"channelType":"RadioPagingDemod","direction":0,"RadioPagingDemodSettings":{"pocsagEnabled":0,"flexEnabled":1,"gscEnabled":0,"flexDeviation":4800,"title":"rf","flexCharset":{"vendor":"motorola","model":"linguist","codepage":"cyrillic"}}}' > /dev/null
+curl_code PATCH /deviceset/3/channel/0/settings '{"channelType":"RadioPagingDemod","direction":0,"RadioPagingDemodSettings":{"pocsagEnabled":1,"flexEnabled":0,"gscEnabled":0,"pocsagDeviation":4500,"title":"rp","pocsagCharset":{"vendor":"generic","model":"generic","codepage":"latin-german"}}}' > /dev/null
 check "the codepage setting of a receiver must be one of the protocol" '[ "$(curl_code PATCH /deviceset/3/channel/0/settings "{\"channelType\":\"RadioPagingDemod\",\"direction\":0,\"RadioPagingDemodSettings\":{\"gscCharset\":$CYRILLIC}}")" = 400 ]'
 check "the POCSAG fill codes must be hex codes 00 to 7F" '[ "$(curl_code PATCH /deviceset/3/channel/0/settings "{\"channelType\":\"RadioPagingDemod\",\"direction\":0,\"RadioPagingDemodSettings\":{\"pocsagFillCodes\":\"00 80\"}}")" = 400 ]'
 curl_code PATCH /deviceset/3/channel/0/settings '{"channelType":"RadioPagingDemod","direction":0,"RadioPagingDemodSettings":{"pocsagFill":1}}' > /dev/null

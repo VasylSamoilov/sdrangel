@@ -44,7 +44,7 @@ sleep 0.5
 curl_code PUT /deviceset/0/device '{"hwType":"FileOutput","direction":1}' > /dev/null
 curl_code PATCH /deviceset/0/device/settings "{\"deviceHwType\":\"FileOutput\",\"direction\":1,\"fileOutputSettings\":{\"fileName\":\"$OUT\",\"sampleRate\":48000,\"log2Interp\":0}}" > /dev/null
 curl_code POST /deviceset/0/channel '{"channelType":"RadioPagingMod","direction":1}' > /dev/null
-curl_code PATCH /deviceset/0/channel/0/settings '{"channelType":"RadioPagingMod","direction":1,"RadioPagingModSettings":{"protocol":1,"mode":0,"flexMode":0,"channelAlias":"t1","deviation":4800}}' > /dev/null
+curl_code PATCH /deviceset/0/channel/0/settings '{"channelType":"RadioPagingMod","direction":1,"RadioPagingModSettings":{"protocol":1,"mode":0,"flexMode":0,"title":"t1","deviation":4800}}' > /dev/null
 curl_code POST /deviceset/0/device/run > /dev/null
 sleep 1
 
@@ -90,7 +90,7 @@ sleep 0.5
 curl_code PUT /deviceset/1/device '{"hwType":"FileInput","direction":0}' > /dev/null
 curl_code PATCH /deviceset/1/device/settings "{\"deviceHwType\":\"FileInput\",\"direction\":0,\"fileInputSettings\":{\"fileName\":\"$OUT\",\"accelerationFactor\":1,\"loop\":0}}" > /dev/null
 curl_code POST /deviceset/1/channel '{"channelType":"RadioPagingDemod","direction":0}' > /dev/null
-curl_code PATCH /deviceset/1/channel/0/settings '{"channelType":"RadioPagingDemod","direction":0,"RadioPagingDemodSettings":{"pocsagEnabled":0,"flexEnabled":1,"gscEnabled":0,"flexDeviation":4800,"channelAlias":"r1"}}' > /dev/null
+curl_code PATCH /deviceset/1/channel/0/settings '{"channelType":"RadioPagingDemod","direction":0,"RadioPagingDemodSettings":{"pocsagEnabled":0,"flexEnabled":1,"gscEnabled":0,"flexDeviation":4800,"title":"r1"}}' > /dev/null
 curl_code POST /deviceset/1/device/run > /dev/null
 
 SECS=$(( $(stat -c %s "$OUT") / (48000 * 4) + 5 ))
@@ -120,13 +120,14 @@ if [ "$failed" -ne 0 ]; then
     report | sed 's/},{/}\n{/g' | grep "\"direction\":\"rx\""
 fi
 
-# The first announcement of a paging channel adds a Message Center when there is none, and only then
+# The paging channels do not add a Message Center (their Message Center button opens one): their announcements
+# (every 5 s) neither add another nor add one when there is none
 centers() { curl -s "$U/featureset" | tr -d '\n ' | grep -o '"id":"MessageCenter"' | wc -l; }
 check "a Message Center: the channels do not add another" '[ "$(centers)" = 1 ]'
 curl_code DELETE /featureset/feature/0 > /dev/null
 curl_code POST /deviceset/0/channel '{"channelType":"RadioPagingMod","direction":1}' > /dev/null
-for i in $(seq 15); do [ "$(centers)" = 1 ] && break; sleep 1; done
-check "without a Message Center, a new paging channel adds one" '[ "$(centers)" = 1 ]'
+sleep 7
+check "without a Message Center, a new paging channel does not add one" '[ "$(centers)" = 0 ]'
 
 curl_code DELETE /deviceset/1/device/run > /dev/null
 fuser -k "$PORT"/tcp > /dev/null 2>&1

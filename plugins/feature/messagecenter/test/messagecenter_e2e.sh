@@ -37,7 +37,7 @@ sleep 0.5
 curl_code PUT /deviceset/0/device '{"hwType":"FileOutput","direction":1}' > /dev/null
 curl_code PATCH /deviceset/0/device/settings "{\"deviceHwType\":\"FileOutput\",\"direction\":1,\"fileOutputSettings\":{\"fileName\":\"$OUT\",\"sampleRate\":48000,\"log2Interp\":0}}" > /dev/null
 curl_code POST /deviceset/0/channel '{"channelType":"RadioPagingMod","direction":1}' > /dev/null
-curl_code PATCH /deviceset/0/channel/0/settings '{"channelType":"RadioPagingMod","direction":1,"RadioPagingModSettings":{"protocol":2,"mode":0,"channelAlias":"t1","deviation":4500}}' > /dev/null
+curl_code PATCH /deviceset/0/channel/0/settings '{"channelType":"RadioPagingMod","direction":1,"RadioPagingModSettings":{"protocol":2,"mode":0,"title":"t1","deviation":4500}}' > /dev/null
 curl_code POST /deviceset/0/device/run > /dev/null
 
 # The modulator announces itself every 5 s
