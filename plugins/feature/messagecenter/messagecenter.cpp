@@ -1143,6 +1143,44 @@ int MessageCenter::webapiActionsPost(const QStringList& featureActionsKeys, SWGS
         }
 
         auto text = [](QString *s) { return s ? *s : QString(); };
+
+        // To a contact: the fields of its send to for this page (transmitter, address...) set on it
+        if (!text(post->getContact()).trimmed().isEmpty())
+        {
+            const QString name = text(post->getContact()).trimmed();
+            MessageCenterContact contact;
+            bool found = false;
+            {
+                QMutexLocker mutexLocker(&m_mutex);
+
+                for (const MessageCenterContact& c : m_settings.m_contacts)
+                {
+                    if (c.m_name == name)
+                    {
+                        contact = c;
+                        found = true;
+                    }
+                }
+            }
+
+            if (!found)
+            {
+                errorMessage = QString("No contact %1").arg(name);
+                return 400;
+            }
+
+            QJsonObject *message = post->asJsonObject();
+            QJsonObject sent;
+            const bool sendable = contact.pageFor(*message, sent, &errorMessage);
+            delete message;
+
+            if (!sendable) {
+                return 400;
+            }
+
+            post->fromJsonObject(sent);
+        }
+
         QString polarity = text(post->getPolarity()).toLower();
         RadioPagingPage page;
         page.m_id = text(post->getId());

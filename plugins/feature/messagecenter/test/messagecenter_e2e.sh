@@ -51,13 +51,21 @@ check "a page for a transmitter that is not there is accepted" '[ "$(post "{\"id
 check "a page with a bad address is refused" '[ "$(post "{\"id\":\"p-bad\",\"transmitter\":\"t1\",\"protocol\":\"flex\",\"address\":\"abc\"}")" = 400 ]'
 check "a voice page needs a file" '[ "$(post "{\"id\":\"p-voice\",\"transmitter\":\"t1\",\"protocol\":\"gsc\",\"address\":\"123456\",\"type\":\"voice\"}")" = 400 ]'
 
+# A contact: its rule names the messages of its address, its send to gives the transmitter and the address of a page to it
+CONTACTS='[{\"name\":\"Duty\",\"icon\":\":pager\",\"rules\":[[{\"field\":\"protocol\",\"is\":\"gsc\"},{\"field\":\"address\",\"matches\":\"123456/.\"}]],\"sendTo\":[{\"page\":{\"transmitter\":\"t1\",\"protocol\":\"gsc\",\"address\":\"123456\",\"function\":3}}]}]'
+check "the contacts are set" '[ "$(curl_code PATCH /featureset/feature/0/settings "{\"featureType\":\"MessageCenter\",\"MessageCenterSettings\":{\"contacts\":\"$CONTACTS\"}}")" = 200 ]'
+check "a contact with an address that is not one is refused" '[ "$(curl_code PATCH /featureset/feature/0/settings "{\"featureType\":\"MessageCenter\",\"MessageCenterSettings\":{\"contacts\":\"[{\\\"name\\\":\\\"X\\\",\\\"sendTo\\\":[{\\\"page\\\":{\\\"transmitter\\\":\\\"t1\\\",\\\"protocol\\\":\\\"gsc\\\",\\\"address\\\":\\\"abc\\\"}}]}]\"}}")" = 400 ]'
+check "a page to a contact is accepted" '[ "$(post "{\"id\":\"p-contact\",\"contact\":\"Duty\",\"type\":\"alphanumeric\",\"text\":\"TO A CONTACT\"}")" = 202 ]'
+check "a page to a contact that is not there is refused" '[ "$(post "{\"id\":\"p-nocontact\",\"contact\":\"Nobody\",\"type\":\"tone\"}")" = 400 ]'
+
 sleep 12
 R=$(report)
+check "the page to the contact was sent by its transmitter to its address, the log names it" '[[ "$R" == *"\"id\":\"p-contact\""*"\"state\":\"sent\""* && "$R" == *"\"contact\":\"Duty\""* && "$R" == *"123456/4"* ]]'
 check "the page was claimed by the modulator and sent" '[[ "$R" == *"\"claimedBy\":\"t1\""*"\"id\":\"p-tone\""*"\"state\":\"sent\""* ]]'
 check "the page with text was sent" '[[ "$R" == *"\"id\":\"p-alpha\""*"\"state\":\"sent\""*"\"text\":\"FROM THE CENTER\""* ]]'
 check "the page for nobody waits" '[[ "$R" == *"\"id\":\"p-nobody\""*"\"state\":\"pending\""* ]]'
 check "the sent messages are in the log, from the transmitter" '[[ "$R" == *"\"channel\":\"t1\""*"\"direction\":\"tx\""* ]]'
-check "the modulator sent two messages" '[ "$(curl -s "$U/deviceset/0/channel/0/report" | tr -d "\n " | grep -o "\"sent\":[0-9]*")" = "\"sent\":2" ]'
+check "the modulator sent three messages" '[ "$(curl -s "$U/deviceset/0/channel/0/report" | tr -d "\n " | grep -o "\"sent\":[0-9]*")" = "\"sent\":3" ]'
 
 check "a page nobody has can be withdrawn" '[ "$(curl_code POST /featureset/feature/0/actions "{\"featureType\":\"MessageCenter\",\"MessageCenterActions\":{\"cancel\":\"p-nobody\"}}")" = 202 ]'
 sleep 1.5

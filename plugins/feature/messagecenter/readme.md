@@ -74,6 +74,8 @@ A contact has rules; a message is the contact's when it meets all the conditions
 
 A message of a contact has its name, icon and colour in its data (contact, contact_icon, contact_color): the sinks have them too. A change of the contacts names the messages that come after it.
 
+A page can go to a contact instead of a transmitter and an address (`contact` in a post of the WebAPI or of the MCP tool message_center_post_page). The contact's send to list says how: in order, conditions on the page (protocol, type, text, priority... as a post has them; none for always) and the fields it sets (transmitter, protocol, address, function...). The first one whose conditions the page meets is taken, e.g. voice pages by GSC, binary ones by FLEX, the others by POCSAG. A page no send to takes is refused with the reason.
+
 <h3>Routes</h3>
 
 Every message is checked against all the routes in their number order (#), not only the first. Each route whose filter selects the message sends it to the sinks of the route: the log, the transmit queue or the sinks of I/O. A route with Stop ends the check for the messages it selects, so the routes after it do not see them. The log is a sink as the others: a message no route sends to it is not logged. A new Message Center has one route, 1 "All messages to the log", without a filter. A sink takes only what a route sends to it.

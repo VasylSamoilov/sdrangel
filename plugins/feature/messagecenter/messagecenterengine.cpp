@@ -28,6 +28,7 @@
 #include <algorithm>
 
 #include "util/csv.h"
+#include "radiopagingpage.h"
 #include "radiopagingpagerformat.h"
 #include "radiopagingrecode.h"
 #include "messagecenterengine.h"
@@ -524,6 +525,110 @@ bool MessageCenterContact::matches(const QJsonObject& fields) const
     return false;
 }
 
+QString MessageCenterContact::SendTo::check() const
+{
+    for (const Condition& condition : m_when)
+    {
+        const QString error = condition.check();
+
+        if (!error.isEmpty()) {
+            return error;
+        }
+    }
+
+    if (m_page.value("transmitter").toString().trimmed().isEmpty()) {
+        return "a send to has no transmitter";
+    }
+
+    // An address of a paging protocol: as a page has it (the same check as the WebAPI and the composer)
+    const QString protocol = m_page.value("protocol").toString().toLower();
+
+    if (RadioPagingPage::protocols().contains(protocol))
+    {
+        RadioPagingPage page;
+        page.m_protocol = protocol;
+        page.m_address = m_page.value("address").toVariant().toString().trimmed();
+        page.m_function = m_page.value("function").toInt(0);
+        const QString error = page.checkAddress();
+
+        if (!error.isEmpty()) {
+            return QString("send to %1: %2").arg(m_page.value("transmitter").toString(), error);
+        }
+    }
+    else if (m_page.value("address").toVariant().toString().trimmed().isEmpty())
+    {
+        return "a send to has no address";
+    }
+
+    return QString();
+}
+
+QJsonObject MessageCenterContact::SendTo::toJson() const
+{
+    QJsonObject json;
+    QJsonArray when;
+
+    for (const Condition& c : m_when) {
+        when.append(c.toJson());
+    }
+
+    if (!when.isEmpty()) {
+        json["when"] = when;
+    }
+
+    json["page"] = m_page;
+    return json;
+}
+
+MessageCenterContact::SendTo MessageCenterContact::SendTo::fromJson(const QJsonObject& json)
+{
+    SendTo s;
+
+    for (const QJsonValue& v : json["when"].toArray()) {
+        s.m_when.append(Condition::fromJson(v.toObject()));
+    }
+
+    s.m_page = json["page"].toObject();
+    return s;
+}
+
+bool MessageCenterContact::pageFor(const QJsonObject& message, QJsonObject& page, QString *error) const
+{
+    for (const SendTo& sendTo : m_sendTo)
+    {
+        bool all = true;
+
+        for (const Condition& condition : sendTo.m_when)
+        {
+            if (!condition.matches(message))
+            {
+                all = false;
+                break;
+            }
+        }
+
+        if (!all) {
+            continue;
+        }
+
+        // The page as it was, with the fields of the send to (its transmitter and address)
+        page = message;
+        page.remove("contact");
+
+        for (auto it = sendTo.m_page.begin(); it != sendTo.m_page.end(); ++it) {
+            page.insert(it.key(), it.value());
+        }
+
+        return true;
+    }
+
+    if (error) {
+        *error = m_sendTo.isEmpty() ? QString("%1 has no send to").arg(m_name) : QString("No send to of %1 for this page").arg(m_name);
+    }
+
+    return false;
+}
+
 QJsonObject MessageCenterContact::recordFields(const MessageRecord& record)
 {
     QJsonObject fields = record.toJson();
@@ -569,6 +674,17 @@ QJsonObject MessageCenterContact::toJson() const
     json["name"] = m_name;
     json["rules"] = rules;
 
+    if (!m_sendTo.isEmpty())
+    {
+        QJsonArray sendTo;
+
+        for (const SendTo& s : m_sendTo) {
+            sendTo.append(s.toJson());
+        }
+
+        json["sendTo"] = sendTo;
+    }
+
     if (!m_icon.isEmpty()) {
         json["icon"] = m_icon;
     }
@@ -600,6 +716,10 @@ MessageCenterContact MessageCenterContact::fromJson(const QJsonObject& json)
         }
     }
 
+    for (const QJsonValue& v : json["sendTo"].toArray()) {
+        c.m_sendTo.append(SendTo::fromJson(v.toObject()));
+    }
+
     c.m_icon = json["icon"].toString();
     c.m_color = (quint32) json["color"].toDouble(0);
     c.m_note = json["note"].toString();
@@ -622,6 +742,10 @@ QList<MessageCenterContact> MessageCenterContact::listFromJson(const QByteArray&
     QList<MessageCenterContact> contacts;
     QJsonParseError parseError;
     QJsonDocument doc = QJsonDocument::fromJson(json, &parseError);
+
+    if (error) {
+        error->clear();
+    }
 
     if (json.trimmed().isEmpty()) {
         return contacts;
@@ -656,6 +780,14 @@ QList<MessageCenterContact> MessageCenterContact::listFromJson(const QByteArray&
                 if (why.isEmpty() && !conditionError.isEmpty()) {
                     why = QString("%1: %2").arg(c.m_name, conditionError);
                 }
+            }
+        }
+        for (const SendTo& sendTo : c.m_sendTo)
+        {
+            const QString sendError = sendTo.check();
+
+            if (why.isEmpty() && !sendError.isEmpty()) {
+                why = QString("%1: %2").arg(c.m_name, sendError);
             }
         }
 

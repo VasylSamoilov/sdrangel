@@ -754,6 +754,12 @@ void testUdp()
     check(inUse.poll(none, second), "once");
 }
 
+MessageCenterContact rulesOnly(MessageCenterContact contact)
+{
+    contact.m_sendTo.clear();
+    return contact;
+}
+
 // The address book: the addresses of a contact in several protocols, its name on the records, the filters by it
 void testContacts()
 {
@@ -824,6 +830,32 @@ void testContacts()
         && (logged->m_protocolData.value("contact_color").toULongLong() == 4294901760ULL),
         "Contacts: a route selects the messages of a contact, the log has its name, icon and colour");
     check(MessageCenterFilter::fromJson(routes[0].m_filter.toJson()).m_contacts == QStringList({"Fire 3"}), "Contacts: the filter keeps them in JSON");
+
+    // Send to: the first one whose conditions the page meets sets its fields (voice by GSC, binary by FLEX, the rest by
+    // POCSAG)
+    QString sendJson = "[{\"name\":\"Pager\",\"rules\":[[{\"field\":\"ric\",\"is\":\"1234567\"}]],\"sendTo\":["
+        "{\"when\":[{\"field\":\"type\",\"is\":\"voice\"}],\"page\":{\"transmitter\":\"tg\",\"protocol\":\"gsc\",\"address\":\"012345\",\"function\":1}},"
+        "{\"when\":[{\"field\":\"type\",\"matches\":\"binary|secure\"}],\"page\":{\"transmitter\":\"tf\",\"protocol\":\"flex\",\"address\":\"1100001\"}},"
+        "{\"page\":{\"transmitter\":\"tp\",\"protocol\":\"pocsag\",\"address\":\"1234567\",\"function\":3}}]}]";
+    QList<MessageCenterContact> pagers = MessageCenterContact::listFromJson(sendJson.toUtf8(), &error);
+    check((pagers.size() == 1) && (pagers[0].m_sendTo.size() == 3) && error.isEmpty(), "Send to: read from JSON");
+    check(MessageCenterContact::listFromJson(MessageCenterContact::listToJson(pagers))[0].m_sendTo.size() == 3, "Send to: written to JSON and read again");
+
+    QJsonObject page;
+    const bool voice = pagers[0].pageFor(QJsonObject({{"contact", "Pager"}, {"type", "voice"}, {"text", "/tmp/v.wav"}}), page);
+    check(voice && (page["transmitter"] == "tg") && (page["protocol"] == "gsc") && (page["address"] == "012345") && (page["text"] == "/tmp/v.wav")
+        && !page.contains("contact"), "Send to: a voice page goes by GSC, its text kept");
+    pagers[0].pageFor(QJsonObject({{"type", "binary"}, {"text", "DEAD"}}), page);
+    check((page["transmitter"] == "tf") && (page["protocol"] == "flex"), "Send to: a binary page goes by FLEX (a regular expression)");
+    pagers[0].pageFor(QJsonObject({{"type", "alphanumeric"}, {"text", "FIRE"}}), page);
+    check((page["transmitter"] == "tp") && (page["protocol"] == "pocsag") && (page["function"] == 3), "Send to: the others by POCSAG (no condition)");
+    check(!rulesOnly(pagers[0]).pageFor(QJsonObject({{"type", "tone"}}), page, &error) && error.contains("no send to"),
+        "Send to: a contact without send to is refused with the reason");
+
+    check(MessageCenterContact::listFromJson("[{\"name\":\"A\",\"sendTo\":[{\"page\":{\"transmitter\":\"t\",\"protocol\":\"pocsag\",\"address\":\"9999999\"}}]}]",
+        &error).isEmpty() && error.contains("POCSAG"), "Send to: an address that is not one of its protocol is refused (the check of the pages)");
+    check(MessageCenterContact::listFromJson("[{\"name\":\"A\",\"sendTo\":[{\"page\":{\"protocol\":\"pocsag\",\"address\":\"1\"}}]}]", &error).isEmpty()
+        && error.contains("transmitter"), "Send to: a send to without a transmitter is refused");
 }
 
 void testCsvSources()

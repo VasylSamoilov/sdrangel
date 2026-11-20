@@ -6333,7 +6333,8 @@ void MCPTools::registerMessageCenterTools()
         });
 
     add("get_message_center",
-        "Get the state of the Message Center: its routes, sinks and sources, the channels that announced themselves (receivers "
+        "Get the state of the Message Center: its routes, contacts (the address book: name, rules, send to), sinks and sources, "
+        "the channels that announced themselves (receivers "
         "and transmitters), the pages in the transmit queue, the records each sink took and refused, the errors since the "
         "last call, and the newest 50 messages of its log.",
         schema(QJsonObject()),
@@ -6349,6 +6350,7 @@ void MCPTools::registerMessageCenterTools()
             QJsonObject result;
             result["featureIndex"] = index;
             result["routes"] = parsed(settings["routes"]);
+            result["contacts"] = parsed(settings["contacts"]);
             result["sinks"] = parsed(settings["sinks"]);
             result["sources"] = parsed(settings["sources"]);
             result["logSize"] = settings["logSize"];
@@ -6424,8 +6426,10 @@ void MCPTools::registerMessageCenterTools()
         "lists the transmitters). "
         "The page has the fields of MessageCenterPost: transmitter, protocol (pocsag, flex, gsc), address, type (alphanumeric, "
         "numeric, tone, voice...), text, function, speed, polarity, priority and the fields of the protocol. "
-        "The page goes on the air when the transmitter takes it.",
-        schema({{"page", objProp("The page: transmitter, protocol, address, type, text and the optional fields")}}, {"page"}),
+        "Or contact: the name of a contact of the address book (get_message_center has them) instead of the transmitter and "
+        "the address: its send to for the page gives them, e.g. {\"contact\": \"Fire station 3\", \"type\": \"alphanumeric\", "
+        "\"text\": \"FIRE Main St\"}. The page goes on the air when the transmitter takes it.",
+        schema({{"page", objProp("The page: transmitter, protocol, address (or contact), type, text and the optional fields")}}, {"page"}),
         [this](const QJsonObject& args)
         {
             QJsonObject actions;

@@ -13,7 +13,7 @@
 /*
  * SWGMessageCenterPost.h
  *
- * A page to transmit. The transmitter is the channel alias it announced. A page is for a modulator that handles its protocol. No live voice: a voice page is a sound file
+ * A page to transmit. The transmitter is the channel name it announced. A page is for a modulator that handles its protocol. No live voice: a voice page is a sound file
  */
 
 #ifndef SWGMessageCenterPost_H_
@@ -45,6 +45,9 @@ public:
 
     QString* getId();
     void setId(QString* id);
+
+    QString* getContact();
+    void setContact(QString* contact);
 
     QString* getTransmitter();
     void setTransmitter(QString* transmitter);
@@ -121,6 +124,9 @@ public:
 private:
     QString* id;
     bool m_id_isSet;
+
+    QString* contact;
+    bool m_contact_isSet;
 
     QString* transmitter;
     bool m_transmitter_isSet;

@@ -30,6 +30,8 @@ SWGMessageCenterPost::SWGMessageCenterPost(QString* json) {
 SWGMessageCenterPost::SWGMessageCenterPost() {
     id = nullptr;
     m_id_isSet = false;
+    contact = nullptr;
+    m_contact_isSet = false;
     transmitter = nullptr;
     m_transmitter_isSet = false;
     protocol = nullptr;
@@ -86,6 +88,8 @@ void
 SWGMessageCenterPost::init() {
     id = new QString("");
     m_id_isSet = false;
+    contact = new QString("");
+    m_contact_isSet = false;
     transmitter = new QString("");
     m_transmitter_isSet = false;
     protocol = new QString("");
@@ -138,6 +142,9 @@ void
 SWGMessageCenterPost::cleanup() {
     if(id != nullptr) { 
         delete id;
+    }
+    if(contact != nullptr) { 
+        delete contact;
     }
     if(transmitter != nullptr) { 
         delete transmitter;
@@ -194,6 +201,8 @@ SWGMessageCenterPost::fromJson(QString &json) {
 void
 SWGMessageCenterPost::fromJsonObject(QJsonObject &pJson) {
     ::SWGSDRangel::setValue(&id, pJson["id"], "QString", "QString");
+    
+    ::SWGSDRangel::setValue(&contact, pJson["contact"], "QString", "QString");
     
     ::SWGSDRangel::setValue(&transmitter, pJson["transmitter"], "QString", "QString");
     
@@ -259,6 +268,9 @@ SWGMessageCenterPost::asJsonObject() {
     QJsonObject* obj = new QJsonObject();
     if(id != nullptr && *id != QString("")){
         toJsonValue(QString("id"), id, obj, QString("QString"));
+    }
+    if(contact != nullptr && *contact != QString("")){
+        toJsonValue(QString("contact"), contact, obj, QString("QString"));
     }
     if(transmitter != nullptr && *transmitter != QString("")){
         toJsonValue(QString("transmitter"), transmitter, obj, QString("QString"));
@@ -341,6 +353,16 @@ void
 SWGMessageCenterPost::setId(QString* id) {
     this->id = id;
     this->m_id_isSet = true;
+}
+
+QString*
+SWGMessageCenterPost::getContact() {
+    return contact;
+}
+void
+SWGMessageCenterPost::setContact(QString* contact) {
+    this->contact = contact;
+    this->m_contact_isSet = true;
 }
 
 QString*
@@ -579,6 +601,9 @@ SWGMessageCenterPost::isSet(){
     bool isObjectUpdated = false;
     do{
         if(id && *id != QString("")){
+            isObjectUpdated = true; break;
+        }
+        if(contact && *contact != QString("")){
             isObjectUpdated = true; break;
         }
         if(transmitter && *transmitter != QString("")){

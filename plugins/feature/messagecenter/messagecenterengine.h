@@ -81,13 +81,31 @@ struct MessageCenterContact
     typedef QList<Condition> Rule;
 
     QString m_name;
+    //! How a page is sent to the contact: when the page meets the conditions (on the fields of the page as the WebAPI
+    //! posts it: protocol, type, text, priority...; none: always), the fields of page are set on it (transmitter,
+    //! protocol, address, function...). The first one whose conditions the page meets
+    struct SendTo
+    {
+        Rule m_when;
+        QJsonObject m_page;
+
+        //!< Empty if it can send, else why not: a transmitter and an address of its protocol
+        QString check() const;
+        QJsonObject toJson() const;
+        static SendTo fromJson(const QJsonObject& json);
+    };
+
     QList<Rule> m_rules;                //!< The messages of the contact: those of any of its rules
+    QList<SendTo> m_sendTo;             //!< In order: the first one for the page
     QString m_icon;                     //!< A built-in icon (:name, see iconCategories), or the path of an image file; empty for none
     quint32 m_color = 0;                //!< ARGB, 0 for none
     QString m_note;
 
     //!< The record matches one of the rules (fields: recordFields of the record)
     bool matches(const QJsonObject& fields) const;
+    //!< A page for the contact (the fields of a page as the WebAPI posts it): page with the fields of the first send to
+    //!< whose conditions it meets. False and why if none
+    bool pageFor(const QJsonObject& message, QJsonObject& page, QString *error = nullptr) const;
     QJsonObject toJson() const;
     static MessageCenterContact fromJson(const QJsonObject& json);
     static QByteArray listToJson(const QList<MessageCenterContact>& contacts);
