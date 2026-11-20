@@ -906,7 +906,7 @@ void testCsvSources()
     if (records.size() == 2)
     {
         check(records[0].m_protocol == "pocsag" && records[0].m_address == "0001234" && records[0].m_text == "HELLO, WORLD"
-            && records[0].m_speed == 1200 && records[0].m_errorsCorrected == 1 && records[0].m_protocolData.value("function").toInt() == 2,
+            && records[0].m_speed == 1200 && records[0].m_errorsUncorrectable == 1 && records[0].m_protocolData.value("function").toInt() == 2,
             "Pager POCSAG row");
         check(records[1].m_protocol == "flex" && records[1].m_msgType == "numeric" && records[1].m_text == "5551234", "Pager FLEX row");
     }
@@ -918,6 +918,7 @@ void testCsvSources()
     p.m_msgType = "alphanumeric";
     p.m_speed = 1200;
     p.m_errorsCorrected = 2;
+    p.m_errorsUncorrectable = 1;
     p.m_protocolData["ric"] = 1234568;
     p.m_protocolData["function"] = 3;
     MessageRecord event = rx("e", "flex", "", "", "ch1");
@@ -932,7 +933,7 @@ void testCsvSources()
     MessageCenterCsvSource pagerOutSource("pagerout", pagerOutPath);
     records.clear();
     check(pagerOutSource.poll(records, error) && (records.size() == 1) && (records[0].m_address == "1234568")
-        && (records[0].m_text == p.m_text) && (records[0].m_speed == 1200) && (records[0].m_errorsCorrected == 2)
+        && (records[0].m_text == p.m_text) && (records[0].m_speed == 1200) && (records[0].m_errorsUncorrectable == 1)
         && (records[0].m_protocolData.value("function").toInt() == 3), "Pager CSV: read back as the log of the Pager demodulator");
 
     // A CSV that is not a log of messages

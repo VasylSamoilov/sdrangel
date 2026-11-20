@@ -105,8 +105,10 @@ QString RadioPagingPagerFormat::csvRow(const MessageRecord& record)
     QVariant frame = record.m_protocolData.value("frame");
     QStringList row = {
         f[0], f[1], f[2], f[3], CSV::escape(f[4]), CSV::escape(f[5]),
-        // Unknown (negative) is none, as the Pager demodulator writes it
-        QString::number(std::max(0, record.m_errorsUncorrectable)), QString::number(std::max(0, record.m_errorsCorrected)),
+        // The Pager demodulator counts the codewords BCH could not correct as BCH parity errors, and those left with a
+        // wrong parity bit as even parity errors: the uncorrectable errors are the first, none is the second. Unknown
+        // (negative) is none
+        QString("0"), QString::number(std::max(0, record.m_errorsUncorrectable)),
         QString::number(std::max(0, record.m_speed)), f[6], CSV::escape(f[7]), frame.isValid() ? frame.toString() : QString()
     };
 
@@ -229,8 +231,8 @@ bool RadioPagingPagerFormat::fromCsvRow(const QHash<QString, int>& columns, cons
         record.m_mode = QString::number(baud);
     }
 
-    // The parity errors of the Pager demodulator are the bits it corrected
-    record.m_errorsCorrected = field("Even Parity Errors").toInt() + field("BCH Parity Errors").toInt();
+    // The parity errors of the Pager demodulator are codewords it could not correct (BCH) or whose parity bit is wrong
+    record.m_errorsUncorrectable = field("Even Parity Errors").toInt() + field("BCH Parity Errors").toInt();
 
     if (!field("Frame").isEmpty()) {
         record.m_protocolData.insert("frame", field("Frame"));

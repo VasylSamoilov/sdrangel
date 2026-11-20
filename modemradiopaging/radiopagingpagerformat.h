@@ -40,8 +40,8 @@ public:
     static QByteArray datagram(const MessageRecord& record);
     //! The header of the CSV log the Pager demodulator writes (csvColumns, then baud, protocol, type and frame)
     static QStringList csvHeader();
-    //! The row of a message in that log: even parity errors are the uncorrectable errors, BCH parity errors the
-    //! corrected bits. Empty for what is not a message
+    //! The row of a message in that log: BCH parity errors are its uncorrectable errors, even parity errors none.
+    //! Empty for what is not a message
     static QString csvRow(const MessageRecord& record);
     //! The message of a datagram of a Pager demodulator; the time is that of the datagram, else now (ms since the epoch)
     static bool fromDatagram(const QByteArray& datagram, qint64 now, MessageRecord& record);
