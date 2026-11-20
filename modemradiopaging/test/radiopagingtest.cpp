@@ -354,6 +354,33 @@ void testPocsagPreambleLock()
         std::snprintf(what, sizeof(what), "POCSAG %.0f baud: no preamble at all, all messages %s", baud, ok ? "yes" : "no");
         check(ok, what);
     }
+
+    // A transmission of one batch (no sync codeword after it) whose preamble has bit errors in its last bits, and a
+    // message codeword that needs a correction: the batch still follows a preamble, the message is decoded whole (the
+    // rule for a sync codeword alone would end it at the corrected codeword)
+    for (double baud : bauds)
+    {
+        std::vector<RadioPagingPocsag::TxMessage> messages(1);
+        messages[0].m_address = 1100105;
+        messages[0].m_function = 3;
+        messages[0].m_type = RadioPagingPocsag::Alphanumeric;
+        messages[0].m_text = "RP SENSITIVITY 05 ABCDEFGHIJKLMNOP";
+        std::vector<uint8_t> bits = RadioPagingPocsag::encode(messages).m_bits;
+        const int preamble = RadioPagingPocsag::m_preambleBits;
+        bits[preamble - 3] ^= 1;
+        bits[preamble - 11] ^= 1;
+        bits[preamble + 32 + 32 * 6 + 9] ^= 1;
+        std::vector<float> samples = makeWaveform(bits, 38400.0, baud, false, 0.08f, 0.12f, 300, 300, 21);
+        PocsagLeg leg(38400.0, baud);
+
+        for (float s : samples) {
+            leg.process(s);
+        }
+
+        std::string why;
+        std::snprintf(what, sizeof(what), "POCSAG %.0f baud: one batch, bit errors at the end of the preamble and in a codeword: decoded whole", baud);
+        check(sameMessages(leg.m_normalMessages, messages, why), what);
+    }
 }
 
 bool sameMessages(const std::vector<RadioPagingPocsagDecoder::Message>& rx, const std::vector<RadioPagingPocsag::TxMessage>& tx, std::string& why)

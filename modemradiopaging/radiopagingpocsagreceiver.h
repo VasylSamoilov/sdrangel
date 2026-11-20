@@ -97,6 +97,10 @@ private:
     int m_reversals;                    //!< Consecutive reversals
     bool m_preambleLocked;
     int m_bitsSincePreamble;            //!< Bits since the last run of m_preambleLockBits reversals
+    //! Bits since a run of m_preambleLockBits reversals ended, at most m_preambleRecentBits: a sync codeword completed
+    //! within m_preambleRecentBits of it (it started at most a codeword after the run) follows a preamble
+    int m_bitsSinceReversals = m_preambleRecentBits;
+    static const int m_preambleRecentBits = 2 * m_preambleLockBits;
     std::deque<RadioPagingPocsagDecoder::Message> m_messages;
     RadioPagingDedup m_dedup{"pocsag"};
     double m_time = 0.0;                //!< Seconds of signal received, for the duplicate window

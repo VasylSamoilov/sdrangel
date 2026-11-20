@@ -54,6 +54,7 @@ void RadioPagingPocsagReceiver::reset()
     m_reversals = 0;
     m_preambleLocked = false;
     m_bitsSincePreamble = 0;
+    m_bitsSinceReversals = m_preambleRecentBits;
     m_messages.clear();
     m_dedup.reset();
     m_time = 0.0;
@@ -67,6 +68,7 @@ void RadioPagingPocsagReceiver::dropLock()
     m_inverted.reset();
     m_preambleLocked = false;
     m_bitsSincePreamble = 0;
+    m_bitsSinceReversals = m_preambleRecentBits;
 }
 
 // The last 32 symbols were the sync codeword, sent most significant bit first; a binary 1
@@ -126,6 +128,11 @@ void RadioPagingPocsagReceiver::process(float sample)
     {
         m_preambleLocked = true;
         m_bitsSincePreamble = 0;
+        m_bitsSinceReversals = 0;
+    }
+    else if (m_bitsSinceReversals < m_preambleRecentBits)
+    {
+        m_bitsSinceReversals++;
     }
 
     uint32_t normalSyncs = m_normal.syncWords();
@@ -140,17 +147,21 @@ void RadioPagingPocsagReceiver::process(float sample)
 
     // A sync codeword was just received (the candidate of a batch or the codeword of the
     // next batch): DC offset and deviation are measured on it and held for the batch. A
-    // candidate that follows the preamble is marked so
+    // candidate that follows the preamble is marked so: a run of reversals ended at most a
+    // codeword before the sync codeword started (bit errors in the last bits of the preamble
+    // break the run before its end)
+    const bool preambleBefore = m_bitsSinceReversals < m_preambleRecentBits;
+
     if (m_normalEnabled && (m_normal.syncWords() != normalSyncs))
     {
-        if (m_preambleLocked && !m_normal.getStatus().m_confirmed) {
+        if (preambleBefore && !m_normal.getStatus().m_confirmed) {
             m_normal.setPreambleBefore();
         }
         fitSyncCodeword(false);
     }
     else if (m_invertedEnabled && (m_inverted.syncWords() != invertedSyncs))
     {
-        if (m_preambleLocked && !m_inverted.getStatus().m_confirmed) {
+        if (preambleBefore && !m_inverted.getStatus().m_confirmed) {
             m_inverted.setPreambleBefore();
         }
         fitSyncCodeword(true);
