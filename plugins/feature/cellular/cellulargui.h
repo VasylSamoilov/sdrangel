@@ -18,7 +18,11 @@
 #ifndef INCLUDE_FEATURE_CELLULARGUI_H_
 #define INCLUDE_FEATURE_CELLULARGUI_H_
 
+#include <QDialog>
+#include <QMap>
 #include <QWidget>
+
+#include <deque>
 
 #include "feature/featuregui.h"
 #include "settings/rollupstate.h"
@@ -30,41 +34,29 @@
 class PluginAPI;
 class FeatureUISet;
 class Feature;
+class ButtonSwitch;
 class QCheckBox;
 class QComboBox;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
-class QPushButton;
 class QSpinBox;
 class QTabWidget;
 class QTableWidget;
 
-// One network in its tab: its plan, carriers and radios, the state of its carriers and its log.
-class CellularNetworkTab : public QWidget
+// The settings of one network, edited as a copy: they are taken once, with OK.
+class CellularNetworkDialog : public QDialog
 {
     Q_OBJECT
 public:
-    explicit CellularNetworkTab(QWidget *parent = nullptr);
+    explicit CellularNetworkDialog(const CellularNetworkSettings& settings, QWidget *parent = nullptr);
 
-    void display(const CellularNetworkSettings& settings);
     void read(CellularNetworkSettings& settings) const;
-    int id() const { return m_id; }
-    void showStatus(const Cellular::MsgReportStatus& report);
-    void appendLog(const QString& line);
-
-signals:
-    void changed();
-    // an action of the tester on a phone (Cellular::MsgAction::Action)
-    void actionRequested(int network, int action, const QString& number, const QString& text, int value);
 
 private:
     void fillCountries(const QString& selected);
-    void requestAction(int action, const QString& text, int value);
-    void showPhones(const QList<Cellular::MsgReportStatus::Phone>& phones);
 
-    int m_id;
-    bool m_updating;
+    CellularNetworkSettings m_settings;
     QLineEdit *m_name;
     QCheckBox *m_enabled;
     QComboBox *m_system;
@@ -81,23 +73,10 @@ private:
     QComboBox *m_fallback;
     QSpinBox *m_rxDeviceSet;
     QSpinBox *m_txDeviceSet;
-    QLabel *m_summary;
-    QLineEdit *m_phone;
-    QLineEdit *m_smsText;
-    QComboBox *m_mwiKind;
-    QComboBox *m_powerLevel;
-    QSpinBox *m_moveChannel;
-    QTabWidget *m_views;
-    QTableWidget *m_table;
-    QTableWidget *m_phones;
-    QPlainTextEdit *m_log;
-
-private slots:
-    void onSystemChanged();
-    void onChanged();
 };
 
-// The networks of the controller: one tab each, the transmit lead and the start of the controller.
+// The networks of the tester and what it sees: phones, a test bench for one phone, the log, the
+// networks and their carriers, one tab each.
 class CellularGUI : public FeatureGUI
 {
     Q_OBJECT
@@ -118,12 +97,37 @@ private:
     explicit CellularGUI(PluginAPI* pluginAPI, FeatureUISet *featureUISet, Feature *feature, QWidget* parent = nullptr);
     ~CellularGUI() override;
 
+    struct LogLine
+    {
+        QString time;
+        int network;            // 0: the controller
+        QString text;
+    };
+
     void buildUI();
+    QWidget *buildPhones();
+    QWidget *buildTest();
+    QWidget *buildLog();
+    QWidget *buildNetworks();
+    QWidget *buildCarriers();
     void displaySettings();
     void applySettings();
     bool handleMessage(const Message& message);
-    CellularNetworkTab *tabFor(int id) const;
-    void addTab(const CellularNetworkSettings& network);
+    void showStatus(const Cellular::MsgReportStatus& report);
+    void showPhones(int network, const QList<Cellular::MsgReportStatus::Phone>& phones);
+    void showCarriers();
+    void showSummary();
+    void showTestPhone();
+    void fillNetworkCombos();
+    void addLog(int network, const QString& text);
+    bool logShown(const LogLine& line) const;
+    void renderLog();
+    QString networkName(int id) const;
+    int selectedNetwork() const;
+    void editNetwork(int id);
+    void requestAction(int network, const QString& number, int action, const QString& text, int value);
+    void phoneMenu(const QPoint& pos);
+    void openSettings();
 
     Cellular *m_cellular;
     CellularSettings m_settings;
@@ -132,21 +136,47 @@ private:
     bool m_doApplySettings;
     unsigned int m_tickCount;
 
-    QSpinBox *m_lead;
-    QPushButton *m_startStop;
-    QPushButton *m_add;
-    QPushButton *m_remove;
+    ButtonSwitch *m_startStop;
+    QLabel *m_summary;
     QTabWidget *m_tabs;
-    QPlainTextEdit *m_log;                  // the controller
+    // Phones
+    QTableWidget *m_phones;
+    // Test
+    QComboBox *m_testNetwork;
+    QComboBox *m_testPhone;
+    QLabel *m_testState;
+    QLineEdit *m_smsText;
+    QComboBox *m_mwiKind;
+    QComboBox *m_powerLevel;
+    QSpinBox *m_moveChannel;
+    // Log
+    QComboBox *m_logNetwork;
+    QCheckBox *m_logFrames;
+    QPlainTextEdit *m_log;
+    std::deque<LogLine> m_logLines;
+    // Networks
+    QTableWidget *m_networks;
+    // Carriers
+    QTableWidget *m_carriers;
+
+    // the last report of each network
+    struct NetworkStatus
+    {
+        bool onAir = false;
+        int registered = 0;
+        int calls = 0;
+        QString summary;
+        QList<Cellular::MsgReportStatus::Carrier> carriers;
+        QList<Cellular::MsgReportStatus::Phone> phones;
+    };
+    QMap<int, NetworkStatus> m_status;
+
+    static const int m_maxLogLines = 5000;
 
 private slots:
     void handleInputMessages();
     void onWidgetRolled(QWidget* widget, bool rollDown);
-    void onNetworkChanged();
-    void onLeadChanged();
     void onStartStop(bool checked);
-    void onAdd();
-    void onRemove();
     void tick();
 };
 
