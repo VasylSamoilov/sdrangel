@@ -182,7 +182,7 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
         "e.g. 1234567 for that RIC, 12345.. for 1234500 to 1234599, 001001/. for a GSC cap code. Empty: any address");
     m_text->setToolTip("Regular expression the whole text must match: e.g. .*FIRE.* for a text that contains FIRE,\n"
         "(?i).*fire.* not case sensitive. Empty: any text");
-    m_source->setToolTip("Where the message comes from: the channels, the API (ingest), or a source of Files");
+    m_source->setToolTip("Where the message comes from: the channels, the API (ingest), or a source of I/O");
     m_hideDuplicates->setToolTip("Hide the messages marked as duplicates (copies received again)");
     m_voiceOnly->setToolTip("Only the GSC voice pages that have a sound file");
     m_matchField->setToolTip("Field the regular expression is matched on: address, message, protocol, type, channel,\n"
@@ -414,7 +414,10 @@ MessageCenterGUI::MessageCenterGUI(PluginAPI* pluginAPI, FeatureUISet *featureUI
     buildQueue(tab(tr("Queue")));
     buildCompose(tab(tr("Page")));
     buildRoutes(tab(tr("Routes")));
-    buildFiles(tab(tr("Files")));
+    buildFiles(tab(tr("I/O")));
+    m_tabs->setTabToolTip(m_tabs->count() - 1, tr("Sources and sinks: where messages come from besides the channels "
+        "(files, UDP),\nand where the routes send them besides the log and the queue (files, UDP, commands, speech, "
+        "highlight, Map)"));
     mainLayout->addWidget(m_tabs);
 
     m_optionsDialog = new QDialog(this);
@@ -590,7 +593,7 @@ void MessageCenterGUI::buildRoutes(QWidget *container)
     // How the routes work: in the tool tip of the table (and the readme, from the help button of the window)
     m_routesTable = makeTable({"#", "Route", "Filter", "Sinks", "Stop", "On"}, container);
     m_routesTable->setToolTip("Every message is checked against all the routes, in their number order (#), not only the first.\n"
-        "Each route whose filter selects it sends it to the route's sinks: the log, the queue or the sinks of Files.\n"
+        "Each route whose filter selects it sends it to the route's sinks: the log, the queue or the sinks of I/O.\n"
         "A route with Stop ends the check for the messages it selects.\n"
         "The log is a sink too: a message no route sends to it is not logged\n"
         "(route 1, All messages to the log, does it by default). A sink takes only what a route sends to it.\n"
