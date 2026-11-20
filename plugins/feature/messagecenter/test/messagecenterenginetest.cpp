@@ -287,6 +287,17 @@ void testPages()
     check((out.size() == 1) && (engine.page(id)->m_state == MessageCenterPage::Queued) && engine.page(id)->m_dispatched,
         "Page: queued once a transmitter exists, dispatched when it is ready");
     check(engine.dispatch(121).empty(), "Page: not dispatched twice");
+    check(engine.page(id)->m_reason.isEmpty(), "Page: no reason once queued");
+
+    // A page waits with the reason: no transmitter of its name, or one of another protocol
+    QString lost = engine.addPage(pageRecord("tx9", "pocsag", "5", "x"), 122);
+    QString flex = engine.addPage(pageRecord("tx1", "flex", "1100009", "x"), 122);
+    engine.dispatch(123);
+    check(engine.page(lost)->m_reason == "waiting: no transmitter tx9", "Page: waits for its transmitter, with the reason");
+    check((engine.page(flex)->m_state == MessageCenterPage::Pending) && (engine.page(flex)->m_reason == "waiting: tx1 sends pocsag now, not flex"),
+        "Page: waits for a transmitter of its protocol, with the reason");
+    engine.cancel(lost);
+    engine.cancel(flex);
 
     engine.ingest(event(id, "claimed"), "channels", 130);
     check((engine.page(id)->m_state == MessageCenterPage::Claimed) && (engine.page(id)->m_attempts == 1) && !engine.page(id)->m_dispatched

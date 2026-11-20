@@ -1539,6 +1539,27 @@ std::vector<MessageCenterPage> MessageCenterEngine::dispatch(qint64 now)
             {
                 page.m_state = MessageCenterPage::Queued;
                 page.m_changed = now;
+
+                if (page.m_reason.startsWith("waiting:")) {
+                    page.m_reason.clear();      // A rejection is kept for the next attempt
+                }
+            }
+            else
+            {
+                // What the page waits for, so that the GUI and the API say why it is not sent
+                QString waiting;
+
+                if (endpoint == m_endpoints.constEnd()) {
+                    waiting = QString("waiting: no transmitter %1").arg(alias);
+                } else if (endpoint->m_status == MessageEndpoint::Offline) {
+                    waiting = QString("waiting: %1 is offline").arg(alias);
+                } else if (!endpoint->m_protocols.isEmpty() && !endpoint->m_protocols.contains(page.m_record.m_protocol, Qt::CaseInsensitive)) {
+                    waiting = QString("waiting: %1 sends %2 now, not %3").arg(alias, endpoint->m_protocols.join(", "), page.m_record.m_protocol);
+                } else {
+                    waiting = QString("waiting: %1 does not send this speed or polarity now").arg(alias);
+                }
+
+                page.m_reason = waiting;
             }
         }
 

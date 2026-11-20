@@ -65,6 +65,9 @@ QTableWidget *makeTable(const QStringList& headers, QWidget *parent)
     table->horizontalHeader()->setStretchLastSection(true);
     table->setMinimumHeight(60);
     table->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    // One line a row: a long text ends with an ellipsis, its tooltip has all of it
+    table->setWordWrap(false);
+    table->setTextElideMode(Qt::ElideRight);
     return table;
 }
 
@@ -81,6 +84,7 @@ void setRow(QTableWidget *table, int row, const QStringList& cells)
         }
 
         item->setText(cells[c]);
+        item->setToolTip(cells[c]);
     }
 }
 
@@ -554,6 +558,10 @@ void MessageCenterGUI::buildQueue(QWidget *container)
     QVBoxLayout *layout = new QVBoxLayout(container);
     layout->setContentsMargins(2, 2, 2, 2);
     m_queueTable = makeTable({"Page", "Transmitter", "Protocol", "Address", "Text", "State", "Tries", "Retries", "Reason"}, container);
+    // The text and the reason share the width left and are cut short: the state stays in view
+    m_queueTable->horizontalHeader()->setStretchLastSection(false);
+    m_queueTable->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
+    m_queueTable->horizontalHeader()->setSectionResizeMode(8, QHeaderView::Stretch);
     QHBoxLayout *buttons = new QHBoxLayout();
     QPushButton *requeue = new QPushButton("Requeue", container);
     requeue->setToolTip("A dead page goes back to pending with its attempts reset");
@@ -1049,6 +1057,7 @@ void MessageCenterGUI::refreshQueue()
             MessageCenterPage::stateName(p.m_state), QString::number(p.m_attempts), QString::number(p.m_retransmits), p.m_reason
         });
         m_queueTable->item(i, 0)->setData(idRole, p.m_record.m_id);
+        m_queueTable->item(i, 0)->setToolTip(p.m_record.m_id);
 
         if (p.m_record.m_id == selected) {
             m_queueTable->selectRow(i);

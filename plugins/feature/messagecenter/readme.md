@@ -44,7 +44,7 @@ The channels that announced themselves: name (the title of the channel), role (r
 
 <h3>Queue</h3>
 
-The pages to transmit, with the transmitter (its name), protocol, address, text, state, tries, retries and the reason of a failure. A page goes through pending, queued, claimed, transmitted and sent: the transmitter claims it and reports its state back. A page given to a transmitter that does not claim it within the claim timeout goes back to the queue; a page that can not be sent is dead.
+The pages to transmit, with the transmitter (its name), protocol, address, text, state, tries, retries and the reason of a failure or of the wait of a pending page (for example "waiting: tx1 sends pocsag now, not flex": the page goes out once the modulator is switched to FLEX). A page goes through pending, queued, claimed, transmitted and sent: the transmitter claims it and reports its state back. A page given to a transmitter that does not claim it within the claim timeout goes back to the queue; a page that can not be sent is dead.
 
 * Requeue: a dead page goes back to pending with its attempts reset.
 * Cancel: withdraws a page nobody has claimed, or a dead page.
