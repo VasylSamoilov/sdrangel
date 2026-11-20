@@ -227,6 +227,9 @@ class MessageCenterUdpSource : public MessageCenterSource
 public:
     MessageCenterUdpSource(const QString& name, const QString& address, quint16 port);
     ~MessageCenterUdpSource() override;
+    // It owns its socket: not copied
+    MessageCenterUdpSource(const MessageCenterUdpSource&) = delete;
+    MessageCenterUdpSource& operator=(const MessageCenterUdpSource&) = delete;
     QString name() const override { return m_name; }
     bool poll(std::vector<MessageRecord>& records, QString& error) override;
     int skipped() const { return m_skipped; }       //!< Datagrams that were not messages
@@ -249,6 +252,9 @@ public:
 
     MessageCenterUdpSink(const QString& name, const QString& address, quint16 port, Format format);
     ~MessageCenterUdpSink() override;
+    // It owns its socket: not copied
+    MessageCenterUdpSink(const MessageCenterUdpSink&) = delete;
+    MessageCenterUdpSink& operator=(const MessageCenterUdpSink&) = delete;
     QString name() const override { return m_name; }
     using MessageCenterSink::accept;
     bool accept(const MessageRecord& record, QString& error) override;
