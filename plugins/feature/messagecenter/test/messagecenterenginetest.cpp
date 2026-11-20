@@ -30,6 +30,7 @@
 
 #include "radiopagingpagerformat.h"
 #include "messagecenterengine.h"
+#include "messagecenterarchive.h"
 #include "messagecentersettings.h"
 
 namespace {
@@ -1145,11 +1146,11 @@ void testGuards()
 
     // History: the log is there again at the next start, a message once in its last version
     QTemporaryDir historyDirectory;
-    const QString historyPath = historyDirectory.path() + "/history.jsonl";
+    const QString historyPath = historyDirectory.path() + "/history";
     QString error;
     {
         MessageCenterEngine first;
-        check(first.setHistory(historyPath, 1 << 20, error) && first.log().empty(), "History: a new file, an empty log");
+        check(first.setHistory(historyPath, 30, 1 << 20, error) && first.log().empty(), "History: a new folder, an empty log");
         first.ingest(rx("h1", "pocsag", "1", "first", "A"), "channels", 1);
         first.ingest(rx("h2", "flex", "2", "second", "A"), "channels", 2);
         MessageRecord update;
@@ -1162,36 +1163,38 @@ void testGuards()
     }
     {
         MessageCenterEngine second;
-        check(second.setHistory(historyPath, 1 << 20, error) && (second.log().size() == 2) && second.find("h1")
+        check(second.setHistory(historyPath, 30, 1 << 20, error) && (second.log().size() == 2) && second.find("h1")
             && (second.find("h1")->m_protocolData.value("note").toString() == "updated") && (second.find("h1")->m_text == "first")
             && (second.find("h2")->m_text == "decoded again") && (second.log().front().m_id == "h1"),
             "History: the messages again in their order, the last version of each (update, decoded again)");
-        QFile compact(historyPath);
-        compact.open(QIODevice::ReadOnly);
-        check(compact.readAll().count('\n') == 2, "History: the file is written again with one line a message");
-        compact.close();
 
-        // Over the size limit the newest messages up to half the limit stay
-        const qint64 line = rx("h3", "pocsag", "3", "a third message", "A").toJsonLine().size();
-        second.setHistory(historyPath, line * 4, error);
-        for (int i = 0; i < 6; i++) {
-            second.ingest(rx(QString("n%1").arg(i), "pocsag", "3", "a third message", "A"), "channels", 10 + i);
-        }
-        check((second.historyBytes() <= line * 4) && (second.log().size() == 8), "History: kept under its size limit, the log stays whole");
+        // A query over the history; the same over the log when there is none
+        MessageCenterFilter flex;
+        flex.m_protocols = QStringList("flex");
+        MessageCenterArchive::Query q;
+        q.m_filter = flex;
+        MessageCenterArchiveResult fromHistory = second.archive()->query(q);
+        MessageCenterArchiveResult fromLog = second.queryLog(-1, -1, flex, 0, 100);
+        check((fromHistory.m_total == 1) && (fromHistory.m_records[0].m_text == "decoded again") && (fromLog.m_total == 1)
+            && (fromLog.m_records[0].m_id == "h2"), "History: a query over it, and over the log, give the same");
 
+        // Clearing the log keeps the history; the history is cleared on its own
         second.clearLog();
-        check(second.log().empty() && (QFileInfo(historyPath).size() == 0), "History: clearing the log empties the file");
+        check(second.log().empty() && (second.archive()->query(MessageCenterArchive::Query()).m_total == 2),
+            "History: clearing the log keeps the history");
+        check(second.clearHistory(error) && (second.archive()->query(MessageCenterArchive::Query()).m_total == 0),
+            "History: cleared when asked");
     }
     {
-        // Turned on with messages in the log: the file starts with them
+        // Turned on with messages in the log: they go into it
         MessageCenterEngine later;
         later.ingest(rx("l1", "gsc", "100123", "earlier", "A"), "channels", 1);
-        check(later.setHistory(historyPath, 1 << 20, error) && (later.log().size() == 1), "History: turned on later, the log stays");
+        check(later.setHistory(historyPath, 30, 1 << 20, error) && (later.log().size() == 1), "History: turned on later, the log stays");
         MessageCenterEngine next;
-        next.setHistory(historyPath, 1 << 20, error);
-        check((next.log().size() == 1) && next.find("l1"), "History: turned on later, the file starts with the log");
+        next.setHistory(historyPath, 30, 1 << 20, error);
+        check((next.log().size() == 1) && next.find("l1"), "History: turned on later, it starts with the log");
         MessageCenterEngine none;
-        check(none.setHistory(QString(), 1 << 20, error) && none.log().empty(), "History: no path, no history");
+        check(none.setHistory(QString(), 30, 1 << 20, error) && none.log().empty() && !none.archive(), "History: no folder, no history");
     }
 }
 

@@ -42,6 +42,7 @@ void MessageCenterSettings::resetToDefaults()
     m_logSize = MessageCenterEngine::m_defaultLogSize;
     m_historyEnabled = true;
     m_historyMaxMB = MessageCenterEngine::m_defaultHistoryMB;
+    m_historyDays = MessageCenterEngine::m_defaultHistoryDays;
     m_claimTimeoutSec = 10;
     m_silentSec = 20;
     m_routes = MessageCenterEngine::defaultRoutes();
@@ -312,6 +313,7 @@ QByteArray MessageCenterSettings::serialize() const
     s.writeS32(21, m_historyMaxMB);
     s.writeS32(22, 2);      // Routing: the log is a sink
     s.writeBlob(23, MessageCenterContact::listToJson(m_contacts));
+    s.writeS32(24, m_historyDays);
 
     return s.final();
 }
@@ -388,6 +390,8 @@ bool MessageCenterSettings::deserialize(const QByteArray& data)
             m_routes = routes;
         }
         m_historyMaxMB = std::max(1, std::min(10000, m_historyMaxMB));
+        d.readS32(24, &m_historyDays, MessageCenterEngine::m_defaultHistoryDays);
+        m_historyDays = std::max(1, std::min(3650, m_historyDays));
         return true;
     }
 
@@ -411,6 +415,9 @@ void MessageCenterSettings::applySettings(const QStringList& settingsKeys, const
     }
     if (settingsKeys.contains("historyMaxMB")) {
         m_historyMaxMB = settings.m_historyMaxMB;
+    }
+    if (settingsKeys.contains("historyDays")) {
+        m_historyDays = settings.m_historyDays;
     }
     if (settingsKeys.contains("claimTimeoutSec")) {
         m_claimTimeoutSec = settings.m_claimTimeoutSec;

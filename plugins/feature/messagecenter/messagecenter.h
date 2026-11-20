@@ -136,15 +136,17 @@ public:
         MsgRedecoded(const MessageRecord& record) : Message(), m_record(record) { }
     };
 
-    //! Empty the log and the history file
+    //! Empty the log; the history too if asked
     class MsgClearLog : public Message {
         MESSAGE_CLASS_DECLARATION
 
     public:
-        static MsgClearLog* create() { return new MsgClearLog(); }
+        bool getHistory() const { return m_history; }
+        static MsgClearLog* create(bool history = false) { return new MsgClearLog(history); }
 
     private:
-        MsgClearLog() : Message() { }
+        bool m_history;
+        MsgClearLog(bool history) : Message(), m_history(history) { }
     };
 
     //! Remove channels from the list: by their key (endpointKey), or all those offline
@@ -265,6 +267,10 @@ public:
     static QString historyFilePath();
     //!< Why the history is not kept although it is on (another message center keeps it, a file error); empty if it is
     QString historyError() const { QMutexLocker mutexLocker(&m_mutex); return m_historyError; }
+    qint64 historyBytes() const { QMutexLocker mutexLocker(&m_mutex); return m_engine.historyBytes(); }
+    //! A query of the messages: over the history when it is kept (its files are read without holding the engine),
+    //! else over the log in memory
+    MessageCenterArchiveResult queryMessages(qint64 from, qint64 to, const MessageCenterFilter& filter, int offset, int limit) const;
     const MessageCenterSettings& settings() const { return m_settings; }
     //! Errors of the sinks and sources since the last call
     QStringList takeErrors();

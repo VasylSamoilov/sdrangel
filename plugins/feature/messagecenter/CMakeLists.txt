@@ -1,6 +1,7 @@
 project(messagecenter)
 
 set(messagecenter_SOURCES
+    messagecenterarchive.cpp
     messagecenterengine.cpp
     messagecenter.cpp
     messagecentersettings.cpp
@@ -9,6 +10,7 @@ set(messagecenter_SOURCES
 )
 
 set(messagecenter_HEADERS
+    messagecenterarchive.h
     messagecenterengine.h
     messagecenter.h
     messagecentersettings.h
@@ -79,6 +81,7 @@ endif()
 if(NOT SERVER_MODE)
     add_executable(messagecenterenginetest EXCLUDE_FROM_ALL
         test/messagecenterenginetest.cpp
+        messagecenterarchive.cpp
         messagecenterengine.cpp
         messagecentersettings.cpp
     )

@@ -52,11 +52,8 @@ public:
         int m_limit = 100;
     };
 
-    struct Result
-    {
-        int m_total = 0;                            //!< Records the query selects
-        std::vector<MessageRecord> m_records;       //!< From m_offset, newest first, at most m_limit
-    };
+    //! The total the query selects, and its records from m_offset, newest first, at most m_limit
+    typedef MessageCenterArchiveResult Result;
 
     MessageCenterArchive();
     ~MessageCenterArchive();

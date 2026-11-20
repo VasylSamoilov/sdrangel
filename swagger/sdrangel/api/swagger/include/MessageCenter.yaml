@@ -10,10 +10,13 @@ MessageCenterSettings:
       description: "Messages kept in the log (in memory), 100 to 10000; the GUI shows the newest 1000 its filters select"
       type: integer
     historyEnabled:
-      description: "1 the log is kept in the history file (messagecenter/history.jsonl in the application data folder) and is there again when the message center starts; 0 the log is in memory only. One message center keeps the history"
+      description: "1 every message stored is kept in the history (messagecenter/history in the application data folder: a file for each day, up to 4 MB each), for historyDays and historyMaxMB; the log is the newest of it when the message center starts, and the queries go over all of it. 0 the log is in memory only. One message center keeps the history"
       type: integer
     historyMaxMB:
-      description: "Size limit of the history file in MB (1 to 10000). Over it the file is written again with the newest messages of the log, up to half the limit"
+      description: "Size kept of the history in MB (1 to 10000): over it the oldest files go. Default 500"
+      type: integer
+    historyDays:
+      description: "Days kept of the history (1 to 3650): the files of older days go. Default 30"
       type: integer
     claimTimeoutSec:
       description: "A page given to a transmitter that does not claim it in this time goes back to the queue"

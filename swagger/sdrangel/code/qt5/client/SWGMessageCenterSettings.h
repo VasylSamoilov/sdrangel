@@ -57,6 +57,9 @@ public:
     qint32 getHistoryMaxMb();
     void setHistoryMaxMb(qint32 history_max_mb);
 
+    qint32 getHistoryDays();
+    void setHistoryDays(qint32 history_days);
+
     qint32 getClaimTimeoutSec();
     void setClaimTimeoutSec(qint32 claim_timeout_sec);
 
@@ -108,6 +111,9 @@ private:
 
     qint32 history_max_mb;
     bool m_history_max_mb_isSet;
+
+    qint32 history_days;
+    bool m_history_days_isSet;
 
     qint32 claim_timeout_sec;
     bool m_claim_timeout_sec_isSet;

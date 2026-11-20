@@ -93,8 +93,8 @@ S=$(curl -s "$U/featureset/feature/0/settings" | tr -d "\n" | sed 's/\\"/"/g')
 check "the settings keep the reverse API" '[[ "$S" == *"\"reverseAPIAddress\": \"127.0.0.2\""* && "$S" == *"\"reverseAPIPort\": 8899"* && "$S" == *"\"reverseAPIFeatureSetIndex\": 1"* && "$S" == *"\"reverseAPIFeatureIndex\": 2"* ]]'
 
 # History: the log is in its file and is there again in a new message center
-check "the history is on by default, 50 MB" '[[ "$S" == *"\"historyEnabled\": 1"* && "$S" == *"\"historyMaxMB\": 50"* ]]'
-check "the history file has the log" '[ -n "$(find "$WORK/data" -name history.jsonl -size +0 2>/dev/null)" ]'
+check "the history is on by default, 500 MB, 30 days" '[[ "$S" == *"\"historyEnabled\": 1"* && "$S" == *"\"historyMaxMB\": 500"* && "$S" == *"\"historyDays\": 30"* ]]'
+check "the history has the log, in a file of the day" '[ -n "$(find "$WORK/data" -path "*messagecenter/history/*" -name "$(date +%Y%m%d)-000.jsonl" -size +0 2>/dev/null)" ]'
 curl_code DELETE /featureset/feature/0 > /dev/null
 sleep 1
 curl_code POST /featureset/feature '{"featureType":"MessageCenter"}' > /dev/null

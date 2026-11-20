@@ -184,6 +184,15 @@ private:
 QString messageCenterSubstitute(const QString& text, const MessageRecord& record, const QStringList& captures);
 
 // A sink takes the records routed to it
+class MessageCenterArchive;
+
+//! The records a query of the log selects: the total, and those of the page, newest first
+struct MessageCenterArchiveResult
+{
+    int m_total = 0;
+    std::vector<MessageRecord> m_records;
+};
+
 class MessageCenterSink
 {
 public:
@@ -422,9 +431,11 @@ public:
     static const int m_minLogSize = 100;
     //!< A FLEX record is a few kB (its words, codes and raw data): 10000 of them are some tens of MB
     static const int m_maxLogSize = 10000;
-    static const int m_defaultHistoryMB = 50;          //!< Size limit of the history file
+    static const int m_defaultHistoryMB = 500;          //!< Size kept of the history (the archive)
+    static const int m_defaultHistoryDays = 30;         //!< Days kept of the history
 
     MessageCenterEngine();
+    ~MessageCenterEngine();
 
     // Sinks and sources by name. The log and the transmit queue are always there
     void addSink(std::unique_ptr<MessageCenterSink> sink);
@@ -482,17 +493,24 @@ public:
     int syncLoggedPages();
     //!< A record of the log decoded again (another codepage or type): it replaces the one of its id. False if none
     bool replace(const MessageRecord& record);
-    //!< Empties the log, and the history file when it is kept
+    //!< Empties the log (in memory); the history stays
     void clearLog();
 
-    // The history: the log kept in a JSON lines file, one line for each record stored (a later version of a
-    // message too), so that the log is there again when the message center starts. Over its size limit the
-    // file is written again with the newest messages of the log, up to half the limit
-    //!< Path empty: no history. A new path loads the newest messages of its file into an empty log, else the
-    //!< file starts with the log. False and an error if the file can not be read or written
-    bool setHistory(const QString& path, qint64 maxBytes, QString& error);
-    const QString& historyPath() const { return m_historyPath; }
-    qint64 historyBytes() const { return m_historyBytes; }
+    // The history: every record stored (a later version of a message too) kept in the files of a folder, a day
+    // each up to a size, for days (MessageCenterArchive). The log is the newest of them when the message center
+    // starts, and the queries go over all of it
+    //!< Folder empty: no history. An empty log takes the newest records of the history. False and an error if the
+    //!< folder cannot be used
+    bool setHistory(const QString& folder, int days, qint64 maxBytes, QString& error);
+    QString historyFolder() const;
+    qint64 historyBytes() const;
+    //!< Removes the files of the history
+    bool clearHistory(QString& error);
+    //!< The history, when it is kept (null if not): its queries can be made from any thread, it lives as long as
+    //!< they need it
+    std::shared_ptr<const MessageCenterArchive> archive() const;
+    //!< A query over the log in memory, as the archive does (the history not kept)
+    MessageCenterArchiveResult queryLog(qint64 from, qint64 to, const MessageCenterFilter& filter, int offset, int limit) const;
 
     // Endpoints
     const QMap<QString, MessageEndpoint>& endpoints() const { return m_endpoints; }
@@ -555,12 +573,9 @@ private:
 
     void noteChange(const QString& id);             //!< A record stored or changed: a new version
     void noteReset();                               //!< The log emptied, loaded or cut: a new version
-    QString m_historyPath;
-    qint64 m_historyMaxBytes = 0;
-    qint64 m_historyBytes = 0;
+    std::shared_ptr<MessageCenterArchive> m_archive;    //!< The history: open or not (a query being made keeps it)
 
     void appendHistory(const MessageRecord& record);
-    bool writeHistory(QString& error);              //!< The file with the log alone
     int m_routed = 0;
     std::vector<Route> m_routes;
     std::vector<std::unique_ptr<MessageCenterSink>> m_sinks;

@@ -38,6 +38,8 @@ SWGMessageCenterSettings::SWGMessageCenterSettings() {
     m_history_enabled_isSet = false;
     history_max_mb = 0;
     m_history_max_mb_isSet = false;
+    history_days = 0;
+    m_history_days_isSet = false;
     claim_timeout_sec = 0;
     m_claim_timeout_sec_isSet = false;
     silent_sec = 0;
@@ -78,6 +80,8 @@ SWGMessageCenterSettings::init() {
     m_history_enabled_isSet = false;
     history_max_mb = 0;
     m_history_max_mb_isSet = false;
+    history_days = 0;
+    m_history_days_isSet = false;
     claim_timeout_sec = 0;
     m_claim_timeout_sec_isSet = false;
     silent_sec = 0;
@@ -107,6 +111,7 @@ SWGMessageCenterSettings::cleanup() {
     if(title != nullptr) { 
         delete title;
     }
+
 
 
 
@@ -154,6 +159,8 @@ SWGMessageCenterSettings::fromJsonObject(QJsonObject &pJson) {
     ::SWGSDRangel::setValue(&history_enabled, pJson["historyEnabled"], "qint32", "");
     
     ::SWGSDRangel::setValue(&history_max_mb, pJson["historyMaxMB"], "qint32", "");
+    
+    ::SWGSDRangel::setValue(&history_days, pJson["historyDays"], "qint32", "");
     
     ::SWGSDRangel::setValue(&claim_timeout_sec, pJson["claimTimeoutSec"], "qint32", "");
     
@@ -207,6 +214,9 @@ SWGMessageCenterSettings::asJsonObject() {
     }
     if(m_history_max_mb_isSet){
         obj->insert("historyMaxMB", QJsonValue(history_max_mb));
+    }
+    if(m_history_days_isSet){
+        obj->insert("historyDays", QJsonValue(history_days));
     }
     if(m_claim_timeout_sec_isSet){
         obj->insert("claimTimeoutSec", QJsonValue(claim_timeout_sec));
@@ -293,6 +303,16 @@ void
 SWGMessageCenterSettings::setHistoryMaxMb(qint32 history_max_mb) {
     this->history_max_mb = history_max_mb;
     this->m_history_max_mb_isSet = true;
+}
+
+qint32
+SWGMessageCenterSettings::getHistoryDays() {
+    return history_days;
+}
+void
+SWGMessageCenterSettings::setHistoryDays(qint32 history_days) {
+    this->history_days = history_days;
+    this->m_history_days_isSet = true;
 }
 
 qint32
@@ -423,6 +443,9 @@ SWGMessageCenterSettings::isSet(){
             isObjectUpdated = true; break;
         }
         if(m_history_max_mb_isSet){
+            isObjectUpdated = true; break;
+        }
+        if(m_history_days_isSet){
             isObjectUpdated = true; break;
         }
         if(m_claim_timeout_sec_isSet){

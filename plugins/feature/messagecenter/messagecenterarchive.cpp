@@ -361,8 +361,14 @@ MessageCenterArchive::Result MessageCenterArchive::query(const Query& query) con
     // The newest offset + limit records by their time (a record updated later has its first time): a heap, its top the
     // oldest of them
     const size_t keep = (size_t) std::max(0, query.m_offset) + (size_t) std::max(0, query.m_limit);
-    auto newer = [](const MessageRecord& a, const MessageRecord& b) { return a.m_timestamp > b.m_timestamp; };
-    std::vector<MessageRecord> heap;
+    // Records of the same time: the one written later (its newest version) is the newer. The heap keeps the order they
+    // were read in (newest written first)
+    typedef std::pair<MessageRecord, long> Read;
+    auto newer = [](const Read& a, const Read& b) {
+        return (a.first.m_timestamp > b.first.m_timestamp) || ((a.first.m_timestamp == b.first.m_timestamp) && (a.second < b.second));
+    };
+    std::vector<Read> heap;
+    long order = 0;
 
     for (int i = files.size() - 1; i >= 0; i--)
     {
@@ -403,15 +409,17 @@ MessageCenterArchive::Result MessageCenterArchive::query(const Query& query) con
             if (keep == 0) {
                 continue;
             }
+            Read read(record, order++);
+
             if (heap.size() < keep)
             {
-                heap.push_back(record);
+                heap.push_back(read);
                 std::push_heap(heap.begin(), heap.end(), newer);
             }
-            else if (record.m_timestamp > heap.front().m_timestamp)
+            else if (newer(read, heap.front()))
             {
                 std::pop_heap(heap.begin(), heap.end(), newer);
-                heap.back() = record;
+                heap.back() = read;
                 std::push_heap(heap.begin(), heap.end(), newer);
             }
         }
@@ -420,7 +428,7 @@ MessageCenterArchive::Result MessageCenterArchive::query(const Query& query) con
     std::sort_heap(heap.begin(), heap.end(), newer);
 
     for (size_t i = (size_t) std::max(0, query.m_offset); i < heap.size(); i++) {
-        result.m_records.push_back(heap[i]);
+        result.m_records.push_back(heap[i].first);
     }
 
     return result;

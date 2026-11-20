@@ -638,12 +638,21 @@ void MessageCenterGUI::buildLog(QWidget *container)
     layout->addLayout(buttons);
 
     connect(clear, &QToolButton::clicked, this, [this]() {
-        QString text = m_settings.m_historyEnabled
-            ? QString("Remove all the messages of the log and of the history file?\n%1").arg(MessageCenter::historyFilePath())
-            : QString("Remove all the messages of the log?");
+        // The history (days of messages) goes only when asked
+        QMessageBox box(QMessageBox::Question, "Clear the log", "Remove the messages of the log?",
+            QMessageBox::Yes | QMessageBox::No, this);
+        box.setDefaultButton(QMessageBox::No);
+        QCheckBox *history = nullptr;
 
-        if (QMessageBox::question(this, "Clear the log", text, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) == QMessageBox::Yes) {
-            m_center->getInputMessageQueue()->push(MessageCenter::MsgClearLog::create());
+        if (m_settings.m_historyEnabled)
+        {
+            history = new QCheckBox(QString("Also delete the history (%1 MB in %2)")
+                .arg(m_center->historyBytes() / (1024.0 * 1024.0), 0, 'f', 1).arg(MessageCenter::historyFilePath()), &box);
+            box.setCheckBox(history);
+        }
+
+        if (box.exec() == QMessageBox::Yes) {
+            m_center->getInputMessageQueue()->push(MessageCenter::MsgClearLog::create(history && history->isChecked()));
         }
     });
     connect(m_logFilter, &MessageCenterFilterWidget::changed, this, [this]() { m_shownLogged = -1; refreshLog(); });

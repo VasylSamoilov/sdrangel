@@ -49,6 +49,7 @@
 #include "radiopagingrecode.h"
 
 #include "messagecenter.h"
+#include "messagecenterarchive.h"
 
 MESSAGE_CLASS_DEFINITION(MessageCenter::MsgConfigureMessageCenter, Message)
 MESSAGE_CLASS_DEFINITION(MessageCenter::MsgPostPage, Message)
@@ -116,7 +117,29 @@ MessageCenter*& MessageCenter::historyOwner()
 
 QString MessageCenter::historyFilePath()
 {
-    return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/messagecenter/history.jsonl";
+    return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/messagecenter/history";
+}
+
+MessageCenterArchiveResult MessageCenter::queryMessages(qint64 from, qint64 to, const MessageCenterFilter& filter, int offset, int limit) const
+{
+    std::shared_ptr<const MessageCenterArchive> archive;
+    {
+        QMutexLocker mutexLocker(&m_mutex);
+        archive = m_engine.archive();
+
+        if (!archive) {
+            return m_engine.queryLog(from, to, filter, offset, limit);
+        }
+    }
+
+    // The archive reads its files under its own lock only: the engine keeps storing meanwhile
+    MessageCenterArchive::Query query;
+    query.m_from = from;
+    query.m_to = to;
+    query.m_filter = filter;
+    query.m_offset = offset;
+    query.m_limit = limit;
+    return archive->query(query);
 }
 
 // Called with the engine locked
@@ -133,7 +156,6 @@ void MessageCenter::applyHistory()
         else
         {
             path = historyFilePath();
-            QDir().mkpath(QFileInfo(path).absolutePath());
             historyOwner() = this;
             m_historyError.clear();
         }
@@ -149,7 +171,7 @@ void MessageCenter::applyHistory()
 
     QString error;
 
-    if (!m_engine.setHistory(path, (qint64) m_settings.m_historyMaxMB * 1024 * 1024, error))
+    if (!m_engine.setHistory(path, m_settings.m_historyDays, (qint64) m_settings.m_historyMaxMB * 1024 * 1024, error))
     {
         m_historyError = error;
         qWarning("MessageCenter::applyHistory: %s", qPrintable(error));
@@ -225,6 +247,16 @@ bool MessageCenter::handleMessage(const Message& cmd)
     else if (MsgClearLog::match(cmd))
     {
         m_engine.clearLog();
+
+        if (((const MsgClearLog&) cmd).getHistory())
+        {
+            QString error;
+
+            if (!m_engine.clearHistory(error)) {
+                qWarning("MessageCenter::handleMessage: %s", qPrintable(error));
+            }
+        }
+
         clearMap();
         m_dirty = true;
         return true;
@@ -390,7 +422,8 @@ void MessageCenter::applySettings(const MessageCenterSettings& settings, const Q
     }
 
     if (force || settingsKeys.contains("logSize") || settingsKeys.contains("routes") || settingsKeys.contains("sinks")
-        || settingsKeys.contains("sources") || settingsKeys.contains("historyEnabled") || settingsKeys.contains("historyMaxMB")) {
+        || settingsKeys.contains("sources") || settingsKeys.contains("historyEnabled") || settingsKeys.contains("historyMaxMB")
+        || settingsKeys.contains("historyDays")) {
         applyEngineSettings();
     }
     else if (settingsKeys.contains("contacts"))
@@ -434,6 +467,9 @@ void MessageCenter::webapiReverseSendSettings(const QList<QString>& featureSetti
     }
     if (featureSettingsKeys.contains("historyMaxMB") || force) {
         swg->setHistoryMaxMb(settings.m_historyMaxMB);
+    }
+    if (featureSettingsKeys.contains("historyDays") || force) {
+        swg->setHistoryDays(settings.m_historyDays);
     }
     if (featureSettingsKeys.contains("claimTimeoutSec") || force) {
         swg->setClaimTimeoutSec(settings.m_claimTimeoutSec);
@@ -713,6 +749,7 @@ void MessageCenter::webapiFormatFeatureSettings(SWGSDRangel::SWGFeatureSettings&
     swg->setLogSize(settings.m_logSize);
     swg->setHistoryEnabled(settings.m_historyEnabled ? 1 : 0);
     swg->setHistoryMaxMb(settings.m_historyMaxMB);
+    swg->setHistoryDays(settings.m_historyDays);
     swg->setClaimTimeoutSec(settings.m_claimTimeoutSec);
     swg->setSilentSec(settings.m_silentSec);
     swg->setRoutes(new QString(QString::fromUtf8(MessageCenterSettings::routesToJson(settings.m_routes))));
@@ -751,6 +788,9 @@ void MessageCenter::webapiUpdateFeatureSettings(MessageCenterSettings& settings,
     }
     if (featureSettingsKeys.contains("historyMaxMB")) {
         settings.m_historyMaxMB = std::max(1, std::min(10000, swg->getHistoryMaxMb()));
+    }
+    if (featureSettingsKeys.contains("historyDays")) {
+        settings.m_historyDays = std::max(1, std::min(3650, swg->getHistoryDays()));
     }
     if (featureSettingsKeys.contains("claimTimeoutSec")) {
         settings.m_claimTimeoutSec = std::max(1, std::min(3600, swg->getClaimTimeoutSec()));
