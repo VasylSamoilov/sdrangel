@@ -1859,6 +1859,11 @@ void NmtChannel::completeDialling()
     const std::string dialled = m_dialled;
     NmtTransaction* const transaction = m_transaction;
 
+    m_host->numberDialled(*transaction, dialled);
+    if (m_transaction != transaction || m_state != State::MoDialling) {
+        return;                         // the observer ended the call
+    }
+
     // the number of the service centre: a short message call, the exchange is not called
     if (m_host->isSmsCenter(dialled))
     {

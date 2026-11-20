@@ -13,6 +13,7 @@ set(modemnmt_SOURCES
     nmtmwi.cpp
     nmtmodem.cpp
     nmtnumbers.cpp
+    nmtphoneinfo.cpp
     nmtplan.cpp
     nmtsms.cpp
     nmtsystem.cpp
@@ -32,9 +33,11 @@ set(modemnmt_HEADERS
     nmtmwi.h
     nmtmodem.h
     nmtnumbers.h
+    nmtphoneinfo.h
     nmtplan.h
     nmtsms.h
     nmtsystem.h
+    nmttracefold.h
     nmtvoice.h
 )
 

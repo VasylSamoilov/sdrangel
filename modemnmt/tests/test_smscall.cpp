@@ -217,11 +217,15 @@ static SmsDeliver hello()
 static void testFromPhone()
 {
     Station s;
+    std::vector<std::string> observed;
 
+    s.system.setDialObserver([&observed](const NmtSubscriber&, const std::string& dialled) { observed.push_back(dialled); });
     s.system.setSmscNumber("1234");
     s.dialCentre("1234");
     CHECK(s.tc->state() == State::Sms);
     CHECK(s.calls.dialled.empty());                     // the exchange is not called
+    CHECK(observed.size() == 1 && !observed.empty() && observed[0] == "1234");   // but the number is told
+    s.system.setDialObserver(nullptr);
 
     s.air.link.startAsCaller();
     s.air.link.queueData(kSubmit.data(), kSubmit.size());

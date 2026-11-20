@@ -66,6 +66,10 @@ enum PhoneColumn
     PhoneQuality,
     PhonePower,
     PhoneLastFrame,
+    PhonePassword,
+    PhoneSmsCentre,
+    PhoneDialled,
+    PhoneKept,
     PhoneColCount
 };
 
@@ -413,7 +417,14 @@ QWidget *CellularGUI::buildPhones()
     QVBoxLayout *layout = new QVBoxLayout(page);
     layout->setContentsMargins(0, 0, 0, 0);
 
-    m_phones = makeTable(page, {"Number", "State", "Ch", "Network", "Reg", "Heard", "Rx dB", "Q", "Power", "Last frame"});
+    m_phones = makeTable(page, {"Number", "State", "Ch", "Network", "Reg", "Heard", "Rx dB", "Q", "Power", "Last frame",
+        "K", "SMS centre", "Dialled", "Kept"});
+    m_phones->horizontalHeaderItem(PhonePassword)->setToolTip("Password K of the phone as its seizure frames show it");
+    m_phones->horizontalHeaderItem(PhoneSmsCentre)->setToolTip("Numbers the phone sent short messages to or asked "
+        "for its waiting messages on, with the traffic area of that network");
+    m_phones->horizontalHeaderItem(PhoneDialled)->setToolTip("Numbers the phone dialled, the newest first");
+    m_phones->horizontalHeaderItem(PhoneKept)->setToolTip("Short messages the centre keeps for the phone, and "
+        "indicators postponed until it is free");
     m_phones->horizontalHeaderItem(PhoneRegistered)->setToolTip("Yes: the phone made a roaming update to this network; "
         "no: it was only heard (a call, an answer)");
     m_phones->horizontalHeaderItem(PhoneLevel)->setToolTip("Received level of its channel when it was last heard, dB of full scale");
@@ -701,7 +712,9 @@ void CellularGUI::editNetwork(int id)
 
 int CellularGUI::selectedNetwork() const
 {
-    const int row = m_networks->currentRow();
+    // the highlighted row (the current index is not always set: rows are selected by the program too)
+    const QModelIndexList rows = m_networks->selectionModel()->selectedRows();
+    const int row = rows.isEmpty() ? m_networks->currentRow() : rows.first().row();
     const QTableWidgetItem *item = row >= 0 ? m_networks->item(row, NetName) : nullptr;
 
     return item ? item->data(Qt::UserRole).toInt() : 0;
@@ -908,6 +921,24 @@ void CellularGUI::showPhones(int network, const QList<Cellular::MsgReportStatus:
         setCell(m_phones, row, PhoneQuality, p.lastHeard.isValid() ? QString::number(p.quality, 'f', 2) : QString());
         setCell(m_phones, row, PhonePower, powerName(p.power));
         setCell(m_phones, row, PhoneLastFrame, p.lastFrame);
+        // what was learned stays when a report does not know it (the tester started again)
+        if (!p.password.isEmpty()) {
+            setCell(m_phones, row, PhonePassword, p.password);
+        }
+        if (!p.smsCentre.isEmpty()) {
+            setCell(m_phones, row, PhoneSmsCentre, p.smsCentre);
+        }
+        if (!p.dialled.isEmpty()) {
+            setCell(m_phones, row, PhoneDialled, p.dialled);
+        }
+        QStringList kept;
+        if (p.held > 0) {
+            kept.append(QString("%1 SMS").arg(p.held));
+        }
+        if (p.pendingMwi) {
+            kept.append("indicator");
+        }
+        setCell(m_phones, row, PhoneKept, kept.join(", "));
     }
 }
 

@@ -132,6 +132,8 @@ public:
     virtual bool callDialled(NmtTransaction& transaction, const std::string& dialled) = 0;
     // The phone cleared a call that was taken with callDialled().
     virtual void callCleared(NmtTransaction& transaction) = 0;
+    // The phone finished dialling, any number (also the one of the SMS centre). Only told.
+    virtual void numberDialled(NmtTransaction& transaction, const std::string& dialled) = 0;
     // Short messages. The phone dialled the number of the service centre: the call is a short
     // message call, the exchange is not called.
     virtual bool isSmsCenter(const std::string& dialled) = 0;

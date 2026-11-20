@@ -35,6 +35,8 @@
 #include "cellularsystem.h"
 #include "nmtbasestation.h"
 #include "nmtcellularbridge.h"
+#include "nmtphoneinfo.h"
+#include "nmttracefold.h"
 #include "testcaller.h"
 #include "cellular.h"
 
@@ -113,18 +115,21 @@ private:
         modemcellular::WireSpan boundTx;
         modemcellular::CarrierBatch txBatch;
         std::vector<float> levels;              // per carrier on air
+        // the trace of a channel: each direction folds its own runs of the same frame
         struct Trace
         {
-            std::string last;                   // the last frame to the phone that was logged
-            int repeats = 0;                    // times it was sent
+            modemnmt::NmtTraceFold out;         // to the phone
+            modemnmt::NmtTraceFold in;          // from the phone
+            QString outType;                    // frame type of the run, for its count
+            QString inType;
+            qint64 outAt = 0;                   // ms of the last frame of the run
+            qint64 inAt = 0;
         };
         std::vector<Trace> traces;              // per carrier on air
         // the phones heard: their identity in a frame for the channel it came on
         std::map<std::string, Cellular::MsgReportStatus::Phone> phones;
         std::unique_ptr<modemcellular::TestCaller> caller;     // calls of the tester to a phone
         bool music = false;                     // the far end of calls to no phone: music, else echo
-        // short messages the centre keeps for a phone (by its number) until the phone fetches them
-        std::map<std::string, std::deque<modemnmt::SmsDeliver>> held;
         // message waiting indicators the protocol could not send yet (the phone was busy), by number
         struct PendingMwi
         {
@@ -158,9 +163,14 @@ private:
     void sendPostponed(Network& network);
     // the frames of a carrier into the event log of its network
     void traceFrame(Network& n, size_t index, bool toPhone, const modemnmt::Frame& frame, double quality, double level);
-    void flushTrace(Network& n, size_t index);
+    // the count of a run of the same frame; `quiet`: only runs with no frame for a while
+    void flushTrace(Network& n, size_t index, bool toPhone, bool quiet = false);
+    void flushQuietTraces(Network& n);
     // a phone in a frame of a carrier, if the frame was for that carrier and carries an identity
     void notePhone(Network& n, size_t index, const modemnmt::Frame& frame, double quality);
+    // what the phones show of themselves, by number; kept while the worker runs, over restarts of networks
+    modemnmt::NmtPhoneInfo& known(const std::string& number) { return m_known[number]; }
+    static void trafficArea(const Network& n, int& y1, int& area);
     void action(const Cellular::MsgAction& action);
     void setHandlers(Network& n);
 
@@ -171,6 +181,9 @@ private:
     bool m_direct;                              // in a blocking call of the feature
     std::map<ChannelAPI*, std::unique_ptr<Radio>> m_radios;
     std::vector<std::unique_ptr<Network>> m_networks;
+    std::map<std::string, modemnmt::NmtPhoneInfo> m_known;
+    // short messages the centre keeps for a phone (by its number) until the phone fetches them
+    std::map<std::string, std::deque<modemnmt::SmsDeliver>> m_held;
     modemcellular::CarrierBatch m_rx;
     std::map<Radio*, modemcellular::CarrierBatch> m_txOut;
 };

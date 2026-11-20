@@ -46,6 +46,16 @@ SWGCellularPhoneReport::SWGCellularPhoneReport() {
     m_power_isSet = false;
     last_frame = nullptr;
     m_last_frame_isSet = false;
+    password = nullptr;
+    m_password_isSet = false;
+    dialled = nullptr;
+    m_dialled_isSet = false;
+    sms_centre = nullptr;
+    m_sms_centre_isSet = false;
+    held = 0;
+    m_held_isSet = false;
+    pending_indicators = 0;
+    m_pending_indicators_isSet = false;
 }
 
 SWGCellularPhoneReport::~SWGCellularPhoneReport() {
@@ -72,6 +82,16 @@ SWGCellularPhoneReport::init() {
     m_power_isSet = false;
     last_frame = new QString("");
     m_last_frame_isSet = false;
+    password = new QString("");
+    m_password_isSet = false;
+    dialled = new QString("");
+    m_dialled_isSet = false;
+    sms_centre = new QString("");
+    m_sms_centre_isSet = false;
+    held = 0;
+    m_held_isSet = false;
+    pending_indicators = 0;
+    m_pending_indicators_isSet = false;
 }
 
 void
@@ -93,6 +113,17 @@ SWGCellularPhoneReport::cleanup() {
     if(last_frame != nullptr) { 
         delete last_frame;
     }
+    if(password != nullptr) { 
+        delete password;
+    }
+    if(dialled != nullptr) { 
+        delete dialled;
+    }
+    if(sms_centre != nullptr) { 
+        delete sms_centre;
+    }
+
+
 }
 
 SWGCellularPhoneReport*
@@ -123,6 +154,16 @@ SWGCellularPhoneReport::fromJsonObject(QJsonObject &pJson) {
     ::SWGSDRangel::setValue(&power, pJson["power"], "qint32", "");
     
     ::SWGSDRangel::setValue(&last_frame, pJson["lastFrame"], "QString", "QString");
+    
+    ::SWGSDRangel::setValue(&password, pJson["password"], "QString", "QString");
+    
+    ::SWGSDRangel::setValue(&dialled, pJson["dialled"], "QString", "QString");
+    
+    ::SWGSDRangel::setValue(&sms_centre, pJson["smsCentre"], "QString", "QString");
+    
+    ::SWGSDRangel::setValue(&held, pJson["held"], "qint32", "");
+    
+    ::SWGSDRangel::setValue(&pending_indicators, pJson["pendingIndicators"], "qint32", "");
     
 }
 
@@ -166,6 +207,21 @@ SWGCellularPhoneReport::asJsonObject() {
     }
     if(last_frame != nullptr && *last_frame != QString("")){
         toJsonValue(QString("lastFrame"), last_frame, obj, QString("QString"));
+    }
+    if(password != nullptr && *password != QString("")){
+        toJsonValue(QString("password"), password, obj, QString("QString"));
+    }
+    if(dialled != nullptr && *dialled != QString("")){
+        toJsonValue(QString("dialled"), dialled, obj, QString("QString"));
+    }
+    if(sms_centre != nullptr && *sms_centre != QString("")){
+        toJsonValue(QString("smsCentre"), sms_centre, obj, QString("QString"));
+    }
+    if(m_held_isSet){
+        obj->insert("held", QJsonValue(held));
+    }
+    if(m_pending_indicators_isSet){
+        obj->insert("pendingIndicators", QJsonValue(pending_indicators));
     }
 
     return obj;
@@ -261,6 +317,56 @@ SWGCellularPhoneReport::setLastFrame(QString* last_frame) {
     this->m_last_frame_isSet = true;
 }
 
+QString*
+SWGCellularPhoneReport::getPassword() {
+    return password;
+}
+void
+SWGCellularPhoneReport::setPassword(QString* password) {
+    this->password = password;
+    this->m_password_isSet = true;
+}
+
+QString*
+SWGCellularPhoneReport::getDialled() {
+    return dialled;
+}
+void
+SWGCellularPhoneReport::setDialled(QString* dialled) {
+    this->dialled = dialled;
+    this->m_dialled_isSet = true;
+}
+
+QString*
+SWGCellularPhoneReport::getSmsCentre() {
+    return sms_centre;
+}
+void
+SWGCellularPhoneReport::setSmsCentre(QString* sms_centre) {
+    this->sms_centre = sms_centre;
+    this->m_sms_centre_isSet = true;
+}
+
+qint32
+SWGCellularPhoneReport::getHeld() {
+    return held;
+}
+void
+SWGCellularPhoneReport::setHeld(qint32 held) {
+    this->held = held;
+    this->m_held_isSet = true;
+}
+
+qint32
+SWGCellularPhoneReport::getPendingIndicators() {
+    return pending_indicators;
+}
+void
+SWGCellularPhoneReport::setPendingIndicators(qint32 pending_indicators) {
+    this->pending_indicators = pending_indicators;
+    this->m_pending_indicators_isSet = true;
+}
+
 
 bool
 SWGCellularPhoneReport::isSet(){
@@ -291,6 +397,21 @@ SWGCellularPhoneReport::isSet(){
             isObjectUpdated = true; break;
         }
         if(last_frame && *last_frame != QString("")){
+            isObjectUpdated = true; break;
+        }
+        if(password && *password != QString("")){
+            isObjectUpdated = true; break;
+        }
+        if(dialled && *dialled != QString("")){
+            isObjectUpdated = true; break;
+        }
+        if(sms_centre && *sms_centre != QString("")){
+            isObjectUpdated = true; break;
+        }
+        if(m_held_isSet){
+            isObjectUpdated = true; break;
+        }
+        if(m_pending_indicators_isSet){
             isObjectUpdated = true; break;
         }
     }while(false);

@@ -19,6 +19,7 @@ set(MODEMNMT_LIB_SOURCES
     ../nmtmwi.cpp
     ../nmtmodem.cpp
     ../nmtnumbers.cpp
+    ../nmtphoneinfo.cpp
     ../nmtplan.cpp
     ../nmtsms.cpp
     ../nmtsystem.cpp
@@ -82,3 +83,4 @@ modemnmt_add_test(modemnmt_sms_test test_sms.cpp)
 modemnmt_add_test(modemnmt_smscall_test test_smscall.cpp)
 modemnmt_add_test(modemnmt_plan_test test_plan.cpp)
 modemnmt_add_test(modemnmt_basestation_test test_basestation.cpp)
+modemnmt_add_test(modemnmt_phoneinfo_test test_phoneinfo.cpp)

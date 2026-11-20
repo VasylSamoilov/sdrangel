@@ -295,6 +295,15 @@ uint8_t NmtSystem::smsSubmitted(NmtTransaction& transaction, const SmsSubmit& me
     return m_smsSubmitHandler(subscriber, message);
 }
 
+void NmtSystem::numberDialled(NmtTransaction& transaction, const std::string& dialled)
+{
+    if (m_dialObserver)
+    {
+        const NmtSubscriber subscriber = transaction.subscriber;    // a copy: the observer may end the call
+        m_dialObserver(subscriber, dialled);
+    }
+}
+
 bool NmtSystem::smsRequested(NmtTransaction& transaction, SmsRpKind kind)
 {
     if (!m_smsRequestHandler) {
