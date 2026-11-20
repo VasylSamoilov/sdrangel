@@ -1123,7 +1123,6 @@ MessageCenterUdpSource::MessageCenterUdpSource(const QString& name, const QStrin
 
 MessageCenterUdpSource::~MessageCenterUdpSource()
 {
-    delete m_socket;
 }
 
 bool MessageCenterUdpSource::poll(std::vector<MessageRecord>& records, QString& error)
@@ -1215,7 +1214,6 @@ MessageCenterUdpSink::MessageCenterUdpSink(const QString& name, const QString& a
 
 MessageCenterUdpSink::~MessageCenterUdpSink()
 {
-    delete m_socket;
 }
 
 bool MessageCenterUdpSink::accept(const MessageRecord& record, QString& error)

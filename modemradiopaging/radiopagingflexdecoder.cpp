@@ -18,6 +18,7 @@
 #include "radiopagingflexdecoder.h"
 
 #include <algorithm>
+#include <utility>
 #include <climits>
 #include <cstdio>
 #include <cstdlib>
@@ -192,8 +193,9 @@ bool RadioPagingFlexDecoder::softDecode(uint32_t raw, const uint8_t reliability[
         order[b] = b;
     }
 
+    // The least reliable bits first, the earlier first among equals
     std::partial_sort(order, order + 3, order + 32, [&](int a, int b) {
-        return (reliability[a] < reliability[b]) || ((reliability[a] == reliability[b]) && (a < b));
+        return std::make_pair(reliability[a], a) < std::make_pair(reliability[b], b);
     });
 
     bool found = false;

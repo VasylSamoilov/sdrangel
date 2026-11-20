@@ -309,7 +309,7 @@ public:
 
 private:
     QString m_name;
-    QUdpSocket *m_socket;
+    std::unique_ptr<QUdpSocket> m_socket;
     QString m_bindError;
     bool m_errorReported = false;
     int m_skipped = 0;
@@ -336,7 +336,7 @@ private:
     QString m_addressText;
     quint16 m_port;
     Format m_format;
-    QUdpSocket *m_socket;
+    std::unique_ptr<QUdpSocket> m_socket;
     bool m_addressValid;
     QHostAddress m_address;
 };
