@@ -102,6 +102,7 @@ void RadioPagingModSource::makeStream()
 {
     m_streamProtocol = m_settings.m_protocol;
     m_streamMode = effectiveMode();
+    m_streamFlexMode = m_settings.m_flexMode;
     bool network = (m_streamMode == RadioPagingModSettings::Network);
 
     m_streamMixed = mixing();
@@ -699,9 +700,11 @@ void RadioPagingModSource::applySettings(const QStringList& settingsKeys, const 
         m_settings.applySettings(settingsKeys, settings);
     }
 
-    // Another protocol or mode: the transmission ends and what is queued is dropped
+    // Another protocol or mode, or another FLEX speed (the scheduler is made for the phases of a speed: its queue of
+    // another one has messages it no longer sends): the transmission ends and what is queued is dropped
     if (!m_stream || (m_settings.m_protocol != m_streamProtocol) || (effectiveMode() != m_streamMode)
-        || (mixing() != m_streamMixed))
+        || (mixing() != m_streamMixed)
+        || ((m_settings.m_protocol == RadioPagingModSettings::Flex) && (m_settings.m_flexMode != m_streamFlexMode)))
     {
         if (m_stream)
         {

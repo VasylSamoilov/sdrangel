@@ -175,6 +175,7 @@ private:
     RadioPagingModSettings::Protocol m_streamProtocol;
     RadioPagingModSettings::Mode m_streamMode;
     bool m_streamMixed;                 //!< The stream is a RadioPagingMixTxStream (FLEX network mixed with POCSAG)
+    int m_streamFlexMode = -1;          //!< The FLEX speed the stream was made for
     RadioPagingMixTxStream *m_mix;      //!< m_stream if mixed, else null
     bool m_streamEnded;                 //!< The transmission has no more blocks
     quint64 m_pushed;                   //!< Symbols pushed to the modulator in the transmission

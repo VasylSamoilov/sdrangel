@@ -367,6 +367,36 @@ void testFlexOneShot()
     check((collapsed.scheduleCollapse() == 0) && (collapsed.ersCollapse() == 3) && ers && inFirst,
         "FLEX one-shot collapse 3: re-synchronization of 8 frames, flagged; message in the first frame (collapse 0)");
 
+    // One-shot at every speed: long messages (248 characters fill a frame, 500 are fragments) are all sent, and the
+    // transmission ends (found with a radio round trip: at 3200 and 6400 they stayed queued)
+    for (RadioPagingFlex::Mode mode : {RadioPagingFlex::Mode1600_2, RadioPagingFlex::Mode3200_2, RadioPagingFlex::Mode3200_4, RadioPagingFlex::Mode6400_4})
+    {
+        RadioPagingFlexTxStream shot(false, mode, false, 0);
+        const std::string t248(248, 'A');
+        const std::string t249(249, 'B');
+        const std::string t500(500, 'C');
+        RadioPagingFlexEncoder::TxMessage m248 = flex(1010020, t248.c_str());
+        RadioPagingFlexEncoder::TxMessage m249 = flex(1010021, t249.c_str());
+        RadioPagingFlexEncoder::TxMessage m500 = flex(1010022, t500.c_str());
+        bool queued = shot.add(m248, false, 20, error) && shot.add(m249, false, 21, error) && shot.add(m500, false, 22, error)
+            && shot.add(flex(1010031, "after them"), false, 31, error);
+        std::vector<uint64_t> ids;
+        int blocks = 0;
+
+        shot.begin(1000);
+
+        while (shot.next(block) && (blocks < 2000))
+        {
+            ids.insert(ids.end(), block.m_ids.begin(), block.m_ids.end());
+            blocks++;
+        }
+
+        std::sort(ids.begin(), ids.end());
+        ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+        check(queued && (ids == std::vector<uint64_t>({20, 21, 22, 31})) && !shot.hasWork(),
+            (std::string("FLEX one-shot ") + RadioPagingFlex::modeName(mode) + ": long and fragmented messages sent, then the end").c_str());
+    }
+
     // Network collapse 2: both
     RadioPagingFlexTxStream network(true, RadioPagingFlex::Mode1600_2, false, 2);
     check((network.scheduleCollapse() == 2) && (network.ersCollapse() == 2), "FLEX network: the collapse schedules the frames and sets the re-synchronization");
