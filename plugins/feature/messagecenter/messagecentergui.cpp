@@ -792,7 +792,18 @@ void MessageCenterGUI::editContact(int index)
         }
     }
 
-    MessageCenterContactDialog dialog(existing ? m_settings.m_contacts[index] : MessageCenterContact(), others, fields, sample, this);
+    // The transmitters that announced themselves
+    QStringList transmitters;
+
+    for (const MessageEndpoint& e : m_center->engine().endpoints())
+    {
+        if ((e.m_role == MessageEndpoint::Transmitter) && !transmitters.contains(e.m_channel)) {
+            transmitters.append(e.m_channel);
+        }
+    }
+
+    MessageCenterContactDialog dialog(existing ? m_settings.m_contacts[index] : MessageCenterContact(), others, fields, sample,
+        transmitters, this);
 
     if (dialog.exec() != QDialog::Accepted) {
         return;

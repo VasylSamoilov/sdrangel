@@ -60,7 +60,7 @@ public:
     //!< messages of the log). log: the fields of messages of the log (MessageCenterContact::recordFields), to count
     //!< those each rule finds
     MessageCenterContactDialog(const MessageCenterContact& contact, const QStringList& otherNames, const QStringList& fields,
-        const std::vector<QJsonObject>& log, QWidget *parent = nullptr);
+        const std::vector<QJsonObject>& log, const QStringList& transmitters, QWidget *parent = nullptr);
     MessageCenterContact contact() const;
 
 private:
@@ -70,12 +70,20 @@ private:
     const std::vector<QJsonObject>& m_log;
     QLineEdit *m_name;
     QTableWidget *m_conditions;         //!< A row a condition: its rule, field, is or matches, value, what it finds
+    QTableWidget *m_sendTo;             //!< A row a send to, in order: a condition (none: always) and the page it gives
+    QStringList m_transmitters;
     QToolButton *m_icon;
     QToolButton *m_color;
     QLineEdit *m_note;
     QLabel *m_error;
 
     enum ConditionColumn { ColRule, ColField, ColOperator, ColValue, ColCheck };
+    enum SendToColumn { SendWhenField, SendWhenOperator, SendWhenValue, SendTransmitter, SendProtocol, SendAddress, SendFunction, SendCheck };
+
+    void addSendToRow(const MessageCenterContact::SendTo& sendTo);
+    MessageCenterContact::SendTo rowSendTo(int row) const;
+    //!< The address of each send to checked (the check of the pages), shown in its row
+    void showSendToChecks();
 
     void showIcon();
     void showColor();

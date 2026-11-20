@@ -35,7 +35,11 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include <QJsonArray>
+#include <QJsonDocument>
+
 #include "gui/dialogpositioner.h"
+#include "radiopagingpage.h"
 
 #include "messagecentercontacts.h"
 
@@ -146,12 +150,13 @@ MessageCenterIconPicker::MessageCenterIconPicker(const QString& current, QWidget
 // ---------------------------------------------------------------------------
 
 MessageCenterContactDialog::MessageCenterContactDialog(const MessageCenterContact& contact, const QStringList& otherNames,
-        const QStringList& fields, const std::vector<QJsonObject>& log, QWidget *parent) :
+        const QStringList& fields, const std::vector<QJsonObject>& log, const QStringList& transmitters, QWidget *parent) :
     QDialog(parent),
     m_contact(contact),
     m_otherNames(otherNames),
     m_fields(fields),
-    m_log(log)
+    m_log(log),
+    m_transmitters(transmitters)
 {
     setWindowTitle(contact.m_name.isEmpty() ? tr("New contact") : tr("Contact %1").arg(contact.m_name));
     QVBoxLayout *layout = new QVBoxLayout(this);
@@ -234,6 +239,92 @@ MessageCenterContactDialog::MessageCenterContactDialog(const MessageCenterContac
         addConditionRow(1, ric);
     }
 
+    // Send to: in order, the first one whose condition a page meets gives its transmitter and address
+    QWidget *sendBox = new QWidget(this);
+    QVBoxLayout *sendLayout = new QVBoxLayout(sendBox);
+    sendLayout->setContentsMargins(0, 0, 0, 0);
+    m_sendTo = new QTableWidget(0, 8, sendBox);
+    m_sendTo->setHorizontalHeaderLabels({tr("When"), QString(), tr("Value"), tr("Transmitter"), tr("Protocol"), tr("Address"),
+        tr("Function"), tr("Check")});
+    m_sendTo->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_sendTo->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_sendTo->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    m_sendTo->horizontalHeader()->setSectionResizeMode(SendWhenValue, QHeaderView::Stretch);
+    m_sendTo->horizontalHeader()->setSectionResizeMode(SendAddress, QHeaderView::Interactive);
+    m_sendTo->setColumnWidth(SendAddress, 12 * fontMetrics().averageCharWidth());
+    m_sendTo->setMinimumHeight(5 * fontMetrics().lineSpacing());
+    m_sendTo->setToolTip(tr("How a page is sent to the contact (a page to the contact in the WebAPI or the MCP), in order: the first "
+        "row whose condition the page meets\n(a field of the page: type, protocol, text, priority...; no field: always) gives "
+        "the transmitter, the protocol, the address and the function.\nE.g. type is voice: by GSC; type matches binary|secure: "
+        "by FLEX; always: by POCSAG"));
+    QHBoxLayout *sendButtons = new QHBoxLayout();
+    QToolButton *addSend = new QToolButton(sendBox);
+    addSend->setText(tr("+ Send to"));
+    addSend->setToolTip(tr("Add a way to send pages to the contact (after the others)"));
+    QToolButton *upSend = new QToolButton(sendBox);
+    upSend->setIcon(QIcon(":/arrow_up.png"));
+    upSend->setToolTip(tr("Move the send to selected up: it is tried earlier"));
+    QToolButton *downSend = new QToolButton(sendBox);
+    downSend->setIcon(QIcon(":/arrow_down.png"));
+    downSend->setToolTip(tr("Move the send to selected down: it is tried later"));
+    QToolButton *removeSend = new QToolButton(sendBox);
+    removeSend->setIcon(QIcon(":/bin.png"));
+    removeSend->setToolTip(tr("Remove the send to selected"));
+    sendButtons->addWidget(addSend);
+    sendButtons->addWidget(upSend);
+    sendButtons->addWidget(downSend);
+    sendButtons->addWidget(removeSend);
+    sendButtons->addStretch();
+    sendLayout->addWidget(m_sendTo);
+    sendLayout->addLayout(sendButtons);
+    form->addRow(tr("Send to"), sendBox);
+
+    for (const MessageCenterContact::SendTo& sendTo : contact.m_sendTo) {
+        addSendToRow(sendTo);
+    }
+
+    connect(addSend, &QToolButton::clicked, this, [this]() {
+        addSendToRow(MessageCenterContact::SendTo());
+        showSendToChecks();
+    });
+    connect(removeSend, &QToolButton::clicked, this, [this]() {
+        const int row = m_sendTo->currentRow();
+
+        if (row >= 0)
+        {
+            m_sendTo->removeRow(row);
+            showSendToChecks();
+        }
+    });
+
+    // A move: the rows made again in the new order
+    auto move = [this](int step) {
+        const int row = m_sendTo->currentRow();
+        const int to = row + step;
+
+        if ((row < 0) || (to < 0) || (to >= m_sendTo->rowCount())) {
+            return;
+        }
+
+        QList<MessageCenterContact::SendTo> rows;
+
+        for (int r = 0; r < m_sendTo->rowCount(); r++) {
+            rows.append(rowSendTo(r));
+        }
+
+        rows.swapItemsAt(row, to);
+        m_sendTo->setRowCount(0);
+
+        for (const MessageCenterContact::SendTo& s : rows) {
+            addSendToRow(s);
+        }
+
+        m_sendTo->selectRow(to);
+        showSendToChecks();
+    };
+    connect(upSend, &QToolButton::clicked, this, [move]() { move(-1); });
+    connect(downSend, &QToolButton::clicked, this, [move]() { move(1); });
+
     m_note = new QLineEdit(contact.m_note, this);
     m_note->setToolTip(tr("A note of your own"));
     form->addRow(tr("Note"), m_note);
@@ -305,7 +396,8 @@ MessageCenterContactDialog::MessageCenterContactDialog(const MessageCenterContac
     showIcon();
     showColor();
     showChecks();
-    setMinimumWidth(80 * fontMetrics().averageCharWidth());
+    showSendToChecks();
+    setMinimumWidth(100 * fontMetrics().averageCharWidth());
     new DialogPositioner(this, true);
 }
 
@@ -346,6 +438,155 @@ void MessageCenterContactDialog::addConditionRow(int rule, const MessageCenterCo
     for (QWidget *w : {(QWidget *) ruleBox, (QWidget *) field, (QWidget *) op, (QWidget *) value}) {
         w->installEventFilter(this);
     }
+}
+
+void MessageCenterContactDialog::addSendToRow(const MessageCenterContact::SendTo& sendTo)
+{
+    const int row = m_sendTo->rowCount();
+    m_sendTo->insertRow(row);
+    const MessageCenterContact::Condition when = sendTo.m_when.isEmpty() ? MessageCenterContact::Condition() : sendTo.m_when.first();
+
+    // The condition: the fields of a page
+    QComboBox *field = new QComboBox(m_sendTo);
+    field->setEditable(true);
+    field->addItems({QString(), "type", "protocol", "priority", "text", "speed", "polarity"});
+    field->setCurrentText(when.m_field);
+    field->setToolTip(tr("Field of the page; empty: always"));
+    // More conditions than the row shows (set in the WebAPI) are kept
+    QJsonArray extra;
+
+    for (int i = 1; i < sendTo.m_when.size(); i++) {
+        extra.append(sendTo.m_when[i].toJson());
+    }
+
+    field->setProperty("extra", QJsonDocument(extra).toJson(QJsonDocument::Compact));
+
+    if (!extra.isEmpty()) {
+        field->setToolTip(tr("Field of the page; this send to has %1 more conditions (kept)").arg(extra.size()));
+    }
+
+    QComboBox *op = new QComboBox(m_sendTo);
+    op->addItems({tr("is"), tr("matches")});
+    op->setCurrentIndex(when.m_regExp ? 1 : 0);
+    QLineEdit *value = new QLineEdit(when.m_value, m_sendTo);
+    value->setFrame(false);
+    value->setPlaceholderText(tr("e.g. voice"));
+
+    // The page it gives: a transmitter announced (or another one typed), the protocol, the address and function
+    QComboBox *transmitter = new QComboBox(m_sendTo);
+    transmitter->setEditable(true);
+    transmitter->addItems(m_transmitters);
+    transmitter->setCurrentText(sendTo.m_page.value("transmitter").toString());
+    transmitter->setToolTip(tr("Transmitter: the name of a Radio Paging modulator"));
+    QComboBox *protocol = new QComboBox(m_sendTo);
+    protocol->addItems(RadioPagingPage::protocols());
+    protocol->setCurrentText(sendTo.m_page.value("protocol").toString("pocsag"));
+    QLineEdit *address = new QLineEdit(sendTo.m_page.value("address").toVariant().toString(), m_sendTo);
+    address->setFrame(false);
+    QComboBox *function = new QComboBox(m_sendTo);
+    QLabel *checkLabel = new QLabel(m_sendTo);
+    checkLabel->setContentsMargins(4, 0, 4, 0);
+
+    m_sendTo->setCellWidget(row, SendWhenField, field);
+    m_sendTo->setCellWidget(row, SendWhenOperator, op);
+    m_sendTo->setCellWidget(row, SendWhenValue, value);
+    m_sendTo->setCellWidget(row, SendTransmitter, transmitter);
+    m_sendTo->setCellWidget(row, SendProtocol, protocol);
+    m_sendTo->setCellWidget(row, SendAddress, address);
+    m_sendTo->setCellWidget(row, SendFunction, function);
+    m_sendTo->setCellWidget(row, SendCheck, checkLabel);
+
+    // The functions of the protocol, as the composer has them
+    auto fillFunctions = [protocol, function]() {
+        const int index = std::max(0, function->currentIndex());
+        QSignalBlocker blocker(function);
+        function->clear();
+        function->addItems(RadioPagingPage::functions(protocol->currentText()));
+        function->setEnabled(function->count() > 0);
+        function->setCurrentIndex(std::min(index, function->count() - 1));
+    };
+    fillFunctions();
+    function->setCurrentIndex(std::min(sendTo.m_page.value("function").toInt(0), function->count() - 1));
+
+    connect(protocol, &QComboBox::currentTextChanged, this, [this, fillFunctions]() {
+        fillFunctions();
+        showSendToChecks();
+    });
+
+    for (QComboBox *combo : {field, op, transmitter, function}) {
+        connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() { showSendToChecks(); });
+    }
+    for (QComboBox *combo : {field, transmitter}) {
+        connect(combo, &QComboBox::editTextChanged, this, [this]() { showSendToChecks(); });
+    }
+    for (QLineEdit *edit : {value, address}) {
+        connect(edit, &QLineEdit::textChanged, this, [this]() { showSendToChecks(); });
+    }
+    for (QWidget *w : {(QWidget *) field, (QWidget *) op, (QWidget *) value, (QWidget *) transmitter, (QWidget *) protocol,
+        (QWidget *) address, (QWidget *) function}) {
+        w->installEventFilter(this);
+    }
+}
+
+MessageCenterContact::SendTo MessageCenterContactDialog::rowSendTo(int row) const
+{
+    MessageCenterContact::SendTo sendTo;
+    const QComboBox *field = qobject_cast<QComboBox *>(m_sendTo->cellWidget(row, SendWhenField));
+    const QComboBox *op = qobject_cast<QComboBox *>(m_sendTo->cellWidget(row, SendWhenOperator));
+    const QLineEdit *value = qobject_cast<QLineEdit *>(m_sendTo->cellWidget(row, SendWhenValue));
+    const QComboBox *transmitter = qobject_cast<QComboBox *>(m_sendTo->cellWidget(row, SendTransmitter));
+    const QComboBox *protocol = qobject_cast<QComboBox *>(m_sendTo->cellWidget(row, SendProtocol));
+    const QLineEdit *address = qobject_cast<QLineEdit *>(m_sendTo->cellWidget(row, SendAddress));
+    const QComboBox *function = qobject_cast<QComboBox *>(m_sendTo->cellWidget(row, SendFunction));
+
+    if (!field || !op || !value || !transmitter || !protocol || !address || !function) {
+        return sendTo;
+    }
+    if (!field->currentText().trimmed().isEmpty())
+    {
+        MessageCenterContact::Condition condition;
+        condition.m_field = field->currentText().trimmed();
+        condition.m_regExp = (op->currentIndex() == 1);
+        condition.m_value = condition.m_regExp ? value->text() : value->text().trimmed();
+        sendTo.m_when.append(condition);
+    }
+    for (const QJsonValue& v : QJsonDocument::fromJson(field->property("extra").toByteArray()).array()) {
+        sendTo.m_when.append(MessageCenterContact::Condition::fromJson(v.toObject()));
+    }
+
+    sendTo.m_page["transmitter"] = transmitter->currentText().trimmed();
+    sendTo.m_page["protocol"] = protocol->currentText();
+    sendTo.m_page["address"] = address->text().trimmed();
+
+    if (function->count() > 0) {
+        sendTo.m_page["function"] = function->currentIndex();
+    }
+
+    return sendTo;
+}
+
+// Each send to checked as a page is, what is wrong shown in its row; the address described as the composer does
+void MessageCenterContactDialog::showSendToChecks()
+{
+    for (int row = 0; row < m_sendTo->rowCount(); row++)
+    {
+        QLabel *label = qobject_cast<QLabel *>(m_sendTo->cellWidget(row, SendCheck));
+
+        if (!label) {
+            continue;
+        }
+
+        const MessageCenterContact::SendTo sendTo = rowSendTo(row);
+        const QString error = sendTo.check();
+        const QString description = RadioPagingPage::addressDescription(sendTo.m_page.value("protocol").toString(),
+            sendTo.m_page.value("address").toString(), sendTo.m_page.value("function").toInt(0));
+
+        label->setText(error.isEmpty() ? description.section('\n', 0, 0) : tr("not valid"));
+        label->setToolTip(error.isEmpty() ? description : error);
+        label->setStyleSheet(error.isEmpty() ? QString() : QString("QLabel { color: red; }"));
+    }
+
+    check();
 }
 
 int MessageCenterContactDialog::rowRule(int row) const
@@ -392,6 +633,12 @@ MessageCenterContact MessageCenterContactDialog::contact() const
 
     for (const MessageCenterContact::Rule& rule : rules) {
         c.m_rules.append(rule);
+    }
+
+    c.m_sendTo.clear();
+
+    for (int row = 0; row < m_sendTo->rowCount(); row++) {
+        c.m_sendTo.append(rowSendTo(row));
     }
 
     return c;
@@ -501,6 +748,12 @@ bool MessageCenterContactDialog::check()
             }
         }
     }
+    for (const MessageCenterContact::SendTo& sendTo : c.m_sendTo)
+    {
+        if (why.isEmpty()) {
+            why = sendTo.check();
+        }
+    }
 
     m_error->setText(why);
     m_error->setVisible(!why.isEmpty());
@@ -511,12 +764,15 @@ bool MessageCenterContactDialog::eventFilter(QObject *object, QEvent *event)
 {
     if (event->type() == QEvent::FocusIn)
     {
-        for (int r = 0; r < m_conditions->rowCount(); r++)
+        for (QTableWidget *table : {m_conditions, m_sendTo})
         {
-            for (int c = 0; c < m_conditions->columnCount(); c++)
+            for (int r = 0; r < table->rowCount(); r++)
             {
-                if (m_conditions->cellWidget(r, c) == object) {
-                    m_conditions->selectRow(r);
+                for (int c = 0; c < table->columnCount(); c++)
+                {
+                    if (table->cellWidget(r, c) == object) {
+                        table->selectRow(r);
+                    }
                 }
             }
         }
