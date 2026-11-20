@@ -88,6 +88,19 @@ public:
         QStyleOptionViewItem opt = option;
         initStyleOption(&opt, index);
         opt.text.clear();
+
+        // The icons of the marks side by side: at their width, not squeezed into the square of an icon
+        if ((index.column() == PagingMessageTable::ColMessage) && !opt.icon.isNull())
+        {
+            const QSize size = opt.icon.availableSizes().value(0);
+
+            // initStyleOption fitted it into the square: its height is the side of the square
+            const int side = std::max(opt.decorationSize.width(), opt.decorationSize.height());
+
+            if (size.isValid() && (size.height() > 0)) {
+                opt.decorationSize = QSize(side * size.width() / size.height(), side);
+            }
+        }
         opt.widget->style()->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
 
         // The text beside the icon, if the cell has one. The message wraps to the width of its column

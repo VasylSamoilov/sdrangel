@@ -1045,8 +1045,8 @@ void MessageCenterGUI::buildRoutes(QWidget *container)
                 return;
             }
 
-            const QString question = QString("Replace the %1 routes and %2 sinks with those of the preset %3 (%4 routes, "
-                "%5 sinks)? The sources and the contacts stay.").arg(m_settings.m_routes.size()).arg(m_settings.m_sinks.size())
+            const QString question = QString("Replace the routes (%1) and the sinks (%2) with those of the preset %3 (routes: %4, "
+                "sinks: %5)? The sources and the contacts stay.").arg(m_settings.m_routes.size()).arg(m_settings.m_sinks.size())
                 .arg(name).arg(routes.size()).arg(sinks.size());
 
             if (QMessageBox::question(this, "Preset", question, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
