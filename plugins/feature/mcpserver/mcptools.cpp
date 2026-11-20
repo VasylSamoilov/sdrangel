@@ -3951,6 +3951,8 @@ const ListenMode listenModes[] = {
     {"nxdn24",     "DSDDemod",          6250,   48000, "{\"fmDeviation\":2700,\"baudRate\":2400}", 6250, nullptr,   0},
     {"pager",      "PagerDemod",       20000,   48000, "{}",                                  12500, nullptr,          0},
     {"pocsag",     "PagerDemod",       20000,   48000, "{}",                                  12500, nullptr,          0},
+    // POCSAG, FLEX and GSC at once; the messages are in get_paging_messages and in the log of the Message Center
+    {"paging",     "RadioPagingDemod", 20000,   48000, "{}",                                  12500, "MessageCenter",  0},
     {"sonde",      "RadiosondeDemod",   9600,   48000, "{}",                                  10000, "Radiosonde",     0},
     {"radiosonde", "RadiosondeDemod",   9600,   48000, "{}",                                  10000, "Radiosonde",     0},
     // AX.25 packet at 1200 baud AFSK. APRS is the same signal on a fixed regional frequency,
@@ -3961,7 +3963,7 @@ const ListenMode listenModes[] = {
     {"droneid",    "DroneIDDemod",         0, 15360000, "{}",                                     0, nullptr,          0},
 };
 
-const char *const listenModeList = "bfm, wfm, nfm, am, ssb, usb, lsb, dab, drm, adsb, ais, dsc, dsd, dmr, dpmr, dstar, ysf, nxdn, pager, sonde, packet, aprs, droneid";
+const char *const listenModeList = "bfm, wfm, nfm, am, ssb, usb, lsb, dab, drm, adsb, ais, dsc, dsd, dmr, dpmr, dstar, ysf, nxdn, pager, paging, sonde, packet, aprs, droneid";
 
 // The feature a demodulator of this type feeds, by the modes that add one; null for none
 const char *featureForChannelType(const QString& channelType)
@@ -5285,15 +5287,17 @@ void MCPTools::registerIntentTools()
         "Receive a frequency in one call: picks a device, creates or reuses its device set, sets the sample rate, adds the "
         "demodulator with sensible settings, starts the device and reports the signal level. Audio plays on the default output. "
         "Use the individual tools afterwards to adjust, e.g. set_channel_settings for squelch or volume. Modes whose output "
-        "goes to a feature add it too: ais adds the AIS feature, sonde the Radiosonde feature and aprs the APRS feature, whose "
-        "reports and map items carry what was decoded; a later listen or scan removes the feature again once nothing it added "
+        "goes to a feature add it too: ais adds the AIS feature, sonde the Radiosonde feature, aprs the APRS feature and paging "
+        "the Message Center, whose reports and map items carry what was decoded (the paging messages are also in "
+        "get_paging_messages); a later listen or scan removes the feature again once nothing it added "
         "feeds it. ais is received on two channels, so give 162000000 and it puts a demodulator on each of 161.975 and "
         "162.025 MHz.",
         schema({
             {"frequency", numProp("Frequency to receive in Hz, e.g. 97300000 for 97.3 MHz")},
             {"mode", strProp("bfm (broadcast FM with stereo and RDS), wfm, nfm, am or airband, ssb/usb, lsb, dab, drm (Digital Radio Mondiale), adsb, ais, dsc, dsd/dmr, "
                              "dmr, dpmr, dstar, ysf, nxdn or nxdn24 (digital voice through the DSD demodulator with the deviation and baud rate of that standard), "
-                             "pager (POCSAG), sonde (RS41 radiosondes), packet (AX.25), aprs (APRS with its feature), or any channel type id from list_channel_types. Default nfm")},
+                             "pager (POCSAG, Pager demodulator, messages in the GUI only), paging (POCSAG, FLEX and GSC at once, Radio "
+                             "Paging demodulator, messages in get_paging_messages and the Message Center), sonde (RS41 radiosondes), packet (AX.25), aprs (APRS with its feature), or any channel type id from list_channel_types. Default nfm")},
             {"device", strProp(deviceHint)},
             {"replace", prop("boolean", "Retune the demodulator a previous listen added to this device set when it is of the same type, and remove every other channel earlier listen and scan calls added there, so that exploring a band does not leave a trail of demodulators all playing audio and mis-tuned for the current centre frequency. Channels added any other way are kept on their frequency where the baseband still holds them; audio demodulators it cannot hold are removed, anything else is left and named. Default true")},
             {"tuneGain", prop("boolean", "Measure and set the receiver gain, as tune_gain does, when the device set is new or the retune is to another band (more than a tenth of the frequency away). Adds several seconds in those cases and none otherwise. false leaves the gain as it is. Default true")}
