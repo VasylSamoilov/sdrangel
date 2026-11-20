@@ -1357,6 +1357,14 @@ void RadioPagingModGUI::displayProtocol()
 
     displayProtocolAvailability();
     displayMessage();
+
+    // Another protocol shows other fields: the sections are arranged again, and a window too short for them grows (its
+    // minimum size follows its contents), else its last sections would be under its bottom bar
+    getRollupContents()->arrangeRollups();
+
+    if (!isMaximized() && (getRollupContents()->minimumHeight() + getAdditionalHeight() > height())) {
+        sizeToContents();
+    }
 }
 void RadioPagingModGUI::on_mixPocsag_toggled(bool checked)
 {
