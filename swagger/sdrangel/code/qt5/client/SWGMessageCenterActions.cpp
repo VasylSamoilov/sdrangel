@@ -40,6 +40,8 @@ SWGMessageCenterActions::SWGMessageCenterActions() {
     m_ingest_isSet = false;
     import_file = nullptr;
     m_import_file_isSet = false;
+    query = nullptr;
+    m_query_isSet = false;
     redecode = nullptr;
     m_redecode_isSet = false;
 }
@@ -62,6 +64,8 @@ SWGMessageCenterActions::init() {
     m_ingest_isSet = false;
     import_file = new QString("");
     m_import_file_isSet = false;
+    query = new QString("");
+    m_query_isSet = false;
     redecode = new SWGMessageCenterRedecode();
     m_redecode_isSet = false;
 }
@@ -83,6 +87,9 @@ SWGMessageCenterActions::cleanup() {
     }
     if(import_file != nullptr) { 
         delete import_file;
+    }
+    if(query != nullptr) { 
+        delete query;
     }
     if(redecode != nullptr) { 
         delete redecode;
@@ -111,6 +118,8 @@ SWGMessageCenterActions::fromJsonObject(QJsonObject &pJson) {
     ::SWGSDRangel::setValue(&ingest, pJson["ingest"], "QString", "QString");
     
     ::SWGSDRangel::setValue(&import_file, pJson["importFile"], "QString", "QString");
+    
+    ::SWGSDRangel::setValue(&query, pJson["query"], "QString", "QString");
     
     ::SWGSDRangel::setValue(&redecode, pJson["redecode"], "SWGMessageCenterRedecode", "SWGMessageCenterRedecode");
     
@@ -147,6 +156,9 @@ SWGMessageCenterActions::asJsonObject() {
     }
     if(import_file != nullptr && *import_file != QString("")){
         toJsonValue(QString("importFile"), import_file, obj, QString("QString"));
+    }
+    if(query != nullptr && *query != QString("")){
+        toJsonValue(QString("query"), query, obj, QString("QString"));
     }
     if((redecode != nullptr) && (redecode->isSet())){
         toJsonValue(QString("redecode"), redecode, obj, QString("SWGMessageCenterRedecode"));
@@ -215,6 +227,16 @@ SWGMessageCenterActions::setImportFile(QString* import_file) {
     this->m_import_file_isSet = true;
 }
 
+QString*
+SWGMessageCenterActions::getQuery() {
+    return query;
+}
+void
+SWGMessageCenterActions::setQuery(QString* query) {
+    this->query = query;
+    this->m_query_isSet = true;
+}
+
 SWGMessageCenterRedecode*
 SWGMessageCenterActions::getRedecode() {
     return redecode;
@@ -246,6 +268,9 @@ SWGMessageCenterActions::isSet(){
             isObjectUpdated = true; break;
         }
         if(import_file && *import_file != QString("")){
+            isObjectUpdated = true; break;
+        }
+        if(query && *query != QString("")){
             isObjectUpdated = true; break;
         }
         if(redecode && redecode->isSet()){

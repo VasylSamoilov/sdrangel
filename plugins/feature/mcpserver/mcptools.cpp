@@ -906,7 +906,7 @@ static ToolBehaviour behaviourFor(const QString& name)
     // the dedicated data feeds do: an ADS-B report, for instance, lists the aircraft heard.
     static const QStringList offAirReads = {
         "get_packets", "get_map_items", "get_channel_report",
-        "get_device_report", "get_feature_report", "get_paging_messages", "get_message_center"
+        "get_device_report", "get_feature_report", "get_paging_messages", "get_message_center", "message_center_query"
     };
 
     // Purely additive: they create something new and overwrite nothing
@@ -6481,6 +6481,29 @@ void MCPTools::registerMessageCenterTools()
             QJsonObject actions;
             actions["ingest"] = lines.join('\n');
             return messageCenterAction(actions);
+        });
+
+    add("message_center_query",
+        "Query the messages of the Message Center over its history (days of messages, when it is kept; else its log): a "
+        "time range, a filter, a page. Returns the total it selects and the page, newest first, with the query (from and to "
+        "resolved: run it again with them for the next page).",
+        schema({{"last", numProp("Seconds back from now (instead of from and to)")},
+                {"from", numProp("Start, ms since the epoch")},
+                {"to", numProp("End, ms since the epoch")},
+                {"filter", objProp("A filter as that of a route: protocols, contacts, channels, direction, msgType, address "
+                    "(regular expression of the whole address), text (found anywhere, not case sensitive), field and value...")},
+                {"offset", intProp("Of the messages selected, newest first (default 0)")},
+                {"limit", intProp("Messages of the page, 1 to 1000 (default 100)")}}, {}),
+        [this, parsed](const QJsonObject& args)
+        {
+            QJsonObject actions;
+            actions["query"] = QString::fromUtf8(QJsonDocument(args).toJson(QJsonDocument::Compact));
+            messageCenterAction(actions);
+            SWGSDRangel::SWGFeatureReport response;
+            SWGSDRangel::SWGErrorResponse error;
+            error.init();
+            check(m_adapter->featuresetFeatureReportGet(0, messageCenterIndex(), response, error), error, "Get Message Center report");
+            return parsed(toJson(response)["MessageCenterReport"].toObject()["query"]).toObject();
         });
 
     add("message_center_import_file",

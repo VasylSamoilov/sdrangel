@@ -1713,6 +1713,10 @@ void MessageCenterGUI::refresh()
 }
 
 // The newest messages of the log that the filter selects; made again when the log changed
+// Used by reference (captured, std::max): defined once
+const int MessageCenterGUI::m_maxLogRows;
+const int MessageCenterGUI::m_pageRows;
+
 // The bar above the filters: Live or Query, and the range, the pages and the refresh of a query
 void MessageCenterGUI::buildQueryBar(QWidget *container)
 {

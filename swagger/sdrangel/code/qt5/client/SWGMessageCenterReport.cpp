@@ -42,6 +42,8 @@ SWGMessageCenterReport::SWGMessageCenterReport() {
     m_errors_isSet = false;
     sinks = nullptr;
     m_sinks_isSet = false;
+    query = nullptr;
+    m_query_isSet = false;
 }
 
 SWGMessageCenterReport::~SWGMessageCenterReport() {
@@ -64,6 +66,8 @@ SWGMessageCenterReport::init() {
     m_errors_isSet = false;
     sinks = new QString("");
     m_sinks_isSet = false;
+    query = new QString("");
+    m_query_isSet = false;
 }
 
 void
@@ -84,6 +88,9 @@ SWGMessageCenterReport::cleanup() {
     }
     if(sinks != nullptr) { 
         delete sinks;
+    }
+    if(query != nullptr) { 
+        delete query;
     }
 }
 
@@ -111,6 +118,8 @@ SWGMessageCenterReport::fromJsonObject(QJsonObject &pJson) {
     ::SWGSDRangel::setValue(&errors, pJson["errors"], "QString", "QString");
     
     ::SWGSDRangel::setValue(&sinks, pJson["sinks"], "QString", "QString");
+    
+    ::SWGSDRangel::setValue(&query, pJson["query"], "QString", "QString");
     
 }
 
@@ -148,6 +157,9 @@ SWGMessageCenterReport::asJsonObject() {
     }
     if(sinks != nullptr && *sinks != QString("")){
         toJsonValue(QString("sinks"), sinks, obj, QString("QString"));
+    }
+    if(query != nullptr && *query != QString("")){
+        toJsonValue(QString("query"), query, obj, QString("QString"));
     }
 
     return obj;
@@ -223,6 +235,16 @@ SWGMessageCenterReport::setSinks(QString* sinks) {
     this->m_sinks_isSet = true;
 }
 
+QString*
+SWGMessageCenterReport::getQuery() {
+    return query;
+}
+void
+SWGMessageCenterReport::setQuery(QString* query) {
+    this->query = query;
+    this->m_query_isSet = true;
+}
+
 
 bool
 SWGMessageCenterReport::isSet(){
@@ -247,6 +269,9 @@ SWGMessageCenterReport::isSet(){
             isObjectUpdated = true; break;
         }
         if(sinks && *sinks != QString("")){
+            isObjectUpdated = true; break;
+        }
+        if(query && *query != QString("")){
             isObjectUpdated = true; break;
         }
     }while(false);

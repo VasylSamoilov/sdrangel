@@ -306,6 +306,8 @@ private:
     int importFile(const QString& path, QString& error);
     void applyHistory();                    //!< The history file of the settings in the engine (one owner a file)
     QString m_historyError;                 //!< Why the history is not kept, empty if it is
+    QByteArray m_lastQuery;                 //!< The result of the last query action, with the query (report query)
+    static const int m_maxQueryLimit = 1000;    //!< Records of a page of a query action at most
     static MessageCenter*& historyOwner();
     void ingest(const MessageRecord& record, const QObject *source);
     void tick();

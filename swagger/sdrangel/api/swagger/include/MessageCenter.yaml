@@ -7,7 +7,7 @@ MessageCenterSettings:
       type: integer
       format: int64
     logSize:
-      description: "Messages kept in the log (in memory), 100 to 10000; the GUI shows the newest 1000 its filters select"
+      description: "Messages kept in the log (in memory), 100 to 10000; the live view of the GUI shows the newest 100 its filters select, a query goes over the history"
       type: integer
     historyEnabled:
       description: "1 every message stored is kept in the history (messagecenter/history in the application data folder: a file for each day, up to 4 MB each), for historyDays and historyMaxMB; the log is the newest of it when the message center starts, and the queries go over all of it. 0 the log is in memory only. One message center keeps the history"
@@ -79,6 +79,9 @@ MessageCenterReport:
       type: string
     sinks:
       description: "JSON array of what each sink took: name, accepted and failed (log and queue too)"
+      type: string
+    query:
+      description: "The result of the last query action, as a JSON object: query (the query, from and to resolved), total (the messages it selects) and records (the page, newest first). Empty before the first"
       type: string
 
 MessageCenterPost:
@@ -181,6 +184,9 @@ MessageCenterActions:
       type: string
     importFile:
       description: "Path of a JSON lines or CSV file (a log of a message center or of the Pager demodulator) read once into the log: not routed, so no action is taken on it"
+      type: string
+    query:
+      description: "A query of the messages, as a JSON object: over the history when it is kept, else over the log. from and to (ms since the epoch) or last (seconds back from now), filter (as the filter of a route), offset and limit (default 100, at most 1000) of the messages it selects, newest first. Made at once: its result is in the report (query)"
       type: string
     redecode:
       $ref: "http://swgserver:8081/api/swagger/include/MessageCenter.yaml#/MessageCenterRedecode"

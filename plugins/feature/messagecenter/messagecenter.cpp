@@ -120,6 +120,9 @@ QString MessageCenter::historyFilePath()
     return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/messagecenter/history";
 }
 
+// Used by reference (std::min): defined once
+const int MessageCenter::m_maxQueryLimit;
+
 MessageCenterArchiveResult MessageCenter::queryMessages(qint64 from, qint64 to, const MessageCenterFilter& filter, int offset, int limit) const
 {
     std::shared_ptr<const MessageCenterArchive> archive;
@@ -1050,6 +1053,7 @@ int MessageCenter::webapiReportGet(SWGSDRangel::SWGFeatureReport& response, QStr
     swg->setLog(new QString(QString::fromUtf8(QJsonDocument(log).toJson(QJsonDocument::Compact))));
     swg->setSinks(new QString(QString::fromUtf8(QJsonDocument(sinks).toJson(QJsonDocument::Compact))));
     swg->setErrors(new QString(takeErrors().join('\n')));
+    swg->setQuery(new QString(QString::fromUtf8(m_lastQuery)));
     return 200;
 }
 
@@ -1066,12 +1070,67 @@ int MessageCenter::webapiActionsPost(const QStringList& featureActionsKeys, SWGS
     int actions = (featureActionsKeys.contains("post") ? 1 : 0) + (featureActionsKeys.contains("requeue") ? 1 : 0)
         + (featureActionsKeys.contains("cancel") ? 1 : 0) + (featureActionsKeys.contains("clearSent") ? 1 : 0)
         + (featureActionsKeys.contains("redecode") ? 1 : 0) + (featureActionsKeys.contains("ingest") ? 1 : 0)
-        + (featureActionsKeys.contains("importFile") ? 1 : 0);
+        + (featureActionsKeys.contains("importFile") ? 1 : 0) + (featureActionsKeys.contains("query") ? 1 : 0);
 
     if (actions != 1)
     {
-        errorMessage = "One action expected: post, requeue, cancel, clearSent, redecode, ingest or importFile";
+        errorMessage = "One action expected: post, requeue, cancel, clearSent, redecode, ingest, importFile or query";
         return 400;
+    }
+
+    // A query of the messages, over the history (or the log): made now, its result in the report (query), with the query
+    if (featureActionsKeys.contains("query"))
+    {
+        QJsonParseError parseError{};
+        const QJsonDocument doc = QJsonDocument::fromJson(swg->getQuery() ? swg->getQuery()->toUtf8() : QByteArray(), &parseError);
+
+        if (!doc.isObject())
+        {
+            errorMessage = QString("query: %1").arg(parseError.error != QJsonParseError::NoError ? parseError.errorString() : QString("a JSON object is expected"));
+            return 400;
+        }
+
+        const QJsonObject q = doc.object();
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        qint64 from = q.contains("from") ? (qint64) q.value("from").toDouble(-1) : -1;
+        qint64 to = q.contains("to") ? (qint64) q.value("to").toDouble(-1) : -1;
+
+        if (q.contains("last"))
+        {
+            from = now - (qint64) (q.value("last").toDouble(0) * 1000.0);
+            to = now;
+        }
+
+        const MessageCenterFilter filter = MessageCenterFilter::fromJson(q.value("filter").toObject());
+        const QString filterErrors = filter.errors();
+
+        if (!filterErrors.isEmpty())
+        {
+            errorMessage = QString("query: %1").arg(filterErrors);
+            return 400;
+        }
+
+        const int offset = std::max(0, q.value("offset").toInt(0));
+        const int limit = std::max(1, std::min(m_maxQueryLimit, q.value("limit").toInt(100)));
+        const MessageCenterArchiveResult result = queryMessages(from, to, filter, offset, limit);
+        QJsonObject echo = q;
+        echo["from"] = (double) from;
+        echo["to"] = (double) to;
+        echo["offset"] = offset;
+        echo["limit"] = limit;
+        QJsonArray records;
+
+        for (const MessageRecord& record : result.m_records) {
+            records.append(record.toJson());
+        }
+
+        QJsonObject out;
+        out["query"] = echo;
+        out["total"] = result.m_total;
+        out["records"] = records;
+        QMutexLocker mutexLocker(&m_mutex);
+        m_lastQuery = QJsonDocument(out).toJson(QJsonDocument::Compact);
+        return 202;
     }
 
     // Message records from the API: a message received, as if a channel had published it

@@ -62,6 +62,9 @@ public:
     QString* getImportFile();
     void setImportFile(QString* import_file);
 
+    QString* getQuery();
+    void setQuery(QString* query);
+
     SWGMessageCenterRedecode* getRedecode();
     void setRedecode(SWGMessageCenterRedecode* redecode);
 
@@ -86,6 +89,9 @@ private:
 
     QString* import_file;
     bool m_import_file_isSet;
+
+    QString* query;
+    bool m_query_isSet;
 
     SWGMessageCenterRedecode* redecode;
     bool m_redecode_isSet;

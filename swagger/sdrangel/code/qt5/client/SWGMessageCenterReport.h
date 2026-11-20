@@ -63,6 +63,9 @@ public:
     QString* getSinks();
     void setSinks(QString* sinks);
 
+    QString* getQuery();
+    void setQuery(QString* query);
+
 
     virtual bool isSet() override;
 
@@ -87,6 +90,9 @@ private:
 
     QString* sinks;
     bool m_sinks_isSet;
+
+    QString* query;
+    bool m_query_isSet;
 
 };
 

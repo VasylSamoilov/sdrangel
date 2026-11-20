@@ -29,7 +29,8 @@ post() {
 mkdir -p "$WORK/config"
 (cd "$BUILD" && XDG_CONFIG_HOME="$WORK/config" XDG_DATA_HOME="$WORK/data" LD_LIBRARY_PATH="$BUILD/lib" ./sdrangelsrv --scratch -a 127.0.0.1 -p "$PORT" > "$WORK/server.log" 2>&1 &)
 
-for i in $(seq 50); do curl -s "$U" > /dev/null && break; sleep 0.2; done
+# Up to a minute: the server probes the devices first (a USRP takes a while)
+for i in $(seq 300); do curl -s "$U" > /dev/null && break; sleep 0.2; done
 
 curl_code POST /featureset/feature '{"featureType":"MessageCenter"}' > /dev/null
 curl_code POST "/deviceset?direction=1" > /dev/null
@@ -95,6 +96,14 @@ check "the settings keep the reverse API" '[[ "$S" == *"\"reverseAPIAddress\": \
 # History: the log is in its file and is there again in a new message center
 check "the history is on by default, 500 MB, 30 days" '[[ "$S" == *"\"historyEnabled\": 1"* && "$S" == *"\"historyMaxMB\": 500"* && "$S" == *"\"historyDays\": 30"* ]]'
 check "the history has the log, in a file of the day" '[ -n "$(find "$WORK/data" -path "*messagecenter/history/*" -name "$(date +%Y%m%d)-000.jsonl" -size +0 2>/dev/null)" ]'
+
+# A query of the history: the sent pages with text of the last hour, then a page of one
+QUERY='{\"last\":3600,\"filter\":{\"direction\":1,\"text\":\"center|contact\"},\"limit\":1}'
+check "a query is accepted" '[ "$(curl_code POST /featureset/feature/0/actions "{\"featureType\":\"MessageCenter\",\"MessageCenterActions\":{\"query\":\"$QUERY\"}}")" = 202 ]'
+Q=$(report)
+QR=${Q#*\"query\": \"}
+check "its result in the report: the total of the messages it selects, a page of one, the query echoed" '[[ "$QR" == "{\"query\":{"*"\"limit\":1"*"\"total\":2"* && $(grep -o "\"direction\":\"tx\"" <<< "$QR" | wc -l) -eq 1 ]]'
+check "a query with a filter that is not valid is refused" '[ "$(curl_code POST /featureset/feature/0/actions "{\"featureType\":\"MessageCenter\",\"MessageCenterActions\":{\"query\":\"{\\\"filter\\\":{\\\"text\\\":\\\"([\\\"}}\"}}")" = 400 ]'
 curl_code DELETE /featureset/feature/0 > /dev/null
 sleep 1
 curl_code POST /featureset/feature '{"featureType":"MessageCenter"}' > /dev/null

@@ -21,7 +21,10 @@ The window has a tab for each section: Log, Channels, Queue, Page, Contacts, Rou
 
 <h3>Log</h3>
 
-The messages received and sent, newest at the bottom (at most the log size, the oldest go first).
+The messages received and sent, newest at the bottom.
+
+* Live: the newest 100 messages the filters select, as they come. While a row is selected or the table is scrolled up, the rows stay where they are: the new messages wait, and a button in the corner of the table counts them; they come when it is clicked, or when the table is at the bottom again with no row selected.
+* Query: the messages of a time range the filters select, over the history (the log when the history is not kept): the last 5 minutes, hour, day, 7 days, all, or from a time to a time. The range is fixed when the query is run (Run, a filter changed), so the pages keep it: how many messages it selects, and a page of 100 of them, newest first (Newer, Older). It stays as it is until it is run again; the auto-refresh runs it again every 5 to 60 s (none by default; not while a row is selected).
 
 * Filters: contact, protocol, direction (RX, TX or both), polarity, message type (the types of the protocol chosen), channel name, address, text, one more field, hide duplicates, voice pages with a file only. All the filters set must match.
   * Address: a regular expression the whole address must match, as the filters of the other plugins of SDRangel: 12345.. for the addresses 1234500 to 1234599.
@@ -37,7 +40,7 @@ The messages received and sent, newest at the bottom (at most the log size, the 
 * The filters are on a line that wraps at the width of the window.
 * Import (open icon): reads the messages of a file into the log: a JSON lines file, or a CSV log of a message center or of the Pager demodulator. They are logged, not routed, so no action is taken on them again.
 * Export (save icon): saves the messages the filters select to a CSV file, which Import reads again.
-* Clear (bin icon): removes all the messages of the log, and of the history file when it is kept, after a confirmation. The items the map sinks put on the Map are removed too.
+* Clear (bin icon): removes all the messages of the log (in memory) after a confirmation; the history stays, unless "Also delete the history" is checked there. The items the map sinks put on the Map are removed too.
 * A message a mark sink took has the icon of the mark before its text, its text and its row in the colours of the mark (those it sets). A message several routes mark has their icons side by side.
 
 <h3>Channels</h3>
@@ -132,15 +135,15 @@ Sources:
 In the dialog opened by the button at the right of the tabs:
 
 * Log size: messages kept in the log (default 10000).
-* History: keep the log in the history file (messagecenter/history.jsonl in the application data directory), so that it is there again when the Message Center starts. One Message Center keeps the history. Over its size limit (default 50 MB) the file is written again with the newest messages of the log, up to half the limit.
+* History: keep every message stored in the history (messagecenter/history in the application data directory): a file for each day, up to 4 MB each (YYYYMMDD-NNN.jsonl, a line of JSON for each version of a message), for the days kept (default 30) and the size kept (default 500 MB): the oldest files go. The log is the newest of it when the Message Center starts, and the queries go over all of it, reading only the files of their time range. One Message Center keeps the history.
 * Claim timeout: a page given to a transmitter that does not claim it in this time goes back to the queue (default 10 s).
 * Silent time: a channel that does not announce itself for this time is offline (default 20 s).
 
 <h2>REST API</h2>
 
-Settings (`MessageCenterSettings`, feature type `MessageCenter`): title, rgbColor, logSize, historyEnabled, historyMaxMB, claimTimeoutSec, silentSec, routes, contacts, sinks, sources and the reverse API settings. Routes, contacts, sinks and sources are JSON arrays (as text); a setting with a sink, source, route or contact that is not valid is refused with the reason. A contact: `{"name": "Fire station 3", "icon": ":fire_engine", "color": 4294926400, "rules": [[{"field": "protocol", "is": "pocsag"}, {"field": "ric", "is": "1234567"}], [{"field": "protocol", "is": "flex"}, {"field": "capcode", "matches": "11000.."}]]}`.
+Settings (`MessageCenterSettings`, feature type `MessageCenter`): title, rgbColor, logSize, historyEnabled, historyMaxMB, historyDays, claimTimeoutSec, silentSec, routes, contacts, sinks, sources and the reverse API settings. Routes, contacts, sinks and sources are JSON arrays (as text); a setting with a sink, source, route or contact that is not valid is refused with the reason. A contact: `{"name": "Fire station 3", "icon": ":fire_engine", "color": 4294926400, "rules": [[{"field": "protocol", "is": "pocsag"}, {"field": "ric", "is": "1234567"}], [{"field": "protocol", "is": "flex"}, {"field": "capcode", "matches": "11000.."}]]}`.
 
-Report (`MessageCenterReport`): the number of messages logged and routed, the endpoints, the pages, the log, the records each sink took and refused (sinks) and the errors.
+Report (`MessageCenterReport`): the number of messages logged and routed, the endpoints, the pages, the log, the records each sink took and refused (sinks), the errors, and the result of the last query (query).
 
 Actions (`MessageCenterActions`):
 
@@ -150,7 +153,8 @@ Actions (`MessageCenterActions`):
 * `redecode`: a record of the log decoded again (`MessageCenterRedecode`: id, charset, type).
 * `ingest`: message records as JSON lines, routed as messages received. A record needs its protocol; one without a timestamp gets the time it is given, one without an id gets an id of its own.
 * `importFile`: the path of a JSON lines or CSV file read into the log, not routed.
+* `query`: a query of the messages as JSON, over the history (the log without one): `from` and `to` (ms since the epoch) or `last` (seconds back from now), `filter` (as the filter of a route), `offset` and `limit` (default 100, at most 1000). Its result is in the report (query): the query (from and to resolved, to ask for the next page with them), total (the messages it selects) and records (the page, newest first). E.g. `{"last": 86400, "filter": {"protocols": ["flex"], "text": "fire"}, "limit": 50}`.
 
 <h2>MCP</h2>
 
-The MCP server feature has tools for the Message Center: `get_message_center` (routes, sinks, sources, channels, queue, sink counts, errors and the newest messages of the log), `set_message_center_routing` (routes, sinks and sources), `message_center_post_page`, `message_center_page_action` (requeue, cancel, clear sent), `message_center_ingest` and `message_center_import_file`. `get_paging_messages` gives the last 1000 messages of the paging channels whether or not a Message Center is there.
+The MCP server feature has tools for the Message Center: `get_message_center` (routes, sinks, sources, channels, queue, sink counts, errors and the newest messages of the log), `set_message_center_routing` (routes, sinks and sources), `message_center_post_page`, `message_center_page_action` (requeue, cancel, clear sent), `message_center_ingest`, `message_center_import_file` and `message_center_query` (the query action: the total and a page of the messages of a time range and a filter, over the history). `get_paging_messages` gives the last 1000 messages of the paging channels whether or not a Message Center is there.
