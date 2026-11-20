@@ -288,7 +288,7 @@ MessageCenterContactDialog::MessageCenterContactDialog(const MessageCenterContac
         showSendToChecks();
     });
     connect(removeSend, &QToolButton::clicked, this, [this]() {
-        const int row = m_sendTo->currentRow();
+        const int row = selectedRow(m_sendTo);
 
         if (row >= 0)
         {
@@ -299,7 +299,7 @@ MessageCenterContactDialog::MessageCenterContactDialog(const MessageCenterContac
 
     // A move: the rows made again in the new order
     auto move = [this](int step) {
-        const int row = m_sendTo->currentRow();
+        const int row = selectedRow(m_sendTo);
         const int to = row + step;
 
         if ((row < 0) || (to < 0) || (to >= m_sendTo->rowCount())) {
@@ -342,7 +342,7 @@ MessageCenterContactDialog::MessageCenterContactDialog(const MessageCenterContac
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
     connect(addCondition, &QToolButton::clicked, this, [this]() {
-        const int row = m_conditions->currentRow();
+        const int row = selectedRow(m_conditions);
         const int rule = (row >= 0) ? rowRule(row) : 1;
         addConditionRow(rule, MessageCenterContact::Condition());
         showChecks();
@@ -360,7 +360,7 @@ MessageCenterContactDialog::MessageCenterContactDialog(const MessageCenterContac
         showChecks();
     });
     connect(remove, &QToolButton::clicked, this, [this]() {
-        const int row = m_conditions->currentRow();
+        const int row = selectedRow(m_conditions);
 
         if (row >= 0)
         {
@@ -780,23 +780,38 @@ bool MessageCenterContactDialog::check()
 
 bool MessageCenterContactDialog::eventFilter(QObject *object, QEvent *event)
 {
-    if (event->type() == QEvent::FocusIn)
+    // Select the row of the cell widget that gets the focus. Not selectRow(): it moves the current
+    // index, and the view then gives the focus to the widget of the current cell, inside this focus
+    // event (the field list clicked focused the rule box, which crashed).
+    if ((event->type() == QEvent::FocusIn) && !m_selectingRow)
     {
+        m_selectingRow = true;
+
         for (QTableWidget *table : {m_conditions, m_sendTo})
         {
             for (int r = 0; r < table->rowCount(); r++)
             {
                 for (int c = 0; c < table->columnCount(); c++)
                 {
-                    if (table->cellWidget(r, c) == object) {
-                        table->selectRow(r);
+                    if (table->cellWidget(r, c) == object)
+                    {
+                        table->selectionModel()->select(table->model()->index(r, 0),
+                            QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
                     }
                 }
             }
         }
+
+        m_selectingRow = false;
     }
 
     return QDialog::eventFilter(object, event);
+}
+
+int MessageCenterContactDialog::selectedRow(const QTableWidget *table)
+{
+    const QModelIndexList rows = table->selectionModel()->selectedRows();
+    return rows.isEmpty() ? table->currentRow() : rows.first().row();
 }
 
 void MessageCenterContactDialog::accept()

@@ -98,6 +98,10 @@ private:
     void accept() override;
     //!< A field of a row that gets the focus selects its row (for Remove)
     bool eventFilter(QObject *object, QEvent *event) override;
+    //!< The row selected in a table, -1 for none
+    static int selectedRow(const QTableWidget *table);
+
+    bool m_selectingRow = false;
 };
 
 #endif // INCLUDE_FEATURE_MESSAGECENTERCONTACTS_H_
