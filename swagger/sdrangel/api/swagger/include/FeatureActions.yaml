@@ -18,6 +18,9 @@ FeatureActions:
       description: "Afc actions configuration for Feature."
     AircraftActions:
       $ref: "http://swgserver:8081/api/swagger/include/Aircraft.yaml#/AircraftActions"
+    CellularActions:
+      $ref: "http://swgserver:8081/api/swagger/include/Cellular.yaml#/CellularActions"
+      description: "Cellular actions on a phone of a network."
     AMBEActions:
       $ref: "http://swgserver:8081/api/swagger/include/AMBE.yaml#/AMBEActions"
       description: "Ambe actions configuration for Feature."

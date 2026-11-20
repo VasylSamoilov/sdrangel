@@ -236,6 +236,19 @@ NmtCellularBridge::Leg& NmtCellularBridge::legFor(const NmtSubscriber& subscribe
     return *it->second;
 }
 
+modemcellular::MobileLeg* NmtCellularBridge::legOf(const std::string& number)
+{
+    if (number.size() != 7 || std::any_of(number.begin(), number.end(), [](char c) { return c < '0' || c > '9'; })) {
+        return nullptr;
+    }
+
+    NmtSubscriber subscriber;
+    subscriber.country = number[0];
+    subscriber.number = number.substr(1);
+
+    return &legFor(subscriber);
+}
+
 void NmtCellularBridge::queue(Event&& event)
 {
     std::lock_guard<std::mutex> lock(m_mutex);

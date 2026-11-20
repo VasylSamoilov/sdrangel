@@ -55,9 +55,13 @@ public:
 
 signals:
     void changed();
+    // an action of the tester on a phone (Cellular::MsgAction::Action)
+    void actionRequested(int network, int action, const QString& number, const QString& text, int value);
 
 private:
     void fillCountries(const QString& selected);
+    void requestAction(int action, const QString& text, int value);
+    void showPhones(const QList<Cellular::MsgReportStatus::Phone>& phones);
 
     int m_id;
     bool m_updating;
@@ -78,7 +82,14 @@ private:
     QSpinBox *m_rxDeviceSet;
     QSpinBox *m_txDeviceSet;
     QLabel *m_summary;
+    QLineEdit *m_phone;
+    QLineEdit *m_smsText;
+    QComboBox *m_mwiKind;
+    QComboBox *m_powerLevel;
+    QSpinBox *m_moveChannel;
+    QTabWidget *m_views;
     QTableWidget *m_table;
+    QTableWidget *m_phones;
     QPlainTextEdit *m_log;
 
 private slots:

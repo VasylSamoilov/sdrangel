@@ -321,7 +321,8 @@ void CallRouter::forgetBusy(const std::string& number)
     }
 }
 
-CallRouter::SetupResult CallRouter::setup(MobileLeg& origin, const std::string& callerId, const std::string& dialed)
+CallRouter::SetupResult CallRouter::setup(MobileLeg& origin, const std::string& callerId, const std::string& dialed,
+                                          MobileLeg* called)
 {
     if (dialed.empty()) {
         return SetupResult{0, Cause::InvalidNumber};
@@ -335,7 +336,15 @@ CallRouter::SetupResult CallRouter::setup(MobileLeg& origin, const std::string& 
     bool busy = false;
     auto sub = m_subscribers.find(dialed);
 
-    if (sub != m_subscribers.end())
+    if (called)
+    {
+        if ((called == &origin) || (m_busy.count(dialed) > 0)) {
+            busy = true;
+        } else {
+            target = called;
+        }
+    }
+    else if (sub != m_subscribers.end())
     {
         if ((sub->second == &origin) || (m_busy.count(dialed) > 0)) {
             busy = true;

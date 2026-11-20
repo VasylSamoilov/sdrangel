@@ -94,6 +94,7 @@ struct NmtTransaction
     bool messageCall = false;
     // Message indicators for the clearing of the call (also of an ordinary call), and how it ended.
     uint8_t mwiFlags = 0;
+    bool mwiAtClearing = true;      // false: they went out in the conversation only (MwiWhen::InCall)
     NmtServiceEnd mwiResult = NmtServiceEnd::Undelivered;
     bool mwiReported = false;
 
@@ -136,6 +137,11 @@ public:
     virtual bool isSmsCenter(const std::string& dialled) = 0;
     // A short message from the phone (SMS-SUBMIT). The RP cause to answer with, 0 to accept.
     virtual uint8_t smsSubmitted(NmtTransaction& transaction, const SmsSubmit& message) = 0;
+    // The phone asks for its waiting messages (READY-TO-RECEIVE) or tells it has memory again
+    // (MEMORY-AVAILABLE). True if a waiting message goes to the phone in this call: the host made
+    // the transaction a message to the phone (smsToPhone, smsDeliver, smsRef). False: the channel
+    // answers by itself (no messages, or the acknowledgement).
+    virtual bool smsRequested(NmtTransaction& transaction, SmsRpKind kind) = 0;
     // Speech of a connected call, 8 kHz mono: from the phone, and for the phone (the host
     // fills the samples, silence if it has none). Called from the audio path of the channel.
     virtual void audioFromMobile(NmtTransaction& transaction, const float* samples, int count) = 0;
@@ -235,6 +241,10 @@ struct ChannelConfig
     int batteryGroup = 8;
     int supervisory = 0;            // supervisory tone 1..4 on a traffic channel, 0 for none
     bool sendCallerId = false;      // send the number of the caller while the phone rings
+    // Frame periods the radio adds between a frame made here and the answer of the phone (the
+    // transmit lead and the receive path of an SDR). The phone has T (8 frames) from the frame on
+    // the air; the windows that wait for its identity are made longer by this much.
+    int roundTripFrames = 0;
     // NMT-900 channel band advertisement (900-1 4.3.3.13); channel numbers, 0 for none, sent in
     // steps of 4 channels. It and the battery saving frame are one per frame: with a battery saving
     // period they take turns, with period 0 only the advertisement is sent (no clock then).
@@ -331,6 +341,8 @@ public:
     // In the conversation: the message indicators of the call (frame 5c) go out twice, the
     // conversation goes on. False if the call is not in the conversation.
     bool beginMwiInCall();
+    // The phone is in the conversation: indicators can go out at once.
+    bool canSendMwiInCall() const;
     // Switching the call in progress: this connected channel orders the phone to the target
     // (transaction.scipTarget), which waits for it.
     void beginScipOrder();
@@ -343,6 +355,8 @@ public:
     bool inCall() const { return inCallState(m_state); }
     static bool inCallState(State state);
     State state() const { return m_state; }
+    // the transaction the channel serves, null if none
+    const NmtTransaction* currentTransaction() const { return m_transaction; }
 
     void setTimeOfDay(TimeOfDay timeOfDay) { m_timeOfDay = std::move(timeOfDay); }
     void setFrameListener(FrameListener listener) { m_listener = std::move(listener); }

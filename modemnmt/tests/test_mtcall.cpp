@@ -423,6 +423,64 @@ static void testIdentityAndRingTimeouts()
         CHECK(system.transactionCount() == 0);
     }
 
+    // Over an SDR the identity comes later by the round trip of the radio: the window is longer by
+    // it. The phone of the on-air test of 2026-11-20 answered after the 8th request was made.
+    for (int roundTrip : {0, 3})
+    {
+        modemcellular::SampleClock clock(kRate);
+        NmtSystem system(clock);
+        NmtChannel& cc = system.addChannel(callingConfig(50), kRate, 1.0);
+        ChannelConfig tcConfig = config(System::Nmt450, ChannelType::Tc, 100);
+        tcConfig.roundTripFrames = roundTrip;
+        NmtChannel& tc = system.addChannel(tcConfig, kRate, 1.0);
+        Events events;
+        listen(system, events);
+        const Phone phone;
+
+        CHECK(system.startCall(phone.country, phone.number, "5551234", kNational));
+        pullCalling(cc);
+        phoneSends(cc, acknowledgement(cc, phone), 1);
+        CHECK(pullCalling(cc).mt == MessageType::Frame2b);
+        for (int i = 0; i < 8; i++) {
+            CHECK(pull(tc).mt == MessageType::Frame3b);
+        }
+        phoneSends(tc, seizureFrame(tc, phone, MessageType::Frame10b), 3);
+        if (roundTrip == 0)
+        {
+            CHECK(events.failed.size() == 1);
+            CHECK(tc.state() != NmtChannel::State::MtRinging);
+        }
+        else
+        {
+            CHECK(events.failed.empty());
+            CHECK(tc.state() == NmtChannel::State::MtRinging);
+        }
+    }
+
+    // the window with the round trip ends too: 8 + 3 requests, then the call fails
+    {
+        modemcellular::SampleClock clock(kRate);
+        NmtSystem system(clock);
+        NmtChannel& cc = system.addChannel(callingConfig(50), kRate, 1.0);
+        ChannelConfig tcConfig = config(System::Nmt450, ChannelType::Tc, 100);
+        tcConfig.roundTripFrames = 3;
+        NmtChannel& tc = system.addChannel(tcConfig, kRate, 1.0);
+        Events events;
+        listen(system, events);
+
+        CHECK(system.startCall('1', "123456", "5551234", kNational));
+        pullCalling(cc);
+        phoneSends(cc, acknowledgement(cc, Phone()), 1);
+        CHECK(pullCalling(cc).mt == MessageType::Frame2b);
+        for (int i = 0; i < 10; i++) {
+            CHECK(pull(tc).mt == MessageType::Frame3b);
+        }
+        CHECK(events.failed.empty());
+        CHECK(pull(tc).mt == MessageType::Frame3b);
+        CHECK(events.failed.size() == 1 && events.failed[0] == modemcellular::Cause::TempFail);
+        CHECK(tc.state() == NmtChannel::State::Idle);
+    }
+
     // the phone rings for a minute
     {
         modemcellular::SampleClock clock(kRate);

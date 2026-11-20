@@ -21,6 +21,7 @@
 #include <map>
 #include <memory>
 
+#include <QDateTime>
 #include <QMutex>
 #include <QStringList>
 #include <QThread>
@@ -98,6 +99,44 @@ public:
             Message(), m_channel(channel), m_source(source), m_packet(packet) { }
     };
 
+    // An action of the tester on a phone of a network (GUI or web API), done by the worker.
+    class MsgAction : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        enum Action
+        {
+            Call,       // the network calls the phone (registered or not); the far end is echo or music
+            HangUp,     // ends the call of the network to the phone
+            Release,    // releases any call of the phone
+            Sms,        // a short message to the phone (text)
+            Mwi,        // message waiting indicators (value: flags)
+            Power,      // power level of the phone in its call (value: 0..3)
+            Move,       // the call of the phone to another traffic channel (value: channel, 0 any)
+            Hold        // a short message (text) the centre keeps until the phone fetches it
+        };
+        static bool parse(const QString& name, Action& action);
+        static const char* name(Action action);
+
+        int getNetwork() const { return m_network; }
+        Action getAction() const { return m_action; }
+        const QString& getNumber() const { return m_number; }
+        const QString& getText() const { return m_text; }
+        int getValue() const { return m_value; }
+        static MsgAction* create(int network, Action action, const QString& number, const QString& text, int value) {
+            return new MsgAction(network, action, number, text, value);
+        }
+
+    private:
+        int m_network;
+        Action m_action;
+        QString m_number;
+        QString m_text;
+        int m_value;
+        MsgAction(int network, Action action, const QString& number, const QString& text, int value) :
+            Message(), m_network(network), m_action(action), m_number(number), m_text(text), m_value(value) { }
+    };
+
     // a line for the event log of a network (0: the controller)
     class MsgReportLog : public Message {
         MESSAGE_CLASS_DECLARATION
@@ -128,6 +167,20 @@ public:
             float rxLevel = -100.0f;    // dB of full scale
             double txFillMs = 0.0;
             quint64 underruns = 0;
+            QString phone;              // number of the phone the channel serves, empty for none
+        };
+        // A phone the network has heard (its identity in a frame the channel took) or registered.
+        struct Phone
+        {
+            QString number;             // country digit and six digits
+            bool registered = false;    // roaming update done (NMT Doc 450/900-2 5.2.1)
+            int channel = 0;            // channel it was last heard on
+            QString state;              // what it does now on the channels, empty if nothing
+            QDateTime lastHeard;        // invalid: not heard since the network started
+            float level = -100.0f;      // dB of full scale of the channel then
+            float quality = 0.0f;       // of the last frame, 0..1
+            int power = -1;             // power level 0..3 in its frames, -1 not known
+            QString lastFrame;          // type of its last frame
         };
 
         int m_network;
@@ -136,7 +189,19 @@ public:
         int m_calls = 0;
         QString m_summary;
         QList<Carrier> m_carriers;
+        QList<Phone> m_phones;
         static MsgReportStatus* create(int network) { return new MsgReportStatus(network); }
+        MsgReportStatus* clone() const
+        {
+            MsgReportStatus *copy = new MsgReportStatus(m_network);
+            copy->m_onAir = m_onAir;
+            copy->m_registered = m_registered;
+            copy->m_calls = m_calls;
+            copy->m_summary = m_summary;
+            copy->m_carriers = m_carriers;
+            copy->m_phones = m_phones;
+            return copy;
+        }
 
     private:
         explicit MsgReportStatus(int network) : Message(), m_network(network) { }
@@ -159,6 +224,8 @@ public:
     int webapiSettingsPutPatch(bool force, const QStringList& featureSettingsKeys,
         SWGSDRangel::SWGFeatureSettings& response, QString& errorMessage) override;
     int webapiReportGet(SWGSDRangel::SWGFeatureReport& response, QString& errorMessage) override;
+    int webapiActionsPost(const QStringList& featureActionsKeys, SWGSDRangel::SWGFeatureActions& query,
+                          QString& errorMessage) override;
 
     static void webapiFormatFeatureSettings(SWGSDRangel::SWGFeatureSettings& response, const CellularSettings& settings);
     // The keys are those of the top level. A network in the list takes the fields it has; the

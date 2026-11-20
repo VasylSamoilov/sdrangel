@@ -33,6 +33,9 @@
 #include "SWGCellularReport.h"
 #include "SWGCellularNetworkReport.h"
 #include "SWGCellularCarrierReport.h"
+#include "SWGCellularPhoneReport.h"
+#include "SWGCellularActions.h"
+#include "SWGFeatureActions.h"
 
 #include "cellularworker.h"
 #include "cellular.h"
@@ -42,6 +45,30 @@ MESSAGE_CLASS_DEFINITION(Cellular::MsgStartStop, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgToRadio, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgReportLog, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgReportStatus, Message)
+MESSAGE_CLASS_DEFINITION(Cellular::MsgAction, Message)
+
+namespace
+{
+const char* const kActionNames[] = {"call", "hangup", "release", "sms", "mwi", "power", "move", "hold"};
+}
+
+bool Cellular::MsgAction::parse(const QString& name, Action& action)
+{
+    for (int i = 0; i < static_cast<int>(sizeof(kActionNames) / sizeof(kActionNames[0])); i++)
+    {
+        if (name.compare(kActionNames[i], Qt::CaseInsensitive) == 0)
+        {
+            action = static_cast<Action>(i);
+            return true;
+        }
+    }
+    return false;
+}
+
+const char* Cellular::MsgAction::name(Action action)
+{
+    return kActionNames[static_cast<int>(action)];
+}
 
 const char* const Cellular::m_featureIdURI = "sdrangel.feature.cellular";
 const char* const Cellular::m_featureId = "Cellular";
@@ -283,14 +310,7 @@ void Cellular::stopNetwork(int id)
 void Cellular::keepReport(const MsgReportStatus& report)
 {
     QMutexLocker locker(&m_reportMutex);
-    std::unique_ptr<MsgReportStatus> copy(MsgReportStatus::create(report.m_network));
-
-    copy->m_onAir = report.m_onAir;
-    copy->m_registered = report.m_registered;
-    copy->m_calls = report.m_calls;
-    copy->m_summary = report.m_summary;
-    copy->m_carriers = report.m_carriers;
-    m_reports[report.m_network] = std::move(copy);
+    m_reports[report.m_network].reset(report.clone());
 }
 
 void Cellular::dropReport(int network)
@@ -417,16 +437,23 @@ bool Cellular::handleMessage(const Message& cmd)
         if (m_active.find(report.m_network) != m_active.end()) {
             keepReport(report);
         }
-        if (getMessageQueueToGUI())
-        {
-            MsgReportStatus *copy = MsgReportStatus::create(report.m_network);
-            copy->m_onAir = report.m_onAir;
-            copy->m_registered = report.m_registered;
-            copy->m_calls = report.m_calls;
-            copy->m_summary = report.m_summary;
-            copy->m_carriers = report.m_carriers;
-            getMessageQueueToGUI()->push(copy);
+        if (getMessageQueueToGUI()) {
+            getMessageQueueToGUI()->push(report.clone());
         }
+        return true;
+    }
+    else if (MsgAction::match(cmd))
+    {
+        const MsgAction& action = static_cast<const MsgAction&>(cmd);
+
+        if (!m_running || m_active.find(action.getNetwork()) == m_active.end())
+        {
+            report(action.getNetwork(), QString("%1 %2: the network is not on the air")
+                .arg(MsgAction::name(action.getAction())).arg(action.getNumber()));
+            return true;
+        }
+        m_worker->getInputMessageQueue()->push(MsgAction::create(action.getNetwork(), action.getAction(),
+            action.getNumber(), action.getText(), action.getValue()));
         return true;
     }
 
@@ -500,11 +527,68 @@ int Cellular::webapiReportGet(SWGSDRangel::SWGFeatureReport& response, QString& 
             carrier->setRxLevel(c.rxLevel);
             carrier->setTxFillMs(static_cast<float>(c.txFillMs));
             carrier->setUnderruns(static_cast<qint32>(c.underruns));
+            *carrier->getPhone() = c.phone;
             network->getCarriers()->append(carrier);
+        }
+        for (const MsgReportStatus::Phone& p : status.m_phones)
+        {
+            SWGSDRangel::SWGCellularPhoneReport *phone = new SWGSDRangel::SWGCellularPhoneReport();
+
+            phone->init();
+            *phone->getNumber() = p.number;
+            phone->setRegistered(p.registered ? 1 : 0);
+            phone->setChannel(p.channel);
+            *phone->getState() = p.state;
+            *phone->getLastHeard() = p.lastHeard.isValid() ? p.lastHeard.toString(Qt::ISODateWithMs) : QString();
+            phone->setLevel(p.level);
+            phone->setQuality(p.quality);
+            phone->setPower(p.power);
+            *phone->getLastFrame() = p.lastFrame;
+            network->getPhones()->append(phone);
         }
         report->getNetworks()->append(network);
     }
     return 200;
+}
+
+int Cellular::webapiActionsPost(const QStringList& featureActionsKeys, SWGSDRangel::SWGFeatureActions& query,
+                                QString& errorMessage)
+{
+    SWGSDRangel::SWGCellularActions *actions = query.getCellularActions();
+
+    if (!actions)
+    {
+        errorMessage = "Missing CellularActions in query";
+        return 400;
+    }
+    if (!featureActionsKeys.contains("networkId") || !featureActionsKeys.contains("action") || !actions->getAction())
+    {
+        errorMessage = "CellularActions need networkId and action";
+        return 400;
+    }
+
+    MsgAction::Action action;
+    if (!MsgAction::parse(*actions->getAction(), action))
+    {
+        errorMessage = QString("Unknown action %1 (call, hangup, release, sms, mwi, power, move, hold)").arg(*actions->getAction());
+        return 400;
+    }
+
+    const QString number = actions->getNumber() ? actions->getNumber()->trimmed() : QString();
+    if (number.isEmpty())
+    {
+        errorMessage = "The action needs the number of the phone";
+        return 400;
+    }
+    if (!m_running)
+    {
+        errorMessage = "The controller does not run";
+        return 400;
+    }
+
+    getInputMessageQueue()->push(MsgAction::create(actions->getNetworkId(), action, number,
+        actions->getText() ? *actions->getText() : QString(), actions->getValue()));
+    return 202;
 }
 
 void Cellular::webapiFormatFeatureSettings(SWGSDRangel::SWGFeatureSettings& response, const CellularSettings& settings)

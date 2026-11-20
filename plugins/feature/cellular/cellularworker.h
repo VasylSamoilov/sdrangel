@@ -18,6 +18,7 @@
 #ifndef INCLUDE_FEATURE_CELLULARWORKER_H_
 #define INCLUDE_FEATURE_CELLULARWORKER_H_
 
+#include <deque>
 #include <map>
 #include <memory>
 #include <vector>
@@ -34,6 +35,8 @@
 #include "cellularsystem.h"
 #include "nmtbasestation.h"
 #include "nmtcellularbridge.h"
+#include "testcaller.h"
+#include "cellular.h"
 
 class ChannelAPI;
 
@@ -116,6 +119,20 @@ private:
             int repeats = 0;                    // times it was sent
         };
         std::vector<Trace> traces;              // per carrier on air
+        // the phones heard: their identity in a frame for the channel it came on
+        std::map<std::string, Cellular::MsgReportStatus::Phone> phones;
+        std::unique_ptr<modemcellular::TestCaller> caller;     // calls of the tester to a phone
+        bool music = false;                     // the far end of calls to no phone: music, else echo
+        // short messages the centre keeps for a phone (by its number) until the phone fetches them
+        std::map<std::string, std::deque<modemnmt::SmsDeliver>> held;
+        // message waiting indicators the protocol could not send yet (the phone was busy), by number
+        struct PendingMwi
+        {
+            uint8_t flags = 0;
+            modemnmt::MwiWhen when = modemnmt::MwiWhen::InCallAndClearing;
+            QDateTime since;
+        };
+        std::map<std::string, PendingMwi> pendingMwi;
         uint64_t batches = 0;
         uint64_t gaps = 0;                      // batches of the receiver that did not arrive
         uint64_t nextSample = 0;
@@ -138,9 +155,14 @@ private:
     void sendTo(ChannelAPI *channel, const std::vector<uint8_t>& wire);
     void sendAudio(ChannelAPI *channel, const std::vector<uint8_t>& wire);
     void log(int network, const QString& text);
+    void sendPostponed(Network& network);
     // the frames of a carrier into the event log of its network
     void traceFrame(Network& n, size_t index, bool toPhone, const modemnmt::Frame& frame, double quality, double level);
     void flushTrace(Network& n, size_t index);
+    // a phone in a frame of a carrier, if the frame was for that carrier and carries an identity
+    void notePhone(Network& n, size_t index, const modemnmt::Frame& frame, double quality);
+    void action(const Cellular::MsgAction& action);
+    void setHandlers(Network& n);
 
     MessageQueue m_inputMessageQueue;
     MessageQueue *m_reports;

@@ -18,6 +18,9 @@ FeatureActions:
       description: "Afc actions configuration for Feature."
     AircraftActions:
       $ref: "/doc/swagger/include/Aircraft.yaml#/AircraftActions"
+    CellularActions:
+      $ref: "/doc/swagger/include/Cellular.yaml#/CellularActions"
+      description: "Cellular actions on a phone of a network."
     AMBEActions:
       $ref: "/doc/swagger/include/AMBE.yaml#/AMBEActions"
       description: "Ambe actions configuration for Feature."

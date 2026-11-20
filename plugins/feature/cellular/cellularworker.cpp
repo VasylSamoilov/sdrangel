@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <string>
 
 #include <QDebug>
@@ -27,6 +28,8 @@
 #include "pipes/objectpipe.h"
 
 #include "carrierradio.h"
+#include "echoendpoint.h"
+#include "musicendpoint.h"
 #include "tonegenerator.h"
 
 #include "cellular.h"
@@ -141,6 +144,8 @@ void CellularWorker::handleInputMessages()
     {
         if (MsgAddNetwork::match(*message)) {
             addNetwork(static_cast<const MsgAddNetwork&>(*message));
+        } else if (Cellular::MsgAction::match(*message)) {
+            action(static_cast<const Cellular::MsgAction&>(*message));
         }
         delete message;
     }
@@ -154,8 +159,16 @@ void CellularWorker::log(int network, const QString& text)
     }
 }
 
-// Every frame from the phones; the frames to the phones while the channel is not idle (an idle
-// calling channel sends without end), a frame sent again and again once with its count.
+// The frames a channel sends on its own all the time: the indications of its type.
+static bool indicationFrame(modemnmt::MessageType type)
+{
+    using MT = modemnmt::MessageType;
+    return type == MT::Frame1a || type == MT::Frame1aA || type == MT::Frame1aB || type == MT::Frame1b
+        || type == MT::Frame4 || type == MT::Frame4b || type == MT::Frame30;
+}
+
+// Every frame from the phones; the frames to the phones but the indications of the channel (pages
+// and orders of a calling channel are there), a frame sent again and again once with its count.
 void CellularWorker::traceFrame(Network& n, size_t index, bool toPhone, const modemnmt::Frame& frame, double quality, double level)
 {
     if (!n.station || !n.station->system() || index >= n.traces.size()) {
@@ -168,9 +181,8 @@ void CellularWorker::traceFrame(Network& n, size_t index, bool toPhone, const mo
 
     if (toPhone)
     {
-        if (channel.state() == modemnmt::NmtChannel::State::Idle)
-        {
-            flushTrace(n, index);
+        // the indications between them do not break a run of the same frame (pages of a calling channel)
+        if (indicationFrame(frame.mt)) {
             return;
         }
 
@@ -189,11 +201,297 @@ void CellularWorker::traceFrame(Network& n, size_t index, bool toPhone, const mo
     }
 
     flushTrace(n, index);
+    notePhone(n, index, frame, quality);
     log(n.id, QString("ch %1 < %2 (quality %3, level %4 dB)")
         .arg(number)
         .arg(QString::fromStdString(modemnmt::describeFrame(frame)))
         .arg(quality, 0, 'f', 2)
         .arg(20.0 * std::log10(std::max(level, 1e-6)), 0, 'f', 1));
+}
+
+static const char* serviceEndName(modemnmt::NmtServiceEnd result)
+{
+    switch (result)
+    {
+    case modemnmt::NmtServiceEnd::Ok: return "delivered";
+    case modemnmt::NmtServiceEnd::NoAck: return "sent, not acknowledged";
+    case modemnmt::NmtServiceEnd::Undelivered: return "not delivered";
+    case modemnmt::NmtServiceEnd::Unreachable: return "the phone did not answer the page";
+    case modemnmt::NmtServiceEnd::NoChannel: return "no traffic channel became free";
+    case modemnmt::NmtServiceEnd::Rejected: return "refused by the phone";
+    }
+    return "?";
+}
+
+static QString numberText(const modemnmt::NmtSubscriber& subscriber)
+{
+    return QString::fromStdString(modemnmt::NmtCellularBridge::numberOf(subscriber));
+}
+
+// A short message of the tester to a phone: from the number of the centre, sent now.
+static modemnmt::SmsDeliver deliverMessage(const std::string& centre, const QString& text)
+{
+    modemnmt::SmsDeliver message;
+    const QDateTime now = QDateTime::currentDateTime();
+
+    message.originator = centre.empty() ? "0" : centre;
+    message.text = text.toStdString();
+    message.time.year = now.date().year() % 100;
+    message.time.month = now.date().month();
+    message.time.day = now.date().day();
+    message.time.hour = now.time().hour();
+    message.time.minute = now.time().minute();
+    message.time.second = now.time().second();
+    message.time.zoneQuarters = now.offsetFromUtc() / 900;
+    return message;
+}
+
+// What the protocol tells about the services the tester started, and messages from the phones.
+void CellularWorker::setHandlers(Network& n)
+{
+    const int id = n.id;
+    modemnmt::NmtSystem& system = *n.station->system();
+
+    system.setSmsHandlers(
+        [this, id](const modemnmt::NmtSubscriber& subscriber, const modemnmt::SmsSubmit& message) -> uint8_t {
+            log(id, QString("SMS from %1 to %2: %3").arg(numberText(subscriber))
+                .arg(QString::fromStdString(message.destination)).arg(QString::fromStdString(message.text)));
+            return 0;
+        },
+        [this, id](const modemnmt::NmtSubscriber& subscriber, modemnmt::NmtServiceEnd result, uint8_t cause) {
+            log(id, QString("SMS to %1: %2%3").arg(numberText(subscriber)).arg(serviceEndName(result))
+                .arg(cause ? QString(" (RP cause %1)").arg(cause) : QString()));
+        });
+    system.setSmsRequestHandler([this, &n](const modemnmt::NmtSubscriber& subscriber, modemnmt::SmsRpKind kind,
+            modemnmt::SmsDeliver& message) {
+        const QString who = numberText(subscriber);
+
+        if (kind != modemnmt::SmsRpKind::ReadyToReceive)
+        {
+            log(n.id, QString("%1 called the SMS centre: it has memory for messages again").arg(who));
+            return false;
+        }
+        auto it = n.held.find(who.toStdString());
+        if (it == n.held.end() || it->second.empty())
+        {
+            log(n.id, QString("%1 called the SMS centre: it asks for its waiting messages, none wait").arg(who));
+            return false;
+        }
+        message = it->second.front();
+        it->second.pop_front();
+        log(n.id, QString("%1 called the SMS centre: it asks for its waiting messages, it gets \"%2\" (%3 more waiting)")
+            .arg(who).arg(QString::fromStdString(message.text)).arg(it->second.size()));
+        return true;
+    });
+    system.setMwiHandler([this, id](const modemnmt::NmtSubscriber& subscriber, uint8_t flags, modemnmt::NmtServiceEnd result) {
+        log(id, QString("message waiting indicators 0x%1 to %2: %3").arg(flags, 2, 16, QChar('0'))
+            .arg(numberText(subscriber)).arg(serviceEndName(result)));
+    });
+    system.setPowerHandler([this, id](const modemnmt::NmtSubscriber& subscriber, int level, bool done) {
+        log(id, QString("power of %1 to level %2: %3").arg(numberText(subscriber)).arg(level)
+            .arg(done ? "the phone took it" : "the phone did not take it"));
+    });
+    n.caller->setEventHandler([this, id](const std::string& text) {
+        log(id, QString::fromStdString(text));
+    });
+}
+
+void CellularWorker::action(const Cellular::MsgAction& msg)
+{
+    Network *found = nullptr;
+    for (std::unique_ptr<Network>& network : m_networks)
+    {
+        if (network->id == msg.getNetwork()) {
+            found = network.get();
+        }
+    }
+
+    const QString what = QString("%1 %2").arg(Cellular::MsgAction::name(msg.getAction())).arg(msg.getNumber());
+    if (!found || !running(*found))
+    {
+        log(msg.getNetwork(), what + ": the network is not on the air");
+        return;
+    }
+
+    Network& n = *found;
+    modemnmt::NmtSystem& system = *n.station->system();
+    const std::string number = msg.getNumber().toStdString();
+    const bool valid = number.size() == 7 && number.find_first_not_of("0123456789") == std::string::npos;
+
+    if (!valid)
+    {
+        log(n.id, what + ": the number is the country digit and six digits, e.g. 3726136");
+        return;
+    }
+
+    const char country = number[0];
+    const std::string digits = number.substr(1);
+    bool ok = false;
+    QString refused;        // why the protocol may refuse it
+
+    switch (msg.getAction())
+    {
+    case Cellular::MsgAction::Call:
+    {
+        modemcellular::Cause cause = modemcellular::Cause::Normal;
+        std::unique_ptr<modemcellular::AudioEndpoint> endpoint;
+        if (n.music) {
+            endpoint = std::make_unique<modemcellular::MusicEndpoint>();
+        } else {
+            endpoint = std::make_unique<modemcellular::EchoEndpoint>(1.0);
+        }
+        const bool registered = system.isRegistered(country, digits);
+        ok = n.caller->call(number, "", n.bridge->legOf(number), std::move(endpoint), &cause);
+        log(n.id, ok
+            ? QString("%1: paging the phone (%2), the far end is %3").arg(what).arg(registered ? "registered" : "not registered")
+                .arg(n.music ? "music" : "echo")
+            : QString("%1: refused (%2)").arg(what).arg(modemcellular::TestCaller::causeName(cause)));
+        return;
+    }
+    case Cellular::MsgAction::HangUp:
+        n.caller->hangUp();
+        log(n.id, what + ": hung up");
+        return;
+    case Cellular::MsgAction::Release:
+        ok = system.releaseCall(country, digits);
+        refused = "the phone has no call that can be released";
+        break;
+    case Cellular::MsgAction::Sms:
+        ok = system.sendSms(country, digits, deliverMessage(n.config.smscNumber, msg.getText()));
+        refused = "the phone is busy, the calling channels have no room, or the text cannot be coded";
+        break;
+    case Cellular::MsgAction::Hold:
+    {
+        const modemnmt::SmsDeliver message = deliverMessage(n.config.smscNumber, msg.getText());
+        std::vector<uint8_t> rp;
+
+        if (!modemnmt::smsBuildDeliver(message, 0, rp))
+        {
+            log(n.id, what + ": refused: the text cannot be coded");
+            return;
+        }
+        std::deque<modemnmt::SmsDeliver>& queue = n.held[number];
+        queue.push_back(message);
+        log(n.id, QString("%1: the centre keeps it until the phone fetches it (%2 waiting)").arg(what).arg(queue.size()));
+        return;
+    }
+    case Cellular::MsgAction::Mwi:
+    {
+        // for a phone in a call: when they go out (text incall, clearing; empty: both)
+        const QString when = msg.getText().trimmed().toLower();
+        modemnmt::MwiWhen mwiWhen = modemnmt::MwiWhen::InCallAndClearing;
+
+        if (when == "incall") {
+            mwiWhen = modemnmt::MwiWhen::InCall;
+        } else if (when == "clearing") {
+            mwiWhen = modemnmt::MwiWhen::Clearing;
+        } else if (!when.isEmpty())
+        {
+            log(n.id, what + ": refused: when is incall, clearing or empty (both)");
+            return;
+        }
+        const int flags = msg.getValue();
+
+        if (flags <= 0 || flags > modemnmt::MwiAll)
+        {
+            log(n.id, what + ": refused: " + (flags == 0 ? "the network cannot switch an indicator off"
+                : "the indicators are 1 (SMS) to 31"));
+            return;
+        }
+        if (!when.isEmpty()) {
+            log(n.id, QString("%1: %2").arg(what).arg(mwiWhen == modemnmt::MwiWhen::InCall
+                ? "in the conversation only, not at the clearing" : "at the clearing only (in a call)"));
+        }
+        // what the protocol cannot send in the phone's state now waits until it can
+        auto pending = n.pendingMwi.find(number);
+        if (pending == n.pendingMwi.end() && system.sendMwi(country, digits, static_cast<uint8_t>(flags), mwiWhen))
+        {
+            log(n.id, what + ": started");
+            return;
+        }
+        Network::PendingMwi& p = n.pendingMwi[number];
+        if (!p.since.isValid()) {
+            p.since = QDateTime::currentDateTime();
+        }
+        p.flags |= static_cast<uint8_t>(flags);
+        p.when = mwiWhen;
+        log(n.id, QString("%1: postponed: the phone is busy (%2), it goes out when the phone is free")
+            .arg(what).arg(mwiWhen == modemnmt::MwiWhen::InCall ? "not in a conversation now"
+                : "in another procedure, or the calling channels have no room"));
+        return;
+    }
+    case Cellular::MsgAction::Power:
+        ok = system.changePower(country, digits, msg.getValue());
+        refused = "the phone has no connected call, or it has that level already";
+        break;
+    case Cellular::MsgAction::Move:
+        ok = system.moveCall(country, digits, msg.getValue());
+        refused = "the phone has no connected call on one channel, a switch is going on, or there is no such free traffic channel";
+        break;
+    }
+    log(n.id, what + (ok ? ": started" : ": refused: " + refused));
+}
+
+// Indicators that waited for the phone: sent as soon as the protocol takes them.
+void CellularWorker::sendPostponed(Network& n)
+{
+    for (auto it = n.pendingMwi.begin(); it != n.pendingMwi.end();)
+    {
+        const std::string& number = it->first;
+        const Network::PendingMwi& p = it->second;
+
+        if (!n.station->system()->sendMwi(number[0], number.substr(1), p.flags, p.when))
+        {
+            ++it;
+            continue;
+        }
+        log(n.id, QString("mwi %1: started (postponed since %2)").arg(QString::fromStdString(number))
+            .arg(p.since.toString("HH:mm:ss")));
+        it = n.pendingMwi.erase(it);
+    }
+}
+
+// Digits of an identity: 1..9 and 10 for the digit 0 (NMT Doc 450-1 4.3.3).
+static bool identityDigits(uint64_t value, int digits)
+{
+    for (int i = 0; i < digits; i++)
+    {
+        const uint64_t digit = (value >> (4 * i)) & 0xf;
+        if (digit < 1 || digit > 10) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void CellularWorker::notePhone(Network& n, size_t index, const modemnmt::Frame& frame, double quality)
+{
+    const modemnmt::NmtChannel& channel = n.station->system()->channel(index);
+    const char* digits = modemnmt::frameDef(frame.mt).digits;
+    int number = 0;
+    int power = 0;
+
+    // only a frame for this channel (the channel number in it is ours) with an identity in it
+    if (!std::strchr(digits, 'Z') || !std::strchr(digits, 'X')
+        || !modemnmt::decodeChannel(channel.config().system, frame.channelNo, number, power)
+        || (number % 1024) != (channel.config().channel % 1024)
+        || !identityDigits(frame.msCountry, 1) || !identityDigits(frame.msNumber, 6)) {
+        return;
+    }
+
+    const std::string id = modemnmt::valueToDigits(frame.msCountry, 1) + modemnmt::valueToDigits(frame.msNumber, 6);
+    Cellular::MsgReportStatus::Phone& phone = n.phones[id];
+
+    if (phone.number.isEmpty()) {
+        log(n.id, QString("phone %1 heard on channel %2").arg(QString::fromStdString(id)).arg(channel.config().channel));
+    }
+    phone.number = QString::fromStdString(id);
+    phone.channel = channel.config().channel;
+    phone.lastHeard = QDateTime::currentDateTime();
+    phone.level = index < n.levels.size() ? n.levels[index] : -100.0f;
+    phone.quality = static_cast<float>(quality);
+    phone.power = power;
+    phone.lastFrame = QString::fromLatin1(modemnmt::frameDef(frame.mt).number);
 }
 
 void CellularWorker::flushTrace(Network& n, size_t index)
@@ -389,10 +687,16 @@ void CellularWorker::addNetwork(const MsgAddNetwork& add)
     n.id = add.m_id;
     n.name = add.m_name;
     n.config = add.m_config;
+    // the round trip of the radio: the transmit lead and about 100 ms of the receive path (device
+    // buffers, the pipe of the Cellular Rx), in frame periods of 166 bits at 1200 bit/s
+    {
+        const double roundTrip = m_lead / modemnmt::NmtBaseStation::kAudioRate + 0.1;
+        n.config.roundTripFrames = static_cast<int>(std::ceil(roundTrip / (166.0 / 1200.0)));
+    }
     n.station = std::make_unique<modemnmt::NmtBaseStation>(n.config);
     n.cellular = std::make_unique<modemcellular::CellularSystem>(n.station->clock(), modemcellular::ToneSet::Denmark);
-    n.cellular->setFallback(add.m_fallback == CellularNetworkSettings::FallbackMusic
-        ? modemcellular::CallRouter::Fallback::Music : modemcellular::CallRouter::Fallback::Echo);
+    n.music = add.m_fallback == CellularNetworkSettings::FallbackMusic;
+    n.cellular->setFallback(n.music ? modemcellular::CallRouter::Fallback::Music : modemcellular::CallRouter::Fallback::Echo);
     const int id = n.id;
     n.cellular->setSubscriberListener([this, id](const std::string& number, bool registered) {
         log(id, QString("%1 %2").arg(QString::fromStdString(number)).arg(registered ? "registered" : "gone"));
@@ -401,6 +705,8 @@ void CellularWorker::addNetwork(const MsgAddNetwork& add)
     for (const modemnmt::NmtPlanIssue& issue : n.station->issues()) {
         log(id, issueText(issue));
     }
+    log(id, QString("the phones get %1 frames for their identity (T = 8 at the phone, %2 for the round trip of the radio)")
+        .arg(8 + n.config.roundTripFrames).arg(n.config.roundTripFrames));
     for (const modemnmt::NmtCarrierStatus& c : n.station->carriers())
     {
         for (const modemnmt::NmtPlanIssue& issue : c.issues) {
@@ -473,6 +779,8 @@ void CellularWorker::removeAll()
 // takes the network off the air (the radios are told by the caller)
 void CellularWorker::unbind(Network& n)
 {
+    // the call of the tester goes before the router and the base station it uses
+    n.caller.reset();
     n.bridge.reset();
     if (n.station && n.station->running()) {
         n.station->bind({}, {});
@@ -613,6 +921,9 @@ void CellularWorker::tryBind(Network& n)
     }
 
     n.bridge = std::make_unique<modemnmt::NmtCellularBridge>(*n.station->system(), *n.cellular);
+    n.caller = std::make_unique<modemcellular::TestCaller>(*n.cellular);
+    setHandlers(n);
+    n.phones.clear();
     n.boundRx = rxSpan;
     n.boundTx = txSpan;
     n.levels.assign(n.station->system()->channelCount(), -100.0f);
@@ -655,6 +966,9 @@ void CellularWorker::processBatch(Radio& radio)
 
         n.station->process(m_rx, n.txBatch);
         n.bridge->run();
+        // the audio of the tester's call, the same time as the block at the call rate
+        n.caller->process(static_cast<int>(m_rx.length * modemcellular::kAudioSampleRate / modemnmt::NmtBaseStation::kAudioRate));
+        sendPostponed(n);
 
         // the audio of all networks on one transmitter goes as one batch
         modemcellular::CarrierBatch& out = m_txOut[n.tx];
@@ -762,6 +1076,9 @@ void CellularWorker::reportStatus(const Network& n)
         if (c.onAir && system && onAir < system->channelCount())
         {
             row.state = stateName(system->channel(onAir).state());
+            if (const modemnmt::NmtTransaction *t = system->channel(onAir).currentTransaction()) {
+                row.phone = numberText(t->subscriber);
+            }
             row.rxLevel = onAir < n.levels.size() ? n.levels[onAir] : -100.0f;
             const int id = n.station->carrierId(i);
             const modemcellular::WireTxStatus& st = n.tx->txStatus;
@@ -790,6 +1107,27 @@ void CellularWorker::reportStatus(const Network& n)
             }
         }
         msg->m_carriers.append(row);
+    }
+
+    // the phones heard, and the registered ones (also when not heard since the start)
+    if (system)
+    {
+        std::map<std::string, Cellular::MsgReportStatus::Phone> phones = n.phones;
+
+        system->forEachRegistered([&phones](const modemnmt::NmtSubscriber& subscriber) {
+            Cellular::MsgReportStatus::Phone& phone = phones[modemnmt::NmtCellularBridge::numberOf(subscriber)];
+            phone.number = numberText(subscriber);
+            phone.registered = true;
+        });
+        for (const Cellular::MsgReportStatus::Carrier& c : msg->m_carriers)
+        {
+            if (!c.phone.isEmpty() && phones.count(c.phone.toStdString()) > 0) {
+                phones[c.phone.toStdString()].state = QString("channel %1: %2").arg(c.channel).arg(c.state);
+            }
+        }
+        for (const auto& p : phones) {
+            msg->m_phones.append(p.second);
+        }
     }
 
     m_reports->push(msg);

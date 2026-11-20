@@ -200,7 +200,7 @@ void NmtSystem::sendMwiReport(const MwiReport& report)
     }
 }
 
-bool NmtSystem::sendMwi(char country, const std::string& number, uint8_t flags)
+bool NmtSystem::sendMwi(char country, const std::string& number, uint8_t flags, MwiWhen when)
 {
     if (flags == 0 || (flags & ~static_cast<uint8_t>(MwiAll))) {
         return false;
@@ -212,16 +212,25 @@ bool NmtSystem::sendMwi(char country, const std::string& number, uint8_t flags)
             continue;
         }
         // A phone in a call hears it at once when it is in the conversation (5c twice), and again
-        // when the call is cleared; in a procedure of the call only then. One that is doing
-        // anything else is busy.
+        // when the call is cleared; in a procedure of the call only then. `when` may leave out
+        // one of the two. One that is doing anything else is busy.
         const bool switching = transaction.channels.size() == 2 && transaction.scipTarget;
 
         if (!transaction.callUp || (transaction.channels.size() != 1 && !switching)
          || !transaction.channels.front()->inCall()) {
             return false;
         }
+        if (when == MwiWhen::InCall && !transaction.channels.front()->canSendMwiInCall()) {
+            return false;       // not in the conversation now: there is no "at once"
+        }
         transaction.mwiFlags |= flags;
-        transaction.channels.front()->beginMwiInCall();
+        transaction.mwiAtClearing = (when != MwiWhen::InCall);
+        if (transaction.mwiAtClearing && transaction.mwiResult == NmtServiceEnd::NoAck) {
+            transaction.mwiResult = NmtServiceEnd::Undelivered;     // sent in the conversation before, now for the clearing too
+        }
+        if (when != MwiWhen::Clearing) {
+            transaction.channels.front()->beginMwiInCall();
+        }
         return true;
     }
 
@@ -284,6 +293,34 @@ uint8_t NmtSystem::smsSubmitted(NmtTransaction& transaction, const SmsSubmit& me
     const NmtSubscriber subscriber = transaction.subscriber;
 
     return m_smsSubmitHandler(subscriber, message);
+}
+
+bool NmtSystem::smsRequested(NmtTransaction& transaction, SmsRpKind kind)
+{
+    if (!m_smsRequestHandler) {
+        return false;
+    }
+
+    // a copy: the handler may end the transaction
+    const NmtSubscriber subscriber = transaction.subscriber;
+    SmsDeliver message;
+
+    if (!m_smsRequestHandler(subscriber, kind, message) || kind != SmsRpKind::ReadyToReceive) {
+        return false;
+    }
+    // the transaction may be gone when the handler released the call
+    for (const NmtTransaction& t : m_transactions)
+    {
+        if (&t == &transaction)
+        {
+            transaction.smsToPhone = true;
+            transaction.smsDeliver = message;
+            transaction.smsRef = m_smsRef++;
+            transaction.smsResult = NmtServiceEnd::Undelivered;
+            return true;
+        }
+    }
+    return false;
 }
 
 void NmtSystem::detachChannel(NmtChannel& channel, NmtTransaction* transaction)

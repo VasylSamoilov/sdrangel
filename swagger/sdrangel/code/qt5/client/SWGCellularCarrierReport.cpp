@@ -42,6 +42,8 @@ SWGCellularCarrierReport::SWGCellularCarrierReport() {
     m_tx_fill_ms_isSet = false;
     underruns = 0;
     m_underruns_isSet = false;
+    phone = nullptr;
+    m_phone_isSet = false;
 }
 
 SWGCellularCarrierReport::~SWGCellularCarrierReport() {
@@ -64,6 +66,8 @@ SWGCellularCarrierReport::init() {
     m_tx_fill_ms_isSet = false;
     underruns = 0;
     m_underruns_isSet = false;
+    phone = new QString("");
+    m_phone_isSet = false;
 }
 
 void
@@ -77,6 +81,9 @@ SWGCellularCarrierReport::cleanup() {
 
 
 
+    if(phone != nullptr) { 
+        delete phone;
+    }
 }
 
 SWGCellularCarrierReport*
@@ -103,6 +110,8 @@ SWGCellularCarrierReport::fromJsonObject(QJsonObject &pJson) {
     ::SWGSDRangel::setValue(&tx_fill_ms, pJson["txFillMs"], "float", "");
     
     ::SWGSDRangel::setValue(&underruns, pJson["underruns"], "qint32", "");
+    
+    ::SWGSDRangel::setValue(&phone, pJson["phone"], "QString", "QString");
     
 }
 
@@ -140,6 +149,9 @@ SWGCellularCarrierReport::asJsonObject() {
     }
     if(m_underruns_isSet){
         obj->insert("underruns", QJsonValue(underruns));
+    }
+    if(phone != nullptr && *phone != QString("")){
+        toJsonValue(QString("phone"), phone, obj, QString("QString"));
     }
 
     return obj;
@@ -215,6 +227,16 @@ SWGCellularCarrierReport::setUnderruns(qint32 underruns) {
     this->m_underruns_isSet = true;
 }
 
+QString*
+SWGCellularCarrierReport::getPhone() {
+    return phone;
+}
+void
+SWGCellularCarrierReport::setPhone(QString* phone) {
+    this->phone = phone;
+    this->m_phone_isSet = true;
+}
+
 
 bool
 SWGCellularCarrierReport::isSet(){
@@ -239,6 +261,9 @@ SWGCellularCarrierReport::isSet(){
             isObjectUpdated = true; break;
         }
         if(m_underruns_isSet){
+            isObjectUpdated = true; break;
+        }
+        if(phone && *phone != QString("")){
             isObjectUpdated = true; break;
         }
     }while(false);

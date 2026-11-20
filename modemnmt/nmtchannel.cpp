@@ -708,8 +708,8 @@ Frame NmtChannel::txIdentRequest()
     frame.msNumber = static_cast<uint32_t>(digitsToValue(m_transaction->subscriber.number));
     frame.additionalInfo = encodeAreaNo(m_config.system, static_cast<uint8_t>(m_config.areaNo));
 
-    // no reply after 8 frames
-    if (++m_txFrameCount == 8)
+    // no reply in T (8 frames) at the phone, the round trip of the radio added
+    if (++m_txFrameCount == 8 + std::max(m_config.roundTripFrames, 0))
     {
         if (m_state == State::MtIdent)
         {
@@ -2029,9 +2029,14 @@ Frame NmtChannel::mwiFrame() const
 
 // Indicators that come during the conversation go out at once, 5c twice, and the conversation
 // goes on; they go out again with the clearing.
+bool NmtChannel::canSendMwiInCall() const
+{
+    return m_host && m_transaction && m_state == State::Active && m_transaction->callUp && !m_transaction->scipTarget;
+}
+
 bool NmtChannel::beginMwiInCall()
 {
-    if (!m_host || !m_transaction || m_state != State::Active || !m_transaction->callUp || m_transaction->scipTarget) {
+    if (!canSendMwiInCall()) {
         return false;
     }
 
@@ -2045,9 +2050,13 @@ bool NmtChannel::beginMwiInCall()
 
 Frame NmtChannel::txMwiInCall()
 {
-    // both frames are out: the frame made now is not sent, the speech comes back
+    // both frames are out: the frame made now is not sent, the speech comes back. Indicators
+    // only for the conversation are done: sent, the phone does not acknowledge them here.
     if (++m_txFrameCount > 2)
     {
+        if (!m_transaction->mwiAtClearing && m_transaction->mwiResult == NmtServiceEnd::Undelivered) {
+            m_transaction->mwiResult = NmtServiceEnd::NoAck;
+        }
         enterActive();
         return Frame();
     }
@@ -2189,11 +2198,34 @@ void NmtChannel::smsData(const std::vector<uint8_t>& data)
             smsRelease();
             break;
         case SmsRpKind::ReadyToReceive:
-            // the phone asks for waiting messages: there are none here
+        {
+            // the phone asks for its waiting messages (Annex 24 1.1): the first one that waits goes
+            // to it as a message to the phone, else it hears there are none (2.3.8)
+            const bool deliver = m_host->smsRequested(*m_transaction, message.kind);
+            std::vector<uint8_t> rp;
+
+            if (m_state != State::Sms) {
+                return;                 // the handler ended the call
+            }
+            if (deliver && m_transaction->smsToPhone
+                && smsBuildDeliver(m_transaction->smsDeliver, m_transaction->smsRef, rp))
+            {
+                m_smsAnswered = false;
+                m_smsReleasing = false;     // an earlier answer is not the end any more
+                smsSend(rp);
+                m_timer->start(kSmsPacketTimeout);
+                return;                 // what follows in the data is not looked at before it is out
+            }
+            m_transaction->smsToPhone = false;
             m_smsAnswered = true;
             smsSend(smsRpNoMessages(message.rpRef));
             break;
+        }
         case SmsRpKind::MemoryAvailable:
+            m_host->smsRequested(*m_transaction, message.kind);
+            if (m_state != State::Sms) {
+                return;
+            }
             m_smsAnswered = true;
             smsSend(smsRpAckToPhone(message.rpRef));
             break;
@@ -2319,8 +2351,9 @@ void NmtChannel::rxMtRelease(const Frame& frame)
         return;
     }
 
-    // the clearing that carried the indicators is acknowledged
-    if (m_transaction->mwiResult == NmtServiceEnd::NoAck) {
+    // the clearing that carried the indicators is acknowledged (indicators only for the
+    // conversation were not in it)
+    if (m_transaction->mwiResult == NmtServiceEnd::NoAck && m_transaction->mwiAtClearing) {
         m_transaction->mwiResult = NmtServiceEnd::Ok;
     }
     m_host->destroyTransaction(m_transaction);

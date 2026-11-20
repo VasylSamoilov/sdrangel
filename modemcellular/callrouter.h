@@ -125,7 +125,10 @@ public:
     // A mobile places a call. The origin leg is told "proceeding" and then "alerting"/"answer"
     // from a later TimerService::run(), never from inside this call. A busy called mobile does
     // not refuse the call: the caller hears busy tone. Refused: empty number, no endpoint.
-    SetupResult setup(MobileLeg& origin, const std::string& callerId, const std::string& dialed);
+    // called: the leg to call in place of the one the number is registered on (a test call to a
+    // mobile that is not registered); the number is still the dialled one.
+    SetupResult setup(MobileLeg& origin, const std::string& callerId, const std::string& dialed,
+                      MobileLeg* called = nullptr);
     // The called mobile is ringing / has answered. callref is the one given to MobileLeg::setup().
     void alerting(CallRef callref);
     void answer(CallRef callref);

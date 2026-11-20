@@ -109,6 +109,69 @@ CellularNetworkReport:
       type: array
       items:
         $ref: "/doc/swagger/include/Cellular.yaml#/CellularCarrierReport"
+    phones:
+      description: "Phones the network heard or registered."
+      type: array
+      items:
+        $ref: "/doc/swagger/include/Cellular.yaml#/CellularPhoneReport"
+
+CellularPhoneReport:
+  description: "A phone a network heard (its identity in a frame a channel took) or registered"
+  properties:
+    number:
+      type: string
+      description: "Country digit and six digits."
+    registered:
+      type: integer
+      description: "The phone made a roaming update to this network (1) or not (0)."
+    channel:
+      type: integer
+      description: "Channel the phone was last heard on."
+    state:
+      type: string
+      description: "What the phone does now on the channels, empty if nothing."
+    lastHeard:
+      type: string
+      description: "Time the phone was last heard (ISO 8601), empty if not heard since the network started."
+    level:
+      type: number
+      format: float
+      description: "Received level of the channel then, in dB of full scale."
+    quality:
+      type: number
+      format: float
+      description: "Quality of the last frame of the phone, 0..1."
+    power:
+      type: integer
+      description: "Power level 0..3 in the frames of the phone (0, 1 low, 2 medium, 3 high), -1 if not known."
+    lastFrame:
+      type: string
+      description: "Type of the last frame of the phone."
+
+CellularActions:
+  description: "Cellular actions: the tester acts on a phone of a network"
+  properties:
+    networkId:
+      type: integer
+      description: "Id of the network."
+    action:
+      type: string
+      description: >
+        call (the network calls the phone, registered or not; the far end is echo or music),
+        hangup (ends that call), release (releases any call of the phone), sms (text to the phone),
+        mwi (message waiting indicators, value: flags; text for a phone in a call: incall or
+        clearing, empty for both), power (level 0..3 of the phone in its call),
+        move (the call to another traffic channel, value: channel, 0 for any free one),
+        hold (text the SMS centre keeps until the phone calls it for its waiting messages)
+    number:
+      type: string
+      description: "Number of the phone: country digit and six digits."
+    text:
+      type: string
+      description: "Text of the short message (sms)."
+    value:
+      type: integer
+      description: "Flags (mwi), power level (power) or channel (move)."
 
 CellularCarrierReport:
   description: "The state of one carrier of a network"
@@ -138,3 +201,6 @@ CellularCarrierReport:
     underruns:
       type: integer
       description: "Times the queue of the transmitter ran empty."
+    phone:
+      type: string
+      description: "Number of the phone the channel serves, empty for none."

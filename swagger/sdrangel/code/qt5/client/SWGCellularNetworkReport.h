@@ -23,6 +23,7 @@
 
 
 #include "SWGCellularCarrierReport.h"
+#include "SWGCellularPhoneReport.h"
 #include <QList>
 #include <QString>
 
@@ -62,6 +63,9 @@ public:
     QList<SWGCellularCarrierReport*>* getCarriers();
     void setCarriers(QList<SWGCellularCarrierReport*>* carriers);
 
+    QList<SWGCellularPhoneReport*>* getPhones();
+    void setPhones(QList<SWGCellularPhoneReport*>* phones);
+
 
     virtual bool isSet() override;
 
@@ -83,6 +87,9 @@ private:
 
     QList<SWGCellularCarrierReport*>* carriers;
     bool m_carriers_isSet;
+
+    QList<SWGCellularPhoneReport*>* phones;
+    bool m_phones_isSet;
 
 };
 

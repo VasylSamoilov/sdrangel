@@ -37,7 +37,8 @@ namespace modemnmt
 // the router (registered numbers, music, echo, later SIP), the router's progress tones and
 // audio go back, and a call that the far end releases releases the phone. Phones that roam in
 // are registered with the router under their number: the country digit and the six digits.
-// Calls to a phone are not supported yet: the router is told that the phone cannot be reached.
+// A call that the router routes to a phone pages it (NmtSystem::startCall); the phone does not have
+// to be registered for that, legOf() gives the leg of any number for a test call.
 //
 // The bridge takes over the call, clear, audio and registration handlers of the NmtSystem.
 //
@@ -68,6 +69,10 @@ public:
 
     // The number a phone has in the router: country digit and number.
     static std::string numberOf(const NmtSubscriber& subscriber);
+    // The leg of the phone with this number (country digit and six digits), registered or not,
+    // for a call to it (CellularSystem::setup with this leg); null if it is not such a number.
+    // From the thread of the NmtSystem.
+    modemcellular::MobileLeg* legOf(const std::string& number);
 
 private:
     class Leg;
