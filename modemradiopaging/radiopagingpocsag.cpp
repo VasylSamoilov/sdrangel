@@ -336,8 +336,15 @@ int RadioPagingPocsag::scoreAlphanumeric(const std::string& text)
 int RadioPagingPocsag::longNumericPenalty(const std::string& numeric)
 {
     int nbChars = (int) numeric.size();
+    const bool plain = std::all_of(numeric.begin(), numeric.end(), [](char c) { return ((c >= '0') && (c <= '9')) || (c == ' ') || (c == '-'); });
 
-    // Numeric pages are short; a long one is most likely an alphanumeric message
+    // Numeric pages are short; a long one is most likely an alphanumeric message. Unless it is digits, spaces and
+    // hyphens only: the bits of an alphanumeric message are almost never that (3/4 of the nibbles, to the power of
+    // the length)
+    if (plain) {
+        return 0;
+    }
+
     return (nbChars > m_longNumericChars) ? 10 * (nbChars - m_longNumericChars) : 0;
 }
 
