@@ -918,6 +918,72 @@ void testPocsagTransmissionAfterTransmission()
     check(bothWithout == cases, "POCSAG: a transmission right after another found without its preamble, both pages received");
 }
 
+// The end of the sync codeword (18 bits) is the complement of the start of the idle codeword: where a codeword is
+// followed by an idle codeword, the decoder of the other polarity sees the sync codeword but for the last 14 bits of
+// that codeword. A transmission with a message codeword whose last 14 bits complete it, before an idle codeword in the
+// same slot of three batches, makes the other polarity find a sync codeword and confirm it one batch later. The
+// receiver (both polarities) gives the page in the polarity sent and nothing in the other one; the mirror case too
+void testPocsagOtherPolarity()
+{
+    // A message codeword whose last 14 bits are the complement of the first 14 of the sync codeword
+    const uint32_t tail = (~RadioPagingPocsag::m_syncWord >> 18) & 0x3fff;
+    uint32_t c = 0;
+    for (uint32_t data = 1u << 20; (data < (1u << 21)) && !c; data++)
+    {
+        uint32_t w = RadioPagingBCH::encode(data);
+        if ((w & 0x3fff) == tail) {
+            c = w;
+        }
+    }
+    check(c != 0, "POCSAG: a message codeword ending as the complement of the start of the sync codeword");
+
+    // Address 1300001 (frame 1, function 0) in slot 3, the message codeword in slot 4, idle codewords elsewhere
+    const uint32_t address = 1300001;
+    const uint32_t addressWord = RadioPagingBCH::encode(((address >> 3) & 0x3ffff) << 2);
+    std::vector<uint8_t> bits;
+    for (int i = 0; i < RadioPagingPocsag::m_preambleBits; i++) {
+        bits.push_back((i & 1) ? 0 : 1);
+    }
+    auto addWord = [&bits](uint32_t w) {
+        for (int k = 31; k >= 0; k--) {
+            bits.push_back((w >> k) & 1);
+        }
+    };
+    for (int batch = 0; batch < 3; batch++)
+    {
+        addWord(RadioPagingPocsag::m_syncWord);
+        for (int slot = 0; slot < RadioPagingPocsag::m_codewordsPerBatch; slot++) {
+            addWord((slot == 3) ? addressWord : (slot == 4) ? c : RadioPagingPocsag::m_idleWord);
+        }
+    }
+
+    for (int inverted = 0; inverted < 2; inverted++)
+    {
+        std::vector<float> samples = makeWaveform(bits, 38400.0, 1200.0, inverted, 0.0f, 0.02f, 300, 300, 5 + inverted);
+        PocsagLeg leg(38400.0, 1200.0);
+        for (float s : samples) {
+            leg.process(s);
+        }
+        leg.m_receiver.flush();
+        while (leg.m_receiver.hasMessage())
+        {
+            RadioPagingPocsagDecoder::Message m = leg.m_receiver.takeMessage();
+            (m.m_polarity == RadioPagingPocsagDecoder::Inverted ? leg.m_invertedMessages : leg.m_normalMessages).push_back(m);
+        }
+        const auto& sent = inverted ? leg.m_invertedMessages : leg.m_normalMessages;
+        const auto& other = inverted ? leg.m_normalMessages : leg.m_invertedMessages;
+        bool got = false;
+        for (const auto& m : sent) {
+            got = got || (m.m_address == address);
+        }
+        std::printf("      %s transmission: %d messages in its polarity, %d in the other\n", inverted ? "inverted" : "normal",
+            (int) sent.size(), (int) other.size());
+        check(got, inverted ? "POCSAG: inverted transmission, the page is received" : "POCSAG: normal transmission, the page is received");
+        check(other.empty(), inverted ? "POCSAG: inverted transmission, nothing in normal polarity"
+            : "POCSAG: normal transmission, nothing in inverted polarity");
+    }
+}
+
 // The end of a transmission followed (after a gap) by another strong clean signal, as a transmission at another speed
 // read at this one: its words are not a fade of this transmission, no page is made of them
 void testPocsagOtherSignalAfter()
@@ -1238,6 +1304,7 @@ int main()
     testPocsagSyncLookAlike();
     testPocsagOtherSignalAfter();
     testPocsagTransmissionAfterTransmission();
+    testPocsagOtherPolarity();
     testPocsagDamagedIdle();
     testPocsagLongNumeric();
     testPocsagPreambleLock();

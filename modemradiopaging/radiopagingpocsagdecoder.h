@@ -126,6 +126,11 @@ public:
     void flush();
 
     bool isSynced() const { return m_state != Hunting; }
+    //!< In a transmission that started after its preamble or whose sync codewords confirmed it
+    bool inTrustedTransmission() const { return (m_state != Hunting) && (m_preambleBefore || m_leadingConfirmed || (m_batch > 0)); }
+    //!< A candidate batch not trusted (no preamble before it, its sync codeword not confirmed, the first batch) is
+    //!< given up: the decoder hunts again. True if one was
+    bool dropUntrustedCandidate();
     //!< Sync codewords recognised since reset: when it changes, the last 32 symbols fed were
     //!< a sync codeword (a known pattern to measure the levels on)
     uint32_t syncWords() const { return m_syncWords; }

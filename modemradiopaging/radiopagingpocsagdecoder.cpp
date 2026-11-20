@@ -138,6 +138,21 @@ bool RadioPagingPocsagDecoder::softSyncMatch(uint32_t word) const
     return (magnitude > 0.0f) && (correlation >= m_softSyncCorrelation * magnitude);
 }
 
+bool RadioPagingPocsagDecoder::dropUntrustedCandidate()
+{
+    if ((m_state == Hunting) || m_preambleBefore || m_leadingConfirmed || (m_batch > 0) || m_syncMissedLast) {
+        return false;
+    }
+
+    m_candidatesDropped++;
+    m_state = Hunting;
+    m_slot = 0;
+    m_word = 0;
+    m_wordBits = 0;
+    m_wordError2 = 0.0f;
+    return true;
+}
+
 void RadioPagingPocsagDecoder::startCandidate()
 {
     m_syncWords++;

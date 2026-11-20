@@ -152,19 +152,38 @@ void RadioPagingPocsagReceiver::process(float sample)
     // break the run before its end)
     const bool preambleBefore = m_bitsSinceReversals < m_preambleRecentBits;
 
+    // A transmitter sends one polarity: a candidate without a preamble in one polarity, while the decoder of the other
+    // one is in a transmission that started after its preamble or that its sync codewords confirmed, is in that
+    // transmission's data, not a sync codeword. The end of the sync codeword (18 bits) is the complement of the start
+    // of the idle codeword: where a codeword is followed by an idle codeword, the other polarity sees a window that
+    // matches the sync codeword but for the last 14 bits of that codeword, and now and then again one batch later
     if (m_normalEnabled && (m_normal.syncWords() != normalSyncs))
     {
         if (preambleBefore && !m_normal.getStatus().m_confirmed) {
             m_normal.setPreambleBefore();
         }
-        fitSyncCodeword(false);
+        if (!(m_invertedEnabled && m_inverted.inTrustedTransmission() && m_normal.dropUntrustedCandidate()))
+        {
+            fitSyncCodeword(false);
+            // and a candidate of the other polarity found before is given up
+            if (m_invertedEnabled && m_normal.inTrustedTransmission()) {
+                m_inverted.dropUntrustedCandidate();
+            }
+        }
     }
     else if (m_invertedEnabled && (m_inverted.syncWords() != invertedSyncs))
     {
         if (preambleBefore && !m_inverted.getStatus().m_confirmed) {
             m_inverted.setPreambleBefore();
         }
-        fitSyncCodeword(true);
+        if (!(m_normalEnabled && m_normal.inTrustedTransmission() && m_inverted.dropUntrustedCandidate()))
+        {
+            fitSyncCodeword(true);
+            // and a candidate of the other polarity found before is given up
+            if (m_normalEnabled && m_inverted.inTrustedTransmission()) {
+                m_normal.dropUntrustedCandidate();
+            }
+        }
     }
 
     bool synced = (m_normalEnabled && m_normal.isSynced()) || (m_invertedEnabled && m_inverted.isSynced());
