@@ -110,6 +110,19 @@ int main(int argc, char **argv)
     select(composer, "Tone");
     check(composer.page().m_text.isEmpty() && !textEdit(composer)->isEnabled(), "a tone page has no text, the field is off");
 
+    // A destination filled in (a contact): transmitter (one that did not announce itself too), protocol, address,
+    // function and polarity; not an edit of the user
+    {
+        PagingComposer filled;
+        filled.setTransmitters({"tx1"});
+        int edits = 0;
+        QObject::connect(&filled, &PagingComposer::destinationEdited, [&edits]() { edits++; });
+        filled.setDestination("tx-gsc", "gsc", "012345", 2, 1);
+        RadioPagingPage d = filled.page();
+        check((filled.transmitter() == "tx-gsc") && (d.m_protocol == "gsc") && (d.m_address == "012345") && (d.m_function == 2)
+            && (d.m_polarity == 1) && (edits == 0), "a destination filled in: transmitter, protocol, address, function, polarity");
+    }
+
     // FLEX: priority, short message, binary, secure
     composer.setProtocols({"pocsag", "flex", "gsc"});
     select(composer, "FLEX");

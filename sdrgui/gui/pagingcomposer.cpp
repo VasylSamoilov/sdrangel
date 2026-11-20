@@ -266,6 +266,11 @@ PagingComposer::PagingComposer(QWidget *parent) :
         emit selectionChanged();
     });
     connect(m_transmitter, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &PagingComposer::selectionChanged);
+    // Changed by the user, not by the code (activated, textEdited)
+    connect(m_transmitter, QOverload<int>::of(&QComboBox::activated), this, &PagingComposer::destinationEdited);
+    connect(m_function, QOverload<int>::of(&QComboBox::activated), this, &PagingComposer::destinationEdited);
+    connect(m_polarity, QOverload<int>::of(&QComboBox::activated), this, &PagingComposer::destinationEdited);
+    connect(m_address, &QLineEdit::textEdited, this, &PagingComposer::destinationEdited);
     connect(m_type, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() { display(); emit selectionChanged(); });
     connect(m_voiceSource, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() { display(); emit selectionChanged(); });
     connect(m_shortType, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &PagingComposer::display);
@@ -354,9 +359,40 @@ void PagingComposer::setTransmitters(const QStringList& aliases)
     emit selectionChanged();
 }
 
+void PagingComposer::setDestination(const QString& transmitter, const QString& protocol, const QString& address, int function,
+    int polarity)
+{
+    // The transmitter: one that has not announced itself is shown too, so the page says where it goes
+    if (m_transmitter->findData(transmitter) < 0)
+    {
+        QSignalBlocker blocker(m_transmitter);
+        m_transmitter->addItem(tr("%1 (not announced)").arg(transmitter), transmitter);
+    }
+
+    m_transmitter->setCurrentIndex(m_transmitter->findData(transmitter));
+    const int protocolIndex = m_protocol->findData(protocol);
+
+    if (protocolIndex >= 0) {
+        m_protocol->setCurrentIndex(protocolIndex);     // The functions and types of the protocol
+    }
+
+    m_address->setText(address);
+
+    if ((function >= 0) && (function < m_function->count())) {
+        m_function->setCurrentIndex(function);
+    }
+    // The polarity of the pager: the same address in the other polarity is another pager
+    if ((polarity >= -1) && (polarity <= 1)) {
+        m_polarity->setCurrentIndex(polarity + 1);
+    }
+
+    display();
+}
+
 QString PagingComposer::transmitter() const
 {
-    return m_transmitter->isVisible() ? m_transmitter->currentData().toString() : QString();
+    // The selector was set up (setTransmitters): not hidden, whether the window is shown or not
+    return !m_transmitter->isHidden() ? m_transmitter->currentData().toString() : QString();
 }
 
 void PagingComposer::setNetworkMode(bool network)

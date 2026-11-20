@@ -78,7 +78,8 @@ private:
     QLabel *m_error;
 
     enum ConditionColumn { ColRule, ColField, ColOperator, ColValue, ColCheck };
-    enum SendToColumn { SendWhenField, SendWhenOperator, SendWhenValue, SendTransmitter, SendProtocol, SendAddress, SendFunction, SendCheck };
+    enum SendToColumn { SendWhenField, SendWhenOperator, SendWhenValue, SendTransmitter, SendProtocol, SendAddress, SendFunction, SendPolarity,
+        SendCheck };
 
     void addSendToRow(const MessageCenterContact::SendTo& sendTo);
     MessageCenterContact::SendTo rowSendTo(int row) const;

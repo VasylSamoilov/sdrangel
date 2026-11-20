@@ -119,8 +119,10 @@ private:
     QTableWidget *m_queueTable;
     // The page to compose
     PagingComposer *m_composer;
-    QComboBox *m_toContact;             //!< The page to the address of the composer, or to a contact
+    QComboBox *m_toContact = nullptr;   //!< The page to the address of the composer, or to a contact
     QLabel *m_toWhere;                  //!< Where the page to the contact goes
+    bool m_fillingContact = false;      //!< The composer filled with the send to of the contact
+    QToolButton *m_addContact = nullptr; //!< Add the destination of the composer to the contacts
     // The routes and the files
     QTableWidget *m_routesTable;
     QTableWidget *m_contactsTable;
@@ -163,7 +165,12 @@ private:
     void refreshComposeTransmitters();
     void refreshRoutes();
     void refreshContacts();
-    void editContact(int index);        //!< -1: a new one
+    //!< -1: a new one, preset (if given) to start with
+    void editContact(int index, const MessageCenterContact *preset = nullptr);
+    //!< A new contact of the page composed: a rule for the messages of its address, a send to of its transmitter
+    MessageCenterContact contactOfPage(const RadioPagingPage& page) const;
+    //!< The first contact one of whose send to is the destination of the page composed; empty if none
+    QString contactOfDestination(const RadioPagingPage& page) const;
     void removeContact();
     void exportContacts();
     void importContacts();
@@ -185,6 +192,8 @@ private slots:
     void post();
     bool contactPage(RadioPagingPage& page, QString& error) const;
     void showContactPage();
+    void destinationEdited();
+    void updateAddContact();
     void pageAction(int action);
     void addRoute();
     void removeRoute();

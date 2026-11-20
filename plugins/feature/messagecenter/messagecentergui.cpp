@@ -632,11 +632,99 @@ void MessageCenterGUI::buildCompose(QWidget *container)
         "(its type, protocol...) gives them");
     m_toWhere = new QLabel(container);
     m_toWhere->setToolTip("Where the page goes: the transmitter, protocol and address the send to of the contact gives");
+    QToolButton *editContactButton = iconButton(container, ":/edit.png", "Edit the contact chosen (its send to)");
+    QToolButton *contactsButton = iconButton(container, ":/listing.png", "The contacts (the address book)");
+    QToolButton *addContactButton = iconButton(container, ":/plus.png", "A new contact of the transmitter and address below: "
+        "a rule for the messages of the address, a send to of the transmitter");
     toLayout->addWidget(toLabel);
     toLayout->addWidget(m_toContact);
+    toLayout->addWidget(editContactButton);
+    toLayout->addWidget(addContactButton);
+    toLayout->addWidget(contactsButton);
+
+    m_addContact = addContactButton;
+    connect(addContactButton, &QToolButton::clicked, this, [this, addContactButton]() {
+        RadioPagingPage page = m_composer->page();
+        page.m_transmitter = m_composer->transmitter();
+        const MessageCenterContact preset = contactOfPage(page);
+
+        // A new contact, or the address added to one (its rule and its send to after the others)
+        QMenu menu(this);
+        QAction *newContact = menu.addAction(QIcon(":/plus.png"), "New contact...");
+
+        if (!m_settings.m_contacts.isEmpty()) {
+            menu.addSection("Add to");
+        }
+
+        QMap<QAction*, int> addTo;
+
+        for (int i = 0; i < m_settings.m_contacts.size(); i++) {
+            addTo[menu.addAction(MessageCenterContactIcons::icon(m_settings.m_contacts[i].m_icon), m_settings.m_contacts[i].m_name + "...")] = i;
+        }
+
+        QAction *chosen = menu.exec(addContactButton->mapToGlobal(QPoint(0, addContactButton->height())));
+
+        if (!chosen) {
+            return;
+        }
+
+        QString name;
+
+        if (chosen == newContact)
+        {
+            const int before = m_settings.m_contacts.size();
+            editContact(-1, &preset);
+
+            if (m_settings.m_contacts.size() > before) {
+                name = m_settings.m_contacts.last().m_name;
+            }
+        }
+        else
+        {
+            const int index = addTo.value(chosen);
+            MessageCenterContact merged = m_settings.m_contacts[index];
+            merged.m_rules.append(preset.m_rules);
+            merged.m_sendTo.append(preset.m_sendTo);
+            editContact(index, &merged);
+            name = m_settings.m_contacts[index].m_name;
+        }
+
+        // The page goes to it, if the contact has it (it was not cancelled)
+        if (!name.isEmpty())
+        {
+            destinationEdited();
+            updateAddContact();
+        }
+    });
     toLayout->addWidget(m_toWhere, 1);
     layout->addLayout(toLayout);
-    connect(m_toContact, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MessageCenterGUI::showContactPage);
+
+    connect(editContactButton, &QToolButton::clicked, this, [this]() {
+        const QString name = m_toContact->currentData().toString();
+
+        for (int i = 0; i < m_settings.m_contacts.size(); i++)
+        {
+            if (!name.isEmpty() && (m_settings.m_contacts[i].m_name == name))
+            {
+                editContact(i);
+                return;
+            }
+        }
+
+        editContact(-1);    // No contact chosen: a new one
+    });
+    connect(contactsButton, &QToolButton::clicked, this, [this]() {
+        for (int i = 0; i < m_tabs->count(); i++)
+        {
+            if (m_tabs->tabText(i) == tr("Contacts")) {
+                m_tabs->setCurrentIndex(i);
+            }
+        }
+    });
+    connect(m_toContact, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
+        transmitterChanged();       // The protocols of the contact, or of the transmitter
+        showContactPage();
+    });
 
     // The transmitters say what they can send; the page is checked by the one that takes it (its mode, numbering)
     m_composer = new PagingComposer(container);
@@ -649,6 +737,8 @@ void MessageCenterGUI::buildCompose(QWidget *container)
 
     connect(m_composer, &PagingComposer::selectionChanged, this, &MessageCenterGUI::transmitterChanged);
     connect(m_composer, &PagingComposer::selectionChanged, this, &MessageCenterGUI::showContactPage);
+    connect(m_composer, &PagingComposer::destinationEdited, this, &MessageCenterGUI::destinationEdited);
+    connect(m_composer, &PagingComposer::selectionChanged, this, &MessageCenterGUI::updateAddContact);
     connect(m_composer, &PagingComposer::sendRequested, this, &MessageCenterGUI::post);
 }
 
@@ -671,6 +761,11 @@ bool MessageCenterGUI::contactPage(RadioPagingPage& page, QString& error) const
         message["text"] = page.m_text;
         message["priority"] = page.m_priority ? 1 : 0;
         message["speed"] = page.m_speed;
+
+        if (page.m_polarity >= 0) {
+            message["polarity"] = (page.m_polarity == 1) ? "inverted" : "normal";
+        }
+
         QJsonObject sent;
 
         if (!contact.pageFor(message, sent, &error)) {
@@ -681,6 +776,14 @@ bool MessageCenterGUI::contactPage(RadioPagingPage& page, QString& error) const
         page.m_protocol = sent.value("protocol").toString(page.m_protocol).toLower();
         page.m_address = sent.value("address").toVariant().toString();
         page.m_function = sent.value("function").toInt(page.m_function);
+
+        // The polarity of the pager (the same address in the other polarity is another pager)
+        if (sent.contains("polarity"))
+        {
+            const QString polarity = sent.value("polarity").toString().toLower();
+            page.m_polarity = (polarity == "normal") ? 0 : (polarity == "inverted") ? 1 : -1;
+        }
+
         return true;
     }
 
@@ -688,8 +791,13 @@ bool MessageCenterGUI::contactPage(RadioPagingPage& page, QString& error) const
     return false;
 }
 
+// The fields of the composer that the send to of the contact chosen gives for the page (its type): filled and locked
 void MessageCenterGUI::showContactPage()
 {
+    if (m_fillingContact) {
+        return;     // The composer telling the fields just set
+    }
+
     if (m_toContact->currentIndex() <= 0)
     {
         m_toWhere->clear();
@@ -701,8 +809,10 @@ void MessageCenterGUI::showContactPage()
 
     if (contactPage(page, error))
     {
-        m_toWhere->setText(QString("%1, %2 %3").arg(page.m_transmitter, page.m_protocol.toUpper(),
-            QString::fromStdString(page.toRecord().m_address.toStdString())));
+        m_fillingContact = true;
+        m_composer->setDestination(page.m_transmitter, page.m_protocol, page.m_address, page.m_function, page.m_polarity);
+        m_fillingContact = false;
+        m_toWhere->setText(QString("by %1").arg(page.m_transmitter));
         m_toWhere->setStyleSheet(QString());
     }
     else
@@ -710,6 +820,50 @@ void MessageCenterGUI::showContactPage()
         m_toWhere->setText(error);
         m_toWhere->setStyleSheet("QLabel { color: red; }");
     }
+}
+
+// The transmitter, address, function or polarity changed by hand: the page goes where the fields say; the contact of
+// that destination (one of its send to) is shown, if there is one
+void MessageCenterGUI::destinationEdited()
+{
+    RadioPagingPage page = m_composer->page();
+    page.m_transmitter = m_composer->transmitter();
+    const QString known = contactOfDestination(page);
+    const int index = known.isEmpty() ? 0 : std::max(0, m_toContact->findData(known));
+
+    if (m_toContact->currentIndex() != index)
+    {
+        {
+            QSignalBlocker blocker(m_toContact);
+            m_toContact->setCurrentIndex(index);
+        }
+
+        transmitterChanged();       // The protocols of the contact or of the transmitter
+    }
+
+    m_toWhere->setText(known.isEmpty() ? QString() : QString("by %1").arg(page.m_transmitter));
+    m_toWhere->setStyleSheet(QString());
+    updateAddContact();
+}
+
+// Something to add to the contacts: an address that is one, of a transmitter, that no contact has as its destination
+void MessageCenterGUI::updateAddContact()
+{
+    if (!m_addContact) {
+        return;
+    }
+
+    RadioPagingPage page = m_composer->page();
+    page.m_transmitter = m_composer->transmitter();
+    const QString error = page.checkAddress();
+    const QString known = error.isEmpty() ? contactOfDestination(page) : QString();
+    const bool addable = error.isEmpty() && !page.m_transmitter.isEmpty() && known.isEmpty();
+
+    m_addContact->setEnabled(addable);
+    m_addContact->setToolTip(addable ? QString("Add the transmitter and the address below to the contacts: a new contact, or to one")
+        : !error.isEmpty() ? QString("Nothing to add: %1").arg(error)
+        : page.m_transmitter.isEmpty() ? QString("Nothing to add: no transmitter")
+        : QString("Nothing to add: it is the destination of %1").arg(known));
 }
 
 void MessageCenterGUI::buildRoutes(QWidget *container)
@@ -833,9 +987,97 @@ void MessageCenterGUI::refreshContacts()
     m_toContact->setCurrentIndex(std::max(0, m_toContact->findData(to)));
     blocker.unblock();
     showContactPage();
+    updateAddContact();
 }
 
-void MessageCenterGUI::editContact(int index)
+MessageCenterContact MessageCenterGUI::contactOfPage(const RadioPagingPage& page) const
+{
+    MessageCenterContact contact;
+    MessageCenterContact::Rule rule;
+    auto condition = [](const QString& field, const QString& value) {
+        MessageCenterContact::Condition c;
+        c.m_field = field;
+        c.m_value = value;
+        return c;
+    };
+
+    // The messages of its address as the receivers record them: POCSAG the RIC and function, FLEX the capcode (the
+    // address of a capcode form), GSC the address and its number
+    rule.append(condition("protocol", page.m_protocol));
+
+    if (page.m_protocol == "pocsag")
+    {
+        rule.append(condition("ric", QString::number(page.m_address.toULongLong())));
+        rule.append(condition("function", QString::number(page.m_function)));
+    }
+    else if (page.m_protocol == "flex")
+    {
+        qulonglong capcode = 0;
+        page.flexCapcode(capcode);
+        rule.append(condition("capcode", QString::number(capcode)));
+    }
+    else if (page.m_protocol == "gsc")
+    {
+        QString address;
+        int function;
+        page.gscAddress(address, function);
+        rule.append(condition("address", QString("%1/%2").arg(address).arg(function + 1)));
+    }
+
+    // The same address in the other polarity is another pager
+    if (page.m_polarity >= 0) {
+        rule.append(condition("polarity", (page.m_polarity == 1) ? "inverted" : "normal"));
+    }
+
+    contact.m_rules.append(rule);
+
+    MessageCenterContact::SendTo sendTo;
+    sendTo.m_page["transmitter"] = page.m_transmitter;
+    sendTo.m_page["protocol"] = page.m_protocol;
+    sendTo.m_page["address"] = page.m_address;
+
+    if (!RadioPagingPage::functions(page.m_protocol).isEmpty()) {
+        sendTo.m_page["function"] = page.m_function;
+    }
+    if (page.m_polarity >= 0) {
+        sendTo.m_page["polarity"] = (page.m_polarity == 1) ? "inverted" : "normal";
+    }
+
+    contact.m_sendTo.append(sendTo);
+    contact.m_icon = ":pager";
+    return contact;
+}
+
+QString MessageCenterGUI::contactOfDestination(const RadioPagingPage& page) const
+{
+    const QString polarity = (page.m_polarity == 1) ? "inverted" : (page.m_polarity == 0) ? "normal" : QString();
+    const bool functions = !RadioPagingPage::functions(page.m_protocol).isEmpty();
+
+    for (const MessageCenterContact& c : m_settings.m_contacts)
+    {
+        for (const MessageCenterContact::SendTo& s : c.m_sendTo)
+        {
+            const QJsonObject& p = s.m_page;
+
+            // Numbers as numbers (a RIC with or without its leading zeros)
+            const QString address = p.value("address").toVariant().toString().trimmed();
+            bool a1, a2;
+            const qulonglong n1 = address.toULongLong(&a1);
+            const qulonglong n2 = page.m_address.trimmed().toULongLong(&a2);
+            const bool sameAddress = (a1 && a2) ? (n1 == n2) : (address == page.m_address.trimmed());
+
+            if ((p.value("transmitter").toString() == page.m_transmitter) && (p.value("protocol").toString().toLower() == page.m_protocol)
+                && sameAddress && (!functions || (p.value("function").toInt(0) == page.m_function))
+                && (p.value("polarity").toString().toLower() == polarity)) {
+                return c.m_name;
+            }
+        }
+    }
+
+    return QString();
+}
+
+void MessageCenterGUI::editContact(int index, const MessageCenterContact *preset)
 {
     const bool existing = (index >= 0) && (index < m_settings.m_contacts.size());
     QStringList others;
@@ -894,8 +1136,8 @@ void MessageCenterGUI::editContact(int index)
         }
     }
 
-    MessageCenterContactDialog dialog(existing ? m_settings.m_contacts[index] : MessageCenterContact(), others, fields, sample,
-        transmitters, this);
+    MessageCenterContactDialog dialog(preset ? *preset : existing ? m_settings.m_contacts[index] : MessageCenterContact(), others, fields,
+        sample, transmitters, this);
 
     if (dialog.exec() != QDialog::Accepted) {
         return;
@@ -1621,6 +1863,35 @@ void MessageCenterGUI::transmitterChanged()
 {
     QString alias = m_composer->transmitter();
     QStringList protocols;
+
+    if (m_fillingContact) {
+        return;
+    }
+
+    // To a contact: the protocols its send to list sends with (any for one that sets none)
+    if (m_toContact && (m_toContact->currentIndex() > 0))
+    {
+        for (const MessageCenterContact& c : m_settings.m_contacts)
+        {
+            if (c.m_name != m_toContact->currentData().toString()) {
+                continue;
+            }
+
+            for (const MessageCenterContact::SendTo& s : c.m_sendTo)
+            {
+                const QString p = s.m_page.value("protocol").toString().toLower();
+
+                if (p.isEmpty()) {
+                    protocols = RadioPagingPage::protocols();
+                } else if (!protocols.contains(p)) {
+                    protocols.append(p);
+                }
+            }
+        }
+
+        m_composer->setProtocols(protocols.isEmpty() ? RadioPagingPage::protocols() : protocols);
+        return;
+    }
 
     for (const MessageEndpoint& e : m_center->engine().endpoints())
     {

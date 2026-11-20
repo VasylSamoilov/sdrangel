@@ -243,9 +243,9 @@ MessageCenterContactDialog::MessageCenterContactDialog(const MessageCenterContac
     QWidget *sendBox = new QWidget(this);
     QVBoxLayout *sendLayout = new QVBoxLayout(sendBox);
     sendLayout->setContentsMargins(0, 0, 0, 0);
-    m_sendTo = new QTableWidget(0, 8, sendBox);
+    m_sendTo = new QTableWidget(0, 9, sendBox);
     m_sendTo->setHorizontalHeaderLabels({tr("When"), QString(), tr("Value"), tr("Transmitter"), tr("Protocol"), tr("Address"),
-        tr("Function"), tr("Check")});
+        tr("Function"), tr("Polarity"), tr("Check")});
     m_sendTo->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_sendTo->setSelectionMode(QAbstractItemView::SingleSelection);
     m_sendTo->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
@@ -398,6 +398,11 @@ MessageCenterContactDialog::MessageCenterContactDialog(const MessageCenterContac
     showChecks();
     showSendToChecks();
     setMinimumWidth(100 * fontMetrics().averageCharWidth());
+
+    // A new contact (from the fields of a page too) starts with its name
+    if (contact.m_name.isEmpty()) {
+        m_name->setFocus();
+    }
     new DialogPositioner(this, true);
 }
 
@@ -484,6 +489,12 @@ void MessageCenterContactDialog::addSendToRow(const MessageCenterContact::SendTo
     QLineEdit *address = new QLineEdit(sendTo.m_page.value("address").toVariant().toString(), m_sendTo);
     address->setFrame(false);
     QComboBox *function = new QComboBox(m_sendTo);
+    // The polarity of the pager: the same address in the other polarity is another pager
+    QComboBox *polarity = new QComboBox(m_sendTo);
+    polarity->addItems({tr("Default"), tr("Normal"), tr("Inverted")});
+    polarity->setToolTip(tr("Polarity of the pager; Default: the polarity of the transmitter"));
+    const QString pagePolarity = sendTo.m_page.value("polarity").toString().toLower();
+    polarity->setCurrentIndex((pagePolarity == "normal") ? 1 : (pagePolarity == "inverted") ? 2 : 0);
     QLabel *checkLabel = new QLabel(m_sendTo);
     checkLabel->setContentsMargins(4, 0, 4, 0);
 
@@ -494,6 +505,7 @@ void MessageCenterContactDialog::addSendToRow(const MessageCenterContact::SendTo
     m_sendTo->setCellWidget(row, SendProtocol, protocol);
     m_sendTo->setCellWidget(row, SendAddress, address);
     m_sendTo->setCellWidget(row, SendFunction, function);
+    m_sendTo->setCellWidget(row, SendPolarity, polarity);
     m_sendTo->setCellWidget(row, SendCheck, checkLabel);
 
     // The functions of the protocol, as the composer has them
@@ -513,7 +525,7 @@ void MessageCenterContactDialog::addSendToRow(const MessageCenterContact::SendTo
         showSendToChecks();
     });
 
-    for (QComboBox *combo : {field, op, transmitter, function}) {
+    for (QComboBox *combo : {field, op, transmitter, function, polarity}) {
         connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() { showSendToChecks(); });
     }
     for (QComboBox *combo : {field, transmitter}) {
@@ -523,7 +535,7 @@ void MessageCenterContactDialog::addSendToRow(const MessageCenterContact::SendTo
         connect(edit, &QLineEdit::textChanged, this, [this]() { showSendToChecks(); });
     }
     for (QWidget *w : {(QWidget *) field, (QWidget *) op, (QWidget *) value, (QWidget *) transmitter, (QWidget *) protocol,
-        (QWidget *) address, (QWidget *) function}) {
+        (QWidget *) address, (QWidget *) function, (QWidget *) polarity}) {
         w->installEventFilter(this);
     }
 }
@@ -560,6 +572,12 @@ MessageCenterContact::SendTo MessageCenterContactDialog::rowSendTo(int row) cons
 
     if (function->count() > 0) {
         sendTo.m_page["function"] = function->currentIndex();
+    }
+
+    const QComboBox *polarity = qobject_cast<QComboBox *>(m_sendTo->cellWidget(row, SendPolarity));
+
+    if (polarity && (polarity->currentIndex() > 0)) {
+        sendTo.m_page["polarity"] = (polarity->currentIndex() == 2) ? "inverted" : "normal";
     }
 
     return sendTo;

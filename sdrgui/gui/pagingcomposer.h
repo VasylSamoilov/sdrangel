@@ -56,6 +56,10 @@ public:
     //!< The transmitters that can send the page (message center): the selector is there when this is called
     void setTransmitters(const QStringList& aliases);
     QString transmitter() const;
+    //!< The destination of the page filled in (a contact): transmitter (shown even if it has not announced itself),
+    //!< protocol, address, function and polarity (-1 the channel's, 0 normal, 1 inverted). The user can change them:
+    //!< destinationEdited
+    void setDestination(const QString& transmitter, const QString& protocol, const QString& address, int function, int polarity);
     //!< Copies and send delay are for the network mode (POCSAG and FLEX)
     void setNetworkMode(bool network);
     //!< FLEX copies are for the numbered types of a network with message numbering (STD-43A 4.3.7)
@@ -87,6 +91,8 @@ signals:
     void microphoneInputRequested();
     //!< The protocol, the type, the transmitter or the voice source changed
     void selectionChanged();
+    //!< The user changed the transmitter, the address, the function or the polarity (not setDestination)
+    void destinationEdited();
 
 private:
     QComboBox *m_transmitter;

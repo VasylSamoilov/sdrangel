@@ -56,6 +56,9 @@ The pages to transmit, with the transmitter (its name), protocol, address, text,
 
 The composer of a page, the same as in the Radio Paging modulator: transmitter (its name), protocol, address, type, text and the fields of the protocol. Table opens the codepage table of the text. Post the page queues the page for the transmitter.
 
+* To: the transmitter and the address of the composer, or a contact (one with a send to): its send to for the page (its type, protocol...) fills in the transmitter, the address, the function and the polarity. They can be changed: the page then goes where they say, and To shows the contact whose destination they are, if one has it.
+* Edit: the contact chosen (a new one if none). + : the transmitter and the address of the composer to the contacts, as a new contact or added to one: a rule for the messages of the address (and its polarity, if one is set: the same address in the other polarity is another pager) and a send to; there only when the address is one that no contact has as its destination. The list button opens the Contacts tab.
+
 <h3>Contacts</h3>
 
 ![Message Center contacts](../../../doc/img/MessageCenter_plugin_contacts.png)
