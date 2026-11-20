@@ -190,6 +190,29 @@ int main(int argc, char **argv)
             "a reserved short message shows its data");
     }
 
+    // A row selected: new messages wait, the rows shown do not move; they come when the selection goes
+    {
+        PagingMessageTable live;
+        live.setMaxRows(5);
+        live.resize(600, 400);
+        for (int i = 0; i < 5; i++) {
+            live.addRecord(record(QString("l%1").arg(i), "pocsag", QString("000000%1A").arg(i), QString("old %1").arg(i)));
+        }
+        live.selectId("l2");
+        for (int i = 5; i < 8; i++) {
+            live.addRecord(record(QString("l%1").arg(i), "pocsag", QString("000000%1A").arg(i), QString("new %1").arg(i)));
+        }
+        MessageRecord update = record("l3", "pocsag", "0000003A", "old 3 updated");
+        live.addRecord(update);
+        check((live.rowCount() == 5) && (live.waiting() == 3) && (cell(live, 0, PagingMessageTable::ColMessage) == "old 0")
+            && (live.selectedId() == "l2"), "a row selected: the new messages wait, no row moves, the selection stays");
+        check(cell(live, 3, PagingMessageTable::ColMessage) == "old 3 updated", "a row shown is updated in place");
+        live.clearSelection();
+        QApplication::processEvents();
+        check((live.waiting() == 0) && (live.rowCount() == 5) && (cell(live, 4, PagingMessageTable::ColMessage) == "new 7")
+            && (cell(live, 0, PagingMessageTable::ColMessage) == "old 3 updated"), "no selection: they come, the oldest go");
+    }
+
     // Marks: their icons before the message, the colour of its text and of the row
     {
         PagingMessageTable marked;

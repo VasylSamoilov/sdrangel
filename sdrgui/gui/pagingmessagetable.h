@@ -31,6 +31,8 @@
 
 class FeatureGUI;
 class QMouseEvent;
+class QResizeEvent;
+class QToolButton;
 class PagingVoicePlayer;
 
 // The messages of the paging channels and of the message center (POCSAG, FLEX, GSC) as a table: the same
@@ -75,8 +77,14 @@ public:
     //!< Rows kept, the oldest go first
     void setMaxRows(int rows) { m_maxRows = rows; }
     //!< The record is a row, or updates the row of its id. Newest at the bottom: the view follows while it is at the
-    //!< bottom. State: the text of the state column (queued, sent, ...), none for the received messages
+    //!< bottom. While a row is selected or the view is not at the bottom, a new record waits (the rows shown do not
+    //!< move) and a button says how many: they come when it is pressed, or the view is at the bottom again with no
+    //!< row selected. A table being made again (updates disabled) takes them at once. State: the text of the state
+    //!< column (queued, sent, ...), none for the received messages
     void addRecord(const MessageRecord& record, const QString& state = QString());
+    //!< The records waiting are shown, the view follows again
+    void showWaiting();
+    int waiting() const { return (int) m_waiting.size(); }
     //!< Sizes the columns to their usual content (when no sizes were saved)
     void sizeColumns();
     //!< The id of the record of the selected row, empty if none; selects the row of an id
@@ -127,11 +135,21 @@ signals:
 
 protected:
     void mousePressEvent(QMouseEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
     //!< The tool tip of the chip under the mouse in the info column
     bool viewportEvent(QEvent *event) override;
 
 private:
     int m_maxRows = 1000;
+    //! New records that wait while the view does not follow (a row selected, or scrolled up), with their state
+    std::vector<std::pair<MessageRecord, QString>> m_waiting;
+    QToolButton *m_waitingButton;
+
+    //! The view does not follow: a row is selected or it is not at the bottom
+    bool holding() const;
+    //! A new record as a row; the oldest rows go over the maximum
+    void appendRecord(const MessageRecord& record, const QString& state);
+    void showWaitingButton();
     //!< The row of each id (its time cell), kept by the model when rows go; an id not there has no row
     mutable QHash<QString, QPersistentModelIndex> m_rowsById;
     QList<Column> m_defaultColumns;

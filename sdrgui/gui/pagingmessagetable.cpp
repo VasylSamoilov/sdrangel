@@ -34,7 +34,9 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QScrollBar>
+#include <QToolButton>
 #include <QStyledItemDelegate>
 #include <QTextDocument>
 #include <QAbstractTextDocumentLayout>
@@ -327,6 +329,71 @@ PagingMessageTable::PagingMessageTable(QWidget *parent) :
     m_defaultColumns = {ColDate, ColTime, ColProtocol, ColAddress, ColType, ColMessage, ColInfo};
     fitNarrowColumns();
     setDefaultColumns(m_defaultColumns);
+
+    // The records that wait while the view does not follow: a button in the corner of the view. They come when it is
+    // pressed, or when the view is at the bottom with no row selected
+    m_waitingButton = new QToolButton(viewport());
+    m_waitingButton->setIcon(QIcon(":/arrow_down.png"));
+    m_waitingButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_waitingButton->setToolTip(tr("New messages wait while a row is selected or the view is scrolled up, so that the rows\n"
+        "do not move. Click to show them and follow the newest again"));
+    m_waitingButton->hide();
+    connect(m_waitingButton, &QToolButton::clicked, this, [this]() {
+        clearSelection();
+        showWaiting();
+    });
+    auto release = [this]() {
+        if (!m_waiting.empty() && !holding()) {
+            showWaiting();
+        }
+    };
+    connect(verticalScrollBar(), &QScrollBar::valueChanged, this, release);
+    connect(selectionModel(), &QItemSelectionModel::selectionChanged, this, release);
+}
+
+bool PagingMessageTable::holding() const
+{
+    const QScrollBar *sb = verticalScrollBar();
+    return selectionModel()->hasSelection() || (sb->value() < sb->maximum());
+}
+
+void PagingMessageTable::showWaitingButton()
+{
+    m_waitingButton->setText(tr("%n new", "", (int) m_waiting.size()));
+    m_waitingButton->adjustSize();
+    m_waitingButton->move(viewport()->width() - m_waitingButton->width() - 4, viewport()->height() - m_waitingButton->height() - 4);
+    m_waitingButton->setVisible(!m_waiting.empty());
+    m_waitingButton->raise();
+}
+
+void PagingMessageTable::resizeEvent(QResizeEvent *event)
+{
+    QTableWidget::resizeEvent(event);
+
+    if (!m_waiting.empty()) {
+        showWaitingButton();
+    }
+}
+
+void PagingMessageTable::showWaiting()
+{
+    std::vector<std::pair<MessageRecord, QString>> waiting;
+    waiting.swap(m_waiting);
+
+    // One that has a row by now (the table was made again meanwhile) updates it
+    for (const auto& w : waiting)
+    {
+        const int row = findRow(w.first.m_id);
+
+        if (row >= 0) {
+            fillRow(row, w.first, w.second);
+        } else {
+            appendRecord(w.first, w.second);
+        }
+    }
+
+    m_waitingButton->hide();
+    scrollToBottom();
 }
 
 void PagingMessageTable::setDefaultColumns(const QList<Column>& shown)
@@ -1079,9 +1146,45 @@ void PagingMessageTable::addRecord(const MessageRecord& record, const QString& s
         return;
     }
 
+    // A new record while the view does not follow waits, the rows shown stay where they are (one already waiting is
+    // updated there). A table being made again takes them at once
+    if (updatesEnabled() && (holding() || !m_waiting.empty()))
+    {
+        auto it = std::find_if(m_waiting.begin(), m_waiting.end(),
+            [&record](const std::pair<MessageRecord, QString>& w) { return !record.m_id.isEmpty() && (w.first.m_id == record.m_id); });
+
+        if (it != m_waiting.end())
+        {
+            *it = std::make_pair(record, state);
+        }
+        else
+        {
+            m_waiting.emplace_back(record, state);
+
+            // Never more than a table of them: the oldest would go at once
+            if ((int) m_waiting.size() > m_maxRows) {
+                m_waiting.erase(m_waiting.begin());
+            }
+        }
+
+        if (holding())
+        {
+            showWaitingButton();
+            return;
+        }
+
+        showWaiting();
+        return;
+    }
+
+    appendRecord(record, state);
+}
+
+void PagingMessageTable::appendRecord(const MessageRecord& record, const QString& state)
+{
     QScrollBar *sb = verticalScrollBar();
     bool atBottom = (sb->value() == sb->maximum());
-    row = rowCount();
+    int row = rowCount();
     setRowCount(row + 1);
     fillRow(row, record, state);
 
