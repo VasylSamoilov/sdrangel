@@ -215,6 +215,10 @@ PagingMessageTable::PagingMessageTable(QWidget *parent) :
     setSelectionMode(QAbstractItemView::SingleSelection);
     setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
     setItemDelegate(new HtmlDelegate(this));
+    // A text longer than its column (a long channel name) is cut with an ellipsis, not wrapped; the message wraps in
+    // its delegate
+    setWordWrap(false);
+    setTextElideMode(Qt::ElideRight);
     // Row numbers, as in the Pager demodulator
     verticalHeader()->setVisible(true);
     verticalHeader()->setDefaultAlignment(Qt::AlignRight | Qt::AlignVCenter);
