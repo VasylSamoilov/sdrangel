@@ -16,12 +16,15 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include <algorithm>
+#include <cmath>
 
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
 #include <QDialogButtonBox>
 #include <QFormLayout>
+#include <QGuiApplication>
+#include <QScreen>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
@@ -39,6 +42,10 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include "device/deviceapi.h"
+#include "device/deviceset.h"
+#include "dsp/devicesamplesink.h"
+#include "dsp/devicesamplesource.h"
 #include "feature/featureuiset.h"
 #include "gui/buttonswitch.h"
 #include "gui/flowlayout.h"
@@ -47,6 +54,7 @@
 
 #include "nmtplan.h"
 
+#include "cellularchannelgrid.h"
 #include "cellulargui.h"
 
 const int CellularGUI::m_maxLogLines;
@@ -170,7 +178,7 @@ QString powerName(int level)
 
 // ---- the settings of one network ----
 
-CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& settings, QWidget *parent) :
+CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& settings, const QMap<int, QString>& others, QWidget *parent) :
     QDialog(parent),
     m_settings(settings)
 {
@@ -221,11 +229,38 @@ CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& sett
         "2 medium (10 dB less), 1 and 0 low (20 dB less). A phone that receives the network strongly in a call "
         "goes to low power by itself");
     form->addRow("Phone power", m_msPower);
+    // the channels: the plan of the country as a grid, the same as text below it
+    m_grid = new CellularChannelGrid(page);
+    m_grid->setToolTip("The channels of the country plan by frequency (each row starts at the downlink frequency on its left). "
+        "Click: free, CC, TC, CC/TC; right click: any type and the supervisory tone of a traffic channel. "
+        "Grey: used by another network on the same devices; dark: outside the span of the devices");
+    m_grid->setMinimumHeight(170);
+    m_grid->setOthers(others);
+    form->addRow(new QLabel("Carriers", page));
+    form->addRow(m_grid);
+    QLabel *legend = new QLabel(page);
+    legend->setTextFormat(Qt::RichText);
+    legend->setWordWrap(true);
+    legend->setText("<span style=\"background-color:#c07a1a;\">&nbsp;CC&nbsp;</span> "
+        "<span style=\"background-color:#2f6db3;\">&nbsp;TC&nbsp;</span> "
+        "<span style=\"background-color:#7a4fb3;\">&nbsp;CC/TC&nbsp;</span> "
+        "<span style=\"background-color:#4a4a4a;\">&nbsp;other network&nbsp;</span> "
+        "<span style=\"background-color:#1c1c1c; color:#777777;\">&nbsp;outside the devices&nbsp;</span>");
+    form->addRow(legend);
+    m_bandwidth = new QLabel(page);
+    m_bandwidth->setWordWrap(true);
+    m_bandwidth->setTextFormat(Qt::RichText);
+    form->addRow(m_bandwidth);
     m_carriers = new QLineEdit(page);
-    m_carriers->setToolTip("channel:type[:supervisory], comma separated; every channel needs its type. Types: cc (calling), "
+    m_carriers->setToolTip("The same channels as text: channel:type[:supervisory], comma separated. Types: cc (calling), "
         "tc (traffic), cctc (both), actc, cca, ccb (NMT-900), test. Supervisory tone 1..4 (0 none) on every traffic channel, "
         "or on none for 1..4 in turn. Example: 1:cctc:1, 5:tc:2, 6:tc:3");
-    form->addRow("Carriers", m_carriers);
+    form->addRow(m_carriers);
+    m_carriersError = new QLabel(page);
+    m_carriersError->setWordWrap(true);
+    m_carriersError->setStyleSheet("color: #ff6060;");
+    m_carriersError->hide();
+    form->addRow(m_carriersError);
     m_compandor = new QCheckBox("Compandor on speech", page);
     form->addRow(m_compandor);
     m_callerId = new QCheckBox("Send the number of the caller", page);
@@ -269,10 +304,204 @@ CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& sett
     m_fallback->setCurrentIndex(settings.m_fallback == CellularNetworkSettings::FallbackMusic ? 1 : 0);
     m_rxDeviceSet->setValue(settings.m_rxDeviceSetIndex);
     m_txDeviceSet->setValue(settings.m_txDeviceSetIndex);
+    onPlanChanged();
+    onTextChanged();
+
+    // room for the grid, but not more than the screen
+    QSize size(400, 700);
+    if (const QScreen *screen = parent ? parent->screen() : QGuiApplication::primaryScreen()) {
+        size = size.boundedTo(screen->availableGeometry().size());
+    }
+    resize(size);
 
     connect(m_system, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
         fillCountries(m_country->currentData().toString());
+        onPlanChanged();
     });
+    connect(m_country, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &CellularNetworkDialog::onPlanChanged);
+    connect(m_rxDeviceSet, QOverload<int>::of(&QSpinBox::valueChanged), this, &CellularNetworkDialog::onPlanChanged);
+    connect(m_txDeviceSet, QOverload<int>::of(&QSpinBox::valueChanged), this, &CellularNetworkDialog::onPlanChanged);
+    connect(m_grid, &CellularChannelGrid::changed, this, &CellularNetworkDialog::onGridChanged);
+    connect(m_carriers, &QLineEdit::editingFinished, this, &CellularNetworkDialog::onTextChanged);
+}
+
+QString CellularNetworkDialog::carriersText(const std::vector<modemnmt::NmtCarrierConfig>& carriers)
+{
+    using T = modemnmt::ChannelType;
+    QStringList items;
+
+    for (const modemnmt::NmtCarrierConfig& c : carriers)
+    {
+        QString type;
+        switch (c.type)
+        {
+        case T::Cc: type = "cc"; break;
+        case T::Cca: type = "cca"; break;
+        case T::Ccb: type = "ccb"; break;
+        case T::Tc: type = "tc"; break;
+        case T::AcTc: type = "actc"; break;
+        case T::CcTc: type = "cctc"; break;
+        case T::Test: type = "test"; break;
+        }
+        // tone: 1..4 given, -1 none (written 0), 0 auto (not written)
+        items.append(c.supervisory != 0 ? QString("%1:%2:%3").arg(c.channel).arg(type).arg(std::max(c.supervisory, 0))
+            : QString("%1:%2").arg(c.channel).arg(type));
+    }
+    return items.join(", ");
+}
+
+// the plan of the country, the spans of the devices
+void CellularNetworkDialog::onPlanChanged()
+{
+    double downLow = 0.0, downHigh = 0.0, upLow = 0.0, upHigh = 0.0, centre = 0.0;
+    int rate = 0;
+
+    m_grid->setPlan(m_system->currentIndex() == 1 ? modemnmt::System::Nmt900 : modemnmt::System::Nmt450,
+        m_country->currentData().toString());
+    if (!deviceSpan(m_txDeviceSet->value(), true, downLow, downHigh, centre, rate)) {
+        downLow = downHigh = 0.0;
+    }
+    if (!deviceSpan(m_rxDeviceSet->value(), false, upLow, upHigh, centre, rate)) {
+        upLow = upHigh = 0.0;
+    }
+    m_grid->setSpans(downLow, downHigh, upLow, upHigh);
+    showBandwidth();
+}
+
+void CellularNetworkDialog::onGridChanged()
+{
+    m_carriers->setText(carriersText(m_grid->carriers()));
+    onTextChanged();
+}
+
+// the text is checked as the network will take it; when it can be read the grid follows it
+void CellularNetworkDialog::onTextChanged()
+{
+    std::vector<modemnmt::NmtCarrierConfig> carriers;
+    QString error;
+    // the tones written in the text; the parser gives the others 1..4 in turn, which the grid
+    // does not take as given (they stay "auto" when the grid writes the text again)
+    QMap<int, int> givenTones;
+    for (const QString& item : m_carriers->text().split(',', Qt::SkipEmptyParts))
+    {
+        const QStringList parts = item.trimmed().split(':');
+        if (parts.size() == 3)
+        {
+            const int tone = parts[2].trimmed().toInt();
+            givenTones[parts[0].trimmed().toInt()] = tone > 0 ? tone : -1;     // 0 in the text: none
+        }
+    }
+    const auto keepGiven = [&givenTones](std::vector<modemnmt::NmtCarrierConfig>& list) {
+        for (modemnmt::NmtCarrierConfig& c : list) {
+            c.supervisory = givenTones.value(c.channel, 0);
+        }
+    };
+
+    if (CellularNetworkSettings::parseCarriers(m_carriers->text(), carriers, error))
+    {
+        m_carriersError->hide();
+        keepGiven(carriers);
+        m_grid->setCarriers(carriers);
+    }
+    else
+    {
+        m_carriersError->setText(error);
+        m_carriersError->show();
+        // the items that can be read are still shown
+        std::vector<modemnmt::NmtCarrierConfig> partial;
+        for (const QString& item : m_carriers->text().split(',', Qt::SkipEmptyParts))
+        {
+            std::vector<modemnmt::NmtCarrierConfig> one;
+            QString itemError;
+            if (CellularNetworkSettings::parseCarriers(item, one, itemError)) {
+                partial.insert(partial.end(), one.begin(), one.end());
+            }
+        }
+        keepGiven(partial);
+        m_grid->setCarriers(partial);
+    }
+    showBandwidth();
+}
+
+bool CellularNetworkDialog::deviceSpan(int index, bool tx, double& low, double& high, double& centre, int& rate)
+{
+    const std::vector<DeviceSet*>& sets = MainCore::instance()->getDeviceSets();
+
+    if (index < 0 || index >= static_cast<int>(sets.size()) || !sets[index] || !sets[index]->m_deviceAPI) {
+        return false;
+    }
+    DeviceAPI *api = sets[index]->m_deviceAPI;
+    if (tx)
+    {
+        if (!api->getSampleSink()) {
+            return false;
+        }
+        centre = api->getSampleSink()->getCenterFrequency();
+        rate = api->getSampleSink()->getSampleRate();
+    }
+    else
+    {
+        if (!api->getSampleSource()) {
+            return false;
+        }
+        centre = api->getSampleSource()->getCenterFrequency();
+        rate = api->getSampleSource()->getSampleRate();
+    }
+    // the carriers go in 75 % of the band of the device
+    low = centre - 0.375 * rate;
+    high = centre + 0.375 * rate;
+    return rate > 0;
+}
+
+// The span of the chosen channels, the sample rate it needs, and whether the devices of the network
+// carry it.
+void CellularNetworkDialog::showBandwidth()
+{
+    const std::vector<modemnmt::NmtCarrierConfig> carriers = m_grid->carriers();
+    const modemnmt::NmtCountry *country = m_grid->country();
+
+    if (carriers.empty() || !country)
+    {
+        m_bandwidth->setText("No carriers.");
+        return;
+    }
+    double downMin = 1e12, downMax = 0.0, upMin = 1e12, upMax = 0.0;
+    for (const modemnmt::NmtCarrierConfig& c : carriers)
+    {
+        modemnmt::NmtChannelFrequency f;
+        if (modemnmt::nmtChannelFrequency(*country, c.channel, f))
+        {
+            downMin = std::min(downMin, f.downlink);
+            downMax = std::max(downMax, f.downlink);
+            upMin = std::min(upMin, f.uplink);
+            upMax = std::max(upMax, f.uplink);
+        }
+    }
+    // a channel is 25 kHz wide; the rate is an even multiple of 48 kHz
+    const double span = std::max(downMax - downMin, upMax - upMin) + 25e3;
+    const int needed = static_cast<int>(std::ceil(span / 0.75 / 96e3)) * 96000;
+    QString text = QString("Down %1 - %2 MHz, up %3 - %4 MHz: span %5 MHz, needs at least %6 kS/s.")
+        .arg(downMin / 1e6, 0, 'f', 4).arg(downMax / 1e6, 0, 'f', 4)
+        .arg(upMin / 1e6, 0, 'f', 4).arg(upMax / 1e6, 0, 'f', 4)
+        .arg(span / 1e6, 0, 'f', 3).arg(needed / 1000);
+
+    double low, high, centre;
+    int rate;
+    const auto describe = [&](const char *name, int index, bool tx, double minHz, double maxHz) {
+        if (!deviceSpan(index, tx, low, high, centre, rate)) {
+            return QString(" %1 %2: not there.").arg(name).arg(index);
+        }
+        const bool fits = minHz - 12.5e3 >= low && maxHz + 12.5e3 <= high;
+        QString s = QString(" %1 %2 at %3 MHz, %4 kS/s: %5").arg(name).arg(index).arg(centre / 1e6, 0, 'f', 4).arg(rate / 1000)
+            .arg(fits ? "<span style=\"color:#5fd07f;\">fits</span>" : "<span style=\"color:#ff6060;\">does not fit</span>");
+        if (!fits) {
+            s += QString(" (centre %1 MHz would take it)").arg((minHz + maxHz) / 2e6, 0, 'f', 4);
+        }
+        return s + ".";
+    };
+    text += describe("Transmitter", m_txDeviceSet->value(), true, downMin, downMax);
+    text += describe("receiver", m_rxDeviceSet->value(), false, upMin, upMax);
+    m_bandwidth->setText(text);
 }
 
 // the countries of the system, the short name as the data
@@ -696,7 +925,23 @@ void CellularGUI::editNetwork(int id)
     if (!current) {
         return;
     }
-    CellularNetworkDialog dialog(*current, this);
+    // the channels other networks take on the same receiver or transmitter
+    QMap<int, QString> others;
+    for (const CellularNetworkSettings& n : m_settings.m_networks)
+    {
+        if (n.m_id == id || (n.m_rxDeviceSetIndex != current->m_rxDeviceSetIndex && n.m_txDeviceSetIndex != current->m_txDeviceSetIndex)) {
+            continue;
+        }
+        std::vector<modemnmt::NmtCarrierConfig> carriers;
+        QString error;
+        if (CellularNetworkSettings::parseCarriers(n.m_carriers, carriers, error) || !carriers.empty())
+        {
+            for (const modemnmt::NmtCarrierConfig& c : carriers) {
+                others[c.channel] = n.m_name;
+            }
+        }
+    }
+    CellularNetworkDialog dialog(*current, others, this);
     if (dialog.exec() != QDialog::Accepted) {
         return;
     }

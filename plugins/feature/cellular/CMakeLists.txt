@@ -25,10 +25,12 @@ include_directories(
 if(NOT SERVER_MODE)
     set(cellular_SOURCES
         ${cellular_SOURCES}
+        cellularchannelgrid.cpp
         cellulargui.cpp
     )
     set(cellular_HEADERS
         ${cellular_HEADERS}
+        cellularchannelgrid.h
         cellulargui.h
     )
 

@@ -44,17 +44,32 @@ class QSpinBox;
 class QTabWidget;
 class QTableWidget;
 
-// The settings of one network, edited as a copy: they are taken once, with OK.
+class CellularChannelGrid;
+
+// The settings of one network, edited as a copy: they are taken once, with OK. `others`: the
+// channels of the other networks on the same devices, with their names.
 class CellularNetworkDialog : public QDialog
 {
     Q_OBJECT
 public:
-    explicit CellularNetworkDialog(const CellularNetworkSettings& settings, QWidget *parent = nullptr);
+    CellularNetworkDialog(const CellularNetworkSettings& settings, const QMap<int, QString>& others, QWidget *parent = nullptr);
 
     void read(CellularNetworkSettings& settings) const;
+    // "10:cc, 18:tc:1"
+    static QString carriersText(const std::vector<modemnmt::NmtCarrierConfig>& carriers);
 
 private:
     void fillCountries(const QString& selected);
+    void onPlanChanged();
+    void onGridChanged();
+    void onTextChanged();
+    void showBandwidth();
+    // span of a device set in Hz, false if it is not there or not of that direction
+    static bool deviceSpan(int index, bool tx, double& low, double& high, double& centre, int& rate);
+
+    CellularChannelGrid *m_grid;
+    QLabel *m_bandwidth;
+    QLabel *m_carriersError;
 
     CellularNetworkSettings m_settings;
     QLineEdit *m_name;
