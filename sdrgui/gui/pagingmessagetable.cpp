@@ -404,7 +404,9 @@ QString PagingMessageTable::recordText(const MessageRecord& record)
             return QString("(system event, flags %1)").arg(d.value("event_flags").toUInt(), 3, 16, QChar('0'));
         }
 
-        return QString("(short instruction type %1)").arg(type);
+        // Types 2 to 7 are reserved (STD-43A Table 3.9.1-1): the 11 data bits d3-d13 as they are
+        const unsigned bits = (d.value("instruction_data").toUInt() >> 3) & 0x7ff;
+        return QString("(short instruction type %1, reserved, data 0x%2)").arg(type).arg(bits, 3, 16, QChar('0'));
     }
 
     return record.m_text;
@@ -583,6 +585,22 @@ void PagingMessageTable::recordChips(const MessageRecord& record, QStringList& t
             int frame = d.value("instruction_frame").toInt();
             add(QString("G:%1>%2").arg(slot).arg(frame), tr("%1 added to group slot %2 (temporary address %3); the group "
                 "message comes in frame %4").arg(record.m_address).arg(slot).arg(2029568 + slot).arg(frame), ToneGroup);
+        }
+        // The other short instructions: what the type is and the data bits
+        if (d.contains("instruction_type") && (d.value("instruction_type").toInt() != 0))
+        {
+            const int type = d.value("instruction_type").toInt();
+            const unsigned data = d.value("instruction_data").toUInt();
+            const unsigned bits = (data >> 3) & 0x7ff;
+            const QString binary = QString("%1").arg(bits, 11, 2, QChar('0'));
+            QString tip = (type == 1)
+                ? tr("Short instruction type 1, system event notification (STD-43A Table 3.9.1-1): event flags d3-d13 %1 (0x%2)")
+                    .arg(binary).arg(bits, 3, 16, QChar('0'))
+                : tr("Short instruction type %1 (i2 i1 i0 = %2): reserved for future use in STD-43A Table 3.9.1-1, not decoded.\n"
+                    "Data bits d3-d13: %3 (0x%4, %5); the 14 bits of the vector: 0x%6.\n"
+                    "A network may use it for its own purpose; a word with errors corrected (see Errors) may also be damaged")
+                    .arg(type).arg(type, 3, 2, QChar('0')).arg(binary).arg(bits, 3, 16, QChar('0')).arg(bits).arg(data, 4, 16, QChar('0'));
+            add(QString("SI:%1").arg(type), tip);
         }
         if (d.contains("nid_service_area"))
         {

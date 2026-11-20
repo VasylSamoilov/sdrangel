@@ -111,6 +111,21 @@ int main(int argc, char **argv)
         check(cell(pages, 0, PagingMessageTable::ColDirection) == "TX", "a page its channel sent is TX");
     }
 
+    // A FLEX short instruction of a reserved type: its data bits in the message, the type explained in the info
+    {
+        PagingMessageTable si;
+        MessageRecord r = record("si", "flex", "0000289168", QString());
+        r.m_msgType = "short_instruction";
+        r.m_protocolData.insert("instruction_type", 5);
+        r.m_protocolData.insert("instruction_data", (0x2a5 << 3) | 5);
+        si.addRecord(r);
+        const QTableWidgetItem *info = si.item(0, PagingMessageTable::ColInfo);
+        check(cell(si, 0, PagingMessageTable::ColMessage) == "(short instruction type 5, reserved, data 0x2a5)",
+            "a reserved short instruction shows its data bits");
+        check(cell(si, 0, PagingMessageTable::ColInfo).contains("SI:5") && info && info->toolTip().contains("reserved for future use")
+            && info->toolTip().contains("01010100101"), "its info explains the type and has the bits");
+    }
+
     // The oldest rows go first
     table.addRecord(record("c", "gsc", "123456/1", "C"));
     table.addRecord(record("d", "gsc", "123456/2", "D"));
