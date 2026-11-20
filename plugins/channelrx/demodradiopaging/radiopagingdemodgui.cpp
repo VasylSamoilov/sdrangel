@@ -2047,8 +2047,11 @@ void RadioPagingDemodGUI::updateStatus()
     bool playing = status.m_enabled[2] && status.m_gscAudio;
     ui->gscAudio->setStyleSheet(playing ? "QToolButton { background-color : green; }" : "");
 
-    // The status lines come and go with what is received: a window too short for them grows (its minimum size follows
-    // its contents), else its last sections would be under its bottom bar
+    // The status lines come and go with what is received: the sections are arranged again for them (nothing is done
+    // when nothing changed) and a window too short for them grows (its minimum size follows its contents), else its
+    // last sections would be under its bottom bar
+    getRollupContents()->arrangeRollups();
+
     if (!isMaximized() && (getRollupContents()->minimumHeight() + getAdditionalHeight() > height())) {
         sizeToContents();
     }
