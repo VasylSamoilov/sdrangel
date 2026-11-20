@@ -60,7 +60,6 @@ MESSAGE_CLASS_DEFINITION(MessageCenter::MsgRemoveEndpoints, Message)
 MESSAGE_CLASS_DEFINITION(MessageCenter::MsgImportFile, Message)
 MESSAGE_CLASS_DEFINITION(MessageCenter::MsgIngestRecords, Message)
 MESSAGE_CLASS_DEFINITION(MessageCenter::MsgSpeak, Message)
-MESSAGE_CLASS_DEFINITION(MessageCenter::MsgHighlight, Message)
 
 const char* const MessageCenter::m_featureIdURI = "sdrangel.feature.messagecenter";
 const char* const MessageCenter::m_featureId = "MessageCenter";
@@ -560,8 +559,11 @@ std::unique_ptr<MessageCenterSink> MessageCenter::makeSink(const MessageCenterFi
     if (type == "command") {
         return std::unique_ptr<MessageCenterSink>(new MessageCenterCommandSink(setting.m_name, setting.m_text));
     }
+    if (type == "mark") {
+        return std::unique_ptr<MessageCenterSink>(new MessageCenterMarkSink(setting.m_name, setting.m_icon, setting.m_color, setting.m_background));
+    }
 
-    // speech, highlight and map: done by the feature, in the thread of the message center
+    // speech and map: done by the feature, in the thread of the message center
     return std::unique_ptr<MessageCenterSink>(new MessageCenterActionSink(setting.m_name, type, setting.m_text, setting.m_color,
         [this](const QString& actionType, const MessageRecord& record, const QString& text, quint32 color) {
             doAction(actionType, record, text, color);
@@ -589,17 +591,13 @@ std::unique_ptr<MessageCenterSource> MessageCenter::makeSource(const MessageCent
 // Called with the engine locked
 void MessageCenter::doAction(const QString& type, const MessageRecord& record, const QString& text, quint32 color)
 {
+    (void) color;
+
     if (type == "speech")
     {
         // Said by the GUI: no GUI, nobody to say it
         if (getMessageQueueToGUI()) {
             getMessageQueueToGUI()->push(MsgSpeak::create(text));
-        }
-    }
-    else if (type == "highlight")
-    {
-        if (getMessageQueueToGUI()) {
-            getMessageQueueToGUI()->push(MsgHighlight::create(record.m_id, color));
         }
     }
     else if (type == "map")

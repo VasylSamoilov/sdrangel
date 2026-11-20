@@ -207,23 +207,6 @@ public:
         MsgSpeak(const QString& text) : Message(), m_text(text) { }
     };
 
-    //! To the GUI: the row of a message in the log gets a colour
-    class MsgHighlight : public Message {
-        MESSAGE_CLASS_DECLARATION
-
-    public:
-        const QString& getId() const { return m_id; }
-        quint32 getColor() const { return m_color; }
-
-        static MsgHighlight* create(const QString& id, quint32 color) { return new MsgHighlight(id, color); }
-
-    private:
-        QString m_id;
-        quint32 m_color;
-
-        MsgHighlight(const QString& id, quint32 color) : Message(), m_id(id), m_color(color) { }
-    };
-
     //! To the GUI: the log, the endpoints or the queue changed
     class MsgUpdated : public Message {
         MESSAGE_CLASS_DECLARATION

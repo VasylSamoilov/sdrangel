@@ -113,7 +113,7 @@ std::vector<MessageCenterEngine::Route> MessageCenterSettings::routesFromJson(co
 
 const QStringList& MessageCenterFileSetting::sinkTypes()
 {
-    static const QStringList types = {"file", "udp", "command", "speech", "highlight", "map"};
+    static const QStringList types = {"file", "udp", "command", "speech", "mark", "map"};
     return types;
 }
 
@@ -161,8 +161,60 @@ QString MessageCenterFileSetting::check(bool sink) const
     if ((type == "speech") && m_text.trimmed().isEmpty()) {
         return QString("%1: a speech sink needs a text").arg(m_name);
     }
+    if ((type == "mark") && m_icon.isEmpty() && (m_color == 0) && (m_background == 0)) {
+        return QString("%1: a mark needs an icon, a colour of the text or a colour of the row").arg(m_name);
+    }
 
     return QString();
+}
+
+QStringList MessageCenterSettings::presetNames()
+{
+    return {"Empty", "Emergency"};
+}
+
+bool MessageCenterSettings::preset(const QString& name, std::vector<MessageCenterEngine::Route>& routes, QList<MessageCenterFileSetting>& sinks)
+{
+    if (!presetNames().contains(name)) {
+        return false;
+    }
+
+    routes = MessageCenterEngine::defaultRoutes();
+    sinks.clear();
+
+    if (name == "Empty") {
+        return true;
+    }
+
+    // An example: a few words of the text (English, and Dutch of the P2000 network) and an icon for each kind of message
+    static const struct { const char *name; const char *text; const char *icon; } kinds[] = {
+        {"Ambulance", "ambu|reanimatie|cardiac|drowning", ":ambulance"},
+        {"Fire", "brand|fire|smoke", ":fire_engine"},
+        {"Accident", "ongeval|accident|crash", ":collision"},
+        {"Hazardous", "gaslucht|hazmat", ":biohazard"},
+        {"Helicopter", "lifeliner|helicopter", ":helicopter"},
+        {"Police", "politie|police", ":police_car_light"},
+        {"Call back", "graag contact|please call", ":telephone_receiver"},
+        {"Plant alarm", "high level|fault", ":wrench"},
+        {"Test", "test page|testoproep", ":satellite_antenna"}
+    };
+
+    for (const auto& kind : kinds)
+    {
+        MessageCenterFileSetting sink;
+        sink.m_name = kind.name;
+        sink.m_type = "mark";
+        sink.m_icon = kind.icon;
+        sinks.append(sink);
+
+        MessageCenterEngine::Route route;
+        route.m_name = kind.name;
+        route.m_filter.m_text = kind.text;
+        route.m_sinks = QStringList(kind.name);
+        routes.push_back(route);
+    }
+
+    return true;
 }
 
 QByteArray MessageCenterSettings::filesToJson(const QList<MessageCenterFileSetting>& files)
@@ -189,8 +241,14 @@ QByteArray MessageCenterSettings::filesToJson(const QList<MessageCenterFileSetti
         if (!file.m_text.isEmpty()) {
             o["text"] = file.m_text;
         }
-        if (file.m_color != 0xffff0000) {
+        if (!file.m_icon.isEmpty()) {
+            o["icon"] = file.m_icon;
+        }
+        if (file.m_color != 0) {
             o["color"] = (double) file.m_color;
+        }
+        if (file.m_background != 0) {
+            o["background"] = (double) file.m_background;
         }
 
         array.append(o);
@@ -214,7 +272,9 @@ QList<MessageCenterFileSetting> MessageCenterSettings::filesFromJson(const QByte
         file.m_address = o["address"].toString();
         file.m_port = o["port"].toInt();
         file.m_text = o["text"].toString();
-        file.m_color = o.contains("color") ? (quint32) o["color"].toDouble() : 0xffff0000;
+        file.m_icon = o["icon"].toString();
+        file.m_color = (quint32) o["color"].toDouble(0);
+        file.m_background = (quint32) o["background"].toDouble(0);
         files.append(file);
     }
 

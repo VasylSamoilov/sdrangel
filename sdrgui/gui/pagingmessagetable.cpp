@@ -66,6 +66,7 @@ const int jsonRole = Qt::UserRole + 3;          // On the time item: the record 
 const int tipRole = Qt::UserRole + 4;           // On the message item: its tool tip without the voice file
 const int chipTextsRole = Qt::UserRole + 5;     // On the info item: the label of each chip
 const int chipTipsRole = Qt::UserRole + 6;      // On the info item: the tool tip of each chip
+const int marksIconRole = Qt::UserRole + 7;     // On the message item: the icons of its marks (a voice message: its play icon)
 
 class HtmlDelegate : public QStyledItemDelegate
 {
@@ -113,9 +114,12 @@ public:
         }
 
         // The message: as high as its text wrapped to the width of its column
+        // (less the width of its icon, the marks)
         const QTableView *view = qobject_cast<const QTableView *>(parent());
+        const QIcon icon = index.data(Qt::DecorationRole).value<QIcon>();
+        const int iconWidth = icon.isNull() ? 0 : icon.availableSizes().value(0, QSize(16, 16)).width() + 4;
         const int textWidth = (view && (index.column() == PagingMessageTable::ColMessage))
-            ? std::max(20, view->columnWidth(index.column()) - 8) : -1;
+            ? std::max(20, view->columnWidth(index.column()) - 8 - iconWidth) : -1;
 
         // Laying out HTML is slow: the size of the same HTML at the same width and font is kept (the chips and the
         // colours of thousands of rows are a few hundred different cells)
@@ -240,6 +244,36 @@ QIcon contactIcon(const QString& icon)
     const QString path = (icon.startsWith(':') && !icon.startsWith(":/")) ? QString(":/messagecenter/icons/%1.svg").arg(icon.mid(1)) : icon;
     QIcon result(path);
     icons.insert(icon, result);
+    return result;
+}
+
+// The icons of the marks of a message side by side, in one icon (kept: the same few combinations on many rows)
+QIcon marksIcon(const QStringList& names, int size)
+{
+    static QHash<QString, QIcon> icons;
+
+    if (names.isEmpty()) {
+        return QIcon();
+    }
+
+    const QString key = QString::number(size) + '|' + names.join('|');
+    auto it = icons.constFind(key);
+
+    if (it != icons.constEnd()) {
+        return it.value();
+    }
+
+    QPixmap pixmap(names.size() * (size + 2) - 2, size);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+
+    for (int i = 0; i < names.size(); i++) {
+        contactIcon(names[i]).paint(&painter, QRect(i * (size + 2), 0, size, size));
+    }
+
+    painter.end();
+    QIcon result(pixmap);
+    icons.insert(key, result);
     return result;
 }
 
@@ -914,7 +948,35 @@ void PagingMessageTable::fillRow(int row, const MessageRecord& record, const QSt
         messageHtml += QString(" <i style=\"color:#888888\">[%1: %2]</i>").arg(altType.toHtmlEscaped(), altText.toHtmlEscaped());
         messageTip += QString("\n%1: %2").arg(altType, altText);
     }
-    cell(ColMessage, text, messageHtml, messageTip)->setData(tipRole, messageTip);
+
+    // The marks of the routes (Message Center): their icons before the message, the colour of its text and of the row
+    // (the last mark that has one)
+    QStringList markIcons;
+    QColor markText;
+    QColor markBackground;
+
+    for (const QVariant& m : d.value("marks").toList())
+    {
+        const QVariantMap mark = m.toMap();
+
+        if (!mark.value("icon").toString().isEmpty()) {
+            markIcons.append(mark.value("icon").toString());
+        }
+        if (mark.value("color").toUInt() != 0) {
+            markText = QColor::fromRgba(mark.value("color").toUInt());
+        }
+        if (mark.value("background").toUInt() != 0) {
+            markBackground = QColor::fromRgba(mark.value("background").toUInt());
+        }
+    }
+
+    if (markText.isValid()) {
+        messageHtml = QString("<span style=\"color:%1\">%2</span>").arg(markText.name(), messageHtml);
+    }
+
+    QTableWidgetItem *messageItem = cell(ColMessage, text, messageHtml, messageTip);
+    messageItem->setData(tipRole, messageTip);
+    messageItem->setData(marksIconRole, marksIcon(markIcons, iconSize().height() > 0 ? iconSize().height() : 16));
     setVoiceCell(row);
 
     // Fragment: the n-th fragment received, or the reassembled message of n fragments
@@ -971,6 +1033,20 @@ void PagingMessageTable::fillRow(int row, const MessageRecord& record, const QSt
     }
 
     cell(ColState, state);
+
+    // The colour of the row of its marks, on every cell (none: a row decoded again loses the one it had)
+    if (markBackground.isValid() || d.contains("marks"))
+    {
+        QBrush brush = markBackground.isValid()
+            ? QBrush(QColor(markBackground.red(), markBackground.green(), markBackground.blue(), 110)) : QBrush();
+
+        for (int col = 0; col < columnCount(); col++)
+        {
+            if (QTableWidgetItem *cellItem = item(row, col)) {
+                cellItem->setBackground(brush);
+            }
+        }
+    }
 
     // The height of the row follows its cells (a message decoded again may need more or fewer lines)
     resizeRowToContents(row);
@@ -1057,7 +1133,7 @@ void PagingMessageTable::setVoiceCell(int row)
 
     if (file.isEmpty())
     {
-        messageItem->setIcon(QIcon());
+        messageItem->setIcon(messageItem->data(marksIconRole).value<QIcon>());
         messageItem->setToolTip(tip);
         return;
     }

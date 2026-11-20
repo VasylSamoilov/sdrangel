@@ -142,8 +142,6 @@ private:
     QTableWidget *m_sinksTable;
     QTableWidget *m_sourcesTable;
     QPlainTextEdit *m_errors;
-    QHash<QString, quint32> m_highlights;   //!< Colour of the rows of the log, by record id (the highlight sinks)
-    static const int m_maxHighlights = 10000;
 #ifdef QT_TEXTTOSPEECH_FOUND
     QTextToSpeech *m_speech = nullptr;
 #endif

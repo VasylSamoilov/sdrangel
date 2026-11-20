@@ -80,6 +80,7 @@ if(NOT SERVER_MODE)
     add_executable(messagecenterenginetest EXCLUDE_FROM_ALL
         test/messagecenterenginetest.cpp
         messagecenterengine.cpp
+        messagecentersettings.cpp
     )
     target_include_directories(messagecenterenginetest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/modemradiopaging)
     target_link_libraries(messagecenterenginetest Qt::Core Qt::Network sdrbase modemradiopaging)

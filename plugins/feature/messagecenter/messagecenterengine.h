@@ -374,6 +374,27 @@ private:
     Action m_action;
 };
 
+// A mark on the messages a route sends to it: an icon, a colour of the text and a colour of the row, each optional. The
+// engine writes it into the record before the record goes to the sinks (protocolData "marks", a list: a message of
+// several routes has their marks), so the log, the history and the API have it
+class MessageCenterMarkSink : public MessageCenterSink
+{
+public:
+    //! icon: a built-in icon (:name) or the path of an image, empty for none; textColor, background: ARGB, 0 for none
+    MessageCenterMarkSink(const QString& name, const QString& icon, quint32 textColor, quint32 background);
+    QString name() const override { return m_name; }
+    using MessageCenterSink::accept;
+    bool accept(const MessageRecord& record, QString& error) override;
+    //!< The mark as it is in the record: icon, color, background (those set), and the name of the sink
+    QVariantMap mark() const;
+
+private:
+    QString m_name;
+    QString m_icon;
+    quint32 m_textColor;
+    quint32 m_background;
+};
+
 // A page to transmit
 struct MessageCenterPage
 {
@@ -444,6 +465,8 @@ public:
     //!< The record with the name, icon and colour of its contact in protocolData (contact, contact_icon,
     //!< contact_color), or without them when it has none
     void nameContact(MessageRecord& record) const;
+    //! The marks of the routes that select the record (from source) and send it to a mark sink, into its protocol data
+    void markRecord(MessageRecord& record, const QString& source) const;
 
     //!< A record from a source: events update the endpoints and the pages, the others are routed
     void ingest(const MessageRecord& record, const QString& source, qint64 now);

@@ -567,7 +567,7 @@ MessageCenterGUI::MessageCenterGUI(PluginAPI* pluginAPI, FeatureUISet *featureUI
     buildFiles(tab(tr("I/O")));
     m_tabs->setTabToolTip(m_tabs->count() - 1, tr("Sources and sinks: where messages come from besides the channels "
         "(files, UDP),\nand where the routes send them besides the log and the queue (files, UDP, commands, speech, "
-        "highlight, Map)"));
+        "marks, Map)"));
     mainLayout->addWidget(m_tabs);
 
     m_optionsDialog = new QDialog(this);
@@ -1000,6 +1000,43 @@ void MessageCenterGUI::buildRoutes(QWidget *container)
     buttons->addWidget(up);
     buttons->addWidget(down);
     buttons->addStretch();
+
+    // The presets: the routes and the sinks of each, in place of those set (after a question)
+    QToolButton *presets = new QToolButton(container);
+    presets->setText("Presets");
+    presets->setToolTip("Replace the routes and the sinks with a preset: Empty (every message to the log, as a new\n"
+        "Message Center) or Emergency (an example: an icon on the messages of a kind, by a few words of their text)");
+    presets->setPopupMode(QToolButton::InstantPopup);
+    QMenu *presetsMenu = new QMenu(presets);
+
+    for (const QString& name : MessageCenterSettings::presetNames())
+    {
+        connect(presetsMenu->addAction(name), &QAction::triggered, this, [this, name]() {
+            std::vector<MessageCenterEngine::Route> routes;
+            QList<MessageCenterFileSetting> sinks;
+
+            if (!MessageCenterSettings::preset(name, routes, sinks)) {
+                return;
+            }
+
+            const QString question = QString("Replace the %1 routes and %2 sinks with those of the preset %3 (%4 routes, "
+                "%5 sinks)? The sources and the contacts stay.").arg(m_settings.m_routes.size()).arg(m_settings.m_sinks.size())
+                .arg(name).arg(routes.size()).arg(sinks.size());
+
+            if (QMessageBox::question(this, "Preset", question, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
+                return;
+            }
+
+            m_settings.m_routes = routes;
+            m_settings.m_sinks = sinks;
+            refreshRoutes();
+            refreshFiles();
+            applySettings({"routes", "sinks"});
+        });
+    }
+
+    presets->setMenu(presetsMenu);
+    buttons->addWidget(presets);
     buttons->addWidget(importRouting);
     buttons->addWidget(exportRouting);
     layout->addWidget(m_routesTable);
@@ -1421,7 +1458,7 @@ void MessageCenterGUI::buildFiles(QWidget *container)
     layout->setContentsMargins(2, 2, 2, 2);
     m_sinksTable = makeTable({"Sink", "Type", "Target", "Format", "Taken", "Failed", "Routes"}, container);
     m_sinksTable->setToolTip("The sinks the routes send messages to: files, UDP, and actions on the message (command,\n"
-        "speech, highlight in the log, position on the Map). Double-click to edit");
+        "speech, marks in the log, position on the Map). Double-click to edit");
     m_sourcesTable = makeTable({"Source", "Type", "Target"}, container);
     m_sourcesTable->setToolTip("The sources messages are read from, as if they came from the channels: files (read as they\n"
         "grow) and UDP. Double-click to edit");
@@ -1632,21 +1669,6 @@ bool MessageCenterGUI::handleMessage(const Message& message)
         speak(((const MessageCenter::MsgSpeak&) message).getText());
         return true;
     }
-    if (MessageCenter::MsgHighlight::match(message))
-    {
-        const MessageCenter::MsgHighlight& msg = (const MessageCenter::MsgHighlight&) message;
-
-        if (m_highlights.size() >= m_maxHighlights) {
-            m_highlights.clear();
-        }
-
-        m_highlights.insert(msg.getId(), msg.getColor());
-        QColor color = QColor::fromRgba(msg.getColor());
-        color.setAlpha(110);
-        m_logTable->setRowBackground(msg.getId(), color);
-        return true;
-    }
-
     return false;
 }
 
@@ -1693,17 +1715,8 @@ void MessageCenterGUI::refreshLog()
             done.insert(id);
             const MessageRecord *record = engine.find(id);
 
-            if (record && filter.matches(*record))
-            {
+            if (record && filter.matches(*record)) {
                 m_logTable->addRecord(*record);
-                auto highlight = m_highlights.constFind(id);
-
-                if (highlight != m_highlights.constEnd())
-                {
-                    QColor color = QColor::fromRgba(highlight.value());
-                    color.setAlpha(110);
-                    m_logTable->setRowBackground(id, color);
-                }
             }
             else
             {
@@ -1727,17 +1740,8 @@ void MessageCenterGUI::refreshLog()
     m_logTable->setUpdatesEnabled(false);
     m_logTable->setRowCount(0);
 
-    for (size_t i = first; i < records.size(); i++)
-    {
+    for (size_t i = first; i < records.size(); i++) {
         m_logTable->addRecord(records[i]);
-        auto highlight = m_highlights.constFind(records[i].m_id);
-
-        if (highlight != m_highlights.constEnd())
-        {
-            QColor color = QColor::fromRgba(highlight.value());
-            color.setAlpha(110);
-            m_logTable->setRowBackground(records[i].m_id, color);
-        }
     }
 
     m_logTable->selectId(selected);
@@ -1864,8 +1868,21 @@ QString fileTarget(const MessageCenterFileSetting& f)
     if ((type == "command") || (type == "speech")) {
         return f.m_text;
     }
-    if (type == "highlight") {
-        return QColor::fromRgba(f.m_color).name(QColor::HexArgb);
+    if (type == "mark")
+    {
+        QStringList parts;
+
+        if (!f.m_icon.isEmpty()) {
+            parts << QString("icon %1").arg(f.m_icon.startsWith(':') ? f.m_icon.mid(1) : QFileInfo(f.m_icon).fileName());
+        }
+        if (f.m_color != 0) {
+            parts << QString("text %1").arg(QColor::fromRgba(f.m_color).name());
+        }
+        if (f.m_background != 0) {
+            parts << QString("row %1").arg(QColor::fromRgba(f.m_background).name());
+        }
+
+        return parts.join(", ");
     }
     if (type == "map") {
         return "the position in the message";
@@ -1934,8 +1951,17 @@ void MessageCenterGUI::refreshFiles()
         setSinkRow(row, {f.m_name, f.typeOrDefault(), fileTarget(f), fileFormat(f),
             QString::number(stat.m_accepted), QString::number(stat.m_failed)}, routesTo(f.m_name), false);
 
-        if (f.typeOrDefault() == "highlight") {
-            m_sinksTable->item(row, 2)->setBackground(QColor::fromRgba(f.m_color));
+        if (f.typeOrDefault() == "mark")
+        {
+            m_sinksTable->item(row, 2)->setIcon(MessageCenterContactIcons::icon(f.m_icon));
+            m_sinksTable->item(row, 2)->setBackground(f.m_background ? QBrush(QColor::fromRgba(f.m_background)) : QBrush());
+            m_sinksTable->item(row, 2)->setForeground(f.m_color ? QBrush(QColor::fromRgba(f.m_color)) : QBrush());
+        }
+        else if (m_sinksTable->item(row, 2))
+        {
+            m_sinksTable->item(row, 2)->setIcon(QIcon());
+            m_sinksTable->item(row, 2)->setBackground(QBrush());
+            m_sinksTable->item(row, 2)->setForeground(QBrush());
         }
     }
 
@@ -2309,7 +2335,7 @@ void MessageCenterGUI::editFile(bool sink, int index)
     type->setToolTip(sink
         ? "file: written as JSON lines, CSV or the CSV log of the Pager demodulator. udp: a datagram for each message.\n"
           "command: run for each message. speech: said for each message.\n"
-          "highlight: the row of the message in the log. map: the position in the message, on the Map"
+          "mark: an icon before the message in the log, the colour of its text, of its row. map: the position in the message, on the Map"
         : "file: a JSON lines file, read as it grows. csv: a CSV log of a message center or of the Pager\n"
           "demodulator, read as it grows. udp: datagrams in JSON or in the format of the Pager demodulator");
     QLineEdit *path = new QLineEdit(setting.m_path, &dialog);
@@ -2331,13 +2357,72 @@ void MessageCenterGUI::editFile(bool sink, int index)
     text->setToolTip("${address}, ${message}, ${protocol}, ${type}, ${channel}, ${mode}, ${id}, ${frequency}, ${time} and\n"
         "${0}, ${1}... (the captures of the regular expression of the route) are replaced.\n"
         "A command is split into the program and its arguments first: the message goes into the arguments only");
-    QPushButton *color = new QPushButton(&dialog);
-    quint32 colorValue = setting.m_color;
-    auto showColor = [color, &colorValue]() {
-        color->setText(QColor::fromRgba(colorValue).name());
-        color->setStyleSheet(QString("QPushButton { background-color: %1; }").arg(QColor::fromRgba(colorValue).name()));
+    // A mark: an icon, a colour of the text and of the row, each optional (right click: none)
+    QWidget *markRow = new QWidget(&dialog);
+    QHBoxLayout *markLayout = new QHBoxLayout(markRow);
+    markLayout->setContentsMargins(0, 0, 0, 0);
+    QToolButton *markIcon = new QToolButton(markRow);
+    QToolButton *markText = new QToolButton(markRow);
+    QToolButton *markBackground = new QToolButton(markRow);
+    markIcon->setToolTip("The icon before the message: click to choose, right click for none");
+    markText->setToolTip("The colour of the text of the message: click to choose, right click for none");
+    markBackground->setToolTip("The colour of the row of the message: click to choose, right click for none");
+    markLayout->addWidget(markIcon);
+    markLayout->addWidget(markText);
+    markLayout->addWidget(markBackground);
+    markLayout->addStretch();
+    QString iconValue = setting.m_icon;
+    quint32 textValue = setting.m_color;
+    quint32 backgroundValue = setting.m_background;
+
+    auto showMark = [&]() {
+        QIcon icon = MessageCenterContactIcons::icon(iconValue);
+        markIcon->setIcon(icon);
+        markIcon->setText(icon.isNull() ? QString("Icon") : QString());
+        markIcon->setToolButtonStyle(icon.isNull() ? Qt::ToolButtonTextOnly : Qt::ToolButtonIconOnly);
+
+        for (auto pair : {qMakePair(markText, textValue), qMakePair(markBackground, backgroundValue)})
+        {
+            QToolButton *button = pair.first;
+            const bool none = (pair.second == 0);
+            button->setText(none ? QString(button == markText ? "Text colour" : "Row colour") : QString());
+            button->setStyleSheet(none ? QString()
+                : QString("QToolButton { background-color: %1; min-width: 2em; }").arg(QColor::fromRgba(pair.second).name()));
+        }
     };
-    showColor();
+    showMark();
+
+    for (QToolButton *button : {markIcon, markText, markBackground}) {
+        button->setContextMenuPolicy(Qt::CustomContextMenu);
+    }
+
+    connect(markIcon, &QToolButton::clicked, &dialog, [&]() {
+        MessageCenterIconPicker picker(iconValue, &dialog);
+
+        if (picker.exec() == QDialog::Accepted)
+        {
+            iconValue = picker.icon();
+            showMark();
+        }
+    });
+    connect(markIcon, &QWidget::customContextMenuRequested, &dialog, [&]() { iconValue.clear(); showMark(); });
+
+    for (auto pair : {qMakePair(markText, &textValue), qMakePair(markBackground, &backgroundValue)})
+    {
+        QToolButton *button = pair.first;
+        quint32 *value = pair.second;
+        connect(button, &QToolButton::clicked, &dialog, [&, value, button]() {
+            QColor chosen = QColorDialog::getColor(*value ? QColor::fromRgba(*value) : QColor(Qt::white), &dialog,
+                button == markText ? QString("Colour of the text") : QString("Colour of the row"));
+
+            if (chosen.isValid())
+            {
+                *value = chosen.rgba();
+                showMark();
+            }
+        });
+        connect(button, &QWidget::customContextMenuRequested, &dialog, [&, value]() { *value = 0; showMark(); });
+    }
 
     layout->addRow("Name", name);
     layout->addRow("Type", type);
@@ -2346,7 +2431,7 @@ void MessageCenterGUI::editFile(bool sink, int index)
     layout->addRow("Address", address);
     layout->addRow("Port", port);
     layout->addRow("Text", text);
-    layout->addRow("Colour", color);
+    layout->addRow("Mark", markRow);
 
     // The fields of the type. A row is shown or hidden with its label (QFormLayout::setRowVisible is Qt 6 only)
     auto setRowVisible = [layout](QWidget *field, bool visible) {
@@ -2366,7 +2451,7 @@ void MessageCenterGUI::editFile(bool sink, int index)
         setRowVisible(address, udp);
         setRowVisible(port, udp);
         setRowVisible(text, hasText);
-        setRowVisible(color, t == "highlight");
+        setRowVisible(markRow, t == "mark");
         int current = format->currentIndex();
         format->blockSignals(true);
         format->clear();
@@ -2437,15 +2522,6 @@ void MessageCenterGUI::editFile(bool sink, int index)
     connect(type, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, [&]() { showFields(); });
     connect(ok, &QPushButton::clicked, &dialog, &QDialog::accept);
     connect(cancel, &QPushButton::clicked, &dialog, &QDialog::reject);
-    connect(color, &QPushButton::clicked, &dialog, [&]() {
-        QColor chosen = QColorDialog::getColor(QColor::fromRgba(colorValue), &dialog, "Highlight");
-
-        if (chosen.isValid())
-        {
-            colorValue = chosen.rgba();
-            showColor();
-        }
-    });
     connect(browse, &QPushButton::clicked, &dialog, [&]() {
         QString file = sink ? QFileDialog::getSaveFileName(&dialog, "File", path->text())
             : QFileDialog::getOpenFileName(&dialog, "File", path->text());
@@ -2469,7 +2545,10 @@ void MessageCenterGUI::editFile(bool sink, int index)
         setting.m_address = (t == "udp") ? address->text().trimmed() : QString();
         setting.m_port = (t == "udp") ? port->value() : 0;
         setting.m_text = ((t == "command") || (t == "speech")) ? text->text() : QString();
-        setting.m_color = colorValue;
+        const bool mark = (t == "mark");
+        setting.m_icon = mark ? iconValue : QString();
+        setting.m_color = mark ? textValue : 0;
+        setting.m_background = mark ? backgroundValue : 0;
 
         QString error = setting.check(sink);
 

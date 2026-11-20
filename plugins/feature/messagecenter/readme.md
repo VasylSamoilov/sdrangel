@@ -10,7 +10,7 @@ The channels publish their messages as message records on the "messages" pipe, a
   source ---> routes 1, 2, 3... (filter) ---> sink(s)
   sources: the channels, the API, a JSON lines file, a CSV log, UDP datagrams
   sinks:   the log, the transmit queue, a JSON lines file, a CSV file, UDP datagrams,
-           a command, speech, a highlight in the log, a position on the Map
+           a command, speech, a mark in the log, a position on the Map
 ```
 
 <h2>Interface</h2>
@@ -38,7 +38,7 @@ The messages received and sent, newest at the bottom (at most the log size, the 
 * Import (open icon): reads the messages of a file into the log: a JSON lines file, or a CSV log of a message center or of the Pager demodulator. They are logged, not routed, so no action is taken on them again.
 * Export (save icon): saves the messages the filters select to a CSV file, which Import reads again.
 * Clear (bin icon): removes all the messages of the log, and of the history file when it is kept, after a confirmation. The items the map sinks put on the Map are removed too.
-* A message a highlight sink took has its row in the colour of the sink.
+* A message a mark sink took has the icon of the mark before its text, its text and its row in the colours of the mark (those it sets). A message several routes mark has their icons side by side.
 
 <h3>Channels</h3>
 
@@ -99,6 +99,7 @@ The tool tip of the table of the routes recalls how they work.
 * Add (plus icon), Edit (pencil icon, or double click) and Remove (bin icon) manage the routes; a route can be switched off. Up and Down (arrows) change the order.
 * Insert: where a new route goes, before route 1 by default, or before or after another.
 * Decode as codepage and type: the messages the route selects are decoded again with the codepage and as the type before they go to its sinks; the routes after it get them as they were received. A message that cannot be decoded so (a codepage of another protocol, a transmitted message) is sent as it is.
+* Presets: replace the routes and the sinks (after a confirmation; the sources and the contacts stay) with those of a preset. Empty: every message to the log, as a new Message Center. Emergency, an example to adapt: the log, and a route with a mark (an icon) for each kind of message, by a few words of its text, in English and in Dutch (the P2000 network): ambulance (ambu, reanimatie, cardiac, drowning), fire (brand, fire, smoke), accident (ongeval, accident, crash), hazardous (gaslucht, hazmat), helicopter (lifeliner, helicopter), police (politie, police), call back (graag contact, please call), plant alarm (high level, fault), test (test page, testoproep). A message of several kinds has their icons side by side.
 * Export (save icon) saves the routes, the sinks and the sources to a JSON file; Import (open icon) replaces them with those of a file, after a check and a confirmation.
 
 The filter of a route has the fields of the filter of the log, and the source of the message: the channels, the API (ingest) or a source of I/O. The captures of its text expression are ${1}, ${2}... in the texts of the sinks the route sends to: text Fire at (.*) gives the place as ${1}. Decode as type is for POCSAG and GSC: a FLEX message is sent with its type, it keeps it.
@@ -115,10 +116,10 @@ Sinks:
 * udp: a datagram for each message to an address and port. Pager format: the fields of the Pager demodulator, each ended by a NUL (date, time, address, function bits, alphanumeric, numeric, protocol, type); the address has 7 digits for POCSAG and 9 for FLEX, the function bits are POCSAG only, and the other reading of a message (numeric or alphanumeric) is in the other field. JSON format: the record as one line.
 * command: a command run for each message. The command is split into the program and its arguments first, then ${address}, ${message}, ${protocol}, ${type}, ${channel}, ${mode}, ${id}, ${frequency}, ${time} (UTC) and ${0}, ${1}... (the captures of the route) are replaced in the arguments, so a message cannot add arguments or change the program. At most 5 are run in a second; the others are refused and reported.
 * speech: the text, with the same replacements, is said (when SDRangel is built with text to speech).
-* highlight: the row of the message in the log gets the colour.
+* mark: an icon (the icons of the contacts, or an image file), a colour of the text and a colour of the row, each optional (right click on its button: none). The mark is written into the record (protocolData marks) before it is logged: the history, the exports and the WebAPI have it, and it is there again after a restart.
 * map: the position (latitude and longitude) in the text of the message is put on the Map, named by the address.
 
-The actions (command, speech, highlight, map) are taken on messages only: not on events, nor on the end of a GSC voice message, which completes its page.
+The actions (command, speech, mark, map) are taken on messages only: not on events, nor on the end of a GSC voice message, which completes its page.
 
 Sources:
 

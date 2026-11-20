@@ -32,8 +32,8 @@ class Serializable;
 // A sink the routes send records to, or a source records are read from. The type tells which:
 //   sinks:   "file" (default: path, format 0 JSON lines, 1 CSV or 2 Pager CSV), "udp" (address, port, format 0 Pager
 //            demodulator or 1 JSON), "command" (text: the command, the text of the message goes into its
-//            arguments), "speech" (text: what is said), "highlight" (color of the row in the log), "map" (the
-//            position in the text of the message on the Map)
+//            arguments), "speech" (text: what is said), "mark" (icon, colour of the text and of the row of the message
+//            in the log, each optional), "map" (the position in the text of the message on the Map)
 //   sources: "file" (default: a JSON lines file), "csv" (path: a log of this message center or of the Pager
 //            demodulator), "udp" (address and port to listen on, JSON lines or the Pager demodulator format)
 struct MessageCenterFileSetting
@@ -45,9 +45,11 @@ struct MessageCenterFileSetting
     QString m_address;          //!< udp
     int m_port = 0;             //!< udp
     QString m_text;             //!< command, speech
-    quint32 m_color = 0xffff0000;   //!< highlight, ARGB
+    QString m_icon;             //!< mark: a built-in icon (:name) or the path of an image, empty for none
+    quint32 m_color = 0;        //!< mark: colour of the text, ARGB, 0 for none
+    quint32 m_background = 0;   //!< mark: colour of the row, ARGB, 0 for none
 
-    static const QStringList& sinkTypes();      //!< file, udp, command, speech, highlight, map
+    static const QStringList& sinkTypes();      //!< file, udp, command, speech, mark, map
     static const QStringList& sourceTypes();    //!< file, csv, udp
     QString typeOrDefault() const { return m_type.isEmpty() ? QString("file") : m_type; }
     //!< What is wrong with the setting as a sink or source, empty if nothing
@@ -90,6 +92,11 @@ struct MessageCenterSettings
     static std::vector<MessageCenterEngine::Route> routesFromJson(const QByteArray& json);
     static QByteArray filesToJson(const QList<MessageCenterFileSetting>& files);
     static QList<MessageCenterFileSetting> filesFromJson(const QByteArray& json);
+    //! The presets of the routes and their sinks: Empty (every message to the log, as a new message center) and
+    //! Emergency (an example: the log, and a mark on the messages of a kind, by a few words of their text)
+    static QStringList presetNames();
+    //! The routes and the sinks of a preset; false if there is none of that name
+    static bool preset(const QString& name, std::vector<MessageCenterEngine::Route>& routes, QList<MessageCenterFileSetting>& sinks);
 };
 
 #endif // INCLUDE_MESSAGECENTERSETTINGS_H

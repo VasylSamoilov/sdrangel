@@ -1213,6 +1213,40 @@ bool MessageCenterUdpSink::accept(const MessageRecord& record, QString& error)
 // Actions
 // ---------------------------------------------------------------------------
 
+MessageCenterMarkSink::MessageCenterMarkSink(const QString& name, const QString& icon, quint32 textColor, quint32 background) :
+    m_name(name),
+    m_icon(icon),
+    m_textColor(textColor),
+    m_background(background)
+{
+}
+
+// The mark is written into the record before it is routed (MessageCenterEngine::markRecord): nothing more to do
+bool MessageCenterMarkSink::accept(const MessageRecord& record, QString& error)
+{
+    (void) record;
+    (void) error;
+    return true;
+}
+
+QVariantMap MessageCenterMarkSink::mark() const
+{
+    QVariantMap mark;
+    mark.insert("sink", m_name);
+
+    if (!m_icon.isEmpty()) {
+        mark.insert("icon", m_icon);
+    }
+    if (m_textColor != 0) {
+        mark.insert("color", m_textColor);
+    }
+    if (m_background != 0) {
+        mark.insert("background", m_background);
+    }
+
+    return mark;
+}
+
 MessageCenterCommandSink::MessageCenterCommandSink(const QString& name, const QString& command, Launcher launcher) :
     m_name(name),
     m_command(command),
@@ -1875,6 +1909,7 @@ void MessageCenterEngine::ingest(const MessageRecord& record, const QString& sou
     bool matched = false;
     MessageRecord named = record;
     nameContact(named);
+    markRecord(named, source);
 
     for (const Route& route : m_routes)
     {
@@ -1901,6 +1936,41 @@ void MessageCenterEngine::ingest(const MessageRecord& record, const QString& sou
 
     if (matched) {
         m_routed++;
+    }
+}
+
+// The routes in their order, as the routing does (one that stops ends it): the marks of the mark sinks they send to
+void MessageCenterEngine::markRecord(MessageRecord& record, const QString& source) const
+{
+    QVariantList marks;
+
+    for (const Route& route : m_routes)
+    {
+        if (!route.m_enabled || !route.m_filter.matches(record, source)) {
+            continue;
+        }
+
+        for (const QString& sinkName : route.m_sinks)
+        {
+            for (const auto& sink : m_sinks)
+            {
+                const MessageCenterMarkSink *mark = dynamic_cast<const MessageCenterMarkSink*>(sink.get());
+
+                if (mark && (mark->name() == sinkName) && !marks.contains(mark->mark())) {
+                    marks.append(mark->mark());
+                }
+            }
+        }
+
+        if (route.m_stop) {
+            break;
+        }
+    }
+
+    if (marks.isEmpty()) {
+        record.m_protocolData.remove("marks");
+    } else {
+        record.m_protocolData.insert("marks", marks);
     }
 }
 

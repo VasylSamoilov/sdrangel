@@ -190,6 +190,29 @@ int main(int argc, char **argv)
             "a reserved short message shows its data");
     }
 
+    // Marks: their icons before the message, the colour of its text and of the row
+    {
+        PagingMessageTable marked;
+        MessageRecord r = record("m", "flex", "0001234567", "P 1 Brand, ongeval");
+        QVariantMap fire;
+        fire.insert("icon", ":fire_engine");
+        fire.insert("background", 0xff802020u);
+        QVariantMap accident;
+        accident.insert("icon", ":collision");
+        accident.insert("color", 0xffffcc00u);
+        r.m_protocolData.insert("marks", QVariantList({fire, accident}));
+        marked.addRecord(r);
+        marked.addRecord(record("n", "flex", "0001234568", "plain"));
+        const QTableWidgetItem *message = marked.item(0, PagingMessageTable::ColMessage);
+        const QTableWidgetItem *address = marked.item(0, PagingMessageTable::ColAddress);
+        const QTableWidgetItem *plain = marked.item(1, PagingMessageTable::ColMessage);
+        check(message && !message->icon().isNull() && (message->icon().availableSizes().value(0).width() > message->icon().availableSizes().value(0).height()),
+            "a message with two marks has their two icons side by side");
+        check(message && message->data(Qt::UserRole + 1).toString().contains("#ffcc00"), "its text has the colour of its mark");
+        check(address && (address->background().color().rgb() == QColor(0x80, 0x20, 0x20).rgb()), "its row has the colour of its mark");
+        check(plain && plain->icon().isNull() && (plain->background().style() == Qt::NoBrush), "a message without marks: none");
+    }
+
     // The oldest rows go first
     table.addRecord(record("c", "gsc", "123456/1", "C"));
     table.addRecord(record("d", "gsc", "123456/2", "D"));

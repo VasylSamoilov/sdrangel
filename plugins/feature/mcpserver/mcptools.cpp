@@ -6378,7 +6378,7 @@ void MCPTools::registerMessageCenterTools()
         "again before they go to the route's sinks.\n"
         "Sink: {name, type, ...}: file {path, format 0 JSON lines or 1 CSV}; udp {address, port, format 0 Pager demodulator "
         "or 1 JSON}; command {text: the command, the message goes into its arguments: ${address} ${message} ${protocol} "
-        "${type} ${channel} ${mode} ${id} ${frequency} ${time} ${1}...}; speech {text}; highlight {color: ARGB}; map (the "
+        "${type} ${channel} ${mode} ${id} ${frequency} ${time} ${1}...}; speech {text}; mark {icon (:name of a built-in icon or an image path), color (of the text), background (of the row): ARGB, each optional}; map (the "
         "position in the message on the Map).\n"
         "Source: {name, type, ...}: file {path: JSON lines}; csv {path: a log of a message center or of the Pager "
         "demodulator}; udp {address (default 127.0.0.1), port}.",

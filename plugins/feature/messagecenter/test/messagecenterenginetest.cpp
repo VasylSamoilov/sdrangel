@@ -30,6 +30,7 @@
 
 #include "radiopagingpagerformat.h"
 #include "messagecenterengine.h"
+#include "messagecentersettings.h"
 
 namespace {
 
@@ -608,6 +609,95 @@ void testRouteOrderAndSources()
 }
 
 // A filter on an address also selects the group messages of which it is a member
+// Marks: written into the record before it is routed, so the log has them; the routes in order, until one that stops
+void testMarks()
+{
+    MessageCenterEngine engine;
+    engine.addSink(std::unique_ptr<MessageCenterSink>(new MessageCenterMarkSink("fire", ":fire_engine", 0, 0xff401010)));
+    engine.addSink(std::unique_ptr<MessageCenterSink>(new MessageCenterMarkSink("accident", ":collision", 0xffffcc00, 0)));
+
+    MessageCenterEngine::Route fire;
+    fire.m_name = "Fire";
+    fire.m_filter.m_text = "brand|fire";
+    fire.m_sinks = QStringList("fire");
+    MessageCenterEngine::Route accident;
+    accident.m_name = "Accident";
+    accident.m_filter.m_text = "ongeval";
+    accident.m_sinks = QStringList("accident");
+    engine.setRoutes({MessageCenterEngine::defaultRoutes()[0], fire, accident});
+
+    engine.ingest(rx("1", "flex", "1", "P 1 Brand woning, ongeval", "c"), "channels", 1);
+    engine.ingest(rx("2", "flex", "1", "A1 Ambu", "c"), "channels", 2);
+    engine.ingest(rx("3", "flex", "1", "Fire alarm", "c"), "channels", 3);
+
+    const MessageRecord *both = engine.find("1");
+    const MessageRecord *none = engine.find("2");
+    const MessageRecord *one = engine.find("3");
+    const QVariantList marks = both ? both->m_protocolData.value("marks").toList() : QVariantList();
+    check((marks.size() == 2) && (marks[0].toMap().value("icon").toString() == ":fire_engine")
+        && (marks[0].toMap().value("background").toUInt() == 0xff401010) && !marks[0].toMap().contains("color")
+        && (marks[1].toMap().value("icon").toString() == ":collision") && (marks[1].toMap().value("color").toUInt() == 0xffffcc00),
+        "a message two routes mark has both marks in the log, in the order of the routes, with what each sets");
+    check(none && !none->m_protocolData.contains("marks"), "a message no route marks has none");
+    check(one && (one->m_protocolData.value("marks").toList().size() == 1), "a message one route marks has one");
+
+    // A route that stops ends the marks too
+    fire.m_stop = true;
+    engine.setRoutes({MessageCenterEngine::defaultRoutes()[0], fire, accident});
+    engine.ingest(rx("4", "flex", "1", "P 1 Brand, ongeval", "c"), "channels", 4);
+    const MessageRecord *stopped = engine.find("4");
+    check(stopped && (stopped->m_protocolData.value("marks").toList().size() == 1), "the routes after one that stops do not mark");
+
+    // A mark sink sets something
+    MessageCenterFileSetting setting;
+    setting.m_name = "m";
+    setting.m_type = "mark";
+    check(!setting.check(true).isEmpty(), "a mark without an icon or a colour is refused");
+    setting.m_background = 0xff000080;
+    check(setting.check(true).isEmpty(), "a mark with a colour of the row only is valid");
+    QList<MessageCenterFileSetting> back = MessageCenterSettings::filesFromJson(MessageCenterSettings::filesToJson({setting}));
+    check((back.size() == 1) && (back[0].m_background == 0xff000080) && (back[0].m_color == 0) && back[0].m_icon.isEmpty(),
+        "a mark in the JSON of the sinks: what it sets only");
+}
+
+// The presets: Empty is a new message center; Emergency marks the messages of a kind, its sinks those its routes send to
+void testPresets()
+{
+    std::vector<MessageCenterEngine::Route> routes;
+    QList<MessageCenterFileSetting> sinks;
+    check(MessageCenterSettings::preset("Empty", routes, sinks) && (routes.size() == 1) && sinks.isEmpty()
+        && (routes[0].m_sinks == QStringList("log")), "the Empty preset: every message to the log");
+    check(!MessageCenterSettings::preset("None such", routes, sinks), "a preset that does not exist");
+    check(MessageCenterSettings::preset("Emergency", routes, sinks) && (routes.size() == (size_t) sinks.size() + 1),
+        "the Emergency preset: the log and a route for each of its marks");
+
+    bool valid = true;
+    MessageCenterEngine engine;
+
+    for (const MessageCenterFileSetting& sink : sinks)
+    {
+        valid = valid && sink.check(true).isEmpty() && (sink.m_type == "mark") && !sink.m_icon.isEmpty();
+        engine.addSink(std::unique_ptr<MessageCenterSink>(new MessageCenterMarkSink(sink.m_name, sink.m_icon, sink.m_color, sink.m_background)));
+    }
+
+    check(valid, "its sinks are valid marks with an icon");
+    engine.setRoutes(routes);
+    engine.ingest(rx("p", "flex", "1", "P 1 BDH-01 Brand woning, Ongeval", "c"), "channels", 1);
+    engine.ingest(rx("t", "flex", "1", "TESTOPROEP MOB", "c"), "channels", 2);
+    engine.ingest(rx("x", "flex", "1", "Test", "c"), "channels", 3);
+    auto icons = [&engine](const char *id) {
+        QStringList out;
+        const MessageRecord *r = engine.find(id);
+        for (const QVariant& m : r ? r->m_protocolData.value("marks").toList() : QVariantList()) {
+            out << m.toMap().value("icon").toString();
+        }
+        return out;
+    };
+    check(icons("p") == QStringList({":fire_engine", ":collision"}), "a fire accident gets the icons of fire and of an accident");
+    check(icons("t") == QStringList(":satellite_antenna"), "a test call gets the icon of a test");
+    check(icons("x").isEmpty(), "the word test alone is not a test page");
+}
+
 void testGroupMembers()
 {
     MessageRecord group = rx("g", "flex", "0002029570", "group text", "c");
@@ -1124,6 +1214,8 @@ int main(int argc, char **argv)
     testDecodingRoute();
     testEndpointRemoval();
     testGroupMembers();
+    testMarks();
+    testPresets();
     testUdp();
     testCsvSources();
     testContacts();
