@@ -16,28 +16,42 @@ A network is one base station with its own carriers, registered phones, calls an
 1. Add a receiving device set with a Cellular Rx channel and a transmitting device set with a Cellular Tx channel.
 2. Set the sample rate of both devices to an even multiple of 48 kHz: 960 kS/s, 1.92 MS/s, 2.4 MS/s ... The carriers of a network have to be inside the span of the device (75 % of the sample rate). Channel 1 of NMT-450 in Denmark is 463.000 MHz down and 453.000 MHz up, so a device at 453.3 MHz and one at 463.3 MHz with 960 kS/s carry the channels 1 to about 27.
 3. Run both devices.
-4. Add this feature, give the device set numbers of the radios in the network tab, and press Start.
+4. Add this feature, give the device set numbers of the radios in the settings of the network (Networks tab), switch it on and press Start.
 
 <h2>Interface</h2>
 
-<h3>Start / Stop</h3>
+The window fits small screens: the tabs are on its side, the tables scroll, the settings of a network are in a dialog.
 
-Starts the controller: the networks that are on the air start. Stop takes all networks off the air.
+<h3>Start / Stop, summary, options</h3>
 
-<h3>Add network / Remove network</h3>
+Start takes the networks that are on to the air, Stop takes all networks off the air. Next to it: how many networks are on the air, the phones registered and the calls. The options button opens the options of the tester:
 
-Adds a network in its own tab (it is off until switched on) or removes the network of the open tab.
+* Transmit lead: how far the transmitters run ahead of the receivers. The lead is part of the round trip between a phone and the base station: the answer to a phone is late by the time the audio takes through the receiving device, the controller, the lead and the transmitting device. Keep the round trip below about 300 ms. If the transmit queues run empty (the Empty column of Carriers) the lead is too small. Taken when the tester starts.
 
-<h3>Transmit lead</h3>
+<h3>Phones</h3>
 
-How far the transmitters run ahead of the receivers. The lead is part of the round trip between a phone and the base station: the answer to a phone is late by the time the audio takes through the receiving device, the controller, the lead and the transmitting device. Keep the round trip below about 300 ms. If the transmit queues run empty (the Empty column) the lead is too small. Taken when the controller starts.
+Every phone a network heard (its identity in a frame for the channel it came on) or that registered, one row per phone and network: number, what it does now, channel, network, registered (yes: it made a roaming update to this network), when it was last heard, the received level and the quality of its last frame, the power level in its frames (high, medium, low) and the type of its last frame. A phone keeps its row. Right click: the actions of the Test tab on that phone; double click: the phone in the Test tab.
 
-<h3>Network tab</h3>
+<h3>Test</h3>
 
-Changes of a running network are taken at once: the network starts again with them, and its calls are cleared. Renaming a network does not start it again.
+Actions of a network on one phone. Network: the network that does it. Phone: the country digit and the six digits, typed or one the network heard; below it what the phone does now.
+
+* Call: the network calls the phone, registered or not; it rings, and when it answers it hears itself (echo, after 1 s) or music, as set in Other numbers. Hang up ends that call. Release ends any call of the phone from the network side.
+* SMS: Send sends a short message to the phone; the log tells whether the phone took it. Keep leaves it in the SMS centre until the phone calls the centre for its waiting messages. Messages the phones send to the SMS centre are in the log too.
+* Indicator: a message waiting indicator (SMS, voice mail, fax, e-mail, data). A phone that is idle is called without ringing for it and gets it in the clearing of that call; a phone in a conversation gets it at once and again in the clearing of its call; in another procedure of a call only in the clearing. When the phone is busy with something else the indicator is postponed and goes out when the phone is free (the log tells both). The SMS indicator tells the phone that messages wait in its SMS centre: a phone with SMS calls the centre by itself and asks for them; the log tells it, and a kept message goes to it then. The network cannot switch an indicator off: the phone does, e.g. the voice mail lamp when the user calls the voice mail. Seen with one NMT-450 phone: the voice mail lamp lit at once in a conversation; the SMS indicator made it fetch only when it came in a clearing alone, not when it came in the conversation (also not with the copy in the clearing that follows), and not while its message memory was full (it fetched as soon as there was room).
+* Power: orders the phone in its call to high, medium or low power.
+* Move: switches the call to another traffic channel of the network (any: the first free one).
+
+<h3>Log</h3>
+
+The events of all networks, of the tester itself, or of one network. With Frames, every frame from the phones (with its quality and level) and every frame to them except the indications a channel sends all the time; a frame sent again and again is shown once with its count. The view stays where it was scrolled to; at the end it follows the new lines. The bin clears it.
+
+<h3>Networks</h3>
+
+The networks of the tester. On: on the air while the tester runs; a network is switched on or off without touching the others. The plus button adds a network (off until switched on), the pencil (or a double click) opens the settings of the selected network, the bin removes it. Changed settings of a running network are taken with OK: the network starts again with them, and its calls are cleared. Renaming a network does not start it again. The settings of a network:
 
 * Name: the name of the network.
-* On the air while the controller runs: switch a network on or off without touching the others.
+* On the air while the tester runs: as On in the list.
 * System: NMT-450 or NMT-900.
 * Country: the frequency plan (channel numbers and frequencies) and the country digit of the traffic area. Countries that were not tried with a phone are marked untested.
 * Country digit Y1: "country" sends the first digit of the traffic area that belongs to the country (DK 5, SE 6, NO 7, FI 8 ...). A value 0..15 (NMT-900 0..7) makes a test network with that digit on the frequency plan of the country. A phone takes only calling channels with the Y1 of its country selector, so test networks with different Y1 at the same time show which one a phone is set to.
@@ -50,24 +64,15 @@ Changes of a running network are taken at once: the network starts again with th
 * Other numbers: what answers a call to a number that is not registered, echo or music.
 * Receiver device set, Transmitter device set: the device sets with the Cellular Rx and the Cellular Tx channel of the network.
 
-Below the settings (Settings folds them away): the state of the network, the actions on a phone, and three tabs: Carriers, a table of its carriers (frequencies, state of the channel, received level, milliseconds of audio in the transmit queue, number of times the queue ran empty, the phone the channel serves), Phones and Log, its event log. A carrier that cannot go on the air is red, with the reason: a channel that is not in the plan of the country, a frequency outside the span of the device, or the frequency of a channel of another network on the same device.
-
-The event log has every frame from the phones (with its quality and level) and every frame to them except the indications a channel sends all the time; a frame sent again and again is shown once with its count.
-
-Phones: every phone the network heard (its identity in a frame for the channel it came on) or that registered: number, registered (yes: it made a roaming update to this network), channel, what it does now, when it was last heard, the received level and the quality of its last frame, the power level in its frames (high, medium, low) and the type of its last frame. A phone keeps its row. Clicking a row takes its number for the actions.
-
-Actions on a phone (number: the country digit and the six digits):
-
-* Call: the network calls the phone, registered or not; it rings, and when it answers it hears itself (echo, after 1 s) or music, as set in Other numbers. Hang up ends that call. Release ends any call of the phone from the network side.
-* SMS: a short message to the phone; the log tells whether the phone took it. Messages the phones send to the SMS centre are in the log too.
-* Indicator: a message waiting indicator (SMS, voice mail, fax, e-mail, data). A phone that is idle is called without ringing for it and gets it in the clearing of that call; a phone in a conversation gets it at once and again in the clearing of its call; in another procedure of a call only in the clearing. When the phone is busy with something else the indicator is postponed and goes out when the phone is free (the log tells both). The SMS indicator tells the phone that messages wait in its SMS centre: a phone with SMS calls the centre by itself and asks for them; the log tells it, and a message kept for the phone (`hold`, see Web API) goes to it then. The network cannot switch an indicator off: the phone does, e.g. the voice mail lamp when the user calls the voice mail. Seen with one NMT-450 phone: the voice mail lamp lit at once in a conversation; the SMS indicator made it fetch only when it came in a clearing alone, not when it came in the conversation (also not with the copy in the clearing that follows), and not while its message memory was full (it fetched as soon as there was room).
-* In call: Power orders the phone in its call to high, medium or low power; Move switches the call to another traffic channel of the network (any: the first free one).
-
 A network is refused if its carriers do not fit one receiving and one transmitting device.
+
+<h3>Carriers</h3>
+
+The carriers of the networks: network, channel, type, frequencies, state of the channel, received level, milliseconds of audio in the transmit queue, number of times the queue ran empty, the phone the channel serves. A carrier that cannot go on the air is red, with the reason: a channel that is not in the plan of the country, a frequency outside the span of the device, or the frequency of a channel of another network on the same device.
 
 <h2>Web API</h2>
 
-Settings (`GET`, `PUT`, `PATCH` on `/sdrangel/featureset/{n}/feature/{m}/settings`) and report (`GET .../report`) are documented in the web API documentation under `CellularSettings` and `CellularReport`. The actions on a phone are `POST .../actions` with `CellularActions` (`networkId`, `action`: call, hangup, release, sms, mwi, power, move or hold, `number`, `text`, `value`). `hold` keeps the text in the SMS centre until the phone calls the centre for its waiting messages (Web API only for now). For `mwi` to a phone in a call, `text` `incall` sends the indicators only in the conversation and `clearing` only in the clearing sequence; empty sends them in both, as the Indicator button does. A `PATCH` with a `networks` list replaces the networks: those it names by `id` are changed and started or stopped as `enabled` says, those it does not name are removed; fields that are not given keep their value; a network that runs starts again when its settings changed. A `PUT` does the same and also starts the networks that run again, with the new settings.
+Settings (`GET`, `PUT`, `PATCH` on `/sdrangel/featureset/{n}/feature/{m}/settings`) and report (`GET .../report`) are documented in the web API documentation under `CellularSettings` and `CellularReport`. The actions on a phone are `POST .../actions` with `CellularActions` (`networkId`, `action`: call, hangup, release, sms, mwi, power, move or hold, `number`, `text`, `value`). `hold` is Keep of the Test tab. For `mwi` to a phone in a call, `text` `incall` sends the indicators only in the conversation and `clearing` only in the clearing sequence; empty sends them in both, as the Indicator button does. A `PATCH` with a `networks` list replaces the networks: those it names by `id` are changed and started or stopped as `enabled` says, those it does not name are removed; fields that are not given keep their value; a network that runs starts again when its settings changed. A `PUT` does the same and also starts the networks that run again, with the new settings.
 
 <h2>Limits</h2>
 
