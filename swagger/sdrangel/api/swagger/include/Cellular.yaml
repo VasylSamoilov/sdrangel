@@ -147,6 +147,21 @@ CellularPhoneReport:
     lastFrame:
       type: string
       description: "Type of the last frame of the phone."
+    password:
+      type: string
+      description: "Password K of the phone (three digits) as its frames show it, empty if not known."
+    dialled:
+      type: string
+      description: "Numbers the phone dialled, the newest first, comma separated."
+    smsCentre:
+      type: string
+      description: "Numbers the phone sent short messages to or asked for its waiting messages on, with the traffic area of the network, comma separated."
+    held:
+      type: integer
+      description: "Short messages the SMS centre keeps for the phone until it fetches them."
+    pendingIndicators:
+      type: integer
+      description: "Message waiting indicators postponed until the phone is free (flags: 1 SMS, 2 voice mail, 4 fax, 8 e-mail, 16 data)."
 
 CellularActions:
   description: "Cellular actions: the tester acts on a phone of a network"

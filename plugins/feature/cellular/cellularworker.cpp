@@ -178,33 +178,34 @@ void CellularWorker::traceFrame(Network& n, size_t index, bool toPhone, const mo
     const modemnmt::NmtChannel& channel = n.station->system()->channel(index);
     Network::Trace& trace = n.traces[index];
     const int number = channel.config().channel;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
 
-    if (toPhone)
-    {
-        // the indications between them do not break a run of the same frame (pages of a calling channel)
-        if (indicationFrame(frame.mt)) {
-            return;
-        }
-
-        std::string text = modemnmt::describeFrame(frame);
-
-        if (text == trace.last)
-        {
-            trace.repeats++;
-            return;
-        }
-        flushTrace(n, index);
-        log(n.id, QString("ch %1 > %2").arg(number).arg(QString::fromStdString(text)));
-        trace.last = std::move(text);
-        trace.repeats = 1;
+    // the indications between them do not break a run of the same frame (pages of a calling channel)
+    if (toPhone && indicationFrame(frame.mt)) {
         return;
     }
+    if (!toPhone) {
+        notePhone(n, index, frame, quality);        // every frame, also the repeats that are not shown
+    }
 
-    flushTrace(n, index);
-    notePhone(n, index, frame, quality);
+    // each direction folds its own runs: the phone's idle frames do not break the network's run
+    const std::string text = modemnmt::describeFrame(frame);
+    modemnmt::NmtTraceFold& fold = toPhone ? trace.out : trace.in;
+    (toPhone ? trace.outAt : trace.inAt) = now;
+
+    if (fold.repeat(text)) {
+        return;
+    }
+    flushTrace(n, index, toPhone);
+    (toPhone ? trace.outType : trace.inType) = QString::fromLatin1(modemnmt::frameDef(frame.mt).number);
+    if (toPhone)
+    {
+        log(n.id, QString("ch %1 > %2").arg(number).arg(QString::fromStdString(text)));
+        return;
+    }
     log(n.id, QString("ch %1 < %2 (quality %3, level %4 dB)")
         .arg(number)
-        .arg(QString::fromStdString(modemnmt::describeFrame(frame)))
+        .arg(QString::fromStdString(text))
         .arg(quality, 0, 'f', 2)
         .arg(20.0 * std::log10(std::max(level, 1e-6)), 0, 'f', 1));
 }
@@ -252,8 +253,20 @@ void CellularWorker::setHandlers(Network& n)
     const int id = n.id;
     modemnmt::NmtSystem& system = *n.station->system();
 
+    // what a phone shows of itself: the numbers it dials, its SMS centre when it really speaks to it
+    auto learnCentre = [this, &n](const modemnmt::NmtSubscriber& subscriber) {
+        int y1, area;
+        trafficArea(n, y1, area);
+        known(numberText(subscriber).toStdString()).noteSmsCentre(n.config.smscNumber, y1, area);
+    };
+    system.setDialObserver([this, &n](const modemnmt::NmtSubscriber& subscriber, const std::string& dialled) {
+        int y1, area;
+        trafficArea(n, y1, area);
+        known(numberText(subscriber).toStdString()).noteDialled(dialled, y1, area);
+    });
     system.setSmsHandlers(
-        [this, id](const modemnmt::NmtSubscriber& subscriber, const modemnmt::SmsSubmit& message) -> uint8_t {
+        [this, id, learnCentre](const modemnmt::NmtSubscriber& subscriber, const modemnmt::SmsSubmit& message) -> uint8_t {
+            learnCentre(subscriber);
             log(id, QString("SMS from %1 to %2: %3").arg(numberText(subscriber))
                 .arg(QString::fromStdString(message.destination)).arg(QString::fromStdString(message.text)));
             return 0;
@@ -262,17 +275,18 @@ void CellularWorker::setHandlers(Network& n)
             log(id, QString("SMS to %1: %2%3").arg(numberText(subscriber)).arg(serviceEndName(result))
                 .arg(cause ? QString(" (RP cause %1)").arg(cause) : QString()));
         });
-    system.setSmsRequestHandler([this, &n](const modemnmt::NmtSubscriber& subscriber, modemnmt::SmsRpKind kind,
+    system.setSmsRequestHandler([this, &n, learnCentre](const modemnmt::NmtSubscriber& subscriber, modemnmt::SmsRpKind kind,
             modemnmt::SmsDeliver& message) {
         const QString who = numberText(subscriber);
+        learnCentre(subscriber);
 
         if (kind != modemnmt::SmsRpKind::ReadyToReceive)
         {
             log(n.id, QString("%1 called the SMS centre: it has memory for messages again").arg(who));
             return false;
         }
-        auto it = n.held.find(who.toStdString());
-        if (it == n.held.end() || it->second.empty())
+        auto it = m_held.find(who.toStdString());
+        if (it == m_held.end() || it->second.empty())
         {
             log(n.id, QString("%1 called the SMS centre: it asks for its waiting messages, none wait").arg(who));
             return false;
@@ -299,7 +313,7 @@ void CellularWorker::setHandlers(Network& n)
 void CellularWorker::action(const Cellular::MsgAction& msg)
 {
     Network *found = nullptr;
-    for (std::unique_ptr<Network>& network : m_networks)
+    for (const std::unique_ptr<Network>& network : m_networks)
     {
         if (network->id == msg.getNetwork()) {
             found = network.get();
@@ -370,7 +384,7 @@ void CellularWorker::action(const Cellular::MsgAction& msg)
             log(n.id, what + ": refused: the text cannot be coded");
             return;
         }
-        std::deque<modemnmt::SmsDeliver>& queue = n.held[number];
+        std::deque<modemnmt::SmsDeliver>& queue = m_held[number];
         queue.push_back(message);
         log(n.id, QString("%1: the centre keeps it until the phone fetches it (%2 waiting)").arg(what).arg(queue.size()));
         return;
@@ -492,17 +506,58 @@ void CellularWorker::notePhone(Network& n, size_t index, const modemnmt::Frame& 
     phone.quality = static_cast<float>(quality);
     phone.power = power;
     phone.lastFrame = QString::fromLatin1(modemnmt::frameDef(frame.mt).number);
+    // its password, in the seizure frames (a value is taken when two frames agree)
+    if (std::strchr(digits, 'K')) {
+        known(id).notePassword(frame.msPassword);
+    }
 }
 
-void CellularWorker::flushTrace(Network& n, size_t index)
+// The traffic area the network sends, Y1 and Y2 (Y1 may be the country's).
+void CellularWorker::trafficArea(const Network& n, int& y1, int& area)
 {
-    Network::Trace& trace = n.traces[index];
-
-    if (trace.repeats > 1 && n.station && n.station->system()) {
-        log(n.id, QString("ch %1 > the frame above %2 times").arg(n.station->system()->channel(index).config().channel).arg(trace.repeats));
+    y1 = 0;
+    area = 0;
+    if (n.station && n.station->system() && n.station->system()->channelCount() > 0)
+    {
+        const uint8_t ta = n.station->system()->channel(0).config().trafficArea;
+        y1 = ta >> 4;
+        area = ta & 0x0f;
     }
-    trace.last.clear();
-    trace.repeats = 0;
+}
+
+// A run that ended: "ch 18 > 6 again 23 times". The run before the frame just taken, or, when the
+// direction was quiet for a while, the run going on.
+void CellularWorker::flushTrace(Network& n, size_t index, bool toPhone, bool quiet)
+{
+    if (index >= n.traces.size() || !n.station || !n.station->system()) {
+        return;
+    }
+    Network::Trace& trace = n.traces[index];
+    modemnmt::NmtTraceFold& fold = toPhone ? trace.out : trace.in;
+    const int repeats = quiet ? fold.end() : fold.flush();
+
+    if (repeats > 0)
+    {
+        log(n.id, QString("ch %1 %2 %3 again %4 time%5").arg(n.station->system()->channel(index).config().channel)
+            .arg(toPhone ? ">" : "<").arg(toPhone ? trace.outType : trace.inType).arg(repeats).arg(repeats == 1 ? "" : "s"));
+    }
+}
+
+// A direction with no frame for a second: its run is over, its count is shown.
+void CellularWorker::flushQuietTraces(Network& n)
+{
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    for (size_t i = 0; i < n.traces.size(); i++)
+    {
+        Network::Trace& trace = n.traces[i];
+        if (trace.out.running() && now - trace.outAt > 1000) {
+            flushTrace(n, i, true, true);
+        }
+        if (trace.in.running() && now - trace.inAt > 1000) {
+            flushTrace(n, i, false, true);
+        }
+    }
 }
 
 void CellularWorker::sendTo(ChannelAPI *channel, const std::vector<uint8_t>& wire)
@@ -969,6 +1024,7 @@ void CellularWorker::processBatch(Radio& radio)
         // the audio of the tester's call, the same time as the block at the call rate
         n.caller->process(static_cast<int>(m_rx.length * modemcellular::kAudioSampleRate / modemnmt::NmtBaseStation::kAudioRate));
         sendPostponed(n);
+        flushQuietTraces(n);
 
         // the audio of all networks on one transmitter goes as one batch
         modemcellular::CarrierBatch& out = m_txOut[n.tx];
@@ -1125,8 +1181,21 @@ void CellularWorker::reportStatus(const Network& n)
                 phones[c.phone.toStdString()].state = QString("channel %1: %2").arg(c.channel).arg(c.state);
             }
         }
-        for (const auto& p : phones) {
-            msg->m_phones.append(p.second);
+        for (auto& p : phones)
+        {
+            Cellular::MsgReportStatus::Phone& phone = p.second;
+            const auto info = m_known.find(p.first);
+            if (info != m_known.end())
+            {
+                phone.password = QString::fromStdString(info->second.password());
+                phone.dialled = QString::fromStdString(modemnmt::NmtPhoneInfo::text(info->second.dialled(), false));
+                phone.smsCentre = QString::fromStdString(modemnmt::NmtPhoneInfo::text(info->second.smsCentres(), true));
+            }
+            const auto held = m_held.find(p.first);
+            phone.held = held != m_held.end() ? static_cast<int>(held->second.size()) : 0;
+            const auto pending = n.pendingMwi.find(p.first);
+            phone.pendingMwi = pending != n.pendingMwi.end() ? pending->second.flags : 0;
+            msg->m_phones.append(phone);
         }
     }
 

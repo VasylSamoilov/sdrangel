@@ -181,6 +181,12 @@ public:
             float quality = 0.0f;       // of the last frame, 0..1
             int power = -1;             // power level 0..3 in its frames, -1 not known
             QString lastFrame;          // type of its last frame
+            // what it showed of itself (kept over restarts of the network), empty if not known
+            QString password;           // K, three digits
+            QString dialled;            // the numbers it dialled, the newest first
+            QString smsCentre;          // the numbers it sent messages or asked for them on, with the traffic area
+            int held = 0;               // short messages the centre keeps for it
+            int pendingMwi = 0;         // indicators postponed until it is free (flags)
         };
 
         int m_network;

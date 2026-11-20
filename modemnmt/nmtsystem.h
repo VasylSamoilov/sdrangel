@@ -110,7 +110,11 @@ public:
     // has memory again (MemoryAvailable). For ReadyToReceive the handler returns true and fills
     // the message when one waits: it goes to the phone in this call and its result is told to
     // the SMS result handler. Otherwise the phone is told that no messages wait.
-    using SmsRequestHandler = std::function<bool(const NmtSubscriber& subscriber, SmsRpKind kind, SmsDeliver& message)>;
+    // Every number a phone dials, also the one of the SMS centre; only told (a tester learns the
+    // numbers a phone has stored this way).
+    using DialObserver = std::function<void(const NmtSubscriber& subscriber, const std::string& dialled)>;
+    void setDialObserver(DialObserver observer) { m_dialObserver = std::move(observer); }
+    using SmsRequestHandler =std::function<bool(const NmtSubscriber& subscriber, SmsRpKind kind, SmsDeliver& message)>;
     void setSmsRequestHandler(SmsRequestHandler handler) { m_smsRequestHandler = std::move(handler); }
 
     // Orders the phone of a connected call to another power level 0..3 (NMT Doc 450-1 4.4.1.8).
@@ -202,6 +206,7 @@ public:
     bool isSmsCenter(const std::string& dialled) override;
     uint8_t smsSubmitted(NmtTransaction& transaction, const SmsSubmit& message) override;
     bool smsRequested(NmtTransaction& transaction, SmsRpKind kind) override;
+    void numberDialled(NmtTransaction& transaction, const std::string& dialled) override;
     void audioFromMobile(NmtTransaction& transaction, const float* samples, int count) override;
     void audioToMobile(NmtTransaction& transaction, float* samples, int count) override;
     NmtChannel* findTrafficChannel(NmtChannel& from) override;
@@ -267,6 +272,7 @@ private:
     std::string m_smscNumber;
     SmsSubmitHandler m_smsSubmitHandler;
     SmsRequestHandler m_smsRequestHandler;
+    DialObserver m_dialObserver;
     SmsResultHandler m_smsResultHandler;
     uint8_t m_smsRef = 0;
     PowerHandler m_powerHandler;

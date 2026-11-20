@@ -69,6 +69,21 @@ public:
     QString* getLastFrame();
     void setLastFrame(QString* last_frame);
 
+    QString* getPassword();
+    void setPassword(QString* password);
+
+    QString* getDialled();
+    void setDialled(QString* dialled);
+
+    QString* getSmsCentre();
+    void setSmsCentre(QString* sms_centre);
+
+    qint32 getHeld();
+    void setHeld(qint32 held);
+
+    qint32 getPendingIndicators();
+    void setPendingIndicators(qint32 pending_indicators);
+
 
     virtual bool isSet() override;
 
@@ -99,6 +114,21 @@ private:
 
     QString* last_frame;
     bool m_last_frame_isSet;
+
+    QString* password;
+    bool m_password_isSet;
+
+    QString* dialled;
+    bool m_dialled_isSet;
+
+    QString* sms_centre;
+    bool m_sms_centre_isSet;
+
+    qint32 held;
+    bool m_held_isSet;
+
+    qint32 pending_indicators;
+    bool m_pending_indicators_isSet;
 
 };
 

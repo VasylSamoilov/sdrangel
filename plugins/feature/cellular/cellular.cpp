@@ -544,6 +544,11 @@ int Cellular::webapiReportGet(SWGSDRangel::SWGFeatureReport& response, QString& 
             phone->setQuality(p.quality);
             phone->setPower(p.power);
             *phone->getLastFrame() = p.lastFrame;
+            *phone->getPassword() = p.password;
+            *phone->getDialled() = p.dialled;
+            *phone->getSmsCentre() = p.smsCentre;
+            phone->setHeld(p.held);
+            phone->setPendingIndicators(p.pendingMwi);
             network->getPhones()->append(phone);
         }
         report->getNetworks()->append(network);
