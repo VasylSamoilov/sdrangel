@@ -16,6 +16,7 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include <QDateTime>
+#include <QHeaderView>
 #include <QTimeZone>
 #include <QDateTimeEdit>
 #include <QDebug>
@@ -1097,6 +1098,14 @@ RadioPagingModGUI::RadioPagingModGUI(PluginAPI* pluginAPI, DeviceUISet *deviceUI
 
     // The log of the requests and events: a few lines under the table of the messages
     ui->log->setMaximumHeight(ui->log->fontMetrics().lineSpacing() * 5 + 2 * ui->log->frameWidth() + 8);
+    // The table of the messages shows a few of them in a new window
+    ui->txLog->setMinimumHeight(ui->txLog->horizontalHeader()->sizeHint().height()
+        + 4 * ui->txLog->verticalHeader()->defaultSectionSize() + 2 * ui->txLog->frameWidth());
+    // The switch times of POCSAG mixed into FLEX, one per speed: named by their speed, as the roaming fields by their
+    // letter
+    ui->mixSwitch512->setPrefix("512: ");
+    ui->mixSwitch1200->setPrefix("1200: ");
+    ui->mixSwitch2400->setPrefix("2400: ");
     rollupContents->arrangeRollups();
     connect(rollupContents, SIGNAL(widgetRolled(QWidget*,bool)), this, SLOT(onWidgetRolled(QWidget*,bool)));
     connect(this, SIGNAL(customContextMenuRequested(const QPoint &)), this, SLOT(onMenuDialogCalled(const QPoint &)));
@@ -1222,6 +1231,7 @@ void RadioPagingModGUI::displayProtocol()
     PagingComposer::fillCodepages(ui->charset, protocolNames[(int) m_settings.m_protocol], false);
     PagingComposer::selectCodepage(ui->charset, m_settings.charset(m_settings.m_protocol));
     ui->charset->setVisible(RadioPagingCharset::codepages(protocolNames[(int) m_settings.m_protocol]).size() > 1);
+    ui->charsetLabel->setVisible(ui->charset->isVisibleTo(this));
     // The codepages Default stands for in the composer
     ui->composer->setDefaultCodepage("pocsag", m_settings.m_pocsagCharset);
     ui->composer->setDefaultCodepage("flex", m_settings.m_flexCharset);

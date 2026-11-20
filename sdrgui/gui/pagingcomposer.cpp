@@ -79,6 +79,8 @@ PagingComposer::PagingComposer(QWidget *parent) :
     m_flexValidator = new QRegularExpressionValidator(QRegularExpression("[PQRSpqrs]?[0-9]{0,4}[A-La-lU-Zu-z]?[0-9]{0,10}"), m_address);
     m_address->setValidator(m_digitsValidator);
     m_function = new QComboBox(this);
+    // Its items whole (the function letter and its number)
+    m_function->setSizeAdjustPolicy(QComboBox::AdjustToContents);
     m_capCode = new QLabel(this);
     m_capCode->setWordWrap(true);
     m_priority = new QCheckBox(tr("Priority"), this);
