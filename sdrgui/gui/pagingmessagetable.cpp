@@ -306,14 +306,25 @@ void PagingMessageTable::fitNarrowColumns()
         doc.setHtml(html);
         return (int) doc.idealWidth() + 4;
     };
-    const int padding = 2 * style()->pixelMetric(QStyle::PM_FocusFrameHMargin, nullptr, this) + 8;
-    auto headerWidth = [this, padding](int column) {
-        const QTableWidgetItem *header = horizontalHeaderItem(column);
-        return header ? horizontalHeader()->fontMetrics().horizontalAdvance(header->text()) + padding + 8 : 0;
+    // A cell of plain text as the item delegate sizes it (the style's margins), and the header with its sort space
+    auto textWidth = [this](const QString& text) {
+        QStyleOptionViewItem opt;
+        opt.initFrom(this);
+        opt.font = font();
+        opt.features = QStyleOptionViewItem::HasDisplay;
+        opt.text = text;
+        return style()->sizeFromContents(QStyle::CT_ItemViewItem, &opt, QSize(), this).width() + 4;
     };
-    const int direction = std::max({chipWidth(chip("QU", "#1a1a0d", "#cccc66")), chipWidth(chip("NS", "#2a0d0d", "#ff7777")),
-        fontMetrics().horizontalAdvance("RX") + padding, fontMetrics().horizontalAdvance("TX") + padding, headerWidth(ColDirection)});
-    const int polarity = std::max({chipWidth(chip("I", "#2a1f00", "#ffcc44")), chipWidth(chip("N", "#0d1a2a", "#88aacc")),
+    auto headerWidth = [this](int column) {
+        const QTableWidgetItem *header = horizontalHeaderItem(column);
+        QStyleOptionHeader opt;
+        opt.initFrom(horizontalHeader());
+        opt.text = header ? header->text() : QString();
+        return style()->sizeFromContents(QStyle::CT_HeaderSection, &opt, QSize(), horizontalHeader()).width() + 4;
+    };
+    const int direction = std::max({chipWidth(chip("QU", "#1a1a0d", "#cccc66")) + 8, chipWidth(chip("NS", "#2a0d0d", "#ff7777")) + 8,
+        textWidth("RX"), textWidth("TX"), headerWidth(ColDirection)});
+    const int polarity = std::max({chipWidth(chip("I", "#2a1f00", "#ffcc44")) + 8, chipWidth(chip("N", "#0d1a2a", "#88aacc")) + 8,
         headerWidth(ColPolarity)});
 
     horizontalHeader()->setSectionResizeMode(ColDirection, QHeaderView::Fixed);
@@ -348,6 +359,7 @@ void PagingMessageTable::sizeColumns()
     QSignalBlocker blocker(horizontalHeader());
     resizeColumnsToContents();
     removeRow(row);
+    fitNarrowColumns();
 }
 
 int PagingMessageTable::findRow(const QString& id) const
