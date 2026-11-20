@@ -161,6 +161,7 @@ private:
     bool m_softKnown;
     bool m_preambleBefore;
     bool m_leadingConfirmed;            //!< The sync codeword of the current batch is confirmed
+    int m_candidateSyncErrors = 0;      //!< Bit errors of the sync codeword the candidate batch started at
     int m_batch;                        //!< Batches decoded in the current transmission
 
     bool m_active;

@@ -757,6 +757,205 @@ void testPocsagSignalLost()
     check(received >= 4 * RadioPagingPocsag::m_codewordsPerBatch, "POCSAG: signal lost in the last batch, the message started is received");
 }
 
+// Bits fed as a strong clean signal: the soft value of each symbol known (sync codewords are also matched on them)
+std::vector<RadioPagingPocsagDecoder::Message> decodeCleanSoft(const std::vector<uint8_t>& bits)
+{
+    RadioPagingPocsagDecoder decoder(RadioPagingPocsagDecoder::Normal);
+    std::vector<RadioPagingPocsagDecoder::Message> messages;
+
+    for (uint8_t b : bits)
+    {
+        // Binary 1 is a negative deviation for normal polarity
+        const int symbol = b ? 0 : 1;
+        decoder.feed(symbol, 0.05f, symbol ? 1.0f : -1.0f);
+        while (decoder.hasMessage()) {
+            messages.push_back(decoder.takeMessage());
+        }
+    }
+    decoder.flush();
+    while (decoder.hasMessage()) {
+        messages.push_back(decoder.takeMessage());
+    }
+    return messages;
+}
+
+// A sync codeword look alike in the first batch of a transmission (within 4 bit errors, the soft match, straddling two
+// message codewords of the text "THIRD AT 2400 INVERTED" at RIC 1234569C) is data: the batch after the preamble is not
+// given up for it, the page is received
+void testPocsagSyncLookAlike()
+{
+    RadioPagingPocsag::TxMessage m;
+    m.m_address = 1234569;
+    m.m_function = 2;
+    m.m_type = RadioPagingPocsag::Alphanumeric;
+    m.m_text = "THIRD AT 2400 INVERTED";
+    std::vector<uint8_t> bits = RadioPagingPocsag::encode({ m }).m_bits;
+
+    // The look alike is there: a window within 4 bit errors of the sync codeword, not at a codeword boundary
+    int closest = 32;
+    for (size_t i = RadioPagingPocsag::m_preambleBits + 32; i + 32 <= bits.size(); i++)
+    {
+        uint32_t w = 0;
+        for (int k = 0; k < 32; k++) {
+            w = (w << 1) | bits[i + k];
+        }
+        if ((i - RadioPagingPocsag::m_preambleBits) % 32 != 0) {
+            closest = std::min(closest, __builtin_popcount(w ^ RadioPagingPocsag::m_syncWord));
+        }
+    }
+    check(closest <= RadioPagingPocsagDecoder::m_maxSoftSyncErrors, "POCSAG: the text has a sync codeword look alike in its codewords");
+
+    // After the preamble (the receiver marks the candidate so)
+    std::vector<RadioPagingPocsagDecoder::Message> messages;
+    {
+        RadioPagingPocsagDecoder decoder(RadioPagingPocsagDecoder::Normal);
+        int syncs = 0;
+        for (uint8_t b : bits)
+        {
+            const int symbol = b ? 0 : 1;
+            decoder.feed(symbol, 0.05f, symbol ? 1.0f : -1.0f);
+            if (decoder.syncWords() != (uint32_t) syncs)
+            {
+                if ((syncs == 0) && !decoder.getStatus().m_confirmed) {
+                    decoder.setPreambleBefore();
+                }
+                syncs = decoder.syncWords();
+            }
+            while (decoder.hasMessage()) {
+                messages.push_back(decoder.takeMessage());
+            }
+        }
+        decoder.flush();
+        while (decoder.hasMessage()) {
+            messages.push_back(decoder.takeMessage());
+        }
+    }
+    check(hasAddressText(messages, m.m_address, m.m_text), "POCSAG: a sync look alike in the text after the preamble, the page is received");
+
+    // The preamble missed (the sync codeword found alone): an exact sync codeword does not give way to the look alike
+    // with more bit errors
+    std::vector<uint8_t> noPreamble(bits.begin() + RadioPagingPocsag::m_preambleBits, bits.end());
+    messages = decodeCleanSoft(noPreamble);
+    check(hasAddressText(messages, m.m_address, m.m_text), "POCSAG: a sync look alike in the text without the preamble, the page is received");
+}
+
+// Bits fed as a strong clean signal, a candidate batch marked as after the preamble when reversals end right before its
+// sync codeword (as the receiver does)
+std::vector<RadioPagingPocsagDecoder::Message> decodeCleanSoftPreamble(const std::vector<uint8_t>& bits)
+{
+    RadioPagingPocsagDecoder decoder(RadioPagingPocsagDecoder::Normal);
+    std::vector<RadioPagingPocsagDecoder::Message> messages;
+    uint32_t syncs = 0;
+
+    for (size_t i = 0; i < bits.size(); i++)
+    {
+        const int symbol = bits[i] ? 0 : 1;
+        decoder.feed(symbol, 0.05f, symbol ? 1.0f : -1.0f);
+
+        if (decoder.syncWords() != syncs)
+        {
+            syncs = decoder.syncWords();
+            // 16 reversals end within a codeword before the 32 bits of the sync codeword
+            bool preamble = false;
+            for (size_t end = (i >= 32 + 16) ? i - 32 - 32 : 0; (end + 16 <= i - 32 + 1) && (i >= 32 + 16) && !preamble; end++)
+            {
+                bool reversals = true;
+                for (size_t k = end + 1; k < end + 16; k++) {
+                    reversals = reversals && (bits[k] != bits[k - 1]);
+                }
+                preamble = reversals;
+            }
+            if (preamble && !decoder.getStatus().m_confirmed) {
+                decoder.setPreambleBefore();
+            }
+        }
+        while (decoder.hasMessage()) {
+            messages.push_back(decoder.takeMessage());
+        }
+    }
+    decoder.flush();
+    while (decoder.hasMessage()) {
+        messages.push_back(decoder.takeMessage());
+    }
+    return messages;
+}
+
+// Two transmissions at the same speed and polarity, the second one starting (with a short preamble) right after the
+// first one ends, within the batch the decoder reads after the missed sync codeword: the sync codeword of the second
+// one is taken there, both pages are received. Also when the first one was found without its preamble (its sync
+// codeword exact)
+void testPocsagTransmissionAfterTransmission()
+{
+    RadioPagingPocsag::TxMessage a, b;
+    a.m_address = 1300001;
+    a.m_function = 0;
+    a.m_type = RadioPagingPocsag::Alphanumeric;
+    a.m_text = "FIRST TRANSMISSION";
+    b.m_address = 1300002;
+    b.m_function = 1;
+    b.m_type = RadioPagingPocsag::Alphanumeric;
+    b.m_text = "SECOND TRANSMISSION";
+    std::vector<uint8_t> first = RadioPagingPocsag::encode({ a }).m_bits;
+    std::vector<uint8_t> second = RadioPagingPocsag::encode({ b }).m_bits;
+    int bothWithPreamble = 0, bothWithout = 0, cases = 0;
+
+    for (int preamble = 40; preamble <= 360; preamble += 40)
+    {
+        std::vector<uint8_t> bits = first;
+        bits.insert(bits.end(), second.begin() + (RadioPagingPocsag::m_preambleBits - preamble), second.end());
+        std::vector<RadioPagingPocsagDecoder::Message> messages = decodeCleanSoftPreamble(bits);
+        bothWithPreamble += (hasAddressText(messages, a.m_address, a.m_text) && hasAddressText(messages, b.m_address, b.m_text)) ? 1 : 0;
+
+        std::vector<uint8_t> noPreamble(bits.begin() + RadioPagingPocsag::m_preambleBits, bits.end());
+        messages = decodeCleanSoft(noPreamble);
+        bothWithout += (hasAddressText(messages, a.m_address, a.m_text) && hasAddressText(messages, b.m_address, b.m_text)) ? 1 : 0;
+        cases++;
+    }
+
+    std::printf("      a transmission right after another: both received %d of %d (after the preamble), %d of %d (first found without it)\n",
+        bothWithPreamble, cases, bothWithout, cases);
+    check(bothWithPreamble == cases, "POCSAG: a transmission right after another, both pages received");
+    check(bothWithout == cases, "POCSAG: a transmission right after another found without its preamble, both pages received");
+}
+
+// The end of a transmission followed (after a gap) by another strong clean signal, as a transmission at another speed
+// read at this one: its words are not a fade of this transmission, no page is made of them
+void testPocsagOtherSignalAfter()
+{
+    RadioPagingPocsag::TxMessage a;
+    a.m_address = 1200001;
+    a.m_function = 0;
+    a.m_type = RadioPagingPocsag::Alphanumeric;
+    a.m_text = "INV AT 512";
+    std::vector<uint8_t> sent = RadioPagingPocsag::encode({ a }).m_bits;
+    int foreign = 0, received = 0, transmissions = 0;
+
+    for (int seed = 0; seed < 50; seed++)
+    {
+        std::vector<uint8_t> bits = sent;
+        std::mt19937 rng(seed);
+        for (int i = 0; i < 32 * 17 * 4; i++) {
+            bits.push_back(rng() & 1);
+        }
+        std::vector<RadioPagingPocsagDecoder::Message> messages = decodeCleanSoft(bits);
+        bool got = false;
+        for (const auto& m : messages)
+        {
+            if (m.m_address == a.m_address) {
+                got = true;
+            } else {
+                foreign++;
+            }
+        }
+        received += got ? 1 : 0;
+        transmissions++;
+    }
+
+    std::printf("      another signal after a transmission: %d of %d pages, %d foreign\n", received, transmissions, foreign);
+    check(received == transmissions, "POCSAG: another signal after a transmission, the page is received");
+    check(foreign == 0, "POCSAG: another signal after a transmission gives no page");
+}
+
 void testPocsagStandardRules()
 {
     // Encoder: an idle or address codeword between a message and the next message's address,
@@ -1036,6 +1235,9 @@ int main()
     testPocsagStandardRules();
     testPocsagSyncLoss();
     testPocsagSignalLost();
+    testPocsagSyncLookAlike();
+    testPocsagOtherSignalAfter();
+    testPocsagTransmissionAfterTransmission();
     testPocsagDamagedIdle();
     testPocsagLongNumeric();
     testPocsagPreambleLock();

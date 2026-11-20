@@ -141,6 +141,7 @@ bool RadioPagingPocsagDecoder::softSyncMatch(uint32_t word) const
 void RadioPagingPocsagDecoder::startCandidate()
 {
     m_syncWords++;
+    m_candidateSyncErrors = popcount32(m_reg ^ RadioPagingPocsag::m_syncWord);
     m_state = InBatch;
     m_slot = 0;
     m_word = 0;
@@ -195,8 +196,14 @@ void RadioPagingPocsagDecoder::feed(int symbol)
         break;
 
     case InBatch:
-        // An unconfirmed candidate gives way to a sync codeword at another position
-        if (!m_leadingConfirmed && syncMatch())
+        // An unconfirmed batch gives way to a sync codeword at another position. The first batch of a transmission
+        // only to one with fewer bit errors (its candidate was found in noise or in the data of another signal), and
+        // not after the preamble: that is the start of a transmission, and a sync like pattern in the codewords of its
+        // first batch is their data (a soft match within 4 bit errors straddling two message codewords is found in
+        // real text). The batch read after a missed sync codeword gives way to any (a transmission that follows)
+        if (!m_leadingConfirmed && syncMatch()
+            && (m_syncMissedLast || (m_batch > 0)
+                || (!m_preambleBefore && (popcount32(m_reg ^ RadioPagingPocsag::m_syncWord) < m_candidateSyncErrors))))
         {
             m_candidatesDropped++;
             startCandidate();
@@ -299,8 +306,11 @@ bool RadioPagingPocsagDecoder::decodeUnconfirmedBatch(int received)
     // A sync codeword alone (no preamble before it, no sync codeword one batch after it) is all that says the signal is
     // POCSAG: in noise, a carrier or the data of another protocol one is found now and then, and the code corrects half
     // of the words that follow it to some codeword. A codeword that needs a correction ends it: the codewords are taken
-    // as received (an undecodable one is a lost codeword of the message, it says nothing)
-    const bool alone = (m_batch == 0) && !m_leadingConfirmed && !m_preambleBefore;
+    // as received (an undecodable one is a lost codeword of the message, it says nothing). So is the batch received
+    // after a missed sync codeword (a fade over it, or the end of the transmission): no sync codeword at either end
+    // says it is POCSAG, and after the end of a transmission it is another signal (a transmission at another speed
+    // that follows, read at this one)
+    const bool alone = !m_leadingConfirmed && (((m_batch == 0) && !m_preambleBefore) || m_syncMissedLast);
 
     for (int slot = 0; slot < received; slot++)
     {
