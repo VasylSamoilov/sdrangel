@@ -1021,7 +1021,28 @@ int MessageCenter::webapiActionsPost(const QStringList& featureActionsKeys, SWGS
             MessageRecord record;
             lines++;
 
-            if (!document.isObject() || !MessageRecord::fromJson(document.object(), record))
+            if (!document.isObject())
+            {
+                errorMessage = QString("Line %1 is not a JSON object").arg(lines);
+                return 400;
+            }
+
+            // A message from outside (a script, an agent) needs only its protocol: the time it is given and an id
+            // of its own when it has none
+            QJsonObject json = document.object();
+
+            if (!json.contains("protocol"))
+            {
+                errorMessage = QString("Line %1: protocol missing (pocsag, flex or gsc)").arg(lines);
+                return 400;
+            }
+            if (!json.contains("timestamp")) {
+                json["timestamp"] = QDateTime::currentMSecsSinceEpoch();
+            }
+            if (!json.contains("id")) {
+                json["id"] = QString("api-%1-%2").arg(QDateTime::currentMSecsSinceEpoch()).arg(lines);
+            }
+            if (!MessageRecord::fromJson(json, record))
             {
                 errorMessage = QString("Line %1 is not a message record").arg(lines);
                 return 400;

@@ -6308,14 +6308,15 @@ void MCPTools::registerMessageCenterTools()
 
     add("get_paging_messages",
         "Get the paging messages (POCSAG, FLEX, GSC) the Radio Paging demodulators received and the modulators sent, as "
-        "message records: protocol, mode, address, type, text, polarity, errors, channel alias, frequency and the protocol "
+        "message records: protocol, mode, address, type, text, polarity, errors, channel name (channelAlias: the title of "
+        "the channel), frequency and the protocol "
         "fields. The last 1000 are kept, whether or not a Message Center is there; use sinceSequence with the lastSequence "
         "of a previous call to read only new ones.",
         schema({
             {"protocol", enumProp("Only this protocol", {"pocsag", "flex", "gsc"})},
             {"address", strProp("Only these addresses: a regular expression the whole address must match, e.g. 0001234. (POCSAG RIC and function letter), 0012345.. (FLEX capcode), 001001/. (GSC)")},
             {"text", strProp("Only these texts: a regular expression the whole text must match, e.g. (?i).*fire.* for a text that contains fire")},
-            {"alias", strProp("Only messages of the channel with this alias")},
+            {"channel", strProp("Only messages of the channel with this name (its title, exact)")},
             {"direction", enumProp("Received or sent", {"rx", "tx"})},
             {"limit", bounded(intProp("Maximum number of messages, most recent. Default 50"), 1, MCPDataFeed::m_maxMessages)},
             {"sinceSequence", intProp("Only messages with a sequence number greater than this")}
@@ -6323,7 +6324,7 @@ void MCPTools::registerMessageCenterTools()
         [this](const QJsonObject& args)
         {
             return m_dataFeed.getMessages(argString(args, "protocol", false), argString(args, "address", false),
-                argString(args, "text", false), argString(args, "alias", false), argString(args, "direction", false),
+                argString(args, "text", false), argString(args, "channel", false), argString(args, "direction", false),
                 argInt(args, "limit", false, 50), argInt64(args, "sinceSequence", false, 0));
         });
 
@@ -6362,7 +6363,7 @@ void MCPTools::registerMessageCenterTools()
         "gives them). Each message is checked against all the routes in their order; every route whose filter selects it sends it "
         "to that route's sinks (log, queue or a sink named here); a route with stop ends the check. The log is a sink: a "
         "message no route sends to it is not logged (the default route 'All messages to the log' does).\n"
-        "Route: {name, enabled, stop, sinks: [names], filter: {protocols: [pocsag|flex|gsc], aliases, sources (channels, "
+        "Route: {name, enabled, stop, sinks: [names], filter: {protocols: [pocsag|flex|gsc], aliases (channel names: their titles), sources (channels, "
         "api or source names), direction (0 rx, 1 tx), kind, polarity (1 normal, 2 inverted), speeds, address and text (regular "
         "expressions on the whole field), msgType, matchField (0 address, 1 message, 2 protocol, 3 type, 4 channel, 5 any), "
         "regExp (anywhere in that field, its captures are ${1}... in the sinks), hideDuplicates, voiceOnly}, decodeCharset: "
@@ -6415,7 +6416,8 @@ void MCPTools::registerMessageCenterTools()
         });
 
     add("message_center_post_page",
-        "Queue a page for a transmitter (a Radio Paging modulator, by its alias; get_message_center lists the transmitters). "
+        "Queue a page for a transmitter (a Radio Paging modulator, by its name: the title of the channel; get_message_center "
+        "lists the transmitters). "
         "The page has the fields of MessageCenterPost: transmitter, protocol (pocsag, flex, gsc), address, type (alphanumeric, "
         "numeric, tone, voice...), text, function, speed, polarity, priority and the fields of the protocol. "
         "The page goes on the air when the transmitter takes it.",
@@ -6453,7 +6455,8 @@ void MCPTools::registerMessageCenterTools()
     add("message_center_ingest",
         "Give message records to the Message Center as messages received: they go through its routes (log, files, UDP, "
         "commands, map) as if a channel had published them. They are never pages to transmit.",
-        schema({{"records", prop("array", "Message records (as get_paging_messages gives them): id, timestamp, protocol, kind, address, text...")}}, {"records"}),
+        schema({{"records", prop("array", "Message records (as get_paging_messages gives them): protocol (required: pocsag, "
+            "flex or gsc), address, msgType, text, channelAlias... id and timestamp (ms) are given when missing")}}, {"records"}),
         [this](const QJsonObject& args)
         {
             if (!args["records"].isArray() || args["records"].toArray().isEmpty()) {

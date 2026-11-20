@@ -43,7 +43,7 @@ curl_code POST /deviceset/0/device/run > /dev/null
 # The modulator announces itself every 5 s
 sleep 7
 R=$(report)
-check "the modulator is registered under its alias, idle" '[[ "$R" == *"\"alias\":\"t1\""*"\"role\":\"tx\""*"\"status\":\"idle\""* ]]'
+check "the modulator is registered under its name (title), idle" '[[ "$R" == *"\"alias\":\"t1\""*"\"role\":\"tx\""*"\"status\":\"idle\""* ]]'
 
 check "a page is accepted" '[ "$(post "{\"id\":\"p-tone\",\"transmitter\":\"t1\",\"protocol\":\"gsc\",\"address\":\"123456\",\"function\":1,\"type\":\"tone\"}")" = 202 ]'
 check "a page with text is accepted" '[ "$(post "{\"id\":\"p-alpha\",\"transmitter\":\"t1\",\"protocol\":\"gsc\",\"address\":\"123456\",\"function\":2,\"type\":\"alphanumeric\",\"text\":\"FROM THE CENTER\"}")" = 202 ]'
@@ -64,6 +64,12 @@ sleep 1.5
 R=$(report)
 # (the pages have a state, the records of the log do not)
 check "the withdrawn page is gone" '! echo "$R" | grep -q "\"id\":\"p-nobody\",\"protocol\"[^}]*\"state\""'
+
+# Ingest: a record needs its protocol; its time and id are given when it has none. Routed (the default route logs it)
+check "an ingested record without id and timestamp is accepted" '[ "$(curl_code POST /featureset/feature/0/actions '"'"'{"featureType":"MessageCenter","MessageCenterActions":{"ingest":"{\"protocol\":\"pocsag\",\"address\":\"0007777A\",\"msgType\":\"alphanumeric\",\"text\":\"INGESTED TEXT\"}"}}'"'"')" = 202 ]'
+check "an ingested record without protocol is refused" '[ "$(curl_code POST /featureset/feature/0/actions '"'"'{"featureType":"MessageCenter","MessageCenterActions":{"ingest":"{\"address\":\"0007777A\",\"text\":\"x\"}"}}'"'"')" = 400 ]'
+sleep 1.5
+check "the ingested record is in the log, with an id and a time" '[[ "$(report)" == *"\"id\":\"api-"*"\"text\":\"INGESTED TEXT\""* || "$(report)" == *"\"text\":\"INGESTED TEXT\""*"\"id\":\"api-"* ]]'
 
 check "the settings are read" '[[ "$(curl -s "$U/featureset/feature/0/settings" | tr -d "\n")" == *"\"logSize\": 10000"* ]]'
 check "a route that is not JSON is refused" '[ "$(curl_code PATCH /featureset/feature/0/settings "{\"featureType\":\"MessageCenter\",\"MessageCenterSettings\":{\"routes\":\"not json\"}}")" = 400 ]'

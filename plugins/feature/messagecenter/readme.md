@@ -115,7 +115,7 @@ Actions (`MessageCenterActions`):
 * `requeue`, `cancel`: the id of a page.
 * `clearSent`: 1 to remove the pages sent.
 * `redecode`: a record of the log decoded again (`MessageCenterRedecode`: id, charset, type).
-* `ingest`: message records as JSON lines, routed as messages received.
+* `ingest`: message records as JSON lines, routed as messages received. A record needs its protocol; one without a timestamp gets the time it is given, one without an id gets an id of its own.
 * `importFile`: the path of a JSON lines or CSV file read into the log, not routed.
 
 <h2>MCP</h2>
