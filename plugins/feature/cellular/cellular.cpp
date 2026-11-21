@@ -18,6 +18,7 @@
 #include <algorithm>
 
 #include <QDebug>
+#include <QRegularExpression>
 
 #include "channel/channelapi.h"
 #include "device/deviceset.h"
@@ -34,6 +35,7 @@
 #include "SWGCellularNetworkReport.h"
 #include "SWGCellularCarrierReport.h"
 #include "SWGCellularPhoneReport.h"
+#include "SWGCellularMobile.h"
 #include "SWGCellularActions.h"
 #include "SWGFeatureActions.h"
 
@@ -54,7 +56,7 @@ MESSAGE_CLASS_DEFINITION(Cellular::MsgAction, Message)
 
 namespace
 {
-const char* const kActionNames[] = {"call", "hangup", "release", "sms", "mwi", "power", "move", "hold"};
+const char* const kActionNames[] = {"call", "hangup", "release", "sms", "mwi", "power", "move", "hold", "forget"};
 }
 
 bool Cellular::MsgAction::parse(const QString& name, Action& action)
@@ -581,6 +583,25 @@ bool Cellular::handleMessage(const Message& cmd)
     {
         const MsgAction& action = static_cast<const MsgAction&>(cmd);
 
+        // the book is the feature's: no network has to run for it
+        if (action.getAction() == MsgAction::Forget)
+        {
+            const CellularNetworkSettings *network = m_settings.network(action.getNetwork());
+            const modemnmt::System system = network && network->m_system == 1 ? modemnmt::System::Nmt900 : modemnmt::System::Nmt450;
+            modemnmt::NmtPhoneRecord record;
+            record.system = system;
+            record.number = action.getNumber().toStdString();
+            bool removed;
+            {
+                QMutexLocker locker(&m_bookMutex);
+                removed = m_book.forget(system, record.number);
+            }
+            report(action.getNetwork(), QString("forget %1: %2").arg(action.getNumber()).arg(removed ? "done" : "not in the book"));
+            if (removed) {
+                sendBookRecord(record, true);
+            }
+            return true;
+        }
         if (!m_running || m_active.find(action.getNetwork()) == m_active.end())
         {
             report(action.getNetwork(), QString("%1 %2: the network is not on the air")
@@ -602,9 +623,106 @@ int Cellular::webapiSettingsGet(SWGSDRangel::SWGFeatureSettings& response, QStri
     (void) errorMessage;
     response.setCellularSettings(new SWGSDRangel::SWGCellularSettings());
     response.getCellularSettings()->init();
-    QMutexLocker locker(&m_settingsMutex);
-    webapiFormatFeatureSettings(response, m_settings);
+    {
+        QMutexLocker locker(&m_settingsMutex);
+        webapiFormatFeatureSettings(response, m_settings);
+    }
+    webapiFormatMobiles(response);
     return 200;
+}
+
+// the book of phones, from the book (not from settings)
+void Cellular::webapiFormatMobiles(SWGSDRangel::SWGFeatureSettings& response) const
+{
+    using F = modemnmt::NmtPhoneRecord;
+    SWGSDRangel::SWGCellularSettings *s = response.getCellularSettings();
+    QList<SWGSDRangel::SWGCellularMobile*> *list = s->getMobiles();
+
+    if (list)
+    {
+        qDeleteAll(*list);
+        list->clear();
+    }
+    else
+    {
+        list = new QList<SWGSDRangel::SWGCellularMobile*>();
+        s->setMobiles(list);
+    }
+    QMutexLocker locker(&m_bookMutex);
+    for (const modemnmt::NmtPhoneRecord *r : m_book.all())
+    {
+        SWGSDRangel::SWGCellularMobile *m = new SWGSDRangel::SWGCellularMobile();
+        QStringList typed;
+        QStringList areas;
+
+        m->init();
+        *m->getNumber() = QString::fromStdString(r->number);
+        m->setSystem(r->system == modemnmt::System::Nmt900 ? 1 : 0);
+        *m->getName() = QString::fromStdString(r->value(F::Name));
+        *m->getNotes() = QString::fromStdString(r->value(F::Notes));
+        *m->getPassword() = QString::fromStdString(r->value(F::Password));
+        *m->getSmsCentre() = QString::fromStdString(r->value(F::SmsCentre));
+        *m->getVoiceMail() = QString::fromStdString(r->value(F::VoiceMail));
+        *m->getVoiceMailCode() = QString::fromStdString(r->value(F::VoiceMailCode));
+        for (int f = 0; f < F::FieldCount; f++) {
+            if (r->fields[f].typed) {
+                typed.append(F::fieldName(static_cast<F::Field>(f)));
+            }
+        }
+        *m->getTyped() = typed.join(",");
+        *m->getDialled() = QString::fromStdString(modemnmt::NmtPhoneInfo::text(r->dialled, false));
+        *m->getSmsCentresUsed() = QString::fromStdString(modemnmt::NmtPhoneInfo::text(r->smsCentresUsed, true));
+        for (const std::pair<int, int>& a : r->areas) {
+            areas.append(QString("%1 %2").arg(a.first).arg(a.second));
+        }
+        *m->getAreas() = areas.join(", ");
+        list->append(m);
+    }
+}
+
+// A request with mobiles: each item merges into the book; the fields given are typed. The book
+// is not in the settings, so no network starts again for it.
+void Cellular::webapiUpdateMobiles(const QStringList& featureSettingsKeys, SWGSDRangel::SWGFeatureSettings& response)
+{
+    using F = modemnmt::NmtPhoneRecord;
+    SWGSDRangel::SWGCellularSettings *s = response.getCellularSettings();
+
+    if (!featureSettingsKeys.contains("mobiles") || !s->getMobiles()) {
+        return;
+    }
+    std::vector<modemnmt::NmtPhoneRecord> changed;
+    {
+        QMutexLocker locker(&m_bookMutex);
+        const QList<SWGSDRangel::SWGCellularMobile*>& list = *s->getMobiles();
+        for (int i = 0; i < list.size(); i++)
+        {
+            SWGSDRangel::SWGCellularMobile *m = list[i];
+            const QString number = m->getNumber() ? m->getNumber()->trimmed() : QString();
+            if (number.size() != 7 || number.contains(QRegularExpression("[^0-9]"))) {
+                continue;
+            }
+            const modemnmt::System system = m->getSystem() == 1 ? modemnmt::System::Nmt900 : modemnmt::System::Nmt450;
+            const std::string n = number.toStdString();
+            const auto given = [&](const char *field) {
+                return featureSettingsKeys.contains(QString("mobiles[%1].%2").arg(i).arg(field));
+            };
+            const std::pair<F::Field, QString*> fields[] = {
+                {F::Name, m->getName()}, {F::Notes, m->getNotes()}, {F::Password, m->getPassword()},
+                {F::SmsCentre, m->getSmsCentre()}, {F::VoiceMail, m->getVoiceMail()}, {F::VoiceMailCode, m->getVoiceMailCode()}
+            };
+            m_book.record(system, n);
+            for (const auto& f : fields)
+            {
+                if (given(F::fieldName(f.first)) && f.second) {
+                    m_book.edit(system, n, f.first, f.second->trimmed().toStdString());
+                }
+            }
+            changed.push_back(*m_book.find(system, n));
+        }
+    }
+    for (const modemnmt::NmtPhoneRecord& r : changed) {
+        sendBookRecord(r);
+    }
 }
 
 int Cellular::webapiSettingsPutPatch(bool force, const QStringList& featureSettingsKeys,
@@ -617,6 +735,7 @@ int Cellular::webapiSettingsPutPatch(bool force, const QStringList& featureSetti
         settings = m_settings;
     }
     webapiUpdateFeatureSettings(settings, featureSettingsKeys, response);
+    webapiUpdateMobiles(featureSettingsKeys, response);
 
     // the networks that are switched on start, the others stop; a PATCH starts the running ones
     // whose settings changed again, a PUT all running ones
@@ -627,6 +746,7 @@ int Cellular::webapiSettingsPutPatch(bool force, const QStringList& featureSetti
     }
 
     webapiFormatFeatureSettings(response, settings);
+    webapiFormatMobiles(response);
     return 200;
 }
 
@@ -710,7 +830,7 @@ int Cellular::webapiActionsPost(const QStringList& featureActionsKeys, SWGSDRang
     MsgAction::Action action;
     if (!MsgAction::parse(*actions->getAction(), action))
     {
-        errorMessage = QString("Unknown action %1 (call, hangup, release, sms, mwi, power, move, hold)").arg(*actions->getAction());
+        errorMessage = QString("Unknown action %1 (call, hangup, release, sms, mwi, power, move, hold, forget)").arg(*actions->getAction());
         return 400;
     }
 
@@ -720,7 +840,7 @@ int Cellular::webapiActionsPost(const QStringList& featureActionsKeys, SWGSDRang
         errorMessage = "The action needs the number of the phone";
         return 400;
     }
-    if (!m_running)
+    if (!m_running && action != MsgAction::Forget)      // the book needs no running controller
     {
         errorMessage = "The controller does not run";
         return 400;

@@ -11,12 +11,54 @@ CellularSettings:
       type: array
       items:
         $ref: "http://swgserver:8081/api/swagger/include/Cellular.yaml#/CellularNetworkSettings"
+    mobiles:
+      description: "The book of phones. When present, each item merges into the book by system and number (a phone that is not in the book is added); the fields given become typed values (an empty string gives the field back to learning). Phones are forgotten with the action forget. Changes of the book do not restart networks."
+      type: array
+      items:
+        $ref: "http://swgserver:8081/api/swagger/include/Cellular.yaml#/CellularMobile"
     title:
       type: string
       description: "Title of the feature window."
     rgbColor:
       type: integer
       description: "Title color of the feature window (RGB)."
+
+CellularMobile:
+  description: "What the tester knows of a phone: values learned from it or typed by the user"
+  properties:
+    number:
+      type: string
+      description: "Country digit and six digits."
+    system:
+      type: integer
+      description: "0 NMT-450, 1 NMT-900."
+    name:
+      type: string
+    notes:
+      type: string
+    password:
+      type: string
+      description: "Password K (three digits)."
+    smsCentre:
+      type: string
+      description: "SMS centre of the phone: it reaches the centre on this number whatever the network's is."
+    voiceMail:
+      type: string
+      description: "Number the phone calls for its voice mail."
+    voiceMailCode:
+      type: string
+    typed:
+      type: string
+      description: "The fields typed by the user, comma separated (the others are learned). Read only."
+    dialled:
+      type: string
+      description: "Numbers the phone dialled, the newest first. Read only."
+    smsCentresUsed:
+      type: string
+      description: "Numbers it sent short messages to or fetched them from, with the traffic area. Read only."
+    areas:
+      type: string
+      description: "Traffic areas (Y1 Y2) of the networks it was heard on, the newest first. Read only."
 
 CellularNetworkSettings:
   description: "One NMT network (one base station) and the radios it runs on"
@@ -177,7 +219,8 @@ CellularActions:
         mwi (message waiting indicators, value: flags; text for a phone in a call: incall or
         clearing, empty for both), power (level 0..3 of the phone in its call),
         move (the call to another traffic channel, value: channel, 0 for any free one),
-        hold (text the SMS centre keeps until the phone calls it for its waiting messages)
+        hold (text the SMS centre keeps until the phone calls it for its waiting messages),
+        forget (the phone's record in the book; the system is the one of the network)
     number:
       type: string
       description: "Number of the phone: country digit and six digits."

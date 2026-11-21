@@ -22,6 +22,7 @@
 #include <QJsonObject>
 
 
+#include "SWGCellularMobile.h"
 #include "SWGCellularNetworkSettings.h"
 #include <QList>
 #include <QString>
@@ -50,6 +51,9 @@ public:
     QList<SWGCellularNetworkSettings*>* getNetworks();
     void setNetworks(QList<SWGCellularNetworkSettings*>* networks);
 
+    QList<SWGCellularMobile*>* getMobiles();
+    void setMobiles(QList<SWGCellularMobile*>* mobiles);
+
     QString* getTitle();
     void setTitle(QString* title);
 
@@ -65,6 +69,9 @@ private:
 
     QList<SWGCellularNetworkSettings*>* networks;
     bool m_networks_isSet;
+
+    QList<SWGCellularMobile*>* mobiles;
+    bool m_mobiles_isSet;
 
     QString* title;
     bool m_title_isSet;
