@@ -25,11 +25,7 @@
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
-#include <QResizeEvent>
 #include <QSplitter>
-#include <QStyleOptionTab>
-#include <QStylePainter>
-#include <QTabBar>
 #include <QTabWidget>
 #include <QToolButton>
 #include <QFileDialog>
@@ -174,94 +170,6 @@ QToolButton *iconButton(QWidget *parent, const char *icon, const QString& tip)
     button->setToolTip(tip);
     return button;
 }
-
-// Tabs on the left side with their icon and name written across, not turned up: a tab is one line high, so that the
-// five sections fit a low window. Qt draws the text of side tabs turned; the label is drawn turned back
-class SideTabBar : public QTabBar
-{
-public:
-    explicit SideTabBar(QWidget *parent) : QTabBar(parent) {}
-
-protected:
-    QSize tabSizeHint(int index) const override
-    {
-        QSize size = QTabBar::tabSizeHint(index);
-        size.transpose();
-        return size;
-    }
-
-    void paintEvent(QPaintEvent *event) override
-    {
-        (void) event;
-        QStylePainter painter(this);
-
-        for (int i = 0; i < count(); i++)
-        {
-            QStyleOptionTab option;
-            initStyleOption(&option, i);
-            painter.drawControl(QStyle::CE_TabBarTabShape, option);
-            painter.save();
-            QSize size = option.rect.size();
-            size.transpose();
-            QRect rect(QPoint(), size);
-            rect.moveCenter(option.rect.center());
-            option.rect = rect;
-            const QPoint center = tabRect(i).center();
-            painter.translate(center);
-            painter.rotate(90);
-            painter.translate(-center);
-            painter.drawControl(QStyle::CE_TabBarTabLabel, option);
-            painter.restore();
-        }
-    }
-};
-
-// A tab widget with the side tabs above (QTabWidget::setTabBar is protected). In a narrow window the names fold away:
-// the icons stay, the names are in their tool tips
-class SideTabWidget : public QTabWidget
-{
-public:
-    explicit SideTabWidget(QWidget *parent) : QTabWidget(parent)
-    {
-        setTabBar(new SideTabBar(this));
-        setTabPosition(QTabWidget::West);
-    }
-
-protected:
-    void resizeEvent(QResizeEvent *event) override
-    {
-        const bool fold = event->size().width() < m_foldWidth;
-
-        if (fold != m_folded)
-        {
-            m_folded = fold;
-
-            for (int i = 0; i < count(); i++)
-            {
-                if (fold)
-                {
-                    m_names.append(tabText(i));
-                    setTabText(i, QString());
-                }
-                else if (i < m_names.size())
-                {
-                    setTabText(i, m_names[i]);
-                }
-            }
-
-            if (!fold) {
-                m_names.clear();
-            }
-        }
-
-        QTabWidget::resizeEvent(event);
-    }
-
-private:
-    static const int m_foldWidth = 560;     //!< Narrower: icons only
-    bool m_folded = false;
-    QStringList m_names;
-};
 
 } // namespace
 
@@ -645,17 +553,19 @@ MessageCenterGUI::MessageCenterGUI(PluginAPI* pluginAPI, FeatureUISet *featureUI
 
     // Five sections, one for each stage of a message (where it comes from, which ones, what to do, where it goes),
     // as tabs on the left side (as the APRS and Meshtastic windows): they take width, not the height a small screen
-    // lacks. The options in a dialog opened from the corner of the tabs
+    // lacks. The options in a dialog opened from the Messages tab
     RollupContents *rollupContents = getRollupContents();
     QWidget *main = makeRollup("Message Center", true);
     QVBoxLayout *mainLayout = new QVBoxLayout(main);
     mainLayout->setContentsMargins(0, 0, 0, 0);
-    m_tabs = new SideTabWidget(main);
+    m_tabs = new QTabWidget(main);
+    m_tabs->setTabPosition(QTabWidget::West);
     m_tabs->setDocumentMode(true);
-    auto tab = [this](const QString& title, const char *icon, const QString& tip) {
+    // Names only, as the side tabs of APRS and DATV: an icon makes each tab higher, the five no longer fit
+    auto tab = [this](const QString& title, const QString& tip) {
         QWidget *w = new QWidget(m_tabs);
         w->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-        m_tabs->addTab(w, QIcon(icon), title);
+        m_tabs->addTab(w, title);
         m_tabs->setTabToolTip(m_tabs->count() - 1, tip);
         return w;
     };
@@ -674,15 +584,15 @@ MessageCenterGUI::MessageCenterGUI(PluginAPI* pluginAPI, FeatureUISet *featureUI
     QWidget *top = nullptr;
     QWidget *bottom = nullptr;
 
-    buildLog(tab(tr("Messages"), ":/sms.png", tr("The messages received and sent: live, or searched in the history")));
-    split(tab(tr("Send"), ":/tx.png", tr("Send a page to a contact or an address, and follow the pages sent")), top, bottom);
+    buildLog(tab(tr("Messages"),tr("The messages received and sent: live, or searched in the history")));
+    split(tab(tr("Send"),tr("Send a page to a contact or an address, and follow the pages sent")), top, bottom);
     buildCompose(top);
     buildQueue(bottom);
-    buildContacts(tab(tr("Contacts"), ":/star.png", tr("The address book: a name, an icon and a colour for the addresses of "
+    buildContacts(tab(tr("Contacts"),tr("The address book: a name, an icon and a colour for the addresses of "
         "a pager or a station,\nshown beside their messages, chosen in the filters, and how to send them a page")));
-    buildRoutes(tab(tr("Rules"), ":/funnel.png", tr("What happens to each message: which ones (a filter), what changes "
+    buildRoutes(tab(tr("Rules"),tr("What happens to each message: which ones (a filter), what changes "
         "(a mark, a codepage), and where they go")));
-    split(tab(tr("Connections"), ":/wiring.png", tr("Where messages come from and go: the channels, and the files, UDP, "
+    split(tab(tr("Connections"),tr("Where messages come from and go: the channels, and the files, UDP, "
         "commands, speech and Map")), top, bottom);
     buildEndpoints(top);
     buildFiles(bottom);
