@@ -184,7 +184,7 @@ private:
     //!< assumed: the time mode is assumed (not confirmed by the time words of a cycle), a light yellow chip
     void setNetworkDetail(FlexWord word, int pol, const QString& text, FlexWordAge age, bool assumed = false);
     //!< The kind of the network time, its precision and when it was received, for its tooltips
-    static QString flexTimeKind(const RadioPagingFlexDecoder::NetworkTime& t);
+    static QString flexTimeKind(const RadioPagingFlexDecoder::NetworkTime& t, const RadioPagingFlexDecoder::FrameReport& frame);
     void setDetail(int protocol, int row, int pol, const QString& text, bool live, const QColor& colour = QColor());
     void updateDetails(const RadioPagingDemodSink::Status& status, int flexPol, bool flexHeld);
 

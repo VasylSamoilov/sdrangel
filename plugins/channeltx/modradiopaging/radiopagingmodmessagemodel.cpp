@@ -66,14 +66,14 @@ QString RadioPagingModMessageModel::stateName(State state)
 // The values of the row shown, from its record: made once a change, not at each paint
 void RadioPagingModMessageModel::fill(Row& row)
 {
-    const MessageRecord& record = row.m_record;
-    const QVariantList events = record.m_protocolData.value("events").toList();
+    const MessageRecord& rec = row.m_record;
+    const QVariantList events = rec.m_protocolData.value("events").toList();
 
     row.m_events = events.size();
-    row.m_firstMs = events.isEmpty() ? record.m_timestamp : eventMs(events.first());
-    row.m_lastMs = events.isEmpty() ? record.m_timestamp : eventMs(events.last());
-    row.m_text = PagingMessageTable::recordText(record).simplified();
-    PagingMessageTable::recordInfo(record, row.m_info, row.m_infoHtml, row.m_infoTip);
+    row.m_firstMs = events.isEmpty() ? rec.m_timestamp : eventMs(events.first());
+    row.m_lastMs = events.isEmpty() ? rec.m_timestamp : eventMs(events.last());
+    row.m_text = PagingMessageTable::recordText(rec).simplified();
+    PagingMessageTable::recordInfo(rec, row.m_info, row.m_infoHtml, row.m_infoTip);
 
     QStringList lines;
 
@@ -261,7 +261,18 @@ int RadioPagingModMessageModel::columnCount(const QModelIndex& parent) const
 
 QVariant RadioPagingModMessageModel::headerData(int section, Qt::Orientation orientation, int role) const
 {
-    static const char *names[] = {"#", "State", "First event", "Last", "Events", "Protocol", "Address", "Type", "Message", "Info"};
+    if ((orientation != Qt::Horizontal) || (section < 0) || (section >= ColCount)) {
+        return QVariant();
+    }
+    if (role == Qt::DisplayRole)
+    {
+        static const char *names[] = {"#", "State", "First event", "Last", "Events", "Protocol", "Address", "Type", "Message", "Info"};
+        return QString(names[section]);
+    }
+    if (role != Qt::ToolTipRole) {
+        return QVariant();
+    }
+
     static const char *tips[] = {
         "Id of the message in this transmitter",
         "waiting: queued, not sent yet\non air: its blocks are being sent\nsent: sent completely (and its copies)\n"
@@ -277,17 +288,7 @@ QVariant RadioPagingModMessageModel::headerData(int section, Qt::Orientation ori
         "The protocol fields where it went and how: frame, batch, phase, message number, fragments..."
     };
 
-    if ((orientation != Qt::Horizontal) || (section < 0) || (section >= ColCount)) {
-        return QVariant();
-    }
-    if (role == Qt::DisplayRole) {
-        return QString(names[section]);
-    }
-    if (role == Qt::ToolTipRole) {
-        return QString(tips[section]);
-    }
-
-    return QVariant();
+    return QString(tips[section]);
 }
 
 QVariant RadioPagingModMessageModel::data(const QModelIndex& index, int role) const
@@ -297,7 +298,7 @@ QVariant RadioPagingModMessageModel::data(const QModelIndex& index, int role) co
     }
 
     const Row& row = m_rows[index.row()];
-    const MessageRecord& record = row.m_record;
+    const MessageRecord& rec = row.m_record;
 
     switch (role)
     {
@@ -319,13 +320,13 @@ QVariant RadioPagingModMessageModel::data(const QModelIndex& index, int role) co
             return row.m_eventsTip;
         }
     case Qt::DecorationRole:
-        if ((index.column() == ColMessage) && !record.m_protocolData.value("voice_file").toString().isEmpty()) {
+        if ((index.column() == ColMessage) && !rec.m_protocolData.value("voice_file").toString().isEmpty()) {
             return QIcon(":/sound_on.png");
         }
         return QVariant();
     case PagingMessageTable::m_htmlRole:
         if (index.column() == ColType) {
-            return PagingMessageTable::typeChipHtml(record.m_msgType);
+            return PagingMessageTable::typeChipHtml(rec.m_msgType);
         } else if (index.column() == ColInfo) {
             return row.m_infoHtml;
         }
@@ -339,7 +340,7 @@ QVariant RadioPagingModMessageModel::data(const QModelIndex& index, int role) co
     switch (index.column())
     {
     case ColId:
-        return record.m_protocolData.value("tx_id");
+        return rec.m_protocolData.value("tx_id");
     case ColState:
         return stateName(row.m_state);
     case ColFirst:
@@ -349,11 +350,11 @@ QVariant RadioPagingModMessageModel::data(const QModelIndex& index, int role) co
     case ColEvents:
         return row.m_events;
     case ColProtocol:
-        return record.m_mode.isEmpty() ? record.m_protocol.toUpper() : QString("%1 %2").arg(record.m_protocol.toUpper(), record.m_mode);
+        return rec.m_mode.isEmpty() ? rec.m_protocol.toUpper() : QString("%1 %2").arg(rec.m_protocol.toUpper(), rec.m_mode);
     case ColAddress:
-        return record.m_address;
+        return rec.m_address;
     case ColType:
-        return record.m_msgType;
+        return rec.m_msgType;
     case ColMessage:
         return row.m_text;
     case ColInfo:

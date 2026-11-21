@@ -1401,10 +1401,8 @@ void PagingMessageTable::setupMessageCenterButton(QToolButton *button)
             }
         }
 
-        // On: the grey of the button with a green hue, as light as it is (the icon keeps its contrast)
-        const QColor grey = QApplication::palette().button().color();
-        const QColor green = QColor::fromHsv(120, 110, std::max(grey.value(), 60));
-        button->setStyleSheet(count > 0 ? QString("QToolButton{ background-color: %1; }").arg(green.name()) : QString());
+        // On and off as the indicators of the other channels (NFM, BFM)
+        button->setStyleSheet(count > 0 ? QString("QToolButton { background-color : green; }") : QString("QToolButton { background:rgb(79,79,79); }"));
         button->setToolTip(count == 0
             ? tr("Message Center: there is none. Click to add one and open it.\n"
                  "It keeps the log of the messages of all the paging channels, with their history, routes, sinks and\n"

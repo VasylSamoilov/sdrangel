@@ -1351,6 +1351,8 @@ QString RadioPagingDemodGUI::groupSlotToolTip(const RadioPagingFlexDecoder::Grou
 namespace {
 
 const char *colourInactive = "#a8a8a8";     // Values of a reception that ended: readable on the dark background
+const char *colourOff = "rgb(79,79,79)";    // An indicator off, as in the other channels (NFM, BFM)
+const char *colourAssumed = "rgb(76,84,76)"; // FLEX time of an assumed kind: the grey of off with a green hue
 
 // The boxes of the status (bit error rate, phases, polarity): light tints with dark text, for contrast
 enum Chip { ChipGood, ChipCorrected, ChipBad, ChipEnded, ChipNormal, ChipInverted };
@@ -1537,24 +1539,20 @@ const QList<DetailRow>& detailRows(int protocol)
         {"Network time",
             "The date and the time the network sends, as of the last frame: pagers set their clock from it.\n"
             "Networks must send it at least once an hour (cycle 0, frame 0); many send it in more frames.\n"
-            "The time goes on with the frames between. Green box: received in the last frame. Light green: in this\n"
-            "cycle (4 minutes). Plain: in this hour. Grey: not received for more than an hour. Light yellow: the kind of\n"
-            "the time (of frame 0 of the cycle, or of the frame) is assumed, not told yet by the time words of a cycle.", false},
+            "The time goes on with the frames between.\n"
+            "Green: this cycle. Plain: this hour. Grey: older. Grey-green: kind assumed (often noise).", false},
         {"Time zone",
             "The time zone the network sends with the time: offset from UTC, DST when the time is daylight saving time,\n"
             "ext the extended second (0 to 7 steps of 0.9375 s) that corrects the time of frames not aligned to the\n"
-            "second. Green box: received in the last frame. Light green: in this cycle (4 minutes). Plain: in this\n"
-            "hour. Grey: not received for more than an hour.", false},
+            "second.\nGreen: this cycle. Plain: this hour. Grey: older.", false},
         {"Local ID, zone",
             "Who is transmitting: the local channel ID and the coverage zone of a roaming network, in every frame.\n"
             "A roaming pager looks for its own ID and zone to know it is at home or in a partner network.\n"
-            "Green box: received in the last frame. Light green: in this cycle (4 minutes). Plain: in this hour.\n"
-            "Grey: not received for more than an hour.", false},
+            "Green: this cycle. Plain: this hour. Grey: older.", false},
         {"Country, TMF",
             "The country code (ITU-T E.212) of the network, and its traffic management flags T3 T2 T1 T0:\n"
             "the traffic groups this channel carries (a pager of a group set to 0 looks for another channel).\n"
-            "Sent in frames 0 to 3 of each cycle. Green box: received in the last frame. Light green: in this cycle\n"
-            "(4 minutes). Plain: in this hour. Grey: not received for more than an hour.", false},
+            "Sent in frames 0 to 3 of each cycle.\nGreen: this cycle. Plain: this hour. Grey: older.", false},
         {"Phases A, B",
             "Bit error rate of phases A and B of the last frame: the independent 1600 bit/s channels of the frame\n"
             "(A at 1600; A and C at 3200; A to D at 6400, where a symbol carries A and B, the next one C and D).\n"
@@ -2050,30 +2048,25 @@ void RadioPagingDemodGUI::updateStatus()
     m_flexFrameLabel->setStyleSheet(flexLive ? QString() : QString("QLabel { color : %1; }").arg(colourInactive));
 
     const QString time = status.m_enabled[1] ? flexTimeText(status.m_flexTimePol[flexPol]) : QString();
-    // By the age of the newest time word (date, time or zone), as the details: a green box received in the last
-    // frame, light green in this cycle, the icon alone in this hour, dimmed older or never
+    // By the age of the newest time word (date, time or zone), as the details, in the colours of the indicators of the
+    // other channels (NFM, BFM): green received in this cycle, the icon alone in this hour, grey and dimmed older or
+    // never; the kind of the time assumed: grey with a green hue, dimmed (it is often from noise: it does not stand out)
     const FlexWordAge dateAge = flexWordAge(flexPol, WordDateTime, status.m_signalMs);
     const FlexWordAge zoneAge = flexWordAge(flexPol, WordZone, status.m_signalMs);
     const FlexWordAge timeAge = (dateAge == AgeNever) ? zoneAge : (zoneAge == AgeNever) ? dateAge : std::min(dateAge, zoneAge);
     const bool timeShown = !time.isEmpty() && (timeAge != AgeNever) && (timeAge != AgeOld);
-    // A disabled label does not dim its pixmap
-    m_flexClockLabel->setPixmap(QIcon(":/clockcurrent.png").pixmap(16, 16, timeShown ? QIcon::Normal : QIcon::Disabled));
-    // The time mode assumed (not confirmed by the time words of a cycle): light yellow, as the network time of the details
     const RadioPagingFlexDecoder::NetworkTime& flexTime = status.m_flexTimePol[flexPol];
     const bool assumed = timeShown && flexTime.m_timeValid && !flexTime.m_modeConfirmed;
-    m_flexClockLabel->setStyleSheet(assumed ? QString("QLabel { background-color : #f0e6a0; border-radius : 3px; }")
-        : (timeAge == AgeFrame) ? QString("QLabel { background-color : #6cc070; border-radius : 3px; }")
-        : (timeAge == AgeCycle) ? QString("QLabel { background-color : #bfe6bf; border-radius : 3px; }") : QString());
-    static const char *ages[] = {"", "received in the last frame", "received in this cycle (4 minutes)",
-        "received in this hour", "not received for more than an hour"};
-    const QString legend = tr("Green box: received in the last frame. Light green: in this cycle (4 minutes). The icon alone:\n"
-        "in this hour (networks must send it at least once an hour). Dimmed: older. Light yellow: the kind of the time\n"
-        "(time of frame 0 or of the frame) is assumed, not told yet.");
-    const QString kind = flexTimeKind(flexTime);
+    // A disabled label does not dim its pixmap
+    m_flexClockLabel->setPixmap(QIcon(":/clockcurrent.png").pixmap(16, 16, (timeShown && !assumed) ? QIcon::Normal : QIcon::Disabled));
+    m_flexClockLabel->setStyleSheet(assumed ? QString("QLabel { background:%1; }").arg(colourAssumed)
+        : ((timeAge == AgeFrame) || (timeAge == AgeCycle)) ? QString("QLabel { background-color : green; }")
+        : timeShown ? QString() : QString("QLabel { background:%1; }").arg(colourOff));
+    const QString legend = tr("Green: this cycle. Plain: this hour. Grey: older. Grey-green: kind assumed (often noise).");
+    const QString kind = flexTimeKind(flexTime, status.m_flexFramePol[flexPol]);
     m_flexClockLabel->setToolTip(time.isEmpty()
-        ? tr("FLEX network time: not sent by the network (or no frame received yet).\n%1").arg(legend)
-        : tr("FLEX network time, %1:\n%2%3\n\n%4").arg(tr(ages[timeAge])).arg(time)
-            .arg(kind.isEmpty() ? QString() : "\n\n" + kind).arg(legend));
+        ? tr("FLEX network time: none received\n%1").arg(legend)
+        : tr("FLEX network time: %1\n%2%3").arg(time).arg(kind.isEmpty() ? QString() : kind + "\n").arg(legend));
 
     // Green while the voice is played
     bool playing = status.m_enabled[2] && status.m_gscAudio;
@@ -2141,24 +2134,39 @@ void RadioPagingDemodGUI::stampFlexWords(const RadioPagingDemodSink::Status& sta
 
 // The kind of the network time (standard: the time of frame 0 of its cycle with the frame offset added, direct: the time
 // of the frame), whether the time words of a cycle told it or it is assumed, its precision and when it was received
-QString RadioPagingDemodGUI::flexTimeKind(const RadioPagingFlexDecoder::NetworkTime& t)
+QString RadioPagingDemodGUI::flexTimeKind(const RadioPagingFlexDecoder::NetworkTime& t, const RadioPagingFlexDecoder::FrameReport& frame)
 {
     if (!t.m_timeValid) {
         return QString();
     }
 
-    QString kind = (t.m_mode == 1)
-        ? tr("Direct: the time word is the time of the frame that carries it.")
-        : tr("Standard: the time word is the time of frame 0 of its cycle; the offset of the frame is added.");
-    kind += t.m_modeConfirmed
-        ? tr("\nConfirmed by the time words of a cycle (the same in frames 5 or more apart, or not).")
-        : tr("\nAssumed (light yellow): the time words of a cycle have not told it yet; if the network sends the time\n"
-            "of each frame instead, the time shown is ahead by the offset of the frame.");
-    kind += t.m_zoneValid
-        ? tr("\nPrecision 0.9375 s: the 7.5 s steps of the time word and the extended second of the zone word.")
-        : tr("\nPrecision 7.5 s: the steps of the time word (the zone word, not received, refines it to 0.9375 s).");
-    kind += tr("\nTime word received %1 frames ago (%2 s); the time goes on with the frames since.")
-        .arg(t.m_timeAge).arg(t.m_timeAge * 1.875, 0, 'f', 1);
+    QString kind = (t.m_mode == 1) ? tr("Direct (the time of the frame)") : tr("Standard (the time of frame 0, the frame offset added)");
+    kind += t.m_modeConfirmed ? tr(", confirmed") : tr(", assumed");
+
+    // When the time word came and when its state changes, on the grid of the network (cycle and frame) and in its
+    // time: right on a recording played back too. The time of an event is the time of the last frame moved by the
+    // frames between, about (the network time has steps of 7.5 s or 0.9375 s)
+    if (frame.m_fiwValid && (t.m_timeAge >= 0))
+    {
+        const int now = (int) (frame.m_cycle * 128 + frame.m_frame);
+        const double nowSeconds = t.m_currentHour * 3600.0 + t.m_currentMinute * 60.0 + t.m_currentSecond;
+        auto at = [&](int framesFromNow) {
+            const int index = ((now + framesFromNow) % 1920 + 1920) % 1920;
+            const int seconds = ((int) std::lround(nowSeconds + framesFromNow * 1.875) % 86400 + 86400) % 86400;
+            return QString("C%1/F%2 (~%3:%4:%5)").arg(index / 128, 2, 10, QChar('0')).arg(index % 128, 3, 10, QChar('0'))
+                .arg(seconds / 3600, 2, 10, QChar('0')).arg(seconds / 60 % 60, 2, 10, QChar('0')).arg(seconds % 60, 2, 10, QChar('0'));
+        };
+        const int received = -t.m_timeAge;
+        kind += tr("\nLast received: %1, %2 frames ago").arg(at(received)).arg(t.m_timeAge);
+
+        if (t.m_timeAge < 128) {
+            kind += tr("\nGreen until %1, kept until %2").arg(at(received + 128)).arg(at(received + 1920));
+        } else {
+            kind += tr("\nKept until %1").arg(at(received + 1920));
+        }
+    }
+
+    kind += t.m_zoneValid ? tr("\nPrecision 0.9375 s") : tr("\nPrecision 7.5 s (no zone word)");
     return kind;
 }
 
@@ -2192,21 +2200,25 @@ void RadioPagingDemodGUI::setNetworkDetail(FlexWord word, int pol, const QString
     }
     else if (assumed && (age != AgeOld))
     {
-        // The time mode not confirmed yet: the frame offset may be wrong, a light yellow chip
-        label->setText(QString("<span style=\"background-color:#f0e6a0; color:%1;\">&nbsp;%2&nbsp;</span>")
-            .arg(chipText).arg(text.toHtmlEscaped()));
+        // The time mode not confirmed yet (the frame offset may be wrong, often from noise): grey with a green hue
+        label->setText(QString("<span style=\"background-color:%1; color:#a4aca4;\">&nbsp;%2&nbsp;</span>")
+            .arg(colourAssumed).arg(text.toHtmlEscaped()));
     }
     else if ((age == AgeFrame) || (age == AgeCycle))
     {
-        // Received in the last frame: a green chip, in this cycle: a light green chip
-        label->setText(QString("<span style=\"background-color:%1; color:%2;\">&nbsp;%3&nbsp;</span>")
-            .arg(age == AgeFrame ? "#6cc070" : "#bfe6bf").arg(chipText).arg(text.toHtmlEscaped()));
+        // Received in this cycle: green, as the indicators of the other channels
+        label->setText(QString("<span style=\"background-color:green; color:#ffffff;\">&nbsp;%1&nbsp;</span>").arg(text.toHtmlEscaped()));
+    }
+    else if (age == AgeOld)
+    {
+        // Older than an hour: grey
+        label->setText(QString("<span style=\"background-color:%1; color:#9a9a9a;\">&nbsp;%2&nbsp;</span>")
+            .arg(colourOff).arg(text.toHtmlEscaped()));
     }
     else
     {
-        // In this hour: the text colour; older: grey
-        label->setText(QString("<span style=\"color:%1\">%2</span>")
-            .arg((age == AgeOld) ? QString(colourInactive) : palette().text().color().name()).arg(text.toHtmlEscaped()));
+        // In this hour: the text colour
+        label->setText(QString("<span style=\"color:%1\">%2</span>").arg(palette().text().color().name()).arg(text.toHtmlEscaped()));
     }
 }
 
@@ -2326,7 +2338,7 @@ void RadioPagingDemodGUI::updateDetails(const RadioPagingDemodSink::Status& stat
                     t.m_timeValid && !t.m_modeConfirmed);
                 {
                     const DetailRow& row = detailRows(1)[FlexTime];
-                    const QString kind = flexTimeKind(t);
+                    const QString kind = flexTimeKind(t, frame);
                     m_flexWordLabel[pol][WordDateTime]->setToolTip(tr(row.m_toolTip) + (kind.isEmpty() ? QString() : "\n\n" + kind));
                 }
                 setNetworkDetail(WordZone, pol, flexZoneText(t), flexWordAge(pol, WordZone, at));
