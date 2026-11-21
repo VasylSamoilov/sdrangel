@@ -25,6 +25,11 @@
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QResizeEvent>
+#include <QSplitter>
+#include <QStyleOptionTab>
+#include <QStylePainter>
+#include <QTabBar>
 #include <QTabWidget>
 #include <QToolButton>
 #include <QFileDialog>
@@ -166,6 +171,94 @@ QToolButton *iconButton(QWidget *parent, const char *icon, const QString& tip)
     button->setToolTip(tip);
     return button;
 }
+
+// Tabs on the left side with their icon and name written across, not turned up: a tab is one line high, so that the
+// five sections fit a low window. Qt draws the text of side tabs turned; the label is drawn turned back
+class SideTabBar : public QTabBar
+{
+public:
+    explicit SideTabBar(QWidget *parent) : QTabBar(parent) {}
+
+protected:
+    QSize tabSizeHint(int index) const override
+    {
+        QSize size = QTabBar::tabSizeHint(index);
+        size.transpose();
+        return size;
+    }
+
+    void paintEvent(QPaintEvent *event) override
+    {
+        (void) event;
+        QStylePainter painter(this);
+
+        for (int i = 0; i < count(); i++)
+        {
+            QStyleOptionTab option;
+            initStyleOption(&option, i);
+            painter.drawControl(QStyle::CE_TabBarTabShape, option);
+            painter.save();
+            QSize size = option.rect.size();
+            size.transpose();
+            QRect rect(QPoint(), size);
+            rect.moveCenter(option.rect.center());
+            option.rect = rect;
+            const QPoint center = tabRect(i).center();
+            painter.translate(center);
+            painter.rotate(90);
+            painter.translate(-center);
+            painter.drawControl(QStyle::CE_TabBarTabLabel, option);
+            painter.restore();
+        }
+    }
+};
+
+// A tab widget with the side tabs above (QTabWidget::setTabBar is protected). In a narrow window the names fold away:
+// the icons stay, the names are in their tool tips
+class SideTabWidget : public QTabWidget
+{
+public:
+    explicit SideTabWidget(QWidget *parent) : QTabWidget(parent)
+    {
+        setTabBar(new SideTabBar(this));
+        setTabPosition(QTabWidget::West);
+    }
+
+protected:
+    void resizeEvent(QResizeEvent *event) override
+    {
+        const bool fold = event->size().width() < m_foldWidth;
+
+        if (fold != m_folded)
+        {
+            m_folded = fold;
+
+            for (int i = 0; i < count(); i++)
+            {
+                if (fold)
+                {
+                    m_names.append(tabText(i));
+                    setTabText(i, QString());
+                }
+                else if (i < m_names.size())
+                {
+                    setTabText(i, m_names[i]);
+                }
+            }
+
+            if (!fold) {
+                m_names.clear();
+            }
+        }
+
+        QTabWidget::resizeEvent(event);
+    }
+
+private:
+    static const int m_foldWidth = 560;     //!< Narrower: icons only
+    bool m_folded = false;
+    QStringList m_names;
+};
 
 } // namespace
 
@@ -547,32 +640,49 @@ MessageCenterGUI::MessageCenterGUI(PluginAPI* pluginAPI, FeatureUISet *featureUI
     m_settings = m_center->settings();
     m_settings.setRollupState(&m_rollupState);
 
-    // The sections as tabs (as the APRS and Aircraft features), so that the window fits a small screen; the options in
-    // a dialog opened from the corner of the tabs
+    // Five sections, one for each stage of a message (where it comes from, which ones, what to do, where it goes),
+    // as tabs on the left side (as the APRS and Meshtastic windows): they take width, not the height a small screen
+    // lacks. The options in a dialog opened from the corner of the tabs
     RollupContents *rollupContents = getRollupContents();
     QWidget *main = makeRollup("Message Center", true);
     QVBoxLayout *mainLayout = new QVBoxLayout(main);
     mainLayout->setContentsMargins(0, 0, 0, 0);
-    m_tabs = new QTabWidget(main);
+    m_tabs = new SideTabWidget(main);
     m_tabs->setDocumentMode(true);
-    auto tab = [this](const QString& title) {
+    auto tab = [this](const QString& title, const char *icon, const QString& tip) {
         QWidget *w = new QWidget(m_tabs);
         w->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-        m_tabs->addTab(w, title);
+        m_tabs->addTab(w, QIcon(icon), title);
+        m_tabs->setTabToolTip(m_tabs->count() - 1, tip);
         return w;
     };
-    buildLog(tab(tr("Log")));
-    buildEndpoints(tab(tr("Channels")));
-    buildQueue(tab(tr("Queue")));
-    buildCompose(tab(tr("Page")));
-    buildContacts(tab(tr("Contacts")));
-    m_tabs->setTabToolTip(m_tabs->count() - 1, tr("The address book: a name, an icon and a colour for the addresses of a pager "
-        "or a station,\nshown in the log beside their messages and chosen in the filters"));
-    buildRoutes(tab(tr("Routes")));
-    buildFiles(tab(tr("I/O")));
-    m_tabs->setTabToolTip(m_tabs->count() - 1, tr("Sources and sinks: where messages come from besides the channels "
-        "(files, UDP),\nand where the routes send them besides the log and the queue (files, UDP, commands, speech, "
-        "marks, Map)"));
+    // A section of two parts, one above the other, the user sets their share
+    auto split = [](QWidget *page, QWidget *&top, QWidget *&bottom) {
+        QVBoxLayout *layout = new QVBoxLayout(page);
+        layout->setContentsMargins(0, 0, 0, 0);
+        QSplitter *splitter = new QSplitter(Qt::Vertical, page);
+        top = new QWidget(splitter);
+        bottom = new QWidget(splitter);
+        splitter->addWidget(top);
+        splitter->addWidget(bottom);
+        splitter->setChildrenCollapsible(false);
+        layout->addWidget(splitter);
+    };
+    QWidget *top = nullptr;
+    QWidget *bottom = nullptr;
+
+    buildLog(tab(tr("Messages"), ":/sms.png", tr("The messages received and sent: live, or searched in the history")));
+    split(tab(tr("Send"), ":/tx.png", tr("Send a page to a contact or an address, and follow the pages sent")), top, bottom);
+    buildCompose(top);
+    buildQueue(bottom);
+    buildContacts(tab(tr("Contacts"), ":/star.png", tr("The address book: a name, an icon and a colour for the addresses of "
+        "a pager or a station,\nshown beside their messages, chosen in the filters, and how to send them a page")));
+    buildRoutes(tab(tr("Rules"), ":/funnel.png", tr("What happens to each message: which ones (a filter), what changes "
+        "(a mark, a codepage), and where they go")));
+    split(tab(tr("Connections"), ":/wiring.png", tr("Where messages come from and go: the channels, and the files, UDP, "
+        "commands, speech and Map")), top, bottom);
+    buildEndpoints(top);
+    buildFiles(bottom);
     mainLayout->addWidget(m_tabs);
 
     m_optionsDialog = new QDialog(this);
@@ -585,14 +695,6 @@ MessageCenterGUI::MessageCenterGUI(PluginAPI* pluginAPI, FeatureUISet *featureUI
     connect(optionsButtons, &QDialogButtonBox::rejected, m_optionsDialog, &QDialog::hide);
     optionsLayout->addWidget(optionsButtons);
     new DialogPositioner(m_optionsDialog, true);
-    QToolButton *optionsButton = new QToolButton(m_tabs);
-    optionsButton->setIcon(QIcon(":/listing.png"));
-    optionsButton->setToolTip(tr("Options: log size, history file, claim time of the pages, time to offline of the channels"));
-    connect(optionsButton, &QToolButton::clicked, this, [this]() {
-        m_optionsDialog->show();
-        m_optionsDialog->raise();
-    });
-    m_tabs->setCornerWidget(optionsButton, Qt::TopRightCorner);
     rollupContents->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     rollupContents->arrangeRollups();
     connect(rollupContents, SIGNAL(widgetRolled(QWidget*,bool)), this, SLOT(onWidgetRolled(QWidget*,bool)));
@@ -636,9 +738,18 @@ void MessageCenterGUI::buildLog(QWidget *container)
     QToolButton *exportLog = iconButton(container, ":/save.png", "Save the messages the filters select to a CSV file\n"
         "(it can be imported again, here or in another message center)");
     QToolButton *clear = iconButton(container, ":/bin.png", "Remove all the messages of the log, and of the history file when it is kept");
+    // The options of the log and the history (and the claim and offline times of the channels), in a dialog
+    QPushButton *options = new QPushButton(tr("Options..."), container);
+    options->setToolTip(tr("Options: log size, history (size and days kept), claim time of the pages, time to offline "
+        "of the channels"));
+    connect(options, &QPushButton::clicked, this, [this]() {
+        m_optionsDialog->show();
+        m_optionsDialog->raise();
+    });
     buttons->addWidget(import);
     buttons->addWidget(exportLog);
     buttons->addStretch(1);
+    buttons->addWidget(options);
     buttons->addWidget(clear);
     connect(import, &QToolButton::clicked, this, &MessageCenterGUI::importFile);
     connect(exportLog, &QToolButton::clicked, this, &MessageCenterGUI::exportLog);
@@ -1545,13 +1656,17 @@ void MessageCenterGUI::buildOptions(QWidget *container)
     m_historyMaxMB = new QSpinBox(container);
     m_historyMaxMB->setRange(1, 10000);
     m_historyMaxMB->setSuffix(" MB");
-    m_historyMaxMB->setToolTip("Size limit of the history file:\n"
-        "over it the file is written again with the newest messages of the log, up to half the limit");
+    m_historyMaxMB->setToolTip("Size kept of the history: over it the oldest days go");
+    m_historyDays = new QSpinBox(container);
+    m_historyDays->setRange(1, 3650);
+    m_historyDays->setSuffix(" days");
+    m_historyDays->setToolTip("Days kept of the history: older days go");
     QWidget *history = new QWidget(container);
     QHBoxLayout *historyLayout = new QHBoxLayout(history);
     historyLayout->setContentsMargins(0, 0, 0, 0);
     historyLayout->addWidget(m_historyEnabled);
     historyLayout->addWidget(m_historyMaxMB, 1);
+    historyLayout->addWidget(m_historyDays, 1);
 
     layout->addRow("Log size", m_logSize);
     layout->addRow("History", history);
@@ -1565,11 +1680,16 @@ void MessageCenterGUI::buildOptions(QWidget *container)
     connect(m_historyEnabled, &QCheckBox::toggled, this, [this](bool checked) {
         m_settings.m_historyEnabled = checked;
         m_historyMaxMB->setEnabled(checked);
+        m_historyDays->setEnabled(checked);
         applySettings(QStringList("historyEnabled"));
     });
     connect(m_historyMaxMB, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int value) {
         m_settings.m_historyMaxMB = value;
         applySettings(QStringList("historyMaxMB"));
+    });
+    connect(m_historyDays, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int value) {
+        m_settings.m_historyDays = value;
+        applySettings(QStringList("historyDays"));
     });
     connect(m_claimTimeout, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int value) {
         m_settings.m_claimTimeoutSec = value;
@@ -1638,6 +1758,8 @@ void MessageCenterGUI::displaySettings()
     m_historyEnabled->setChecked(m_settings.m_historyEnabled);
     m_historyMaxMB->setValue(m_settings.m_historyMaxMB);
     m_historyMaxMB->setEnabled(m_settings.m_historyEnabled);
+    m_historyDays->setValue(m_settings.m_historyDays);
+    m_historyDays->setEnabled(m_settings.m_historyEnabled);
     m_claimTimeout->setValue(m_settings.m_claimTimeoutSec);
     m_silentTime->setValue(m_settings.m_silentSec);
     refreshRoutes();

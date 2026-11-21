@@ -169,6 +169,7 @@ private:
     QSpinBox *m_logSize;
     QCheckBox *m_historyEnabled;
     QSpinBox *m_historyMaxMB;
+    QSpinBox *m_historyDays;
     QSpinBox *m_claimTimeout;
     QSpinBox *m_silentTime;
     QTableWidget *m_sinksTable;
