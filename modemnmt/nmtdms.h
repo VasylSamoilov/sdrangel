@@ -24,6 +24,7 @@
 #include <deque>
 #include <functional>
 #include <random>
+#include <string>
 #include <vector>
 
 #include "export.h"
@@ -75,6 +76,11 @@ public:
     void setIdentity(const char* id7);
     // The receiver cannot take more data (NR is sent instead of RR).
     void setReady(bool ready);
+    // Every frame taken (rx) or sent, as a short text for a trace: "DT 3 data 01 18 53 ...",
+    // "DT 0 control rand 8-bit", "RR 4", "NR 1", "rejected (check sum)".
+    using FrameTap = std::function<void(bool rx, const std::string& text)>;
+    void setFrameTap(FrameTap tap) { m_onFrame = std::move(tap); }
+    static std::string describeDt(bool control, int n, const uint8_t words[kDataWords], bool eightBits);
 
     // This side calls: it sends the first frames (identity, random number) and uses d = 0.
     void startAsCaller();
@@ -199,6 +205,7 @@ private:
     ControlHandler m_onControl;
     EventHandler m_onAllSent;
     EventHandler m_onEstablished;
+    FrameTap m_onFrame;
 };
 
 } // namespace modemnmt

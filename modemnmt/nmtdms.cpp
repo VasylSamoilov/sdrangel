@@ -19,6 +19,7 @@
 #include "nmtdms.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <exception>
 
@@ -229,6 +230,32 @@ void NmtDmsLink::queueFrame(bool control, const uint8_t data[kDataWords])
 }
 
 // format: '8' or '7', the last byte of the frame
+// "DT 0 control rand 8-bit", "DT 0 control id", "DT 3 data 01 18 53 4d 53 48 18"
+std::string NmtDmsLink::describeDt(bool control, int n, const uint8_t words[kDataWords], bool eightBits)
+{
+    char text[96];
+
+    if (control)
+    {
+        const char *what = words[0] == kCtRand ? "rand" : words[0] == kCtId ? "id" : "type";
+        std::snprintf(text, sizeof(text), "DT %d control %s%s", n, what,
+            words[0] == kCtRand ? (words[7] == '8' ? " 8-bit" : words[7] == '7' ? " 7-bit" : "") : "");
+        if (words[0] != kCtRand && words[0] != kCtId) {
+            std::snprintf(text + std::strlen(text), sizeof(text) - std::strlen(text), " %d", words[0]);
+        }
+        return text;
+    }
+    // the bytes as the receiver takes them: in 8-bit format the first word holds the 8th bits
+    std::string out = "DT " + std::to_string(n) + " data";
+    for (int i = 0; i < (eightBits ? 7 : kDataWords); i++)
+    {
+        const unsigned byte = eightBits ? ((((words[0] >> (6 - i)) & 1u) << 7) | (words[1 + i] & 0x7fu)) : (words[i] & 0x7fu);
+        std::snprintf(text, sizeof(text), " %02x", byte);
+        out += text;
+    }
+    return out;
+}
+
 void NmtDmsLink::queueRand(char format)
 {
     uint8_t data[kDataWords];
@@ -474,6 +501,9 @@ bool NmtDmsLink::scheduleFrame()
     {
         m_rrPending = false;
         m_txBits = encodeRr(m_dTx, m_rrNr, false, m_nRx);
+        if (m_onFrame) {
+            m_onFrame(false, (m_rrNr ? "NR " : "RR ") + std::to_string(m_nRx));
+        }
         return true;
     }
 
@@ -499,6 +529,9 @@ bool NmtDmsLink::scheduleFrame()
     const TxFrame& frame = m_txList[m_txIndex];
 
     m_txBits = encodeDt(m_dTx, frame.control, frame.n, frame.data, true);
+    if (m_onFrame) {
+        m_onFrame(false, describeDt(frame.control, frame.n, frame.data, m_eightBits));
+    }
     m_gapPending = (m_passes >= kGapPasses);
     m_txIndex++;
     if (m_txIndex >= sendable)
@@ -658,9 +691,15 @@ void NmtDmsLink::rxFrameDone()
         if (crc16(checkBits, 63) != received)
         {
             m_framesRejected++;
+            if (m_onFrame) {
+                m_onFrame(true, "rejected (check sum)");
+            }
             return;
         }
         m_framesReceived++;
+        if (m_onFrame) {
+            m_onFrame(true, describeDt(control, n, words, m_eightBits));
+        }
         rxDt(d, control, n, words);
         return;
     }
@@ -680,6 +719,10 @@ void NmtDmsLink::rxFrameDone()
     m_lastRrLabel = static_cast<int>(label);
     m_bitsSinceRr = 0;
     m_framesReceived++;
+    if (m_onFrame) {
+        // the s bit of an RR answering a random number: a positive response (scrambled data asked)
+        m_onFrame(true, std::string(pp == 2 ? "NR " : "RR ") + std::to_string(n) + (control ? " positive" : ""));
+    }
     rxRr(d, pp == 2, control, n);
 }
 
