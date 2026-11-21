@@ -161,7 +161,7 @@ QString filterSummary(const MessageCenterFilter& f)
 }
 
 // The saved columns of the table of the Messages tab start with it
-const QByteArray logColumnsTag("MCM1:");
+const QByteArray logColumnsTag("MCM3:");
 
 // A button with an icon of the project and its tool tip, as the buttons of the log of the Pager demodulator
 QToolButton *iconButton(QWidget *parent, const char *icon, const QString& tip)
@@ -638,8 +638,9 @@ void MessageCenterGUI::buildLog(QWidget *container)
     m_logTable->setMaxRows(m_maxLogRows);
     // The message always in view: a few columns by default (who is the contact when there is one), the others in
     // the menu of the header
-    m_logTable->setDefaultColumns({PagingMessageTable::ColTime, PagingMessageTable::ColProtocol, PagingMessageTable::ColAddress,
-        PagingMessageTable::ColType, PagingMessageTable::ColMessage, PagingMessageTable::ColState});
+    m_logTable->setDefaultColumns({PagingMessageTable::ColDate, PagingMessageTable::ColTime, PagingMessageTable::ColDirection,
+        PagingMessageTable::ColProtocol, PagingMessageTable::ColPolarity, PagingMessageTable::ColAddress, PagingMessageTable::ColType,
+        PagingMessageTable::ColMessage});
     m_logTable->setContactInAddress(true);
     m_logTable->setSingleLineMessages(true);
     m_logTable->setRowMenuExtender([this](QMenu& menu, const MessageRecord& record) { messageMenu(menu, record); });
@@ -1704,12 +1705,8 @@ void MessageCenterGUI::displaySettings()
     // The columns the user chose; the first time the usual ones. Saved with the tag of the columns of the Messages
     // tab: those of the log of before (all the columns) give the usual ones once
     if (!m_settings.m_logColumns.startsWith(logColumnsTag)
-        || !m_logTable->setColumns(m_settings.m_logColumns.mid(logColumnsTag.size())))
-    {
+        || !m_logTable->setColumns(m_settings.m_logColumns.mid(logColumnsTag.size()))) {
         m_logTable->sizeColumns();
-        // The state of a page before its message: the message takes the width left
-        QHeaderView *header = m_logTable->horizontalHeader();
-        header->moveSection(header->visualIndex(PagingMessageTable::ColState), header->visualIndex(PagingMessageTable::ColMessage));
     }
     m_logTable->setAudioDevice(m_settings.m_voicePlaybackDeviceName);
     getRollupContents()->restoreState(m_rollupState);
