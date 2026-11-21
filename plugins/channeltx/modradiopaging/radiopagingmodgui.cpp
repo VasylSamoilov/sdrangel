@@ -1140,6 +1140,8 @@ RadioPagingModGUI::RadioPagingModGUI(PluginAPI* pluginAPI, DeviceUISet *deviceUI
     m_settings.setRollupState(&m_rollupState);
 
     ui->txLog->setMaxRows(100);
+    // The log keeps its last lines: thousands of messages queued at once would make it grow without end
+    ui->log->setMaximumBlockCount(1000);
     ui->txLog->setDefaultColumns({PagingMessageTable::ColDate, PagingMessageTable::ColTime, PagingMessageTable::ColProtocol, PagingMessageTable::ColAddress,
         PagingMessageTable::ColType, PagingMessageTable::ColMessage, PagingMessageTable::ColInfo, PagingMessageTable::ColState});
     connect(ui->txLog, &PagingMessageTable::columnsChanged, this, [this]() {

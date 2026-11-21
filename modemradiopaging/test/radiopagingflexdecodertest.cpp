@@ -747,6 +747,45 @@ Dec::RxFrame encoderFrame(Enc& enc, const std::vector<Enc::TxMessage>& msgs, uin
     return Dec::RxFrame();
 }
 
+// Frames of the two polarities in turn (two networks, or a transmitter alternating them): each polarity keeps the
+// report of its own last frame (mode, frame, phases) and its own bit error rates. Was: one report and one set of phase
+// windows for both, so the status showed the mode of the frame being received with the phases of the frame before it
+// (an inverted 3200/4 frame shown with the one phase of the normal 1600/2 frame before it)
+void testPolarityReports()
+{
+    Enc encInverted;
+    Enc encNormal;
+    Enc::TxMessage tx;
+
+    encInverted.setMode(Flex::Mode3200_4);
+    encInverted.setInverted(true);
+    encNormal.setMode(Flex::Mode1600_2);
+    encNormal.setInverted(false);
+    tx.m_capcode = 1234567;
+    tx.m_type = Flex::Alphanumeric;
+    tx.m_text = "polarity reports";
+
+    Dec::RxFrame inverted = encoderFrame(encInverted, {tx}, 94);
+    Dec::RxFrame normal = encoderFrame(encNormal, {tx}, 95);
+    Dec dec;
+    dec.decodeFrame(inverted);
+    dec.decodeFrame(normal);
+
+    const Dec::FrameReport& inv = dec.lastFrame(true);
+    const Dec::FrameReport& norm = dec.lastFrame(false);
+    check(inv.m_fiwValid && inv.m_inverted && (inv.m_mode == Flex::Mode3200_4) && (inv.m_blocks.size() == 2),
+        "polarity reports: inverted 3200/4 frame kept with its 2 phases after a normal frame");
+    check(norm.m_fiwValid && !norm.m_inverted && (norm.m_mode == Flex::Mode1600_2) && (norm.m_blocks.size() == 1),
+        "polarity reports: normal 1600/2 frame with its 1 phase");
+    check(inv.m_frame != norm.m_frame, "polarity reports: each polarity its own frame number");
+    check(dec.phaseBer(true, 0).valid() && dec.phaseBer(true, 2).valid(), "polarity reports: inverted phases A and C measured");
+    check(dec.phaseBer(false, 0).valid() && !dec.phaseBer(false, 2).valid(),
+        "polarity reports: normal phase A only, nothing of the inverted phase C");
+    check(dec.ber(true).valid() && dec.ber(false).valid() && (dec.ber(true).m_bits != dec.ber(false).m_bits),
+        "polarity reports: a bit error rate for each polarity");
+    check(!dec.lastFrame().m_inverted && (dec.lastFrame().m_mode == Flex::Mode1600_2), "polarity reports: last frame of either");
+}
+
 void testErrors()
 {
     Enc enc;
@@ -2694,6 +2733,112 @@ void testBinaryTx()
 // Scheduling of fragments (STD-43A 4.2.1, 3.8.5): the first fragment in a frame of the pager, the others in the
 // frames that follow whatever the collapse, in the phase of the first; one fragmented message per address at a
 // time; while it is sent, one unfragmented message per frame to that address
+// Fragments cut to the room of the frame they go in (STD-43A 4.1: a fragment is what the frame has room for). The
+// block information words of roaming and of the time take up to 3 words of a phase: a fragment of the 85 words of 4.1
+// never fitted and stayed queued for ever
+void testFragmentsFitTheFrame()
+{
+    std::string text;
+    for (int i = 0; i < 700; i++) {
+        text += (char) ('A' + i % 26);
+    }
+    std::string digits;
+    for (int i = 0; i < 1200; i++) {
+        digits += "1A2B3C4D5E6F7890"[i % 16];
+    }
+
+    auto setup = [](Enc& enc, bool extras) {
+        std::string error;
+        Enc::Roaming r;
+        r.m_enabled = extras;
+        r.m_localId = 10;
+        r.m_coverageZone = 1;
+        enc.setRoaming(r);
+        Enc::TimeService ts;
+        ts.m_enabled = extras;
+        ts.m_sendZone = true;
+        ts.m_zoneMinutes = 120;
+        enc.setTimeService(ts, error);
+    };
+
+    // The fragments and the whole message decoded from the frames of a run
+    struct Result { std::vector<Dec::Message> m_fragments; std::vector<Dec::Message> m_wholes; };
+    auto run = [](Enc& enc, Dec& dec, uint64_t from, uint64_t to, Result& result) {
+        for (uint64_t index = from; (index < to) && (enc.pending() > 0); index++)
+        {
+            Enc::Frame f = enc.buildFrame(index);
+            if (f.m_reserved) {
+                continue;
+            }
+            for (const Dec::Message& m : dec.decodeFrame(toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data))) {
+                (m.m_isFragment ? result.m_fragments : result.m_wholes).push_back(m);
+            }
+        }
+    };
+    auto samePhase = [](const Result& r) {
+        return !r.m_fragments.empty() && std::all_of(r.m_fragments.begin(), r.m_fragments.end(),
+            [&r](const Dec::Message& m) { return m.m_phase == r.m_fragments.front().m_phase; });
+    };
+
+    // A short and a long address (2 address words, 2 vector words, the second one carrying the first message word)
+    for (uint64_t capcode : {1234567ull, 2101300ull})
+    for (Flex::Mode mode : {Flex::Mode1600_2, Flex::Mode6400_4})
+    {
+        const bool isLong = Flex::isLongAddress(capcode);
+
+        // Roaming and time on from the start: alphanumeric, then HEX/binary
+        for (int binary = 0; binary < 2; binary++)
+        {
+            Enc enc;
+            enc.setMode(mode);
+            setup(enc, true);
+            Enc::TxMessage m;
+            m.m_capcode = capcode;
+            m.m_type = binary ? Flex::Binary : Flex::Alphanumeric;
+            m.m_text = binary ? digits : text;
+            m.m_binary.m_blocking = 8;
+            bool queued = enc.enqueue(m).m_ok;
+            Dec dec;
+            dec.setReportFragments(true);
+            Result r;
+            run(enc, dec, 0, 200, r);
+
+            bool whole = (r.m_wholes.size() == 1) && r.m_wholes[0].m_complete && (r.m_wholes[0].m_text == m.m_text);
+            // Shorter than the characters of a whole frame (STD-43A 4.1: 251 with a short address, 248 with a long
+            // one): cut to the room left by the block words
+            bool cut = binary || (!r.m_fragments.empty() && (r.m_fragments.front().m_text.size() < (isLong ? 248u : 251u)));
+            std::string label = std::string("fragments fit the frame ") + (isLong ? "long address " : "short address ") + Flex::modeName(mode)
+                + (binary ? ", HEX/binary" : ", alphanumeric") + ": roaming and time on, all sent, the message whole"
+                + (binary ? "" : ", the first fragment cut to the room") + ", one phase";
+            check(queued && (enc.pending() == 0) && whole && cut && samePhase(r), label.c_str());
+        }
+
+        // Roaming and time turned on after the first fragment: the fragments still queued are cut again
+        {
+            Enc enc;
+            enc.setMode(mode);
+            setup(enc, false);
+            Enc::TxMessage m;
+            m.m_capcode = capcode;
+            m.m_type = Flex::Alphanumeric;
+            m.m_text = text;
+            enc.enqueue(m);
+            Dec dec;
+            dec.setReportFragments(true);
+            Result r;
+            run(enc, dec, 0, 1, r);
+            bool firstSent = !r.m_fragments.empty();
+            setup(enc, true);
+            run(enc, dec, 1, 200, r);
+
+            bool whole = (r.m_wholes.size() == 1) && r.m_wholes[0].m_complete && (r.m_wholes[0].m_text == text);
+            std::string label = std::string("fragments fit the frame ") + (isLong ? "long address " : "short address ")
+                + Flex::modeName(mode) + ": roaming and time turned on after the first fragment, the rest cut again, the message whole";
+            check(firstSent && (enc.pending() == 0) && whole && samePhase(r), label.c_str());
+        }
+    }
+}
+
 void testFragmentScheduling()
 {
     std::string digits;
@@ -3813,6 +3958,53 @@ void testTime()
         check(ok, label.c_str());
     }
 
+    // A network that sends the time in cycle 0 only (the least, STD-43A 3.7.2: once an hour): the time goes on with
+    // the frames, right in the later cycles too (was: the frame offset in the cycle only, 4 minutes behind for each
+    // cycle since), and a time not received again for over an hour is forgotten
+    {
+        Enc enc;
+        std::string error;
+        enc.setMode(Flex::Mode1600_2);
+        Enc::TimeService ts;
+        ts.m_enabled = true;
+        ts.m_zoneMinutes = 540;
+        ts.m_daylightSaving = true;
+        const uint64_t hourIndex = 1920ull * 400000;
+        const int64_t wanted = 20768LL * 86400 + 13 * 3600;     // 2026-11-11 13:00:00 local at cycle 0 frame 0
+        ts.m_offsetSeconds = wanted - (int64_t) (hourIndex * 1875 / 1000) - (540 + 60) * 60;
+        bool set = enc.setTimeService(ts, error);
+        Dec dec;
+        dec.setReferenceYear(2026);
+
+        for (uint64_t index = hourIndex; index < hourIndex + 40; index++)
+        {
+            Enc::Frame f = enc.buildFrame(index);
+            dec.decodeFrame(toRxFrame(f.m_mode, f.m_inverted, f.m_bytes.m_sync, f.m_bytes.m_data));
+        }
+
+        // No more time words; a frame of cycle 3: 394 frames (12 min 18.75 s) after 13:00:00
+        ts.m_enabled = false;
+        set = set && enc.setTimeService(ts, error);
+        Enc::Frame later = enc.buildFrame(hourIndex + 3 * 128 + 10);
+        dec.decodeFrame(toRxFrame(later.m_mode, later.m_inverted, later.m_bytes.m_sync, later.m_bytes.m_data));
+        Dec::NetworkTime nt = dec.networkTime(false);
+        check(set && nt.m_timeValid && (nt.m_mode == 0) && nt.m_modeConfirmed && (nt.m_currentHour == 13)
+            && (nt.m_currentMinute == 12) && (std::fabs(nt.m_currentSecond - 18.75) < 0.01) && (nt.m_timeAge == 3 * 128 + 10 - 39),
+            "time: sent in cycle 0 only, right in cycle 3 (13:12:18.75), the time of frame 0 confirmed, its age in frames");
+
+        // An hour and more later without the time: forgotten
+        Enc::Frame hourLater = enc.buildFrame(hourIndex + 1920 + 50);
+        dec.decodeFrame(toRxFrame(hourLater.m_mode, hourLater.m_inverted, hourLater.m_bytes.m_sync, hourLater.m_bytes.m_data));
+        nt = dec.networkTime(false);
+        check(!nt.m_timeValid && !nt.m_dateValid && !nt.m_zoneValid, "time: not received for over an hour, forgotten");
+    }
+
+    // A time received in one frame only is assumed to be the time of frame 0 (standard) until the mode is told
+    {
+        Dec::NetworkTime fresh = Dec().networkTime(false);
+        check((fresh.m_mode == 0) && !fresh.m_modeConfirmed, "time: standard assumed, not confirmed, before any time word");
+    }
+
     // Roaming in frames 0-3 takes 2 block words in its phase: one time word a frame, the three in turn; frame 0 of
     // cycle 0 has a time word in every phase
     {
@@ -3908,6 +4100,7 @@ int main()
     testAlphaMailDrop();
     testNumericFormats();
     testFragmentScheduling();
+    testFragmentsFitTheFrame();
     testBinaryTx();
     testHexStatus();
     testHexBits();
@@ -3917,6 +4110,7 @@ int main()
     testVectorOfNoWords();
     testBiw();
     testRoundTrip();
+    testPolarityReports();
     testErrors();
     testFragments();
     testDuplicates();

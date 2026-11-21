@@ -360,6 +360,10 @@ private:
     //!< fragment or an unfragmented message, any frame for the fragments after the first (STD-43A 4.2.1)
     bool frameFor(const Item& item, uint32_t frame) const;
     static RadioPagingFlex::PhaseMessage phaseMessage(const Item& item);
+    //!< The rest of an alphanumeric, HEX/binary or secure message from this fragment on, cut again: its first piece
+    //!< in messageWords (the room of its phase in the frame being built: STD-43A 4.1, a fragment is what the frame
+    //!< has room for), the others in whole frames. False if there is no room for a piece
+    bool refragment(std::list<Item>::iterator item, int messageWords);
     //!< A tone only message as a short message with the tone only payload
     static void toneOnly(RadioPagingFlex::PhaseMessage& pm);
     //!< Message number and R of the item and of its other fragments (see Numbering)

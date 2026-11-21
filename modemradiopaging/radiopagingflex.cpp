@@ -1151,7 +1151,8 @@ std::vector<uint32_t> RadioPagingFlex::secureBody(const std::string& text, Secur
     return msg;
 }
 
-bool RadioPagingFlex::fragmentMessage(const PhaseMessage& message, std::vector<PhaseMessage>& fragments, std::string& error)
+bool RadioPagingFlex::fragmentMessage(const PhaseMessage& message, std::vector<PhaseMessage>& fragments, std::string& error,
+    int startFragment, int firstMessageWords)
 {
     fragments.clear();
 
@@ -1176,16 +1177,26 @@ bool RadioPagingFlex::fragmentMessage(const PhaseMessage& message, std::vector<P
     // no termination: its fragments end on whole words so that their bits join)
     const int blocking = (message.m_type == Binary) ? message.m_binary.m_blocking : 1;
     const size_t len = message.m_text.size();
-    // Message words of a frame for the address (STD-43A 4.1): 85 short, 84 long
-    const int messageWords = maxMessageWords(message.m_capcode);
+    // Message words of a frame for the address (STD-43A 4.1): 85 short, 84 long; the first piece fewer when its
+    // frame has less room
+    const int fullWords = maxMessageWords(message.m_capcode);
     std::vector<std::string> pieces;
     size_t pos = 0;
 
     while (pos < len)
     {
+        const int messageWords = (pieces.empty() && (firstMessageWords > 0)) ? std::min(firstMessageWords, fullWords) : fullWords;
+        // The first fragment of the message (not of the rest of one)
+        const bool first = pieces.empty() && (startFragment == 0);
         // Message words of the fragment: header words 2 (HEX/binary first fragment) or 1, then the data
-        const int headerWords = ((message.m_type == Binary) && pieces.empty()) ? 2 : 1;
+        const int headerWords = ((message.m_type == Binary) && first) ? 2 : 1;
         const int dataWords = messageWords - headerWords;
+
+        if (dataWords < 1)
+        {
+            error = "No room for a fragment";
+            return false;
+        }
         const std::string rest = message.m_text.substr(pos);
         size_t take;
 
@@ -1194,7 +1205,7 @@ bool RadioPagingFlex::fragmentMessage(const PhaseMessage& message, std::vector<P
             // 3 characters a word, the signature slot first in the first fragment (STD-43A 4.1: 251 characters
             // with a short address). A fragment that is not the last has full words (no ETX): with the
             // fragment control bits U0 V0 = 00 a character may continue in the next fragment (3.10.1.3)
-            const size_t room = (size_t) dataWords * 3 - (pieces.empty() ? 1 : 0);
+            const size_t room = (size_t) dataWords * 3 - (first ? 1 : 0);
             take = std::min(rest.size(), room);
         }
         else if (alpha)
@@ -1248,10 +1259,16 @@ bool RadioPagingFlex::fragmentMessage(const PhaseMessage& message, std::vector<P
             }
         }
 
+        if (take == 0)
+        {
+            error = "No room for a fragment";
+            return false;
+        }
+
         pieces.push_back(message.m_text.substr(pos, take));
         pos += take;
 
-        if ((int) pieces.size() > m_maxFragments)
+        if (startFragment + (int) pieces.size() > m_maxFragments)
         {
             error = "Message too long: more than " + std::to_string(m_maxFragments) + " fragments";
             return false;
@@ -1259,16 +1276,16 @@ bool RadioPagingFlex::fragmentMessage(const PhaseMessage& message, std::vector<P
     }
 
     // Signature of the whole message, in the first fragment: HEX/binary in header word 2, alphanumeric in the
-    // first character slot. A secure message has none
-    const int signature = (message.m_type == Binary) ? (int) binarySignature(hexBits(message.m_text))
+    // first character slot. A secure message has none; the rest of a message has the first fragment already
+    const int signature = (startFragment > 0) ? -1 : (message.m_type == Binary) ? (int) binarySignature(hexBits(message.m_text))
         : alphanumeric ? (int) alphaSignature(message.m_text) : -1;
 
     for (size_t k = 0; k < pieces.size(); k++)
     {
         PhaseMessage f = whole;
         f.m_text = pieces[k];
-        f.m_fragment = (int) k;
-        f.m_fragments = (int) pieces.size();
+        f.m_fragment = startFragment + (int) k;
+        f.m_fragments = startFragment + (int) pieces.size();
         f.m_signature = (k == 0) ? signature : -1;
         fragments.push_back(f);
     }

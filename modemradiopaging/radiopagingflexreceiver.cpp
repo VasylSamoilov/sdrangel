@@ -195,6 +195,17 @@ RadioPagingFlexReceiver::Status RadioPagingFlexReceiver::getStatus() const
         status.m_phaseBer[p] = m_decoder.status().m_phaseBer[p];
     }
     status.m_frameReport = m_decoder.lastFrame();
+
+    for (int pol = 0; pol < 2; pol++)
+    {
+        status.m_frameReportPol[pol] = m_decoder.lastFrame(pol == 1);
+        status.m_berPol[pol] = m_decoder.ber(pol == 1);
+
+        for (int p = 0; p < 4; p++) {
+            status.m_phaseBerPol[pol][p] = m_decoder.phaseBer(pol == 1, p);
+        }
+    }
+
     status.m_networkTime = m_decoder.networkTime(m_inverted);
     status.m_groups = m_decoder.groups(m_inverted);
     status.m_reassemblies = m_decoder.reassemblies(m_inverted);

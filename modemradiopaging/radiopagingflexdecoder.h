@@ -184,6 +184,8 @@ public:
     struct FrameReport
     {
         bool m_fiwValid = false;
+        RadioPagingFlex::Mode m_mode = RadioPagingFlex::Mode1600_2;    //!< Speed and levels of the frame
+        bool m_inverted = false;            //!< Polarity of the frame (its network)
         unsigned m_cycle = 0;
         unsigned m_frame = 0;
         bool m_roaming = false;
@@ -367,11 +369,18 @@ public:
         int m_zoneMinutes = 0;
         unsigned m_dst = 0;                 //!< 0 = daylight saving time, 1 = standard
         unsigned m_extendedSeconds = 0;
-        int m_mode = -1;                    //!< -1 unknown, 0 time of frame 0 (frame offset added), 1 time of the frame
+        //! 0 standard: the time word is the time of frame 0 of the cycle (STD-43A 3.7.2), the frame offset is added;
+        //! 1 direct: the time of the frame that carries it. Standard until the time words tell otherwise
+        int m_mode = 0;
+        bool m_modeConfirmed = false;       //!< The mode was told by the time words of a cycle, not assumed
         //! Time of the last decoded frame: hour, minute, seconds (valid if m_timeValid)
         unsigned m_currentHour = 0;
         unsigned m_currentMinute = 0;
         double m_currentSecond = 0.0;
+        //! Frames since each was last received (confirmed), as of the last frame of the network; -1 not valid
+        int m_dateAge = -1;
+        int m_timeAge = -1;
+        int m_zoneAge = -1;
         // Identification
         bool m_ssid1Valid = false;
         unsigned m_localId = 0;
@@ -427,6 +436,10 @@ public:
 
     const Status& status() const { return m_status; }
     const FrameReport& lastFrame() const { return m_report; }
+    //!< The last frame of the network of a polarity, and its bit error rates (all phases, each phase A to D)
+    const FrameReport& lastFrame(bool inverted) const { return m_pol[inverted ? 1 : 0].m_report; }
+    const RadioPagingBerWindow& ber(bool inverted) const { return m_pol[inverted ? 1 : 0].m_ber; }
+    const RadioPagingBerWindow& phaseBer(bool inverted, int phase) const { return m_pol[inverted ? 1 : 0].m_phaseBer[phase & 3]; }
     NetworkTime networkTime(bool inverted = false) const;
     //!< Groups in use on the network of the polarity
     std::vector<GroupSlot> groups(bool inverted) const;
@@ -633,7 +646,14 @@ private:
         unsigned m_zoneZone[8];
         unsigned m_zoneDst[8];
         unsigned m_zoneExt[8];
-        int m_modeDetected = -1;
+        // Standard until the time words tell otherwise (STD-43A 3.7.2: the time of frame 0 of the cycle)
+        int m_modeDetected = 0;
+        bool m_modeConfirmed = false;
+        // Frames of the network since each component was last confirmed: expired a little over an hour after
+        uint32_t m_dateAge = 0;
+        uint32_t m_timeAge = 0;
+        uint32_t m_zoneAge = 0;
+        unsigned m_timeFrame = 0;           //!< Frame (in its cycle) of the time word last confirmed
         int m_modeVotesStd = 0;
         int m_modeVotesDir = 0;
         unsigned m_modeMinute = 0;
@@ -663,6 +683,11 @@ private:
         BiwState m_biw;
         int m_lastCollapse = 0;             //!< System collapse of the last BIW 1 that decoded (clean or corrected)
         std::unordered_map<uint64_t, int> m_lastNumbers;    //!< Last number with R = 1 of each address
+        // The last frame of the network and its bit error rates: the other polarity is another network, whose
+        // frames may come between
+        FrameReport m_report;
+        RadioPagingBerWindow m_ber;
+        RadioPagingBerWindow m_phaseBer[4];
     };
 
     Status m_status;
@@ -673,7 +698,6 @@ private:
     int m_maxMessageNumber = 63;
     bool m_fixedYear;
     int m_referenceYear;
-    unsigned m_lastFrameNumber[2];
 
     // Current phase
     Word m_w[RadioPagingFlex::m_wordsPerFrame];
@@ -755,6 +779,8 @@ private:
     static int zoneMinutes(unsigned zone);
 
     void expireTempGroups();
+    //!< The time components of the network of the frame age by the frames elapsed; expired after an hour
+    void expireTime(uint32_t elapsed);
     //!< Decode the combined copies of a subframe content in the context of its first transmission
     void decodeStore(SubframeStore& store);
 };

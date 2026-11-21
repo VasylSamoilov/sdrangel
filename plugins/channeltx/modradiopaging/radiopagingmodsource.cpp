@@ -133,6 +133,10 @@ void RadioPagingModSource::makeStream()
         m_stream.reset();
         break;
     }
+
+    // The settings the stream is not made with (FLEX roaming, time service, numbering; the POCSAG group, the GSC
+    // mode): a new stream has them too, as at start with the saved settings
+    applyStreamDefaults();
 }
 
 // GSC has no network mode: it is one-shot whatever the setting

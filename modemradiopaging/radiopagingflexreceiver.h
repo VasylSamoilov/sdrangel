@@ -73,10 +73,15 @@ public:
         uint32_t m_frames;              //!< Frames decoded (frame information word valid)
         uint32_t m_frameInfoFailures;   //!< Sync 1 found but the frame information word failed
         float m_quality;                //!< Of the last frame, 0-1
-        RadioPagingBerWindow m_ber;     //!< Of the recent frames of the polarity of the last frame
+        RadioPagingBerWindow m_ber;     //!< Of the recent frames, both polarities
         RadioPagingBerWindow m_phaseBer[4];     //!< The same for each phase A to D
-        // Network of the polarity of the last frame
-        RadioPagingFlexDecoder::FrameReport m_frameReport;
+        RadioPagingFlexDecoder::FrameReport m_frameReport;      //!< The last frame decoded, either polarity
+        // Each polarity (network) apart: its last frame and its bit error rates. The frames of the two may come
+        // in turn: the frame being received is not the last one decoded
+        RadioPagingFlexDecoder::FrameReport m_frameReportPol[2];
+        RadioPagingBerWindow m_berPol[2];
+        RadioPagingBerWindow m_phaseBerPol[2][4];
+        // Network of the polarity of the frame being received
         RadioPagingFlexDecoder::NetworkTime m_networkTime;
         std::vector<RadioPagingFlexDecoder::GroupSlot> m_groups;
         int m_reassemblies;

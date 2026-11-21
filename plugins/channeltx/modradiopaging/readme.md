@@ -12,7 +12,7 @@ A channel transmits one protocol. Its settings are the defaults of the messages 
 
 The symbols are shaped with a Gaussian filter and frequency modulated with the deviation of the channel. The power ramps up at the start of a transmission and down after its last symbol. The radio paging demodulator (demodradiopaging) receives what this plugin transmits.
 
-Messages are queued from the composer of the channel window, from the Message Center (pages sent to the channel by its name) or with the `tx` action of the WebAPI. A message that can not be sent is refused with the reason. At most 100 messages wait.
+Messages are queued from the composer of the channel window, from the Message Center (pages sent to the channel by its name) or with the `tx` action of the WebAPI. A message that can not be sent is refused with the reason. At most 10000 messages wait.
 
 <h2>Modes</h2>
 
@@ -31,7 +31,7 @@ The preamble is 576 bits of reversals. The address codeword goes in the frame of
 
 * Addresses: short and long capcodes. The capcode field also takes the forms of STD-43A Appendix A, `[P|Q|R|S][fff][b]<letter><address>` (for example `3E005237593`): only the address is sent, the composer shows the address type of Table A-1 and what the letters say about the pager.
 * Messages: alphanumeric, numeric, special numeric, numbered numeric, tone, short message, HEX/binary (blocking length, mail drop, display direction, header message, status information) and secure messages; priority addresses. A tone only page is a short message with the tone only payload (every digit a space): pagers do not take an address without a vector, which the standard also allows for tone only.
-* A message longer than a frame is sent in fragments over several frames.
+* A message longer than a frame is sent in fragments over several frames, all in the phase of the first one. A fragment is cut to the room of its phase in the frame it goes in (STD-43A 4.1): the block information words of roaming and of the time, and the other messages, leave less than the 85 words of a frame. The first fragment goes in a frame of the pager, the next ones in the frames that follow.
 * Group messages: up to 5461 pagers. Each pager gets a short instruction with a temporary address and the frame of the group message, then the message goes to that address in that frame (STD-43A 5.2).
 * Network mode:
   * Collapse: pagers listen to one frame in 2^collapse.
@@ -115,7 +115,7 @@ Settings: `RadioPagingModSettings` (channel type `RadioPagingMod`), all the sett
 
 Actions: `RadioPagingModActions`:
 
-* `tx`: a message. `address` is a string for every protocol, as in the posts of the Message Center: the POCSAG address, the FLEX capcode (digits or a form with letters) or the GSC cap code, for example `{"protocol":"flex","address":"1234567","type":"alphanumeric","text":"Hello"}`. POCSAG: `function`, `speed`. FLEX: `priority`, `groupMembers`, `shortType`, `source`, `blocking`, `mailDrop`, `rightToLeft`, `headerMessage`, `statusInfo`, `secureType`. GSC: `function`. All: `protocol`, `type`, `text`, `polarity` (normal or inverted), `charset`, `retransmit`, `retransmitInterval`, `sendDelay`, `id`. 202 when queued, 400 with the reason when it is not valid for the channel or when 100 messages are waiting.
+* `tx`: a message. `address` is a string for every protocol, as in the posts of the Message Center: the POCSAG address, the FLEX capcode (digits or a form with letters) or the GSC cap code, for example `{"protocol":"flex","address":"1234567","type":"alphanumeric","text":"Hello"}`. POCSAG: `function`, `speed`. FLEX: `priority`, `groupMembers`, `shortType`, `source`, `blocking`, `mailDrop`, `rightToLeft`, `headerMessage`, `statusInfo`, `secureType`. GSC: `function`. All: `protocol`, `type`, `text`, `polarity` (normal or inverted), `charset`, `retransmit`, `retransmitInterval`, `sendDelay`, `id`. 202 when queued, 400 with the reason when it is not valid for the channel or when 10000 messages are waiting.
 * `clear`: 1 to drop the messages waiting.
 * `abort`: 1 to drop them and end the one being sent.
 * `systemEvent` and `systemEventFrames`: start the FLEX System Event Notification of the events (0 stops it).

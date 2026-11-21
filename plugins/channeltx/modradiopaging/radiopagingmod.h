@@ -264,7 +264,7 @@ public:
         { }
     };
 
-    static const int m_maxQueued = 100;     //!< Messages not sent yet before requests are refused
+    static const int m_maxQueued = 10000;   //!< Messages not sent yet before requests are refused
     static const int m_maxTextLength = 2000;    //!< Characters of a message
     static const qint64 m_copySlackMs = 3600000;    //!< Retransmissions: longest wait of a copy past its interval (queue, frames)
 

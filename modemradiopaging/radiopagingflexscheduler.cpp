@@ -331,6 +331,65 @@ RadioPagingFlex::PhaseMessage RadioPagingFlexEncoder::phaseMessage(const Item& i
     return pm;
 }
 
+bool RadioPagingFlexEncoder::refragment(std::list<Item>::iterator item, int messageWords)
+{
+    const RadioPagingFlex::MessageType type = item->m_message.m_type;
+
+    if ((item->m_group >= 0) || ((type != RadioPagingFlex::Alphanumeric) && (type != RadioPagingFlex::Binary)
+        && (type != RadioPagingFlex::Secure))) {
+        return false;
+    }
+
+    // The rest of the message: this fragment and those after it, still queued in order
+    std::vector<std::list<Item>::iterator> rest;
+    std::string text;
+
+    for (auto it = item; it != m_queue.end(); ++it)
+    {
+        if ((it->m_id == item->m_id) && (it->m_fragment >= item->m_fragment))
+        {
+            rest.push_back(it);
+            text += it->m_message.m_text;
+        }
+    }
+
+    RadioPagingFlex::PhaseMessage pm = phaseMessage(*item);
+    pm.m_text = text;
+    std::vector<RadioPagingFlex::PhaseMessage> parts;
+    std::string error;
+
+    if (!RadioPagingFlex::fragmentMessage(pm, parts, error, item->m_fragment, messageWords) || parts.empty()
+        || (RadioPagingFlex::messageCost(parts.front()) < 0)) {
+        return false;
+    }
+
+    // The pieces replace the fragments: the first one in place of this item, the others after it
+    Item model = *item;
+
+    for (size_t k = 1; k < rest.size(); k++) {
+        m_queue.erase(rest[k]);
+    }
+
+    auto at = std::next(item);
+
+    for (size_t k = 0; k < parts.size(); k++)
+    {
+        Item piece = model;
+        piece.m_message.m_text = parts[k].m_text;
+        piece.m_fragment = parts[k].m_fragment;
+        piece.m_fragments = parts[k].m_fragments;
+        piece.m_signature = (k == 0) ? model.m_signature : -1;
+
+        if (k == 0) {
+            *item = piece;
+        } else {
+            m_queue.insert(at, piece);
+        }
+    }
+
+    return true;
+}
+
 // Tone only is sent as a Short Message / Tone Only vector with the tone only payload: numeric, every digit a space
 // (STD-43A Table 3.9.2-1). An address without a vector, which the standard also allows for tone only, is not sent:
 // pagers do not take it
@@ -1134,6 +1193,11 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
         m_eventFrames--;
         frame.m_systemEvent = true;
     }
+
+    // The words of each phase before the messages: its block information words 2 to 4 and the System Event
+    // Notification. A message that does not fit what is left is cut again into fragments (fitByFragments)
+    int reserved[RadioPagingFlex::m_maxPhases];
+    std::copy(used, used + RadioPagingFlex::m_maxPhases, reserved);
     int priorityWords[RadioPagingFlex::m_maxPhases] = {0, 0, 0, 0};
 
     // Use of each address in the frame (STD-43A 3.8.5): unfragmented messages twice at most, once only
@@ -1227,29 +1291,59 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
                 phase = it->m_phase % phases;
             }
 
-            if (used[phase] + cost > capacity)
-            {
-                if ((phases <= 1) || (it->m_phase >= 0)) {
-                    continue;
+            // A message of fragments (alphanumeric, HEX/binary, secure) is cut again to the room of its phase in this
+            // frame (STD-43A 4.1: a fragment is what the frame has room for, after its block information words and the
+            // other messages), the rest in the next frames: a fragmented message (its pager waits for the next
+            // fragment, 4.2 (4)), or one that does not fit even a frame of no other message. Another message waits for
+            // a frame with room for it whole
+            auto fitByFragments = [&](int p) {
+                // Address and vector words: a long address has 2 of each, the second vector word carrying the first
+                // message word (STD-43A 3.9), so 3 words besides the message words
+                const int overhead = RadioPagingFlex::isLongAddress(m.m_capcode) ? 3 : 2;
+                const int room = capacity - used[p] - overhead;
+                const bool fragmented = (it->m_fragments > 1) || (it->m_fragment > 0);
+
+                if (!fragmented && (reserved[p] + cost <= capacity)) {
+                    return false;
+                }
+                if ((room < 2) || !refragment(it, room)) {
+                    return false;
                 }
 
-                int found = -1;
-                for (int p = 0; (p < phases) && (found < 0); p++)
+                cost = RadioPagingFlex::messageCost(phaseMessage(*it));
+                return (cost >= 0) && (used[p] + cost <= capacity);
+            };
+
+            if (used[phase] + cost > capacity)
+            {
+                // The fragments of a message stay in the phase of the first one
+                if ((phases <= 1) || (it->m_phase >= 0))
                 {
-                    if ((p != phase) && isMsb(p) && (used[p] + cost <= capacity)) {
-                        found = p;
+                    if (!fitByFragments(phase)) {
+                        continue;
                     }
                 }
-                for (int p = 0; (p < phases) && (found < 0); p++)
+                else
                 {
-                    if ((p != phase) && !isMsb(p) && (used[p] + cost <= capacity)) {
-                        found = p;
+                    int found = -1;
+                    for (int p = 0; (p < phases) && (found < 0); p++)
+                    {
+                        if ((p != phase) && isMsb(p) && (used[p] + cost <= capacity)) {
+                            found = p;
+                        }
+                    }
+                    for (int p = 0; (p < phases) && (found < 0); p++)
+                    {
+                        if ((p != phase) && !isMsb(p) && (used[p] + cost <= capacity)) {
+                            found = p;
+                        }
+                    }
+                    if (found >= 0) {
+                        phase = found;
+                    } else if (!fitByFragments(phase)) {
+                        continue;
                     }
                 }
-                if (found < 0) {
-                    continue;
-                }
-                phase = found;
             }
 
             if (m.m_priority && (priorityWords[phase] + addressWords > RadioPagingFlex::m_maxPriorityWords))

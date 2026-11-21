@@ -171,7 +171,11 @@ public:
     //!< the rest with its termination. The fragments carry m_fragment, m_fragments and, alphanumeric and
     //!< HEX/binary, the signature of the whole message. Other types give one piece. False and an error if the
     //!< message is not valid
-    static bool fragmentMessage(const PhaseMessage& message, std::vector<PhaseMessage>& fragments, std::string& error);
+    //!< startFragment: the message is the rest of a message from that fragment on (its header words and signature
+    //!< slot are of the first fragment only). firstMessageWords: the message words of the first piece, when the frame
+    //!< it goes in has less room than STD-43A 4.1 allows (block information words 2 to 4, other messages); 0 all
+    static bool fragmentMessage(const PhaseMessage& message, std::vector<PhaseMessage>& fragments, std::string& error,
+        int startFragment = 0, int firstMessageWords = 0);
 
     struct PhaseParams
     {

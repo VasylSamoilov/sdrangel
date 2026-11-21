@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <utility>
 #include <climits>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -70,8 +71,6 @@ void RadioPagingFlexDecoder::reset()
     m_status = Status();
     m_report = FrameReport();
     m_ctx = FrameContext();
-    m_lastFrameNumber[0] = 0;
-    m_lastFrameNumber[1] = 0;
     m_out = nullptr;
     m_block = nullptr;
 
@@ -262,6 +261,8 @@ std::vector<RadioPagingFlexDecoder::Message> RadioPagingFlexDecoder::decodeFrame
 
     m_out = &out;
     m_report = FrameReport();
+    m_report.m_mode = frame.m_mode;
+    m_report.m_inverted = frame.m_inverted;
     m_status.m_frames++;
     m_ctx = FrameContext();
     m_ctx.m_mode = frame.m_mode;
@@ -310,15 +311,19 @@ std::vector<RadioPagingFlexDecoder::Message> RadioPagingFlexDecoder::decodeFrame
 
     m_ctx.m_transmissions = m_report.m_transmissions;
     m_ctx.m_tdCollapse = m_report.m_tdCollapse;
-    m_lastFrameNumber[m_ctx.m_pol] = m_ctx.m_frame;
+    // Frames elapsed since the previous frame of the network: the time components age with them
+    const uint32_t elapsed = (absFrame() + framesPerHour - pol().m_lastAbsFrame) % framesPerHour;
     pol().m_lastAbsFrame = absFrame();
 
     expireTempGroups();
+    expireTime(elapsed);
 
     for (size_t i = 0; (i < frame.m_phases.size()) && (i < (size_t) RadioPagingFlex::m_maxPhases); i++) {
         decodePhase(frame.m_phases[i]);
     }
 
+    // The last frame of its network
+    pol().m_report = m_report;
     m_block = nullptr;
     m_out = nullptr;
     return out;
@@ -609,9 +614,12 @@ void RadioPagingFlexDecoder::decodePhase(const RxPhase& phase)
         {
             bool uncorrectable = (m_w[i].m_status != WordClean) && (m_w[i].m_status != WordCorrected);
             m_status.m_ber.add(m_w[i].m_bits, 32, uncorrectable);
+            pol().m_ber.add(m_w[i].m_bits, 32, uncorrectable);
 
-            if ((m_name >= 'A') && (m_name <= 'D')) {
+            if ((m_name >= 'A') && (m_name <= 'D'))
+            {
                 m_status.m_phaseBer[m_name - 'A'].add(m_w[i].m_bits, 32, uncorrectable);
+                pol().m_phaseBer[m_name - 'A'].add(m_w[i].m_bits, 32, uncorrectable);
             }
         }
 
@@ -1023,6 +1031,7 @@ void RadioPagingFlexDecoder::voteDate(int year, unsigned month, unsigned day)
         b.m_month = month;
         b.m_day = day;
         b.m_seenDate = true;
+        b.m_dateAge = 0;
     }
 }
 
@@ -1054,6 +1063,8 @@ void RadioPagingFlexDecoder::voteTime(unsigned hour, unsigned minute, unsigned s
         b.m_minute = minute;
         b.m_second = second;
         b.m_seenTime = true;
+        b.m_timeAge = 0;
+        b.m_timeFrame = m_ctx.m_frame;
     }
 
     // Mode detection. Time of frame 0: the same for the whole cycle. Time of the frame: changes
@@ -1075,11 +1086,15 @@ void RadioPagingFlexDecoder::voteTime(unsigned hour, unsigned minute, unsigned s
                 b.m_modeVotesStd = 0;
             }
 
-            if ((b.m_modeVotesStd >= m_voteThreshold) && (b.m_modeDetected != 0)) {
+            if (b.m_modeVotesStd >= m_voteThreshold)
+            {
                 b.m_modeDetected = 0;
+                b.m_modeConfirmed = true;
             }
-            if ((b.m_modeVotesDir >= m_voteThreshold) && (b.m_modeDetected != 1)) {
+            if (b.m_modeVotesDir >= m_voteThreshold)
+            {
                 b.m_modeDetected = 1;
+                b.m_modeConfirmed = true;
             }
 
             b.m_modeMinute = minute;
@@ -1126,6 +1141,38 @@ void RadioPagingFlexDecoder::voteZone(unsigned zone, unsigned dst, unsigned ext)
         b.m_dst = dst;
         b.m_extSec = ext;
         b.m_seenZone = true;
+        b.m_zoneAge = 0;
+    }
+}
+
+// The time components age with the frames of the network: elapsed is the number of frames since its previous frame
+// (from the frame numbers, a gap of up to an hour). One not confirmed again for a little over an hour (a network sends
+// the time at least once an hour, STD-43A 3.7.2) is forgotten, and its votes start again
+void RadioPagingFlexDecoder::expireTime(uint32_t elapsed)
+{
+    BiwState& b = pol().m_biw;
+    const uint32_t expire = framesPerHour + 5;
+
+    b.m_dateAge += elapsed;
+    b.m_timeAge += elapsed;
+    b.m_zoneAge += elapsed;
+
+    if (b.m_seenDate && (b.m_dateAge >= expire))
+    {
+        b.m_seenDate = false;
+        b.m_dateRingCount = 0;
+        b.m_dateRingIndex = 0;
+    }
+    if (b.m_seenTime && (b.m_timeAge >= expire))
+    {
+        b.m_seenTime = false;
+        b.m_voteTimeCount = 0;
+    }
+    if (b.m_seenZone && (b.m_zoneAge >= expire))
+    {
+        b.m_seenZone = false;
+        b.m_zoneRingCount = 0;
+        b.m_zoneRingIndex = 0;
     }
 }
 
@@ -1149,6 +1196,12 @@ RadioPagingFlexDecoder::NetworkTime RadioPagingFlexDecoder::networkTime(bool inv
     t.m_dst = b.m_dst;
     t.m_extendedSeconds = b.m_extSec;
     t.m_mode = b.m_modeDetected;
+    t.m_modeConfirmed = b.m_modeConfirmed;
+
+    // Frames since each was confirmed, as of the last frame of the network
+    t.m_dateAge = b.m_seenDate ? (int) b.m_dateAge : -1;
+    t.m_timeAge = b.m_seenTime ? (int) b.m_timeAge : -1;
+    t.m_zoneAge = b.m_seenZone ? (int) b.m_zoneAge : -1;
     t.m_ssid1Valid = b.m_ssid1;
     t.m_localId = b.m_localId;
     t.m_coverageZone = b.m_coverage;
@@ -1156,30 +1209,26 @@ RadioPagingFlexDecoder::NetworkTime RadioPagingFlexDecoder::networkTime(bool inv
     t.m_country = b.m_country;
     t.m_tmf = b.m_tmf;
 
+    // The time of the last frame of the network: the time word, plus the frames since the frame it is the time of.
+    // Standard: it is the time of frame 0 of the cycle of the frame that carried it; direct: of that frame. Then the
+    // frames since that frame (1.875 s each), so that the time is right for the whole hour a network may go without
+    // sending it, not only in the cycle it came in
     if (b.m_seenTime)
     {
-        double base = b.m_minute * 60.0 + b.m_second * 7.5;
+        double seconds = b.m_hour * 3600.0 + b.m_minute * 60.0 + b.m_second * 7.5;
 
         if (b.m_seenZone) {
-            base += b.m_extSec * 0.9375;
+            seconds += b.m_extSec * 0.9375;
         }
         if (b.m_modeDetected == 0) {
-            base += m_lastFrameNumber[inverted ? 1 : 0] * 1.875;
+            seconds += b.m_timeFrame * 1.875;
         }
 
-        unsigned hour = b.m_hour;
-        int minute = (int) (base / 60.0);
-        double second = base - minute * 60.0;
-
-        if (minute >= 60)
-        {
-            minute -= 60;
-            hour = (hour + 1) % 24;
-        }
-
-        t.m_currentHour = hour;
-        t.m_currentMinute = (unsigned) minute;
-        t.m_currentSecond = second;
+        seconds = std::fmod(seconds + b.m_timeAge * 1.875, 86400.0);
+        const int whole = (int) seconds;
+        t.m_currentHour = (unsigned) (whole / 3600);
+        t.m_currentMinute = (unsigned) ((whole % 3600) / 60);
+        t.m_currentSecond = seconds - (whole - whole % 60);
     }
 
     return t;
