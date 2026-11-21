@@ -211,14 +211,18 @@ public:
         MESSAGE_CLASS_DECLARATION
 
     public:
+        // what the line is about (a badge in the log)
+        enum Kind { Event, Frame, Call, Sms, Mwi, Power, Phone, Tone, Network, Warning };
         int getNetwork() const { return m_network; }
         const QString& getText() const { return m_text; }
-        static MsgReportLog* create(int network, const QString& text) { return new MsgReportLog(network, text); }
+        Kind getKind() const { return m_kind; }
+        static MsgReportLog* create(int network, const QString& text, Kind kind = Event) { return new MsgReportLog(network, text, kind); }
 
     private:
         int m_network;
         QString m_text;
-        MsgReportLog(int network, const QString& text) : Message(), m_network(network), m_text(text) { }
+        Kind m_kind;
+        MsgReportLog(int network, const QString& text, Kind kind) : Message(), m_network(network), m_text(text), m_kind(kind) { }
     };
 
     // the state of a network, once a second while it runs

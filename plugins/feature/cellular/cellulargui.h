@@ -118,6 +118,7 @@ private:
         QString time;
         int network;            // 0: the controller
         QString text;
+        int kind;               // Cellular::MsgReportLog::Kind
     };
 
     void buildUI();
@@ -143,7 +144,8 @@ private:
     void showSummary();
     void showTestPhone();
     void fillNetworkCombos();
-    void addLog(int network, const QString& text);
+    void addLog(int network, const QString& text, int kind);
+    QString logHtml(const LogLine& line, bool withNetwork) const;
     bool logShown(const LogLine& line) const;
     void renderLog();
     QString networkName(int id) const;

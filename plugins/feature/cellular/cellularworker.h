@@ -172,7 +172,7 @@ private:
     void reportStatus(const Network& network);
     void sendTo(ChannelAPI *channel, const std::vector<uint8_t>& wire);
     void sendAudio(ChannelAPI *channel, const std::vector<uint8_t>& wire);
-    void log(int network, const QString& text);
+    void log(int network, const QString& text, Cellular::MsgReportLog::Kind kind = Cellular::MsgReportLog::Event);
     void sendPostponed(Network& network);
     // the frames of a carrier into the event log of its network
     void traceFrame(Network& n, size_t index, bool toPhone, const modemnmt::Frame& frame, double quality, double level);

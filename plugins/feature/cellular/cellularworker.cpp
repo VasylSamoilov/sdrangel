@@ -154,11 +154,28 @@ void CellularWorker::handleInputMessages()
     }
 }
 
-void CellularWorker::log(int network, const QString& text)
+void CellularWorker::log(int network, const QString& text, Cellular::MsgReportLog::Kind kind)
 {
+    using K = Cellular::MsgReportLog;
+    // the lines of the actions start with the name of the action; errors and warnings say so
+    if (kind == K::Event)
+    {
+        const QString first = text.section(' ', 0, 0);
+        if (first == "call" || first == "hangup" || first == "release" || first == "move") {
+            kind = K::Call;
+        } else if (first == "sms" || first == "hold") {
+            kind = K::Sms;
+        } else if (first == "mwi") {
+            kind = K::Mwi;
+        } else if (first == "power") {
+            kind = K::Power;
+        } else if (first == "error:" || first == "warning:") {
+            kind = K::Warning;
+        }
+    }
     qInfo().noquote() << QString("CellularWorker: network %1: %2").arg(network).arg(text);
     if (m_reports) {
-        m_reports->push(Cellular::MsgReportLog::create(network, text));
+        m_reports->push(Cellular::MsgReportLog::create(network, text, kind));
     }
 }
 
@@ -203,14 +220,14 @@ void CellularWorker::traceFrame(Network& n, size_t index, bool toPhone, const mo
     (toPhone ? trace.outType : trace.inType) = QString::fromLatin1(modemnmt::frameDef(frame.mt).number);
     if (toPhone)
     {
-        log(n.id, QString("ch %1 > %2").arg(number).arg(QString::fromStdString(text)));
+        log(n.id, QString("ch %1 > %2").arg(number).arg(QString::fromStdString(text)), Cellular::MsgReportLog::Frame);
         return;
     }
     log(n.id, QString("ch %1 < %2 (quality %3, level %4 dB)")
         .arg(number)
         .arg(QString::fromStdString(text))
         .arg(quality, 0, 'f', 2)
-        .arg(20.0 * std::log10(std::max(level, 1e-6)), 0, 'f', 1));
+        .arg(20.0 * std::log10(std::max(level, 1e-6)), 0, 'f', 1), Cellular::MsgReportLog::Frame);
 }
 
 static const char* serviceEndName(modemnmt::NmtServiceEnd result)
@@ -304,12 +321,12 @@ void CellularWorker::setHandlers(Network& n)
         [this, id, learnCentre](const modemnmt::NmtSubscriber& subscriber, const modemnmt::SmsSubmit& message) -> uint8_t {
             learnCentre(subscriber);
             log(id, QString("SMS from %1 to %2: %3").arg(numberText(subscriber))
-                .arg(QString::fromStdString(message.destination)).arg(QString::fromStdString(message.text)));
+                .arg(QString::fromStdString(message.destination)).arg(QString::fromStdString(message.text)), Cellular::MsgReportLog::Sms);
             return 0;
         },
         [this, id](const modemnmt::NmtSubscriber& subscriber, modemnmt::NmtServiceEnd result, uint8_t cause) {
             log(id, QString("SMS to %1: %2%3").arg(numberText(subscriber)).arg(serviceEndName(result))
-                .arg(cause ? QString(" (RP cause %1)").arg(cause) : QString()));
+                .arg(cause ? QString(" (RP cause %1)").arg(cause) : QString()), Cellular::MsgReportLog::Sms);
         });
     system.setSmsRequestHandler([this, &n, learnCentre](const modemnmt::NmtSubscriber& subscriber, modemnmt::SmsRpKind kind,
             modemnmt::SmsDeliver& message) {
@@ -318,31 +335,31 @@ void CellularWorker::setHandlers(Network& n)
 
         if (kind != modemnmt::SmsRpKind::ReadyToReceive)
         {
-            log(n.id, QString("%1 called the SMS centre: it has memory for messages again").arg(who));
+            log(n.id, QString("%1 called the SMS centre: it has memory for messages again").arg(who), Cellular::MsgReportLog::Sms);
             return false;
         }
         auto it = m_held.find(who.toStdString());
         if (it == m_held.end() || it->second.empty())
         {
-            log(n.id, QString("%1 called the SMS centre: it asks for its waiting messages, none wait").arg(who));
+            log(n.id, QString("%1 called the SMS centre: it asks for its waiting messages, none wait").arg(who), Cellular::MsgReportLog::Sms);
             return false;
         }
         message = it->second.front();
         it->second.pop_front();
         log(n.id, QString("%1 called the SMS centre: it asks for its waiting messages, it gets \"%2\" (%3 more waiting)")
-            .arg(who).arg(QString::fromStdString(message.text)).arg(it->second.size()));
+            .arg(who).arg(QString::fromStdString(message.text)).arg(it->second.size()), Cellular::MsgReportLog::Sms);
         return true;
     });
     system.setMwiHandler([this, id](const modemnmt::NmtSubscriber& subscriber, uint8_t flags, modemnmt::NmtServiceEnd result) {
         log(id, QString("message waiting indicators 0x%1 to %2: %3").arg(flags, 2, 16, QChar('0'))
-            .arg(numberText(subscriber)).arg(serviceEndName(result)));
+            .arg(numberText(subscriber)).arg(serviceEndName(result)), Cellular::MsgReportLog::Mwi);
     });
     system.setPowerHandler([this, id](const modemnmt::NmtSubscriber& subscriber, int level, bool done) {
         log(id, QString("power of %1 to level %2: %3").arg(numberText(subscriber)).arg(level)
-            .arg(done ? "the phone took it" : "the phone did not take it"));
+            .arg(done ? "the phone took it" : "the phone did not take it"), Cellular::MsgReportLog::Power);
     });
     n.caller->setEventHandler([this, id](const std::string& text) {
-        log(id, QString::fromStdString(text));
+        log(id, QString::fromStdString(text), Cellular::MsgReportLog::Call);
     });
 }
 
@@ -536,7 +553,8 @@ void CellularWorker::notePhone(Network& n, size_t index, const modemnmt::Frame& 
 
     if (phone.number.isEmpty())
     {
-        log(n.id, QString("phone %1 heard on channel %2").arg(QString::fromStdString(id)).arg(channel.config().channel));
+        log(n.id, QString("phone %1 heard on channel %2").arg(QString::fromStdString(id)).arg(channel.config().channel),
+            Cellular::MsgReportLog::Phone);
         // the book learns the traffic area it was heard on
         int y1, area;
         trafficArea(n, y1, area);
@@ -590,7 +608,8 @@ void CellularWorker::flushTrace(Network& n, size_t index, bool toPhone, bool qui
     if (repeats > 0)
     {
         log(n.id, QString("ch %1 %2 %3 again %4 time%5").arg(n.station->system()->channel(index).config().channel)
-            .arg(toPhone ? ">" : "<").arg(toPhone ? trace.outType : trace.inType).arg(repeats).arg(repeats == 1 ? "" : "s"));
+            .arg(toPhone ? ">" : "<").arg(toPhone ? trace.outType : trace.inType).arg(repeats).arg(repeats == 1 ? "" : "s"),
+            Cellular::MsgReportLog::Frame);
     }
 }
 
@@ -604,7 +623,8 @@ void CellularWorker::flushTones(bool all)
         ToneListener& l = t.second;
         if (!l.keys.empty() && (all || now - l.lastMs > 2000))
         {
-            log(l.network, QString("tones from %1: %2").arg(QString::fromStdString(t.first)).arg(QString::fromStdString(l.keys)));
+            log(l.network, QString("tones from %1: %2").arg(QString::fromStdString(t.first)).arg(QString::fromStdString(l.keys)),
+                Cellular::MsgReportLog::Tone);
             l.keys.clear();
         }
     }
@@ -821,25 +841,25 @@ void CellularWorker::addNetwork(const MsgAddNetwork& add)
     n.cellular->setFallback(n.music ? modemcellular::CallRouter::Fallback::Music : modemcellular::CallRouter::Fallback::Echo);
     const int id = n.id;
     n.cellular->setSubscriberListener([this, id](const std::string& number, bool registered) {
-        log(id, QString("%1 %2").arg(QString::fromStdString(number)).arg(registered ? "registered" : "gone"));
+        log(id, QString("%1 %2").arg(QString::fromStdString(number)).arg(registered ? "registered" : "gone"), Cellular::MsgReportLog::Phone);
     });
 
     for (const modemnmt::NmtPlanIssue& issue : n.station->issues()) {
-        log(id, issueText(issue));
+        log(id, issueText(issue), Cellular::MsgReportLog::Warning);
     }
     log(id, QString("the phones get %1 frames for their identity (T = 8 at the phone, %2 for the round trip of the radio)")
         .arg(8 + n.config.roundTripFrames).arg(n.config.roundTripFrames));
     for (const modemnmt::NmtCarrierStatus& c : n.station->carriers())
     {
         for (const modemnmt::NmtPlanIssue& issue : c.issues) {
-            log(id, QString("channel %1: %2").arg(c.config.channel).arg(issueText(issue)));
+            log(id, QString("channel %1: %2").arg(c.config.channel).arg(issueText(issue)), Cellular::MsgReportLog::Warning);
         }
     }
 
     m_networks.push_back(std::move(network));
     n.rx = radioFor(add.m_rxChannel, add.m_rxPipe, false);
     n.tx = radioFor(add.m_txChannel, add.m_txPipe, true);
-    log(id, QString("%1 started").arg(n.name));
+    log(id, QString("%1 started").arg(n.name), Cellular::MsgReportLog::Network);
     tryBind(n);
     if (!running(n)) {
         reportStatus(n);
@@ -868,7 +888,7 @@ void CellularWorker::remove(int id, bool retryOthers)
         n.bridge.reset();
         n.cellular.reset();
         n.station.reset();
-        log(id, QString("%1 stopped").arg(n.name));
+        log(id, QString("%1 stopped").arg(n.name), Cellular::MsgReportLog::Network);
         m_networks.erase(it);
         if (rx) {
             updateTuning(*rx);
@@ -1029,15 +1049,16 @@ void CellularWorker::tryBind(Network& n)
         for (const modemnmt::NmtPlanIssue& issue : c.streamIssues) {
             log(n.id, QString("channel %1 (%2 / %3 MHz): %4").arg(c.config.channel)
                 .arg(c.frequency.downlink / 1e6, 0, 'f', 4).arg(c.frequency.uplink / 1e6, 0, 'f', 4)
-                .arg(issueText(issue)));
+                .arg(issueText(issue)), Cellular::MsgReportLog::Warning);
         }
     }
     for (const modemnmt::NmtPlanIssue& issue : n.station->streamIssues()) {
-        log(n.id, issueText(issue));
+        log(n.id, issueText(issue), Cellular::MsgReportLog::Warning);
     }
     if (!ok)
     {
-        log(n.id, QString("the network is off (receiver %1, transmitter %2)").arg(spanText(rxSpan)).arg(spanText(txSpan)));
+        log(n.id, QString("the network is off (receiver %1, transmitter %2)").arg(spanText(rxSpan)).arg(spanText(txSpan)),
+            Cellular::MsgReportLog::Warning);
         reportStatus(n);
         return;
     }
@@ -1068,7 +1089,7 @@ void CellularWorker::tryBind(Network& n)
             flushTrace(*network, i, !rx);
             (rx ? trace.inType : trace.outType) = "DMS";
             log(network->id, QString("ch %1 %2 DMS %3").arg(network->station->system()->channel(i).config().channel)
-                .arg(rx ? "<" : ">").arg(QString::fromStdString(text)));
+                .arg(rx ? "<" : ">").arg(QString::fromStdString(text)), Cellular::MsgReportLog::Frame);
         });
     }
     n.batches = 0;
@@ -1079,7 +1100,7 @@ void CellularWorker::tryBind(Network& n)
     const size_t carriers = n.station->system()->channelCount();
     log(n.id, QString("on the air with %1 carrier%2 (receiver %3, transmitter %4, lead %5 ms)")
         .arg(carriers).arg(carriers == 1 ? "" : "s").arg(spanText(rxSpan)).arg(spanText(txSpan))
-        .arg(m_lead / modemnmt::NmtBaseStation::kAudioRate * 1e3, 0, 'f', 0));
+        .arg(m_lead / modemnmt::NmtBaseStation::kAudioRate * 1e3, 0, 'f', 0), Cellular::MsgReportLog::Network);
     reportStatus(n);
 }
 
