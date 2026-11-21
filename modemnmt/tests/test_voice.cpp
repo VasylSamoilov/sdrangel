@@ -505,8 +505,15 @@ static void testSpeechBothWays()
     for (double rate : {16000.0, 48000.0})
     {
         VoiceCall call(3, rate, 0.8);
+        std::vector<float> tapped;
 
+        // the tap hears what the handler gets, before it
+        call.system.setAudioTap([&tapped](const NmtSubscriber&, const float *samples, int count) {
+            tapped.insert(tapped.end(), samples, samples + count);
+        });
         const std::vector<float> sent = call.air(2.0, phoneTones(1000.0, 0.4, 3, rate), rate);
+        call.system.setAudioTap(nullptr);
+        CHECK(!tapped.empty() && tapped == call.fromPhone);
 
         // towards the phone: the speech at the level of the endpoint (times the deviation
         // factor) and the supervisory tone of the channel

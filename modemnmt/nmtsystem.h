@@ -188,6 +188,9 @@ public:
         m_audioFromMobile = std::move(fromMobile);
         m_audioToMobile = std::move(toMobile);
     }
+    // The speech from the phones also to an observer (a tester listening for tones), before the
+    // handler; it does not change the audio.
+    void setAudioTap(AudioFromMobile tap) { m_audioTap = std::move(tap); }
     // Subscribers that roamed in, by country digit and number ("1123456").
     bool isRegistered(char country, const std::string& number) const;
     // The data of a registered subscriber, null if it is not registered.
@@ -271,6 +274,7 @@ private:
     CallHandler m_callHandler;
     ClearHandler m_clearHandler;
     AudioFromMobile m_audioFromMobile;
+    AudioFromMobile m_audioTap;
     AudioToMobile m_audioToMobile;
     MwiHandler m_mwiHandler;
     std::string m_smscNumber;

@@ -1102,6 +1102,11 @@ void NmtSystem::callFailed(NmtTransaction& transaction, modemcellular::Cause cau
 
 void NmtSystem::audioFromMobile(NmtTransaction& transaction, const float* samples, int count)
 {
+    if (m_audioTap)
+    {
+        const NmtSubscriber subscriber = transaction.subscriber;
+        m_audioTap(subscriber, samples, count);
+    }
     if (m_audioFromMobile)
     {
         // a copy: the handler may end the transaction

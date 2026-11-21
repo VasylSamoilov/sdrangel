@@ -271,6 +271,21 @@ void CellularWorker::setHandlers(Network& n)
                 centre, y1, area));
         }
     };
+    // touch tones the phone sends in a call (keys pressed, or a code the phone sends by itself)
+    system.setAudioTap([this, id](const modemnmt::NmtSubscriber& subscriber, const float *samples, int count) {
+        ToneListener& t = m_tones[numberText(subscriber).toStdString()];
+        if (!t.detector) {
+            t.detector = std::make_unique<DVDTMF::Detector>(static_cast<int>(modemnmt::NmtBaseStation::kAudioRate));
+        }
+        std::vector<DVDTMF::Detector::Key> keys;
+        t.detector->process(samples, count, keys);
+        for (const DVDTMF::Detector::Key& k : keys)
+        {
+            t.keys += k.m_key;
+            t.network = id;
+            t.lastMs = QDateTime::currentMSecsSinceEpoch();
+        }
+    });
     // a phone's own SMS centre (learned or picked in its record) reaches the centre too
     system.setSmsCentreOf([this, &n](const modemnmt::NmtSubscriber& subscriber) {
         const auto it = m_smsCentres.find(std::make_pair(static_cast<int>(n.config.system), numberText(subscriber).toStdString()));
@@ -576,6 +591,22 @@ void CellularWorker::flushTrace(Network& n, size_t index, bool toPhone, bool qui
     {
         log(n.id, QString("ch %1 %2 %3 again %4 time%5").arg(n.station->system()->channel(index).config().channel)
             .arg(toPhone ? ">" : "<").arg(toPhone ? trace.outType : trace.inType).arg(repeats).arg(repeats == 1 ? "" : "s"));
+    }
+}
+
+// The keys of a phone that sent none for 2 s go to the log as one group.
+void CellularWorker::flushTones(bool all)
+{
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    for (auto& t : m_tones)
+    {
+        ToneListener& l = t.second;
+        if (!l.keys.empty() && (all || now - l.lastMs > 2000))
+        {
+            log(l.network, QString("tones from %1: %2").arg(QString::fromStdString(t.first)).arg(QString::fromStdString(l.keys)));
+            l.keys.clear();
+        }
     }
 }
 
@@ -1061,6 +1092,7 @@ void CellularWorker::processBatch(Radio& radio)
         n.caller->process(static_cast<int>(m_rx.length * modemcellular::kAudioSampleRate / modemnmt::NmtBaseStation::kAudioRate));
         sendPostponed(n);
         flushQuietTraces(n);
+        flushTones(false);
 
         // the audio of all networks on one transmitter goes as one batch
         modemcellular::CarrierBatch& out = m_txOut[n.tx];

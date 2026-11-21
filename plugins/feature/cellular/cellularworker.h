@@ -35,6 +35,7 @@
 #include "cellularsystem.h"
 #include "nmtbasestation.h"
 #include "nmtcellularbridge.h"
+#include "dsp/dv/dvdtmf.h"
 #include "nmtphoneinfo.h"
 #include "nmttracefold.h"
 #include "testcaller.h"
@@ -195,6 +196,17 @@ private:
     std::vector<std::unique_ptr<Network>> m_networks;
     std::map<std::string, modemnmt::NmtPhoneInfo> m_known;
     std::map<std::pair<int, std::string>, std::string> m_smsCentres;   // of the phones, from the book
+    // touch tones in the speech of the phones (DTMF), by number: the keys of a group are logged
+    // together when the phone sent no key for a while
+    struct ToneListener
+    {
+        std::unique_ptr<DVDTMF::Detector> detector;
+        std::string keys;
+        int network = 0;
+        qint64 lastMs = 0;
+    };
+    std::map<std::string, ToneListener> m_tones;
+    void flushTones(bool all);
     // short messages the centre keeps for a phone (by its number) until the phone fetches them
     std::map<std::string, std::deque<modemnmt::SmsDeliver>> m_held;
     modemcellular::CarrierBatch m_rx;
