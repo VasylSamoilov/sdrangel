@@ -30,6 +30,7 @@
 
 #include "cellular.h"
 #include "cellularsettings.h"
+#include "nmtphonebook.h"
 
 class PluginAPI;
 class FeatureUISet;
@@ -129,7 +130,15 @@ private:
     void applySettings();
     bool handleMessage(const Message& message);
     void showStatus(const Cellular::MsgReportStatus& report);
-    void showPhones(int network, const QList<Cellular::MsgReportStatus::Phone>& phones);
+    // the Mobiles table: the book and the phones the networks hear, one row per phone
+    void showMobiles();
+    int mobileRow(modemnmt::System system, const QString& number) const;
+    void editMobile(modemnmt::System system, const QString& number);
+    void addMobile();
+    void forgetMobile(modemnmt::System system, const QString& number);
+    // what the phone does now on the networks, and the network that heard it last
+    QString liveText(const QString& number, int& network, QColor& colour, QString& line) const;
+    modemnmt::System systemOf(int network) const;
     void showCarriers();
     void showSummary();
     void showTestPhone();
@@ -154,8 +163,9 @@ private:
     ButtonSwitch *m_startStop;
     QLabel *m_summary;
     QTabWidget *m_tabs;
-    // Phones
+    // Mobiles
     QTableWidget *m_phones;
+    modemnmt::NmtPhoneBook m_book;              // a copy of the feature's, for presets and the table
     // Test
     QComboBox *m_testNetwork;
     QComboBox *m_testPhone;

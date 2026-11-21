@@ -28,9 +28,11 @@ Start takes the networks that are on to the air, Stop takes all networks off the
 
 * Transmit lead: how far the transmitters run ahead of the receivers. The lead is part of the round trip between a phone and the base station: the answer to a phone is late by the time the audio takes through the receiving device, the controller, the lead and the transmitting device. Keep the round trip below about 300 ms. If the transmit queues run empty (the Empty column of Carriers) the lead is too small. Taken when the tester starts.
 
-<h3>Phones</h3>
+<h3>Mobiles</h3>
 
-Every phone a network heard (its identity in a frame for the channel it came on) or that registered, one row per phone and network: number, what it does now, channel, network, registered (yes: it made a roaming update to this network), when it was last heard, the received level and the quality of its last frame, the power level in its frames (high, medium, low) and the type of its last frame. A phone keeps its row. Right click: the actions of the Test tab on that phone; double click: the phone in the Test tab.
+The phones the tester knows, its book, and the phones the networks hear (their identity in a frame for the channel it came on, or a roaming update), one row per phone. The first line has a dot for what it does (green in a call, orange ringing or paged, blue registered, grey heard, dark not seen), its name and number; the second line what is known of it: the country digit Y1 of the last network that heard it, its password K, SMS centre, voice mail number, short messages the centre keeps for it and an indicator that waits for it. The State column has what it does now and where it was heard last. Rows stay where they are.
+
+What the tester learns of a phone goes into its record by itself: the password in its seizure frames (when two frames agree), the numbers it dials, the SMS centre it really sends to or fetches from (with the traffic area of the network), the traffic areas it was heard on. Double click (or the pencil) opens the record: name, notes, password, SMS centre and voice mail number (pick one of the numbers it dialled or type one), voice mail code. Each value is marked learned or typed: a typed value stays, learning does not change it; clear it to learn it again. The book is kept with the settings (presets) and over restarts of the networks. The plus adds a phone by its number, the bin forgets one (a phone the networks hear comes back). Right click: the record, the actions of the Test tab on the phone (by the network that heard it last, else the network of the Test tab), and forget.
 
 <h3>Test</h3>
 

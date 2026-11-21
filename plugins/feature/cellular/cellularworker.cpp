@@ -257,12 +257,21 @@ void CellularWorker::setHandlers(Network& n)
     auto learnCentre = [this, &n](const modemnmt::NmtSubscriber& subscriber) {
         int y1, area;
         trafficArea(n, y1, area);
-        known(numberText(subscriber).toStdString()).noteSmsCentre(n.config.smscNumber, y1, area);
+        const std::string number = numberText(subscriber).toStdString();
+        known(number).noteSmsCentre(n.config.smscNumber, y1, area);
+        if (m_reports) {
+            m_reports->push(Cellular::MsgBookLearn::create(Cellular::MsgBookLearn::SmsCentre, n.config.system, number,
+                n.config.smscNumber, y1, area));
+        }
     };
     system.setDialObserver([this, &n](const modemnmt::NmtSubscriber& subscriber, const std::string& dialled) {
         int y1, area;
         trafficArea(n, y1, area);
-        known(numberText(subscriber).toStdString()).noteDialled(dialled, y1, area);
+        const std::string number = numberText(subscriber).toStdString();
+        known(number).noteDialled(dialled, y1, area);
+        if (m_reports) {
+            m_reports->push(Cellular::MsgBookLearn::create(Cellular::MsgBookLearn::Dialled, n.config.system, number, dialled, y1, area));
+        }
     });
     system.setSmsHandlers(
         [this, id, learnCentre](const modemnmt::NmtSubscriber& subscriber, const modemnmt::SmsSubmit& message) -> uint8_t {
@@ -496,8 +505,15 @@ void CellularWorker::notePhone(Network& n, size_t index, const modemnmt::Frame& 
     const std::string id = modemnmt::valueToDigits(frame.msCountry, 1) + modemnmt::valueToDigits(frame.msNumber, 6);
     Cellular::MsgReportStatus::Phone& phone = n.phones[id];
 
-    if (phone.number.isEmpty()) {
+    if (phone.number.isEmpty())
+    {
         log(n.id, QString("phone %1 heard on channel %2").arg(QString::fromStdString(id)).arg(channel.config().channel));
+        // the book learns the traffic area it was heard on
+        int y1, area;
+        trafficArea(n, y1, area);
+        if (m_reports) {
+            m_reports->push(Cellular::MsgBookLearn::create(Cellular::MsgBookLearn::Area, n.config.system, id, std::string(), y1, area));
+        }
     }
     phone.number = QString::fromStdString(id);
     phone.channel = channel.config().channel;
@@ -507,8 +523,14 @@ void CellularWorker::notePhone(Network& n, size_t index, const modemnmt::Frame& 
     phone.power = power;
     phone.lastFrame = QString::fromLatin1(modemnmt::frameDef(frame.mt).number);
     // its password, in the seizure frames (a value is taken when two frames agree)
-    if (std::strchr(digits, 'K')) {
-        known(id).notePassword(frame.msPassword);
+    if (std::strchr(digits, 'K'))
+    {
+        modemnmt::NmtPhoneInfo& info = known(id);
+        const std::string before = info.password();
+        info.notePassword(frame.msPassword);
+        if (info.password() != before && m_reports) {
+            m_reports->push(Cellular::MsgBookLearn::create(Cellular::MsgBookLearn::Password, n.config.system, id, info.password()));
+        }
     }
 }
 

@@ -82,6 +82,9 @@ struct CellularSettings
     quint32 m_rgbColor;
     int m_workspaceIndex;
     QByteArray m_geometryBytes;
+    // The book of phones (CellularBook) as it was saved. Read only when settings are loaded (a
+    // preset): the feature keeps the book itself and ignores this in ordinary settings messages.
+    QByteArray m_book;
     Serializable *m_rollupState;
 
     CellularSettings();
