@@ -368,6 +368,48 @@ void testFlexAloneNoOtherSync()
     }
 }
 
+// A POCSAG page of one batch after its preamble: no second sync codeword confirms it, the batch decoded does. The
+// POCSAG row shows it (in sync while the batch is decoded, its polarity kept after)
+void testPocsagOneBatchShown()
+{
+    Modulator mod;
+    std::set<std::string> sent;
+
+    mod.noise(3000);
+    addPocsag(mod, sent, 1200, 1234567, "HI", false);
+
+    MessageQueue queue;
+    RadioPagingDemodSink sink;
+    RadioPagingDemodSettings settings;
+    sink.setMessageQueueToChannel(&queue);
+    sink.applyChannelSettings((int) sampleRate, 0, true);
+    sink.applySettings(QStringList(), settings, true);
+    bool sync = false;
+
+    for (size_t i = 0; i < mod.m_samples.size(); i += 1024)
+    {
+        size_t end = std::min(mod.m_samples.size(), i + 1024);
+        sink.feed(mod.m_samples.begin() + i, mod.m_samples.begin() + end);
+        sync = sync || sink.getStatus().m_pol[0][0].m_sync;
+    }
+
+    RadioPagingDemodSink::Status status = sink.getStatus();
+    int received = 0;
+    Message *message;
+
+    while ((message = queue.pop()))
+    {
+        if (MainCore::MsgMessageRecord::match(*message) && (((MainCore::MsgMessageRecord *) message)->getRecord().m_protocol == "pocsag")) {
+            received++;
+        }
+        delete message;
+    }
+
+    std::printf("      POCSAG one batch: received %d, in sync seen %s, polarity shown %s\n", received, sync ? "yes" : "no",
+        status.m_pol[0][0].m_seen ? "yes" : "no");
+    check((received == 1) && sync && status.m_pol[0][0].m_seen, "POCSAG one batch after its preamble: received, in sync while decoded, polarity shown");
+}
+
 void testNoFalseLocks()
 {
     Modulator mod;
@@ -1146,6 +1188,7 @@ int main(int argc, char **argv)
     testVoiceStore();
     testNoFalseLocks();
     testFlexAloneNoOtherSync();
+    testPocsagOneBatchShown();
     testFrequencyOffset();
 
     std::printf("%d passed, %d failed\n", passes, failures);
