@@ -170,7 +170,10 @@ private:
     std::vector<std::pair<MessageRecord, QString>> m_waiting;
     QToolButton *m_waitingButton;
 
-    //! The view does not follow: a row is selected or it is not at the bottom
+    //! Follows the newest rows: off when the user scrolls up, on when the user scrolls to the bottom or shows the
+    //! records waiting
+    bool m_following = true;
+    //! The view does not follow: a row is selected or the user scrolled up
     bool holding() const;
     //! A new record as a row; the oldest rows go over the maximum
     void appendRecord(const MessageRecord& record, const QString& state);

@@ -127,14 +127,10 @@ bool MessageCenterFilter::matches(const MessageRecord& record) const
         }
     }
     // Any field of the record or of its protocol data; a list (the members of a group message): one of its values
-    if (!m_conditions.isEmpty())
-    {
-        const QJsonObject fields = MessageCenterContact::recordFields(record);
-
-        if (!std::all_of(m_conditions.begin(), m_conditions.end(),
-            [&fields](const MessageCenterContact::Condition& condition) { return condition.matches(fields); })) {
-            return false;
-        }
+    // Each condition reads its field of the record alone (no JSON of the whole record: a filter over a large log)
+    if (!std::all_of(m_conditions.begin(), m_conditions.end(),
+        [&record](const MessageCenterContact::Condition& condition) { return condition.matches(record); })) {
+        return false;
     }
     if ((m_frequencyMin >= 0) && (record.m_frequency < m_frequencyMin)) {
         return false;
@@ -488,7 +484,28 @@ QString MessageCenterContact::Condition::check() const
 
 bool MessageCenterContact::Condition::matches(const QJsonObject& fields) const
 {
-    const QJsonValue value = fields.value(m_field);
+    return matchesField(fields.value(m_field));
+}
+
+bool MessageCenterContact::Condition::matches(const MessageRecord& record) const
+{
+    return matchesField(recordValue(record, m_field));
+}
+
+QJsonValue MessageCenterContact::recordValue(const MessageRecord& record, const QString& key)
+{
+    const QJsonValue value = record.jsonValue(key);
+
+    if (!value.isUndefined()) {
+        return value;
+    }
+
+    const auto it = record.m_protocolData.constFind(key);
+    return (it != record.m_protocolData.constEnd()) ? QJsonValue::fromVariant(it.value()) : QJsonValue(QJsonValue::Undefined);
+}
+
+bool MessageCenterContact::Condition::matchesField(const QJsonValue& value) const
+{
     const bool absent = value.isUndefined() || value.isNull() || (value.isString() && value.toString().isEmpty())
         || (value.isArray() && value.toArray().isEmpty());
 

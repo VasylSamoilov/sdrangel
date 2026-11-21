@@ -89,6 +89,9 @@ struct MODEMRADIOPAGING_API RadioPagingPage
     //!< damaged; S incomplete: damaged unless it is a fragment or a part, whose rest is still to come). Checks passed
     //!< and no error count: clean. Bits corrected and the checks passed (or none to check): corrected
     static MessageRecord::Quality receivedQuality(const MessageRecord& record);
+    //!< The fields of protocolData of the records of the paging receiver, described for the conditions of filters
+    //!< (MessageEndpoint m_fields): key, name, protocol, type (list, number, text) and the values of a list
+    static QVariantList receivedFields();
     //!< A check of protocolData ("checksum" K of the words of a fragment, "signature" S of the whole message) damages it
     static bool checkDamages(const MessageRecord& record, const char *check);
     //!< The quality of a record as its producer set it, else as receivedQuality judges it; sent: clean

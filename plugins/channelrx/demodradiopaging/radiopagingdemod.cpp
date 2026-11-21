@@ -121,6 +121,8 @@ void RadioPagingDemod::announce(const QString& event)
     endpoint.m_protocols = QStringList({"pocsag", "flex", "gsc"});
     endpoint.m_capabilities.insert("voice", true);
     endpoint.m_capabilities.insert("voiceRecording", m_settings.m_gscVoiceRecord);
+    // The fields of its records, described for the conditions of the filters of the Message Center
+    endpoint.m_fields = RadioPagingPage::receivedFields();
     // The alias changed (it is the frequency by default): the old one is gone
     if (!m_lastName.isEmpty() && (endpoint.m_channel != m_lastName) && (event != "unregister"))
     {

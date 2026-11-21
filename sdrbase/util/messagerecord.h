@@ -113,6 +113,9 @@ struct SDRBASE_API MessageRecord
     QStringList addresses() const;
 
     QJsonObject toJson() const;
+    //!< One field of toJson() (the same value), undefined for a key it does not have: a field read without the
+    //!< whole JSON
+    QJsonValue jsonValue(const QString& key) const;
     static bool fromJson(const QJsonObject& json, MessageRecord& record);
     //!< Compact JSON followed by a newline, for JSON lines files and UDP
     QByteArray toJsonLine() const;

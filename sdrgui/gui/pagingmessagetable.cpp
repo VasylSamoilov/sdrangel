@@ -363,6 +363,7 @@ PagingMessageTable::PagingMessageTable(QWidget *parent) :
     m_waitingButton->hide();
     connect(m_waitingButton, &QToolButton::clicked, this, [this]() {
         clearSelection();
+        m_following = true;
         showWaiting();
     });
     auto release = [this]() {
@@ -370,14 +371,28 @@ PagingMessageTable::PagingMessageTable(QWidget *parent) :
             showWaiting();
         }
     };
-    connect(verticalScrollBar(), &QScrollBar::valueChanged, this, release);
+    // Following the newest is a state the user changes: scrolling up stops it, scrolling to the bottom starts it again.
+    // Not read from the position: rows added move the bottom a moment later, which is no scroll of the user. The
+    // action is applied after the signal: the position is read then
+    connect(verticalScrollBar(), &QScrollBar::actionTriggered, this, [this, release]() {
+        QTimer::singleShot(0, this, [this, release]() {
+            const QScrollBar *sb = verticalScrollBar();
+            m_following = (sb->value() >= sb->maximum());
+            release();
+        });
+    });
+    // Rows added, made higher, the table resized: a table that follows stays at the bottom
+    connect(verticalScrollBar(), &QScrollBar::rangeChanged, this, [this]() {
+        if (m_following && !selectionModel()->hasSelection()) {
+            scrollToBottom();
+        }
+    });
     connect(selectionModel(), &QItemSelectionModel::selectionChanged, this, release);
 }
 
 bool PagingMessageTable::holding() const
 {
-    const QScrollBar *sb = verticalScrollBar();
-    return selectionModel()->hasSelection() || (sb->value() < sb->maximum());
+    return selectionModel()->hasSelection() || !m_following;
 }
 
 void PagingMessageTable::showWaitingButton()
@@ -391,14 +406,11 @@ void PagingMessageTable::showWaitingButton()
 
 void PagingMessageTable::resizeEvent(QResizeEvent *event)
 {
-    // A table following the newest messages (at the bottom, nothing selected) keeps following them when its size
-    // changes (the window laid out when it opens, made higher): else it would hold the new rows
-    const QScrollBar *sb = verticalScrollBar();
-    const bool following = !selectionModel()->hasSelection() && (sb->value() >= sb->maximum());
-
+    // A table following the newest messages keeps following them when its size changes (the window laid out when it
+    // opens, made higher)
     QTableWidget::resizeEvent(event);
 
-    if (following) {
+    if (m_following && !selectionModel()->hasSelection()) {
         QTimer::singleShot(0, this, [this]() { scrollToBottom(); });
     }
     if (!m_waiting.empty()) {
@@ -1298,8 +1310,6 @@ void PagingMessageTable::addRecord(const MessageRecord& record, const QString& s
 
 void PagingMessageTable::appendRecord(const MessageRecord& record, const QString& state)
 {
-    QScrollBar *sb = verticalScrollBar();
-    bool atBottom = (sb->value() == sb->maximum());
     int row = rowCount();
     setRowCount(row + 1);
     fillRow(row, record, state);
@@ -1321,7 +1331,7 @@ void PagingMessageTable::appendRecord(const MessageRecord& record, const QString
         removeRow(0);
     }
 
-    if (atBottom) {
+    if (m_following && !selectionModel()->hasSelection()) {
         scrollToBottom();
     }
 }

@@ -20,6 +20,7 @@
 
 #include <QHeaderView>
 #include <QApplication>
+#include <QScrollBar>
 #include <QElapsedTimer>
 #include <QTemporaryDir>
 #include <QTreeWidget>
@@ -231,6 +232,46 @@ int main(int argc, char **argv)
         QApplication::processEvents();
         check((live.waiting() == 0) && (live.rowCount() == 5) && (cell(live, 4, PagingMessageTable::ColMessage) == "new 7")
             && (cell(live, 0, PagingMessageTable::ColMessage) == "old 3 updated"), "no selection: they come, the oldest go");
+    }
+
+    // Following the newest: records that come one after the other keep following (the bottom moves after the rows
+    // are added: that is no scroll of the user); the user scrolling up holds them, scrolling to the bottom shows them
+    {
+        PagingMessageTable follow;
+        follow.setMaxRows(100);
+        follow.resize(600, 200);
+        follow.show();
+        int held = 0;
+
+        for (int i = 0; i < 60; i++)
+        {
+            follow.addRecord(record(QString("f%1").arg(i), "pocsag", QString("000000%1A").arg(i % 10), QString("row %1").arg(i)));
+            held += follow.waiting();
+        }
+
+        QApplication::processEvents();
+        check((held == 0) && (follow.rowCount() == 60), "records one after the other: the table follows, none waits");
+
+        // Rows that get higher after they were added (a message that wraps, laid out later): the bottom moves down,
+        // which is no scroll of the user; the next record still follows
+        for (int i = 50; i < 60; i++) {
+            follow.setRowHeight(i, 60);
+        }
+
+        QApplication::processEvents();      // The layout of the table: its scroll range grows
+        follow.addRecord(record("fh", "pocsag", "0000003A", "after the rows got higher"));
+        QApplication::processEvents();
+        check(follow.waiting() == 0, "rows made higher after they were added: the table still follows");
+        follow.removeRow(follow.rowCount() - 1);
+        follow.verticalScrollBar()->triggerAction(QAbstractSlider::SliderToMinimum);
+        QApplication::processEvents();
+        follow.addRecord(record("f60", "pocsag", "0000001A", "after the scroll up"));
+        check(follow.waiting() == 1, "the user scrolled up: a new record waits");
+        follow.verticalScrollBar()->triggerAction(QAbstractSlider::SliderToMaximum);
+        QApplication::processEvents();
+        follow.addRecord(record("f61", "pocsag", "0000002A", "following again"));
+        QApplication::processEvents();
+        check((follow.waiting() == 0) && (follow.rowCount() == 62), "the user scrolled to the bottom: they come, the table follows again");
     }
 
     // Marks: their icons before the message, the colour of its text and of the row

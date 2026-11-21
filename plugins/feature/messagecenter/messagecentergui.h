@@ -20,6 +20,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QElapsedTimer>
 #include <QHash>
 #include <QLineEdit>
 #include <QPlainTextEdit>
@@ -48,6 +49,16 @@ class QLabel;
 class QTimer;
 class QToolButton;
 
+// A field of the records offered to the conditions: its key, a readable name, its protocol (empty: common to all, or
+// one seen in the log only), and the values of a list
+struct MessageCenterFieldInfo
+{
+    QString m_key;
+    QString m_name;
+    QString m_protocol;
+    QStringList m_values;
+};
+
 // The fields of a filter of the message center: the view of the log and the routes use it
 class MessageCenterFilterWidget : public QWidget
 {
@@ -60,8 +71,8 @@ public:
     void showSources(const QStringList& sources);
     //!< The contacts of the address book to choose from (with their icons); hidden when there is none
     void setContacts(const QList<MessageCenterContact>& contacts);
-    //!< The fields offered to the conditions: those of the messages of the log
-    void setFields(const QStringList& fields) { m_fieldNames = fields; }
+    //!< The fields offered to the conditions: the common ones, those the channels describe, those of the log
+    void setFields(const QList<MessageCenterFieldInfo>& fields) { m_fieldInfos = fields; }
 
 signals:
     void changed();
@@ -88,7 +99,7 @@ private:
     QComboBox *m_quality;               //!< Any, not damaged, clean, corrected, damaged
     QToolButton *m_conditionsButton;    //!< Conditions on any field: their number
     QList<MessageCenterContact::Condition> m_conditions;
-    QStringList m_fieldNames;
+    QList<MessageCenterFieldInfo> m_fieldInfos;
     QComboBox *m_source;
     bool m_sourcesShown = false;
     //! The filter set: what the widgets do not show of it (more than one contact, protocol, channel or source, the
@@ -142,6 +153,9 @@ private:
     QComboBox *m_refresh;
     QLabel *m_queryStatus;
     QCheckBox *m_showFragments;         //!< The fragments of FLEX messages as rows of their own
+    int m_liveMatching = 0;             //!< Live: the messages of the log the filters select
+    int m_countedLogged = -1;           //!< The log (logged) when they were counted
+    QElapsedTimer m_countTimer;         //!< Since they were counted
     QToolButton *m_filtersButton;       //!< Shows or hides the filters of the log
     QToolButton *m_newer;
     QToolButton *m_older;
@@ -236,6 +250,8 @@ private:
     //!< -1: a new one, preset (if given) to start with
     void editContact(int index, const MessageCenterContact *preset = nullptr);
     QStringList logFieldNames(std::vector<QJsonObject> *sample = nullptr) const;
+    //! The fields for the conditions: common, described by the channels (by protocol), then the others of the log
+    QList<MessageCenterFieldInfo> fieldInfos() const;
     //!< A new contact of the page composed: a rule for the messages of its address, a send to of its transmitter
     MessageCenterContact contactOfPage(const RadioPagingPage& page) const;
     //!< The first contact one of whose send to is the destination of the page composed; empty if none

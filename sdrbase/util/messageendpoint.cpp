@@ -70,6 +70,7 @@ bool MessageEndpoint::fromRecord(const MessageRecord& record, MessageEndpoint& e
     endpoint.m_capacity = std::max(0, d.value("capacity").toInt());
     endpoint.m_frequency = record.m_frequency;
     endpoint.m_lastSeen = record.m_timestamp;
+    endpoint.m_fields = d.value("fields").toList();
 
     for (auto it = d.begin(); it != d.end(); ++it)
     {
@@ -103,6 +104,9 @@ MessageRecord MessageEndpoint::toRecord(const MessageEndpoint& endpoint, const Q
 
     for (auto it = endpoint.m_capabilities.begin(); it != endpoint.m_capabilities.end(); ++it) {
         record.m_protocolData.insert("cap_" + it.key(), it.value());
+    }
+    if (!endpoint.m_fields.isEmpty()) {
+        record.m_protocolData.insert("fields", endpoint.m_fields);
     }
 
     return record;

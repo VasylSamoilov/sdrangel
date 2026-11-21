@@ -122,39 +122,86 @@ QStringList MessageRecord::addresses() const
     return list;
 }
 
+namespace {
+
+// The fields of the JSON of a record, in its order
+enum JsonField {
+    FieldSchemaVersion, FieldId, FieldTimestamp, FieldDirection, FieldProtocol, FieldMode, FieldKind, FieldMsgType,
+    FieldAddress, FieldPolarity, FieldSpeed, FieldText, FieldRawData, FieldRawBits, FieldErrorsCorrected,
+    FieldErrorsUncorrectable, FieldBer, FieldCharStatus, FieldFrequency, FieldChannel, FieldDeviceSetIndex,
+    FieldChannelIndex, FieldCenterFrequency, FieldChannelOffset, FieldDuplicate, FieldDedupKey, FieldPartial,
+    FieldProtocolData, FieldQuality, FieldCount
+};
+
+const char * const jsonFieldNames[FieldCount] = {
+    "schemaVersion", "id", "timestamp", "direction", "protocol", "mode", "kind", "msgType",
+    "address", "polarity", "speed", "text", "rawData", "rawBits", "errorsCorrected",
+    "errorsUncorrectable", "ber", "charStatus", "frequency", "channel", "deviceSetIndex",
+    "channelIndex", "centerFrequency", "channelOffset", "duplicate", "dedupKey", "partial",
+    "protocolData", "quality"
+};
+
+int jsonFieldIndex(const QString& key)
+{
+    static const QHash<QString, int> indexes = []() {
+        QHash<QString, int> h;
+        for (int i = 0; i < FieldCount; i++) {
+            h.insert(QString(jsonFieldNames[i]), i);
+        }
+        return h;
+    }();
+
+    return indexes.value(key, -1);
+}
+
+} // namespace
+
+QJsonValue MessageRecord::jsonValue(const QString& key) const
+{
+    switch (jsonFieldIndex(key))
+    {
+    case FieldSchemaVersion: return m_schemaVersion;
+    case FieldId: return m_id;
+    case FieldTimestamp: return m_timestamp;
+    case FieldDirection: return directionToString(m_direction);
+    case FieldProtocol: return stringOrNull(m_protocol);
+    case FieldMode: return stringOrNull(m_mode);
+    case FieldKind: return kindToString(m_kind);
+    case FieldMsgType: return stringOrNull(m_msgType);
+    case FieldAddress: return stringOrNull(m_address);
+    case FieldPolarity: return polarityToString(m_polarity);
+    case FieldSpeed: return intOrNull(m_speed);
+    case FieldText: return stringOrNull(m_text);
+    case FieldRawData: return m_rawBits < 0 ? QJsonValue(QJsonValue::Null) : QJsonValue(QString::fromLatin1(m_rawData.toHex()));
+    case FieldRawBits: return intOrNull(m_rawBits);
+    case FieldErrorsCorrected: return intOrNull(m_errorsCorrected);
+    case FieldErrorsUncorrectable: return intOrNull(m_errorsUncorrectable);
+    case FieldBer: return m_ber < 0.0f ? QJsonValue(QJsonValue::Null) : QJsonValue((double) m_ber);
+    case FieldCharStatus: return stringOrNull(m_charStatus);
+    case FieldFrequency: return intOrNull(m_frequency);
+    case FieldChannel: return stringOrNull(m_channel);
+    case FieldDeviceSetIndex: return intOrNull(m_deviceSetIndex);
+    case FieldChannelIndex: return intOrNull(m_channelIndex);
+    case FieldCenterFrequency: return intOrNull(m_centerFrequency);
+    case FieldChannelOffset: return m_centerFrequency < 0 ? QJsonValue(QJsonValue::Null) : QJsonValue(m_channelOffset);
+    case FieldDuplicate: return duplicateToString(m_duplicate);
+    case FieldDedupKey: return dedupKey();
+    case FieldPartial: return m_partial;
+    case FieldProtocolData: return QJsonObject::fromVariantMap(m_protocolData);
+    case FieldQuality: return stringOrNull(qualityToString(m_quality));
+    default: return QJsonValue(QJsonValue::Undefined);
+    }
+}
+
 QJsonObject MessageRecord::toJson() const
 {
     QJsonObject json;
 
-    json.insert("schemaVersion", m_schemaVersion);
-    json.insert("id", m_id);
-    json.insert("timestamp", m_timestamp);
-    json.insert("direction", directionToString(m_direction));
-    json.insert("protocol", stringOrNull(m_protocol));
-    json.insert("mode", stringOrNull(m_mode));
-    json.insert("kind", kindToString(m_kind));
-    json.insert("msgType", stringOrNull(m_msgType));
-    json.insert("address", stringOrNull(m_address));
-    json.insert("polarity", polarityToString(m_polarity));
-    json.insert("speed", intOrNull(m_speed));
-    json.insert("text", stringOrNull(m_text));
-    json.insert("rawData", m_rawBits < 0 ? QJsonValue(QJsonValue::Null) : QJsonValue(QString::fromLatin1(m_rawData.toHex())));
-    json.insert("rawBits", intOrNull(m_rawBits));
-    json.insert("errorsCorrected", intOrNull(m_errorsCorrected));
-    json.insert("errorsUncorrectable", intOrNull(m_errorsUncorrectable));
-    json.insert("ber", m_ber < 0.0f ? QJsonValue(QJsonValue::Null) : QJsonValue((double) m_ber));
-    json.insert("charStatus", stringOrNull(m_charStatus));
-    json.insert("frequency", intOrNull(m_frequency));
-    json.insert("channel", stringOrNull(m_channel));
-    json.insert("deviceSetIndex", intOrNull(m_deviceSetIndex));
-    json.insert("channelIndex", intOrNull(m_channelIndex));
-    json.insert("centerFrequency", intOrNull(m_centerFrequency));
-    json.insert("channelOffset", m_centerFrequency < 0 ? QJsonValue(QJsonValue::Null) : QJsonValue(m_channelOffset));
-    json.insert("duplicate", duplicateToString(m_duplicate));
-    json.insert("dedupKey", dedupKey());
-    json.insert("partial", m_partial);
-    json.insert("protocolData", QJsonObject::fromVariantMap(m_protocolData));
-    json.insert("quality", stringOrNull(qualityToString(m_quality)));
+    for (int i = 0; i < FieldCount; i++)
+    {
+        const QString key(jsonFieldNames[i]);
+        json.insert(key, jsonValue(key));
+    }
 
     return json;
 }

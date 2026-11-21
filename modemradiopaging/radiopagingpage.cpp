@@ -207,6 +207,67 @@ MessageRecord::Quality RadioPagingPage::receivedQuality(const MessageRecord& rec
     return ((q == MessageRecord::QualityNone) && checked) ? MessageRecord::QualityClean : q;
 }
 
+QVariantList RadioPagingPage::receivedFields()
+{
+    struct Field
+    {
+        const char *protocol;
+        const char *key;
+        const char *name;
+        const char *type;
+        QStringList values;
+    };
+    const QStringList yesNo = {"true", "false"};
+    const std::vector<Field> fields = {
+        {"pocsag", "ric", "RIC (address without its function)", "number", {}},
+        {"pocsag", "function", "Function (0-3: A-D)", "list", {"0", "1", "2", "3"}},
+        {"pocsag", "batch", "Batch of the address (from 0)", "number", {}},
+        {"pocsag", "end", "How it ended", "list", {"idle", "address", "batch", "cut"}},
+        {"flex", "capcode", "Capcode", "text", {}},
+        {"flex", "phase", "Phase", "list", {"A", "B", "C", "D"}},
+        {"flex", "cycle", "Cycle (0-14)", "number", {}},
+        {"flex", "frame", "Frame (0-127)", "number", {}},
+        {"flex", "checksum", "Checksum K (of the words of a fragment)", "list", {"ok", "failed"}},
+        {"flex", "signature", "Signature S (of the characters of the message)", "list", {"ok", "failed", "incomplete"}},
+        {"flex", "message_number", "Message number", "number", {}},
+        {"flex", "fragmented", "Sent in fragments", "list", yesNo},
+        {"flex", "complete", "All its fragments received", "list", yesNo},
+        {"flex", "is_fragment", "A fragment (not the whole message)", "list", yesNo},
+        {"flex", "fragment_count", "Fragments", "number", {}},
+        {"flex", "priority", "Priority address", "list", yesNo},
+        {"flex", "maildrop", "Mail drop", "list", yesNo},
+        {"flex", "long_address", "Long address", "list", yesNo},
+        {"flex", "blocking", "Blocking length (bits of a binary character)", "number", {}},
+        {"flex", "group_slot", "Group slot", "number", {}},
+        {"gsc", "function", "Function (0-3: A-D)", "list", {"0", "1", "2", "3"}},
+        {"gsc", "address_number", "Address number (1-4)", "list", {"1", "2", "3", "4"}},
+        {"gsc", "preamble", "Preamble (0-9)", "number", {}},
+        {"gsc", "slot", "Slot of the address", "number", {}},
+        {"gsc", "non_battery_saver", "Non battery saver", "list", yesNo},
+        {"gsc", "checksum_errors", "Blocks with a wrong checksum", "number", {}},
+        {"gsc", "end", "How it ended", "list", {"complete", "cut"}},
+        {"gsc", "voice_seconds", "Voice length (s)", "number", {}}
+    };
+    QVariantList out;
+
+    for (const Field& f : fields)
+    {
+        QVariantMap m;
+        m.insert("protocol", f.protocol);
+        m.insert("key", f.key);
+        m.insert("name", f.name);
+        m.insert("type", f.type);
+
+        if (!f.values.isEmpty()) {
+            m.insert("values", f.values);
+        }
+
+        out.append(m);
+    }
+
+    return out;
+}
+
 MessageRecord::Quality RadioPagingPage::quality(const MessageRecord& record)
 {
     if (record.m_quality != MessageRecord::QualityUnknown) {

@@ -229,6 +229,32 @@ void testLogAndRoutes()
 
 void testEndpoints()
 {
+    // The fields a channel describes come with its announcement
+    {
+        MessageEndpoint rx;
+        rx.m_channel = "rx1";
+        rx.m_protocols = QStringList({"pocsag", "flex", "gsc"});
+        rx.m_fields = RadioPagingPage::receivedFields();
+        MessageEndpoint back;
+        QString event;
+        const bool parsed = MessageEndpoint::fromRecord(MessageEndpoint::toRecord(rx, "status"), back, event);
+        bool described = parsed && (back.m_fields.size() == rx.m_fields.size()) && !back.m_fields.isEmpty();
+        bool checksumListed = false;
+
+        for (const QVariant& v : back.m_fields)
+        {
+            const QVariantMap f = v.toMap();
+            described = described && !f.value("key").toString().isEmpty() && !f.value("name").toString().isEmpty()
+                && QStringList({"pocsag", "flex", "gsc"}).contains(f.value("protocol").toString())
+                && QStringList({"list", "number", "text"}).contains(f.value("type").toString())
+                && ((f.value("type").toString() != "list") || !f.value("values").toStringList().isEmpty());
+            checksumListed = checksumListed || ((f.value("key").toString() == "checksum")
+                && (f.value("values").toStringList() == QStringList({"ok", "failed"})));
+        }
+
+        check(described && checksumListed, "Endpoint: the fields it describes (key, name, protocol, type, values) come with it");
+    }
+
     MessageCenterEngine engine;
     MessageEndpoint tx = transmitter("tx1", {"pocsag", "gsc"});
     tx.m_speeds = {1200};
@@ -619,6 +645,80 @@ void testConditionsAndQuality()
     MessageRecord fragment = rx("fr", "flex", "0001234567", "part", "ch1");
     fragment.m_protocolData.insert("is_fragment", true);
     check(!fragments.matches(fragment) && fragments.matches(rx("w", "flex", "0001234567", "whole", "ch1")), "fragments hidden");
+}
+
+// The time of a filter over a large log (100000 messages): the simple fields, and conditions on fields of the record
+// and of its protocol data. Printed, not checked (machines differ)
+void testFilterTime()
+{
+    std::vector<MessageRecord> log;
+
+    for (int i = 0; i < 100000; i++)
+    {
+        MessageRecord r = rx(QString("t%1").arg(i), (i % 3 == 0) ? "pocsag" : "flex", QString("%1").arg(1000000 + i),
+            QString("message number %1 with some text").arg(i), "ch1");
+        r.m_errorsCorrected = i % 5;
+        r.m_errorsUncorrectable = (i % 17 == 0) ? 1 : 0;
+        r.m_protocolData.insert("checksum", (i % 11 == 0) ? "failed" : "ok");
+        r.m_protocolData.insert("phase", "A");
+        r.m_protocolData.insert("cycle", i % 15);
+        r.m_protocolData.insert("frame", i % 128);
+        r.m_protocolData.insert("char_status", QString(30, '.'));
+        log.push_back(r);
+    }
+
+    auto time = [&log](const MessageCenterFilter& f, int& found) {
+        QElapsedTimer timer;
+        timer.start();
+        found = 0;
+
+        for (const MessageRecord& r : log) {
+            found += f.matches(r) ? 1 : 0;
+        }
+
+        return timer.nsecsElapsed() / 1e6;
+    };
+
+    MessageCenterFilter simple;
+    simple.m_protocols = QStringList("flex");
+    simple.m_quality = "notDamaged";
+    MessageCenterFilter conditions = simple;
+    MessageCenterContact::Condition checksum;
+    checksum.m_field = "checksum";
+    checksum.m_value = "failed";
+    MessageCenterContact::Condition errors;
+    errors.m_field = "errorsCorrected";
+    errors.m_operator = MessageCenterContact::Condition::Greater;
+    errors.m_value = "1";
+    conditions.m_quality.clear();
+    conditions.m_conditions = {checksum, errors};
+    int foundSimple = 0;
+    int foundConditions = 0;
+    const double msSimple = time(simple, foundSimple);
+    const double msConditions = time(conditions, foundConditions);
+    std::printf("      filter over 100000 messages: simple %.1f ms (%d found), 2 conditions %.1f ms (%d found)\n",
+        msSimple, foundSimple, msConditions, foundConditions);
+    check((foundSimple > 0) && (foundConditions > 0), "filter time measured");
+
+    // A field read alone is the field of the whole JSON: every field of a few records, of the record and of its
+    // protocol data, and keys neither has
+    bool same = true;
+
+    for (size_t i = 0; i < log.size(); i += 9973)
+    {
+        MessageRecord r = log[i];
+        r.m_quality = (i % 2) ? MessageRecord::QualityCorrected : MessageRecord::QualityUnknown;
+        r.m_protocolData.insert("group_capcodes", QVariantList({"1", "2"}));
+        const QJsonObject fields = MessageCenterContact::recordFields(r);
+
+        for (auto it = fields.begin(); it != fields.end(); ++it) {
+            same = same && (MessageCenterContact::recordValue(r, it.key()) == it.value());
+        }
+
+        same = same && MessageCenterContact::recordValue(r, "no_such_field").isUndefined() && !fields.contains("no_such_field");
+    }
+
+    check(same, "a field read alone is the field of the JSON of the record");
 }
 
 void testCommand()
@@ -1374,6 +1474,7 @@ int main(int argc, char **argv)
     testGuards();
     testRegExp();
     testConditionsAndQuality();
+    testFilterTime();
     testCommand();
     testActionSink();
     testRoutesWithActions();

@@ -75,6 +75,8 @@ struct MessageCenterContact
 
         //!< The value of the field in a record (record JSON and protocol data together, see recordFields)
         bool matches(const QJsonObject& fields) const;
+        //!< The same on the record itself: only its field is read (recordValue), no JSON of the whole record
+        bool matches(const MessageRecord& record) const;
         //!< Empty if it can match, else why not: a field, a valid regular expression, a number to compare
         QString check() const;
         //!< {"field": f, "<operator key>": value}: is and matches as saved before the other operators
@@ -90,6 +92,7 @@ struct MessageCenterContact
         QString text() const;
 
     private:
+        bool matchesField(const QJsonValue& value) const;
         bool matchesValue(const QJsonValue& value) const;
     };
     //! A rule: all its conditions
@@ -129,6 +132,8 @@ struct MessageCenterContact
     //!< The fields of a record the conditions look at: its JSON, the protocol data in it at the top too (a field of
     //!< the record first)
     static QJsonObject recordFields(const MessageRecord& record);
+    //!< One field of recordFields, read alone: the field of the record JSON, else of its protocol data; undefined if none
+    static QJsonValue recordValue(const MessageRecord& record, const QString& key);
     //!< A rule as a text: protocol is pocsag and ric is 1234567
     static QString ruleText(const Rule& rule);
     //!< The built-in icons by category, in the order of the picker (Microsoft Fluent Emoji, flat, MIT License):

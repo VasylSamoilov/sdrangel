@@ -19,6 +19,7 @@
 #include <memory>
 
 #include <QDateTime>
+#include <QStandardItemModel>
 #include <QStyledItemDelegate>
 #include <QTextDocument>
 #include <QUuid>
@@ -437,7 +438,7 @@ void MessageCenterFilterWidget::editConditions()
     layout->addWidget(help);
     QTableWidget *table = new QTableWidget(0, 3, &dialog);
     table->setHorizontalHeaderLabels({"Field", "Operator", "Value"});
-    table->setColumnWidth(0, table->fontMetrics().averageCharWidth() * 24);
+    table->setColumnWidth(0, table->fontMetrics().averageCharWidth() * 34);
     table->setColumnWidth(1, table->fontMetrics().averageCharWidth() * 14);
     table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
     table->verticalHeader()->setVisible(false);
@@ -448,20 +449,108 @@ void MessageCenterFilterWidget::editConditions()
     error->setWordWrap(true);
     layout->addWidget(error);
 
-    auto addRow = [this, table](const MessageCenterContact::Condition& c) {
+    // The fields by group: common, then each protocol the channels describe, then the others of the log. An item is
+    // "key - name", its data the key and its values; a key can be typed too
+    const int valuesRole = Qt::UserRole + 1;
+    auto fillFields = [this, valuesRole](QComboBox *field) {
+        static const QList<QPair<QString, QString>> groups = {{"", "Common"}, {"pocsag", "POCSAG"}, {"flex", "FLEX"},
+            {"gsc", "GSC"}, {"other", "Other fields of the log"}};
+        QStringList protocols;
+
+        for (const MessageCenterFieldInfo& f : m_fieldInfos)
+        {
+            if (!protocols.contains(f.m_protocol)) {
+                protocols.append(f.m_protocol);
+            }
+        }
+
+        QStandardItemModel *model = qobject_cast<QStandardItemModel*>(field->model());
+
+        for (const QString& protocol : protocols)
+        {
+            auto group = std::find_if(groups.begin(), groups.end(), [&protocol](const QPair<QString, QString>& g) { return g.first == protocol; });
+            field->addItem((group != groups.end()) ? group->second : protocol.toUpper());
+
+            if (model)
+            {
+                QStandardItem *header = model->item(field->count() - 1);
+                header->setFlags(header->flags() & ~(Qt::ItemIsSelectable | Qt::ItemIsEnabled));
+                QFont font = header->font();
+                font.setBold(true);
+                header->setFont(font);
+            }
+
+            for (const MessageCenterFieldInfo& f : m_fieldInfos)
+            {
+                if (f.m_protocol == protocol)
+                {
+                    field->addItem(f.m_name.isEmpty() ? QString("  %1").arg(f.m_key) : QString("  %1 - %2").arg(f.m_key, f.m_name), f.m_key);
+                    field->setItemData(field->count() - 1, f.m_values, valuesRole);
+                }
+            }
+        }
+    };
+    // The key of the text of the field: before " - ", without the indent of the list
+    auto fieldKey = [](const QString& text) { return text.section(" - ", 0, 0).trimmed(); };
+    auto addRow = [this, table, fillFields, fieldKey, valuesRole](const MessageCenterContact::Condition& c) {
         const int row = table->rowCount();
         table->insertRow(row);
         QComboBox *field = new QComboBox(table);
         field->setEditable(true);
         field->setInsertPolicy(QComboBox::NoInsert);
-        field->addItems(m_fieldNames);
-        field->setCurrentText(c.m_field);
-        field->setToolTip("Field of the message: those of the messages in the log, or another one typed in");
+        fillFields(field);
+        const int index = c.m_field.isEmpty() ? -1 : field->findData(c.m_field);
+
+        if (index >= 0) {
+            field->setCurrentIndex(index);
+        } else {
+            field->setEditText(c.m_field);
+        }
+
+        field->setToolTip("Field of the message: the common ones, those of each protocol as the channels describe them, "
+            "and the others of the messages of the log; or a key typed in (the details of a message show its fields)");
         QComboBox *op = new QComboBox(table);
         MessageCenterContactDialog::fillOperators(op, c.m_operator);
-        QLineEdit *value = new QLineEdit(c.m_value, table);
-        value->setFrame(false);
+        // The value: the values of the field to choose from, or one typed in
+        QComboBox *value = new QComboBox(table);
+        value->setEditable(true);
+        value->setInsertPolicy(QComboBox::NoInsert);
         value->setEnabled(MessageCenterContact::Condition::takesValue(c.m_operator));
+        auto showValues = [this, field, value, fieldKey, valuesRole]() {
+            const QString current = value->currentText();
+            QStringList values = field->currentData(valuesRole).toStringList();
+
+            // A key typed in: the values the descriptions give it
+            if (values.isEmpty())
+            {
+                const QString key = fieldKey(field->currentText());
+
+                for (const MessageCenterFieldInfo& f : m_fieldInfos)
+                {
+                    if (f.m_key == key)
+                    {
+                        for (const QString& v : f.m_values)
+                        {
+                            if (!values.contains(v)) {
+                                values.append(v);
+                            }
+                        }
+                    }
+                }
+            }
+
+            value->clear();
+            value->addItems(values);
+            value->setEditText(current);
+        };
+        showValues();
+        value->setEditText(c.m_value);
+        connect(field, &QComboBox::currentTextChanged, value, showValues);
+        // The key at the start of the text in view, not the end of its name
+        field->lineEdit()->setCursorPosition(0);
+        connect(field, QOverload<int>::of(&QComboBox::activated), field, [field]() {
+            QTimer::singleShot(0, field, [field]() { field->lineEdit()->setCursorPosition(0); });
+        });
         connect(op, QOverload<int>::of(&QComboBox::currentIndexChanged), value, [op, value]() {
             value->setEnabled(MessageCenterContact::Condition::takesValue((MessageCenterContact::Condition::Operator) op->currentData().toInt()));
         });
@@ -469,15 +558,15 @@ void MessageCenterFilterWidget::editConditions()
         table->setCellWidget(row, 1, op);
         table->setCellWidget(row, 2, value);
     };
-    auto rowCondition = [table](int row) {
+    auto rowCondition = [table, fieldKey](int row) {
         MessageCenterContact::Condition c;
         const QComboBox *field = qobject_cast<QComboBox*>(table->cellWidget(row, 0));
         const QComboBox *op = qobject_cast<QComboBox*>(table->cellWidget(row, 1));
-        const QLineEdit *value = qobject_cast<QLineEdit*>(table->cellWidget(row, 2));
-        c.m_field = field ? field->currentText().trimmed() : QString();
+        const QComboBox *value = qobject_cast<QComboBox*>(table->cellWidget(row, 2));
+        c.m_field = field ? fieldKey(field->currentText()) : QString();
         c.m_operator = op ? (MessageCenterContact::Condition::Operator) op->currentData().toInt() : MessageCenterContact::Condition::Is;
         c.m_value = !value || !MessageCenterContact::Condition::takesValue(c.m_operator) ? QString()
-            : (c.m_operator == MessageCenterContact::Condition::Matches) ? value->text() : value->text().trimmed();
+            : (c.m_operator == MessageCenterContact::Condition::Matches) ? value->currentText() : value->currentText().trimmed();
         return c;
     };
 
@@ -522,7 +611,7 @@ void MessageCenterFilterWidget::editConditions()
         addRow(MessageCenterContact::Condition());
     }
 
-    dialog.resize(520, 260);
+    dialog.resize(620, 260);
 
     if (dialog.exec() != QDialog::Accepted) {
         return;
@@ -789,7 +878,7 @@ void MessageCenterGUI::buildLog(QWidget *container)
     QVBoxLayout *layout = new QVBoxLayout(container);
     layout->setContentsMargins(2, 2, 2, 2);
     m_logFilter = new MessageCenterFilterWidget(container);
-    connect(m_logFilter, &MessageCenterFilterWidget::fieldsWanted, this, [this]() { m_logFilter->setFields(logFieldNames()); });
+    connect(m_logFilter, &MessageCenterFilterWidget::fieldsWanted, this, [this]() { m_logFilter->setFields(fieldInfos()); });
     m_logTable = new PagingMessageTable(container);
     m_logTable->setMinimumHeight(80);
     m_logTable->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -1501,6 +1590,62 @@ QStringList MessageCenterGUI::logFieldNames(std::vector<QJsonObject> *sample) co
     return fields;
 }
 
+QList<MessageCenterFieldInfo> MessageCenterGUI::fieldInfos() const
+{
+    QList<MessageCenterFieldInfo> out;
+    QSet<QString> described;
+    auto add = [&out, &described](const QString& protocol, const QString& key, const QString& name, const QStringList& values) {
+        if (!described.contains(protocol + "|" + key))
+        {
+            described.insert(protocol + "|" + key);
+            out.append(MessageCenterFieldInfo{key, name, protocol, values});
+        }
+    };
+
+    // Common to every message (the fields of the record)
+    add("", "protocol", "Protocol", {"pocsag", "flex", "gsc"});
+    add("", "msgType", "Message type", {"alphanumeric", "numeric", "tone", "voice", "binary", "secure", "short_message"});
+    add("", "quality", "Quality", {"clean", "corrected", "damaged", "none"});
+    add("", "direction", "Direction", {"rx", "tx"});
+    add("", "polarity", "Polarity", {"normal", "inverted", "unknown"});
+    add("", "duplicate", "Duplicate", {"none", "dup", "dup+"});
+    add("", "errorsCorrected", "Bit errors corrected", {});
+    add("", "errorsUncorrectable", "Codewords that could not be corrected", {});
+    add("", "ber", "Bit error rate", {});
+    add("", "address", "Address", {});
+    add("", "text", "Text", {});
+    add("", "mode", "Speed and levels", {});
+    add("", "channel", "Channel", {});
+    add("", "frequency", "Frequency (Hz)", {});
+    add("", "contact", "Contact", {});
+
+    // Those the channels describe, by protocol
+    for (const MessageEndpoint& e : m_center->engine().endpoints())
+    {
+        for (const QVariant& v : e.m_fields)
+        {
+            const QVariantMap f = v.toMap();
+            add(f.value("protocol").toString(), f.value("key").toString(), f.value("name").toString(), f.value("values").toStringList());
+        }
+    }
+
+    // The others of the log: no name
+    QSet<QString> keys;
+
+    for (const MessageCenterFieldInfo& f : out) {
+        keys.insert(f.m_key);
+    }
+
+    for (const QString& key : logFieldNames())
+    {
+        if (!keys.contains(key)) {
+            out.append(MessageCenterFieldInfo{key, QString(), QString("other"), {}});
+        }
+    }
+
+    return out;
+}
+
 void MessageCenterGUI::editContact(int index, const MessageCenterContact *preset)
 {
     const bool existing = (index >= 0) && (index < m_settings.m_contacts.size());
@@ -1938,6 +2083,7 @@ bool MessageCenterGUI::handleMessage(const Message& message)
 void MessageCenterGUI::refresh()
 {
     refreshLog();
+    showLiveCount();    // A count put off (at most every 2 s) is made now
     refreshEndpoints();
     refreshQueue();
     refreshComposeTransmitters();
@@ -2246,6 +2392,9 @@ void MessageCenterGUI::refreshLog()
 
     m_shownLogged = engine.logged();
     std::vector<MessageRecord> records = engine.select(logFilter());
+    m_liveMatching = (int) records.size();      // Counted as selected
+    m_countedLogged = engine.logged();
+    m_countTimer.start();
     size_t first = (records.size() > (size_t) m_maxLogRows) ? records.size() - m_maxLogRows : 0;
     QString selected = m_logTable->selectedId();
 
@@ -2355,11 +2504,25 @@ void MessageCenterGUI::showLiveCount()
         return;
     }
 
+    // The messages of the log the filters select: counted again when the log changed, at most every 2 s (a pass over
+    // the log in memory, at most its size; a full refresh counts them as it selects)
+    const MessageCenterEngine& engine = m_center->engine();
+
+    if ((m_countedLogged != engine.logged()) && (!m_countTimer.isValid() || (m_countTimer.elapsed() >= 2000)))
+    {
+        const MessageCenterFilter filter = logFilter();
+        m_liveMatching = (int) std::count_if(engine.log().begin(), engine.log().end(),
+            [&filter](const MessageRecord& r) { return filter.matches(r); });
+        m_countedLogged = engine.logged();
+        m_countTimer.start();
+    }
+
     const int shown = m_logTable->rowCount();
-    const int inLog = (int) m_center->engine().log().size();
-    m_queryStatus->setText(tr("Live: %1 of %2").arg(shown).arg(inLog));
-    m_queryStatus->setToolTip(tr("The newest %1 messages the filters select, as they come: %2 shown, %3 in the log.\n"
-        "Query searches the history").arg(m_maxLogRows).arg(shown).arg(inLog));
+    const int inLog = (int) engine.log().size();
+    m_queryStatus->setText(tr("Live: %1 of %2 matching (%3 in the log)").arg(shown).arg(m_liveMatching).arg(inLog));
+    m_queryStatus->setToolTip(tr("The newest %1 messages the filters select, as they come: %2 shown, %3 of the log match "
+        "the filters, %4 in the log (in memory: Options sets its size).\nQuery searches the history").arg(m_maxLogRows)
+        .arg(shown).arg(m_liveMatching).arg(inLog));
 }
 
 void MessageCenterGUI::refreshEndpoints()
@@ -2958,7 +3121,7 @@ void MessageCenterGUI::editRoute(int index, const MessageCenterEngine::Route *pr
 
     filter->showSources(sources);
     filter->setFilter(route.m_filter);
-    connect(filter, &MessageCenterFilterWidget::fieldsWanted, &dialog, [this, filter]() { filter->setFields(logFieldNames()); });
+    connect(filter, &MessageCenterFilterWidget::fieldsWanted, &dialog, [this, filter]() { filter->setFields(fieldInfos()); });
     QFormLayout *nameForm = new QFormLayout();
     nameForm->addRow("Name", name);
     layout->addLayout(nameForm);

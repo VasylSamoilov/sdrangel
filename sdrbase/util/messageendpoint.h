@@ -47,6 +47,9 @@ struct SDRBASE_API MessageEndpoint
     qint64 m_frequency = -1;
     qint64 m_lastSeen = 0;              //!< Milliseconds since the epoch
     QVariantMap m_capabilities;         //!< The rest as announced
+    //! The fields of protocolData its records have, described for the conditions of filters: each a map of key, name
+    //! (readable), protocol (lower case), type (list, number or text) and values (of a list)
+    QVariantList m_fields;
 
     //!< The endpoint of an event record, false if it is not one
     static bool fromRecord(const MessageRecord& record, MessageEndpoint& endpoint, QString& event);
