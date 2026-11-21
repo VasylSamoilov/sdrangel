@@ -563,7 +563,7 @@ bool Cellular::handleMessage(const Message& cmd)
         if (getMessageQueueToGUI())
         {
             const MsgReportLog& report = static_cast<const MsgReportLog&>(cmd);
-            getMessageQueueToGUI()->push(MsgReportLog::create(report.getNetwork(), report.getText()));
+            getMessageQueueToGUI()->push(MsgReportLog::create(report.getNetwork(), report.getText(), report.getKind()));
         }
         return true;
     }

@@ -1474,17 +1474,41 @@ bool CellularGUI::logShown(const LogLine& line) const
     if (network >= 0 && line.network != network) {
         return false;
     }
-    return m_logFrames->isChecked() || !line.text.startsWith("ch ");
+    return m_logFrames->isChecked() || line.kind != Cellular::MsgReportLog::Frame;
 }
 
-static QString logText(const QString& time, const QString& network, const QString& text)
+// "12:00:01 [SMS] Y1=8: SMS from ...": the kind as a coloured badge, the text escaped (it may
+// carry what a phone sent)
+QString CellularGUI::logHtml(const LogLine& line, bool withNetwork) const
 {
-    return network.isEmpty() ? time + " " + text : time + " " + network + ": " + text;
+    using K = Cellular::MsgReportLog;
+    static const struct { const char *text; const char *colour; } badges[] = {
+        {"", ""},                       // Event
+        {"FRAME", "#3a3a3a"},
+        {"CALL", "#2e6b3e"},
+        {"SMS", "#5b4a20"},
+        {"IND", "#4a3b6b"},
+        {"PWR", "#6b4a2b"},
+        {"PHONE", "#2b4867"},
+        {"TONE", "#2b5b5b"},
+        {"NET", "#3b3b5b"},
+        {"WARN", "#7a2b2b"},
+    };
+    const int kind = (line.kind >= K::Event && line.kind <= K::Warning) ? line.kind : K::Event;
+    QString html = line.time.toHtmlEscaped() + " ";
+
+    if (badges[kind].text[0]) {
+        html += QString("<span style=\"background-color:%1;\">&nbsp;%2&nbsp;</span> ").arg(badges[kind].colour).arg(badges[kind].text);
+    }
+    if (withNetwork && line.network) {
+        html += networkName(line.network).toHtmlEscaped() + ": ";
+    }
+    return html + line.text.toHtmlEscaped();
 }
 
-void CellularGUI::addLog(int network, const QString& text)
+void CellularGUI::addLog(int network, const QString& text, int kind)
 {
-    LogLine line{QDateTime::currentDateTime().toString("HH:mm:ss"), network, text};
+    LogLine line{QDateTime::currentDateTime().toString("HH:mm:ss"), network, text, kind};
 
     m_logLines.push_back(line);
     if (m_logLines.size() > static_cast<size_t>(m_maxLogLines)) {
@@ -1499,23 +1523,24 @@ void CellularGUI::addLog(int network, const QString& text)
     const int value = bar->value();
     const bool all = m_logNetwork->currentData().toInt() < 0;
 
-    m_log->appendPlainText(logText(line.time, all && network ? networkName(network) : QString(), line.text));
+    m_log->appendHtml(logHtml(line, all));
     bar->setValue(atEnd ? bar->maximum() : value);
 }
 
 void CellularGUI::renderLog()
 {
     const bool all = m_logNetwork->currentData().toInt() < 0;
-    QStringList lines;
 
+    m_log->setMaximumBlockCount(0);
+    m_log->clear();
+    m_log->setUpdatesEnabled(false);
     for (const LogLine& line : m_logLines)
     {
         if (logShown(line)) {
-            lines.append(logText(line.time, all && line.network ? networkName(line.network) : QString(), line.text));
+            m_log->appendHtml(logHtml(line, all));
         }
     }
-    m_log->setMaximumBlockCount(0);
-    m_log->setPlainText(lines.join('\n'));
+    m_log->setUpdatesEnabled(true);
     m_log->setMaximumBlockCount(m_maxLogLines);
     m_log->verticalScrollBar()->setValue(m_log->verticalScrollBar()->maximum());
 }
@@ -1587,7 +1612,7 @@ bool CellularGUI::handleMessage(const Message& message)
     if (Cellular::MsgReportLog::match(message))
     {
         const Cellular::MsgReportLog& report = static_cast<const Cellular::MsgReportLog&>(message);
-        addLog(report.getNetwork(), report.getText());
+        addLog(report.getNetwork(), report.getText(), report.getKind());
         return true;
     }
     else if (Cellular::MsgReportStatus::match(message))
