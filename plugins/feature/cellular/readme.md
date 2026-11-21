@@ -46,7 +46,7 @@ Actions of a network on one phone. Network: the network that does it. Phone: the
 
 <h3>Log</h3>
 
-The events of all networks, of the tester itself, or of one network. With Frames, every frame from the phones (with its quality and level) and every frame to them except the indications a channel sends all the time; a frame sent again and again is shown once with its count. The view stays where it was scrolled to; at the end it follows the new lines. The bin clears it.
+The events of all networks, of the tester itself, or of one network. With Frames, every frame from the phones (with its quality and level) and every frame to them except the indications a channel sends all the time; a frame sent again and again is shown once with its count. Touch tones (DTMF) a phone sends in a call, keys pressed or a code it sends by itself (a voice mail code), are logged as a group when it has sent none for 2 s: "tones from 3726136: 123456". The view stays where it was scrolled to; at the end it follows the new lines. The bin clears it.
 
 <h3>Networks</h3>
 
