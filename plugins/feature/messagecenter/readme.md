@@ -45,7 +45,7 @@ The messages received and sent, newest at the bottom.
 * Import (open icon): reads the messages of a file into the log: a JSON lines file, or a CSV log of a message center or of the Pager demodulator. They are logged, not routed, so no action is taken on them again.
 * Export (save icon): saves the messages the filters select to a CSV file, which Import reads again.
 * Clear (bin icon): removes all the messages of the log (in memory) after a confirmation; the history stays, unless "Also delete the history" is checked there. The items the map sinks put on the Map are removed too.
-* A message a mark sink took has the icon of the mark before its text, its text and its row in the colours of the mark (those it sets). A message several rules mark has their icons side by side.
+* A message a rule marked has the icon of the mark before its text, its text and its row in the colours of the mark (those it sets). A message several rules mark has their icons side by side. The marks are in the record (protocolData marks): the history, the exports and the WebAPI have them.
 
 <h3>Channels</h3>
 
@@ -93,23 +93,34 @@ A page can go to a contact instead of a transmitter and an address (`contact` in
 
 <h3>Rules</h3>
 
-A rule says what happens to messages, as a sentence: when (the messages its filter selects), change (a mark, decode again), send to (the log, the transmit queue or the sinks of Connections), and stop. The table shows each rule so, on its lines, with the number of messages of the log it finds; a rule switched off is grey. Every message is checked against all the rules in their number order (#), not only the first. A rule with Stop ends the check for the messages it selects, so the rules after it do not see them. The log is a sink as the others: a message no rule sends to it is not logged. A new Message Center has one rule, 1 "All messages to the log", without a filter. A sink takes only what a rule sends to it. In the WebAPI and the MCP the rules are the routes.
+A rule is a filter (when) and one action (then), shown as a sentence with the number of messages of the log its filter finds; a rule switched off is grey. The actions:
+
+* Log: keep the message in Messages and in the history.
+* Send: to a destination of Connections (a file, UDP, a command, speech, the Map).
+* Page: a message for a transmitter becomes a page of the queue (the Send tab).
+* Mark: an icon before the message, the colour of its text and of its row (each optional). A message several rules mark has their icons side by side.
+* Decode as: the message decoded again with another codepage, or as another type.
+* Transform: when a regular expression is found in the text, the text becomes a template: ${1} or ${name} for the groups of the expression, ${address}, ${channel}, ${time}, ${text}, ${checksum}... for the fields of the message. E.g. Find Unit:(?<unit>\w+) Job #(?<job>\S+), Into Unit ${unit}: job ${job}.
+* Replace: as sed does, each match of a regular expression in the text (or the first one only) replaced, \1 or ${1} for a group: Find (\d{3})(\d{4}), Into \1-\2.
+* Drop: the rules after this one do not see the message.
+
+For each message the rules are walked in their number order (#), every one whose filter selects it acting. The changes (mark, decode, transform, replace) are for the rules after them: a filter after a transform sees the new text. The deliveries (log, send, page) are made at the end of the walk, with the message as the changes left it, so the log of rule 1 has the marks of the rules after it; a destination takes a message once. Drop ends the walk; what the rules before it did stays. A transform or a replace keeps the text before in original_text (the details of the message show it). A new Message Center has one rule, 1 "All messages to the log", without a filter: a message no rule logs is not logged. In the WebAPI and the MCP the rules are the routes; the routes of before (a list of sinks, stop, decode) are read as a rule for each, a mark sink as a mark rule.
 
 ![Message Center routes: the Emergency preset, all the messages to the log and a mark for each kind of message](../../../doc/img/MessageCenter_plugin_routes.png)
 
 ![A route: the messages whose text has brand, fire or smoke, to the mark Fire](../../../doc/img/MessageCenter_plugin_route.png)
 
-A filter on several contacts (set through the WebAPI) is one item of the contact list. Editing a rule keeps what its dialog does not show of its filter. The dialog of a rule is in the order of its sentence: its name, when (the filters, with the number of messages of the log they find as they are changed), change, send to, stop and enabled. Show... (in the dialog, and below the table for the rule selected) opens a window with the messages of the log the rule finds: the columns of Messages, newest first, 100 a page with Newer and Older.
+A filter on several contacts (set through the WebAPI) is one item of the contact list. Editing a rule keeps what its dialog does not show of its filter. The dialog of a rule is in the order of its sentence: its name, when (the filters, with the number of messages of the log they find as they are changed), then (the action and what it takes) and enabled; a rule that cannot work (no destination, a mark of nothing, an expression that is not valid) says why. Show... (in the dialog, and below the table for the rule selected) opens a window with the messages of the log the rule finds: the columns of Messages, newest first, 100 a page with Newer and Older.
 
 The tool tip of the table of the rules recalls how they work.
 
 * Add (plus icon), Edit (pencil icon, or double click) and Remove (bin icon) manage the rules; a rule can be switched off. Up and Down (arrows) change the order.
 * Insert: where a new rule goes, before rule 1 by default, or before or after another.
-* Decode as codepage and type: the messages the rule selects are decoded again with the codepage and as the type before they are sent; the rules after it get them as they were received. A message that cannot be decoded so (a codepage of another protocol, a transmitted message) is sent as it is.
-* Presets: replace the rules and the sinks (after a confirmation; the sources and the contacts stay) with those of a preset. Empty: every message to the log, as a new Message Center. Emergency, an example to adapt: the log, and a rule with a mark (an icon) for each kind of message, by a few words of its text, in English and in Dutch (the P2000 network): ambulance (ambu, reanimatie, cardiac, drowning), fire (brand, fire, smoke), accident (ongeval, accident, crash), hazardous (gaslucht, hazmat), helicopter (lifeliner, helicopter), police (politie, police), call back (graag contact, please call), plant alarm (high level, fault), test (test page, testoproep). A message of several kinds has their icons side by side.
+* Decode as: a message that cannot be decoded so (a codepage of another protocol, a transmitted message) is left as it is. Decode as type is for POCSAG and GSC: a FLEX message is sent with its type, it keeps it.
+* Presets: replace the rules and the sinks (after a confirmation; the sources and the contacts stay) with those of a preset. Empty: every message to the log, as a new Message Center. Emergency, an example to adapt: the log, and a mark rule (an icon) for each kind of message, by a few words of its text, in English and in Dutch (the P2000 network): ambulance (ambu, reanimatie, cardiac, drowning), fire (brand, fire, smoke), accident (ongeval, accident, crash), hazardous (gaslucht, hazmat), helicopter (lifeliner, helicopter), police (politie, police), call back (graag contact, please call), plant alarm (high level, fault), test (test page, testoproep). A message of several kinds has their icons side by side.
 * Export (save icon) saves the rules, the sinks and the sources to a JSON file; Import (open icon) replaces them with those of a file, after a check and a confirmation.
 
-The filter of a rule has the fields of the filter of the log (quality and conditions too), and the source of the message: the channels, the API (ingest) or a source of Connections. The captures of its text expression are ${1}, ${2}... in the texts of the sinks the rule sends to: text Fire at (.*) gives the place as ${1}. Decode as type is for POCSAG and GSC: a FLEX message is sent with its type, it keeps it.
+The filter of a rule has the fields of the filter of the log (quality and conditions too), and the source of the message: the channels, the API (ingest) or a source of Connections. The captures of its text expression are ${1}, ${2}... in the texts of the destination the rule sends to: text Fire at (.*) gives the place as ${1}.
 
 <h3>I/O</h3>
 
@@ -123,9 +134,6 @@ Sinks:
 * udp: a datagram for each message to an address and port. Pager format: the fields of the Pager demodulator, each ended by a NUL (date, time, address, function bits, alphanumeric, numeric, protocol, type); the address has 7 digits for POCSAG and 9 for FLEX, the function bits are POCSAG only, and the other reading of a message (numeric or alphanumeric) is in the other field. JSON format: the record as one line.
 * command: a command run for each message. The command is split into the program and its arguments first, then ${address}, ${message}, ${protocol}, ${type}, ${channel}, ${mode}, ${id}, ${frequency}, ${time} (UTC) and ${0}, ${1}... (the captures of the rule) are replaced in the arguments, so a message cannot add arguments or change the program. At most 5 are run in a second; the others are refused and reported.
 * speech: the text, with the same replacements, is said (when SDRangel is built with text to speech).
-* mark: an icon (the icons of the contacts, or an image file), a colour of the text and a colour of the row, each optional (right click on its button: none). The mark is written into the record (protocolData marks) before it is logged: the history, the exports and the WebAPI have it, and it is there again after a restart.
-
-  ![A mark sink: its icon, the colours of the text and of the row (none here), the routes that send to it](../../../doc/img/MessageCenter_plugin_sink.png)
 * map: the position (latitude and longitude) in the text of the message is put on the Map, named by the address.
 
 The actions (command, speech, mark, map) are taken on messages only: not on events, nor on the end of a GSC voice message, which completes its page.

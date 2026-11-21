@@ -29,11 +29,11 @@
 
 class Serializable;
 
-// A sink the routes send records to, or a source records are read from. The type tells which:
+// A sink the rules send records to (their action Send), or a source records are read from. The type tells which:
 //   sinks:   "file" (default: path, format 0 JSON lines, 1 CSV or 2 Pager CSV), "udp" (address, port, format 0 Pager
 //            demodulator or 1 JSON), "command" (text: the command, the text of the message goes into its
-//            arguments), "speech" (text: what is said), "mark" (icon, colour of the text and of the row of the message
-//            in the log, each optional), "map" (the position in the text of the message on the Map)
+//            arguments), "speech" (text: what is said), "map" (the position in the text of the message on the Map).
+//            "mark" was a sink before the rules had actions: read, it becomes a mark rule (upgradeRoutes)
 //   sources: "file" (default: a JSON lines file), "csv" (path: a log of this message center or of the Pager
 //            demodulator), "udp" (address and port to listen on, JSON lines or the Pager demodulator format)
 struct MessageCenterFileSetting
@@ -90,7 +90,10 @@ struct MessageCenterSettings
     void applySettings(const QStringList& settingsKeys, const MessageCenterSettings& settings);
 
     static QByteArray routesToJson(const std::vector<MessageCenterEngine::Route>& routes);
+    //!< A route of before (a list of sinks, decode, stop) is read as a rule for each, in that order
     static std::vector<MessageCenterEngine::Route> routesFromJson(const QByteArray& json);
+    //!< The sends to the mark sinks of before become mark rules, and the mark sinks go
+    static void upgradeRoutes(std::vector<MessageCenterEngine::Route>& routes, QList<MessageCenterFileSetting>& sinks);
     static QByteArray filesToJson(const QList<MessageCenterFileSetting>& files);
     static QList<MessageCenterFileSetting> filesFromJson(const QByteArray& json);
     //! The presets of the routes and their sinks: Empty (every message to the log, as a new message center) and

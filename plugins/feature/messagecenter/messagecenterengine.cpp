@@ -220,7 +220,8 @@ QStringList MessageCenterFilter::captures(const MessageRecord& record) const
     return match.hasMatch() ? match.capturedTexts() : QStringList();
 }
 
-QString messageCenterSubstitute(const QString& text, const MessageRecord& record, const QStringList& captures)
+QString messageCenterSubstitute(const QString& text, const MessageRecord& record, const QStringList& captures,
+    const QMap<QString, QString>& named)
 {
     QString out;
     int pos = 0;
@@ -263,8 +264,19 @@ QString messageCenterSubstitute(const QString& text, const MessageRecord& record
             value = QString::number(record.m_frequency);
         } else if (name == "time") {
             value = QDateTime::fromMSecsSinceEpoch(record.m_timestamp, Qt::UTC).toString(Qt::ISODate);
+        } else if (named.contains(name)) {
+            value = named.value(name);
         } else {
-            known = false;
+            // Any other field of the record or of its protocol data (a list: its values separated by commas)
+            const QJsonValue field = MessageCenterContact::recordValue(record, name);
+
+            if (field.isUndefined() || field.isObject()) {
+                known = false;
+            } else if (field.isArray()) {
+                value = field.toVariant().toStringList().join(",");
+            } else if (!field.isNull()) {
+                value = field.toVariant().toString();
+            }
         }
 
         out += known ? value : text.mid(start, end - start + 1);
@@ -1336,40 +1348,6 @@ bool MessageCenterUdpSink::accept(const MessageRecord& record, QString& error)
 // Actions
 // ---------------------------------------------------------------------------
 
-MessageCenterMarkSink::MessageCenterMarkSink(const QString& name, const QString& icon, quint32 textColor, quint32 background) :
-    m_name(name),
-    m_icon(icon),
-    m_textColor(textColor),
-    m_background(background)
-{
-}
-
-// The mark is written into the record before it is routed (MessageCenterEngine::markRecord): nothing more to do
-bool MessageCenterMarkSink::accept(const MessageRecord& record, QString& error)
-{
-    (void) record;
-    (void) error;
-    return true;
-}
-
-QVariantMap MessageCenterMarkSink::mark() const
-{
-    QVariantMap mark;
-    mark.insert("sink", m_name);
-
-    if (!m_icon.isEmpty()) {
-        mark.insert("icon", m_icon);
-    }
-    if (m_textColor != 0) {
-        mark.insert("color", m_textColor);
-    }
-    if (m_background != 0) {
-        mark.insert("background", m_background);
-    }
-
-    return mark;
-}
-
 MessageCenterCommandSink::MessageCenterCommandSink(const QString& name, const QString& command, Launcher launcher) :
     m_name(name),
     m_command(command),
@@ -1976,82 +1954,246 @@ void MessageCenterEngine::ingest(const MessageRecord& record, const QString& sou
         }
     }
 
-    // The messages: each route that selects it sends it to its sinks, in the order of the routes, until one that
-    // stops. The log is a sink as the others: the default route sends every message to it. The message has the name
-    // of its contact first: the routes select by it, the sinks have it
-    bool matched = false;
+    // The messages: the rules in their order (applyRules); then its deliveries, with the message as the changes left
+    // it. The log is a delivery as the others: the default rule logs every message. The message has the name of its
+    // contact first: the rules select by it, the sinks have it
     MessageRecord named = record;
     nameContact(named);
-    markRecord(named, source);
+    std::vector<Delivery> deliveries;
+    const MessageRecord changed = applyRules(named, source, deliveries);
+    QSet<QString> delivered;
 
-    for (const Route& route : m_routes)
+    for (const Delivery& delivery : deliveries)
     {
-        if (!route.m_enabled || !route.m_filter.matches(named, source)) {
-            continue;
-        }
-
-        matched = true;
-        MessageRecord decoded;
-        QString error;
-        const bool redecoded = route.decodes()
-            && RadioPagingRecode::redecode(named, route.m_decodeCharset, route.m_decodeType, decoded, error);
-        const MessageRecord& routed = redecoded ? decoded : named;
-        QStringList captures = route.m_filter.captures(routed);
-
-        for (const QString& sink : route.m_sinks) {
-            deliver(routed, sink, captures, now);
-        }
-
-        if (route.m_stop) {
-            break;
+        // A sink takes a message once, whatever the number of rules that send it there
+        if (!delivered.contains(delivery.m_sink))
+        {
+            delivered.insert(delivery.m_sink);
+            deliver(changed, delivery.m_sink, delivery.m_captures, now);
         }
     }
 
-    if (matched) {
+    if (!deliveries.empty()) {
         m_routed++;
     }
 }
 
-// The routes in their order, as the routing does (one that stops ends it): the marks of the mark sinks they send to
-void MessageCenterEngine::markRecord(MessageRecord& record, const QString& source) const
+// ---------------------------------------------------------------------------
+// Rules
+// ---------------------------------------------------------------------------
+
+namespace {
+
+const char * const actionNames[MessageCenterEngine::Route::ActionCount] = {
+    "log", "send", "page", "mark", "decode", "transform", "replace", "drop"
+};
+
+} // namespace
+
+QString MessageCenterEngine::Route::actionName(Action action)
 {
-    QVariantList marks;
+    return ((action >= 0) && (action < ActionCount)) ? QString(actionNames[action]) : QString("log");
+}
+
+MessageCenterEngine::Route::Action MessageCenterEngine::Route::actionOf(const QString& name)
+{
+    for (int a = 0; a < ActionCount; a++)
+    {
+        if (name == actionNames[a]) {
+            return (Action) a;
+        }
+    }
+
+    return ActionLog;
+}
+
+QString MessageCenterEngine::Route::check() const
+{
+    const QString error = m_filter.errors();
+
+    if (!error.isEmpty()) {
+        return QString("Rule %1: %2").arg(m_name, error);
+    }
+    if ((m_action == ActionSend) && m_target.trimmed().isEmpty()) {
+        return QString("Rule %1: send to where").arg(m_name);
+    }
+    if ((m_action == ActionMark) && m_mark.value("icon").toString().isEmpty() && (m_mark.value("color").toUInt() == 0)
+        && (m_mark.value("background").toUInt() == 0)) {
+        return QString("Rule %1: a mark needs an icon, a colour of the text or a colour of the row").arg(m_name);
+    }
+    if ((m_action == ActionDecode) && !decodes()) {
+        return QString("Rule %1: decode as what (a codepage or a type)").arg(m_name);
+    }
+    if ((m_action == ActionTransform) || (m_action == ActionReplace))
+    {
+        if (m_pattern.isEmpty()) {
+            return QString("Rule %1: %2 needs an expression").arg(m_name, actionName(m_action));
+        }
+
+        const QRegularExpression expression(m_pattern);
+
+        if (!expression.isValid()) {
+            return QString("Rule %1: %2: %3").arg(m_name, m_pattern, expression.errorString());
+        }
+    }
+
+    return QString();
+}
+
+bool MessageCenterEngine::Route::apply(MessageRecord& record) const
+{
+    switch (m_action)
+    {
+    case ActionMark:
+    {
+        // Several rules mark a message: their marks side by side, each once
+        QVariantList marks = record.m_protocolData.value("marks").toList();
+        QVariantMap mark = m_mark;
+        mark.insert("rule", m_name);
+
+        if (!marks.contains(mark))
+        {
+            marks.append(mark);
+            record.m_protocolData.insert("marks", marks);
+        }
+
+        return true;
+    }
+    case ActionDecode:
+    {
+        MessageRecord decoded;
+        QString error;
+
+        if (decodes() && RadioPagingRecode::redecode(record, m_decodeCharset, m_decodeType, decoded, error)) {
+            record = decoded;
+        }
+
+        return true;
+    }
+    case ActionTransform:
+    case ActionReplace:
+    {
+        const QRegularExpression expression(m_pattern, m_caseInsensitive ? QRegularExpression::CaseInsensitiveOption
+            : QRegularExpression::NoPatternOption);
+
+        if (!expression.isValid()) {
+            return true;
+        }
+
+        // The groups of a match: by number and by name; \1 in the template is ${1}
+        static const QRegularExpression backReference("\\\\(\\d+)");
+        QString tmpl = m_template;
+        tmpl.replace(backReference, "${\\1}");
+        auto fill = [&record, &tmpl, &expression](const QRegularExpressionMatch& match) {
+            QMap<QString, QString> named;
+
+            for (const QString& name : expression.namedCaptureGroups())
+            {
+                if (!name.isEmpty()) {
+                    named.insert(name, match.captured(name));
+                }
+            }
+
+            return messageCenterSubstitute(tmpl, record, match.capturedTexts(), named);
+        };
+
+        const QString before = record.m_text;
+        QString after;
+
+        if (m_action == ActionTransform)
+        {
+            // The whole text becomes the template, when the expression is found in it
+            const QRegularExpressionMatch match = expression.match(before);
+
+            if (!match.hasMatch()) {
+                return true;
+            }
+
+            after = fill(match);
+        }
+        else
+        {
+            // Each match (the first one only) replaced, the rest of the text as it is
+            QRegularExpressionMatchIterator it = expression.globalMatch(before);
+            int pos = 0;
+
+            while (it.hasNext())
+            {
+                const QRegularExpressionMatch match = it.next();
+
+                if (match.capturedLength() == 0) {
+                    continue;   // An empty match changes nothing (and would repeat)
+                }
+
+                after += before.mid(pos, match.capturedStart() - pos) + fill(match);
+                pos = match.capturedEnd();
+
+                if (!m_all) {
+                    break;
+                }
+            }
+
+            after += before.mid(pos);
+        }
+
+        if (after != before)
+        {
+            if (!record.m_protocolData.contains("original_text")) {
+                record.m_protocolData.insert("original_text", before);
+            }
+
+            record.m_text = after;
+            record.m_charStatus.clear();      // The status of the characters was of the text received
+            record.m_protocolData.remove("char_status");
+        }
+
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
+MessageRecord MessageCenterEngine::applyRules(const MessageRecord& record, const QString& source,
+    std::vector<Delivery>& deliveries) const
+{
+    MessageRecord working = record;
+    working.m_protocolData.remove("marks");     // Made again by the rules (a message decoded again, imported)
+    deliveries.clear();
 
     for (const Route& route : m_routes)
     {
-        if (!route.m_enabled || !route.m_filter.matches(record, source)) {
+        if (!route.m_enabled || !route.m_filter.matches(working, source)) {
             continue;
         }
 
-        for (const QString& sinkName : route.m_sinks)
+        switch (route.m_action)
         {
-            for (const auto& sink : m_sinks)
-            {
-                const MessageCenterMarkSink *mark = dynamic_cast<const MessageCenterMarkSink*>(sink.get());
-
-                if (mark && (mark->name() == sinkName) && !marks.contains(mark->mark())) {
-                    marks.append(mark->mark());
-                }
-            }
-        }
-
-        if (route.m_stop) {
+        case Route::ActionLog:
+            deliveries.push_back(Delivery{QString("log"), route.m_filter.captures(working)});
+            break;
+        case Route::ActionPage:
+            deliveries.push_back(Delivery{QString("queue"), route.m_filter.captures(working)});
+            break;
+        case Route::ActionSend:
+            deliveries.push_back(Delivery{route.m_target, route.m_filter.captures(working)});
+            break;
+        case Route::ActionDrop:
+            return working;
+        default:
+            route.apply(working);
             break;
         }
     }
 
-    if (marks.isEmpty()) {
-        record.m_protocolData.remove("marks");
-    } else {
-        record.m_protocolData.insert("marks", marks);
-    }
+    return working;
 }
 
 std::vector<MessageCenterEngine::Route> MessageCenterEngine::defaultRoutes()
 {
     Route all;
     all.m_name = "All messages to the log";
-    all.m_sinks = QStringList("log");
+    all.m_action = Route::ActionLog;
     return {all};
 }
 

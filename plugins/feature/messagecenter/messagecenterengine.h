@@ -204,9 +204,11 @@ private:
 };
 
 //! ${address}, ${message}, ${protocol}, ${type}, ${channel}, ${mode}, ${id}, ${frequency}, ${time} (ISO, UTC) and
-//! ${0}, ${1}... (the captures of the regular expression) replaced in a text; one pass, so that what is put in is
-//! not replaced again; an unknown name stays as it is
-QString messageCenterSubstitute(const QString& text, const MessageRecord& record, const QStringList& captures);
+//! ${0}, ${1}... (the captures of the regular expression) replaced in a text; then ${name}, a named group of the
+//! expression (named), and ${field}, any other field of the record or of its protocol data (${checksum}, ${ric}...).
+//! One pass, so that what is put in is not replaced again; an unknown name stays as it is
+QString messageCenterSubstitute(const QString& text, const MessageRecord& record, const QStringList& captures,
+    const QMap<QString, QString>& named = QMap<QString, QString>());
 
 // A sink takes the records routed to it
 class MessageCenterArchive;
@@ -408,27 +410,6 @@ private:
     Action m_action;
 };
 
-// A mark on the messages a route sends to it: an icon, a colour of the text and a colour of the row, each optional. The
-// engine writes it into the record before the record goes to the sinks (protocolData "marks", a list: a message of
-// several routes has their marks), so the log, the history and the API have it
-class MessageCenterMarkSink : public MessageCenterSink
-{
-public:
-    //! icon: a built-in icon (:name) or the path of an image, empty for none; textColor, background: ARGB, 0 for none
-    MessageCenterMarkSink(const QString& name, const QString& icon, quint32 textColor, quint32 background);
-    QString name() const override { return m_name; }
-    using MessageCenterSink::accept;
-    bool accept(const MessageRecord& record, QString& error) override;
-    //!< The mark as it is in the record: icon, color, background (those set), and the name of the sink
-    QVariantMap mark() const;
-
-private:
-    QString m_name;
-    QString m_icon;
-    quint32 m_textColor;
-    quint32 m_background;
-};
-
 // A page to transmit
 struct MessageCenterPage
 {
@@ -475,18 +456,42 @@ public:
     // Routes: every message is checked against all the routes in their order; each route that selects it sends it to
     // its sinks; stop: the routes after it do not see it. The log is a sink: a message no route sends to it is not
     // logged (the default route sends everything to the log)
+    //! A rule: when its filter selects a message, its one action. The rules are walked in their order: the changes
+    //! (mark, decode, transform, replace) change the message for the rules after them; the deliveries (log, send,
+    //! page) are made at the end of the walk, with the message as the changes left it; drop ends the walk (the
+    //! deliveries before it are made)
     struct Route
     {
+        enum Action { ActionLog, ActionSend, ActionPage, ActionMark, ActionDecode, ActionTransform, ActionReplace, ActionDrop,
+            ActionCount };
+
         QString m_name;
         MessageCenterFilter m_filter;
-        QStringList m_sinks;            //!< Names: "log", "queue", or a sink added
-        bool m_stop = false;
         bool m_enabled = true;
-        //! The message decoded again before it goes to the sinks of the route: with this codepage (none: the one of
-        //! the record) as this type (empty: the one of the record). A message that cannot be is sent as it is
+        Action m_action = ActionLog;
+        QString m_target;               //!< Send: the name of a sink of Connections
+        //! Mark: icon (a built-in icon :name, or an image path), color (of the text) and background (of the row), ARGB
+        QVariantMap m_mark;
+        //! Decode: the message decoded again with this codepage (none: its own) as this type (empty: its own). A
+        //! message that cannot be is left as it is
         RadioPagingCharset::Key m_decodeCharset;
         QString m_decodeType;
-        bool decodes() const { return !m_decodeCharset.empty() || !m_decodeType.isEmpty(); }
+        //! Transform: the text becomes m_template when it matches m_pattern (its groups ${1}, ${name} and the fields
+        //! of the message ${address}... in the template). Replace: each match of m_pattern in the text (the first
+        //! one only if !m_all) is replaced by m_template (\1, ${1}, ${name}, ${field}). The text before the first
+        //! change is kept in protocolData original_text
+        QString m_pattern;
+        QString m_template;
+        bool m_caseInsensitive = false;
+        bool m_all = true;
+
+        bool decodes() const { return (m_action == ActionDecode) && (!m_decodeCharset.empty() || !m_decodeType.isEmpty()); }
+        static QString actionName(Action action);       //!< log, send, page, mark, decode, transform, replace, drop
+        static Action actionOf(const QString& name);    //!< log for a name that is none
+        //!< Empty if the rule can work, else why not (a regular expression, a mark of nothing, a send to nowhere)
+        QString check() const;
+        //!< The message changed by the rule (mark, decode, transform, replace): false if it is not a change
+        bool apply(MessageRecord& record) const;
     };
     //! The routes of a new message center: every message to the log
     static std::vector<Route> defaultRoutes();
@@ -501,8 +506,14 @@ public:
     //!< The record with the name, icon and colour of its contact in protocolData (contact, contact_icon,
     //!< contact_color), or without them when it has none
     void nameContact(MessageRecord& record) const;
-    //! The marks of the routes that select the record (from source) and send it to a mark sink, into its protocol data
-    void markRecord(MessageRecord& record, const QString& source) const;
+    //! The walk of the rules over a record from a source: the record as the changes leave it, and the deliveries
+    //! (sink names: log, queue or a sink of Connections) with the captures of the filter of their rule
+    struct Delivery
+    {
+        QString m_sink;
+        QStringList m_captures;
+    };
+    MessageRecord applyRules(const MessageRecord& record, const QString& source, std::vector<Delivery>& deliveries) const;
 
     //!< A record from a source: events update the endpoints and the pages, the others are routed
     void ingest(const MessageRecord& record, const QString& source, qint64 now);

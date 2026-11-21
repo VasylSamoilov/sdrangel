@@ -67,18 +67,42 @@ QByteArray MessageCenterSettings::routesToJson(const std::vector<MessageCenterEn
 
     for (const MessageCenterEngine::Route& route : routes)
     {
+        typedef MessageCenterEngine::Route Route;
         QJsonObject o;
         o["name"] = route.m_name;
         o["enabled"] = route.m_enabled;
-        o["stop"] = route.m_stop;
-        o["sinks"] = QJsonArray::fromStringList(route.m_sinks);
+        o["action"] = Route::actionName(route.m_action);
         o["filter"] = route.m_filter.toJson();
 
-        if (!route.m_decodeCharset.empty()) {
-            o["decodeCharset"] = QJsonObject::fromVariantMap(RadioPagingPage::charsetData(route.m_decodeCharset));
-        }
-        if (!route.m_decodeType.isEmpty()) {
-            o["decodeType"] = route.m_decodeType;
+        // What the action takes, only
+        switch (route.m_action)
+        {
+        case Route::ActionSend:
+            o["target"] = route.m_target;
+            break;
+        case Route::ActionMark:
+            o["mark"] = QJsonObject::fromVariantMap(route.m_mark);
+            break;
+        case Route::ActionDecode:
+            if (!route.m_decodeCharset.empty()) {
+                o["decodeCharset"] = QJsonObject::fromVariantMap(RadioPagingPage::charsetData(route.m_decodeCharset));
+            }
+            if (!route.m_decodeType.isEmpty()) {
+                o["decodeType"] = route.m_decodeType;
+            }
+            break;
+        case Route::ActionTransform:
+        case Route::ActionReplace:
+            o["pattern"] = route.m_pattern;
+            o["template"] = route.m_template;
+            o["caseInsensitive"] = route.m_caseInsensitive;
+
+            if (route.m_action == Route::ActionReplace) {
+                o["all"] = route.m_all;
+            }
+            break;
+        default:
+            break;
         }
 
         array.append(o);
@@ -89,32 +113,105 @@ QByteArray MessageCenterSettings::routesToJson(const std::vector<MessageCenterEn
 
 std::vector<MessageCenterEngine::Route> MessageCenterSettings::routesFromJson(const QByteArray& json)
 {
-    std::vector<MessageCenterEngine::Route> routes;
+    typedef MessageCenterEngine::Route Route;
+    std::vector<Route> routes;
 
     for (const QJsonValue& v : QJsonDocument::fromJson(json).array())
     {
         QJsonObject o = v.toObject();
-        MessageCenterEngine::Route route;
+        Route route;
         route.m_name = o["name"].toString();
         route.m_enabled = o["enabled"].toBool(true);
-        route.m_stop = o["stop"].toBool(false);
+        route.m_filter = MessageCenterFilter::fromJson(o["filter"].toObject());
 
-        for (const QJsonValue& s : o["sinks"].toArray()) {
-            route.m_sinks.append(s.toString());
+        if (o.contains("action"))
+        {
+            route.m_action = Route::actionOf(o["action"].toString());
+            route.m_target = o["target"].toString();
+            route.m_mark = o["mark"].toObject().toVariantMap();
+            route.m_decodeCharset = RadioPagingPage::charsetKey(o["decodeCharset"].toObject().toVariantMap());
+            route.m_decodeType = o["decodeType"].toString();
+            route.m_pattern = o["pattern"].toString();
+            route.m_template = o["template"].toString();
+            route.m_caseInsensitive = o["caseInsensitive"].toBool(false);
+            route.m_all = o["all"].toBool(true);
+            routes.push_back(route);
+            continue;
         }
 
-        route.m_filter = MessageCenterFilter::fromJson(o["filter"].toObject());
-        route.m_decodeCharset = RadioPagingPage::charsetKey(o["decodeCharset"].toObject().toVariantMap());
-        route.m_decodeType = o["decodeType"].toString();
-        routes.push_back(route);
+        // A route of before (sinks, decode, stop): a rule for each, with its filter, in that order. A sink that is a
+        // mark becomes a mark rule when the sinks are known (upgradeRoutes)
+        auto add = [&routes, &route](Route::Action action, const QString& target) {
+            Route rule = route;
+            rule.m_action = action;
+            rule.m_target = target;
+            routes.push_back(rule);
+        };
+        const RadioPagingCharset::Key charset = RadioPagingPage::charsetKey(o["decodeCharset"].toObject().toVariantMap());
+        const QString type = o["decodeType"].toString();
+
+        if (!charset.empty() || !type.isEmpty())
+        {
+            Route decode = route;
+            decode.m_action = Route::ActionDecode;
+            decode.m_decodeCharset = charset;
+            decode.m_decodeType = type;
+            routes.push_back(decode);
+        }
+
+        for (const QJsonValue& s : o["sinks"].toArray())
+        {
+            const QString sink = s.toString();
+            add((sink == "log") ? Route::ActionLog : (sink == "queue") ? Route::ActionPage : Route::ActionSend,
+                ((sink == "log") || (sink == "queue")) ? QString() : sink);
+        }
+
+        if (o["stop"].toBool(false)) {
+            add(Route::ActionDrop, QString());
+        }
     }
 
     return routes;
 }
 
+void MessageCenterSettings::upgradeRoutes(std::vector<MessageCenterEngine::Route>& routes, QList<MessageCenterFileSetting>& sinks)
+{
+    // A send to a mark sink of before is a mark rule; the mark sinks go (a mark is a change of a rule)
+    for (MessageCenterEngine::Route& route : routes)
+    {
+        if (route.m_action != MessageCenterEngine::Route::ActionSend) {
+            continue;
+        }
+
+        for (const MessageCenterFileSetting& sink : sinks)
+        {
+            if ((sink.m_name == route.m_target) && (sink.typeOrDefault() == "mark"))
+            {
+                route.m_action = MessageCenterEngine::Route::ActionMark;
+                route.m_target.clear();
+                route.m_mark.clear();
+
+                if (!sink.m_icon.isEmpty()) {
+                    route.m_mark.insert("icon", sink.m_icon);
+                }
+                if (sink.m_color != 0) {
+                    route.m_mark.insert("color", sink.m_color);
+                }
+                if (sink.m_background != 0) {
+                    route.m_mark.insert("background", sink.m_background);
+                }
+            }
+        }
+    }
+
+    for (auto it = sinks.begin(); it != sinks.end();) {
+        it = (it->typeOrDefault() == "mark") ? sinks.erase(it) : std::next(it);
+    }
+}
+
 const QStringList& MessageCenterFileSetting::sinkTypes()
 {
-    static const QStringList types = {"file", "udp", "command", "speech", "mark", "map"};
+    static const QStringList types = {"file", "udp", "command", "speech", "map"};
     return types;
 }
 
@@ -162,9 +259,6 @@ QString MessageCenterFileSetting::check(bool sink) const
     if ((type == "speech") && m_text.trimmed().isEmpty()) {
         return QString("%1: a speech sink needs a text").arg(m_name);
     }
-    if ((type == "mark") && m_icon.isEmpty() && (m_color == 0) && (m_background == 0)) {
-        return QString("%1: a mark needs an icon, a colour of the text or a colour of the row").arg(m_name);
-    }
 
     return QString();
 }
@@ -200,18 +294,14 @@ bool MessageCenterSettings::preset(const QString& name, std::vector<MessageCente
         {"Test", "test page|testoproep", ":satellite_antenna"}
     };
 
+    // A mark rule for each (the log of the first rule has the marks: the deliveries are made after the walk)
     for (const auto& kind : kinds)
     {
-        MessageCenterFileSetting sink;
-        sink.m_name = kind.name;
-        sink.m_type = "mark";
-        sink.m_icon = kind.icon;
-        sinks.append(sink);
-
         MessageCenterEngine::Route route;
         route.m_name = kind.name;
         route.m_filter.m_text = kind.text;
-        route.m_sinks = QStringList(kind.name);
+        route.m_action = MessageCenterEngine::Route::ActionMark;
+        route.m_mark.insert("icon", kind.icon);
         routes.push_back(route);
     }
 
@@ -346,6 +436,7 @@ bool MessageCenterSettings::deserialize(const QByteArray& data)
         m_sinks = filesFromJson(bytes);
         d.readBlob(8, &bytes);
         m_sources = filesFromJson(bytes);
+        upgradeRoutes(m_routes, m_sinks);
 
         if (m_rollupState)
         {

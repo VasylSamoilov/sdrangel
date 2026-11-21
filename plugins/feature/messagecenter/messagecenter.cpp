@@ -598,9 +598,6 @@ std::unique_ptr<MessageCenterSink> MessageCenter::makeSink(const MessageCenterFi
     if (type == "command") {
         return std::unique_ptr<MessageCenterSink>(new MessageCenterCommandSink(setting.m_name, setting.m_text));
     }
-    if (type == "mark") {
-        return std::unique_ptr<MessageCenterSink>(new MessageCenterMarkSink(setting.m_name, setting.m_icon, setting.m_color, setting.m_background));
-    }
 
     // speech and map: done by the feature, in the thread of the message center
     return std::unique_ptr<MessageCenterSink>(new MessageCenterActionSink(setting.m_name, type, setting.m_text, setting.m_color,
@@ -813,6 +810,9 @@ void MessageCenter::webapiUpdateFeatureSettings(MessageCenterSettings& settings,
     if (featureSettingsKeys.contains("sources") && swg->getSources()) {
         settings.m_sources = MessageCenterSettings::filesFromJson(swg->getSources()->toUtf8());
     }
+
+    // Rules of before (sends to mark sinks) as rules of now
+    MessageCenterSettings::upgradeRoutes(settings.m_routes, settings.m_sinks);
     if (featureSettingsKeys.contains("useReverseAPI")) {
         settings.m_useReverseAPI = swg->getUseReverseApi() != 0;
     }
@@ -874,20 +874,19 @@ QString MessageCenter::checkRouting(const MessageCenterSettings& settings)
     }
     for (const MessageCenterEngine::Route& route : settings.m_routes)
     {
-        for (const QString& sink : route.m_sinks)
-        {
-            if (!sinkNames.contains(sink)) {
-                return QString("Route %1: there is no sink %2").arg(route.m_name).arg(sink);
-            }
+        // A send to a sink of the settings (log and queue are the log and page actions)
+        if ((route.m_action == MessageCenterEngine::Route::ActionSend) && !route.m_target.isEmpty()
+            && (!sinkNames.contains(route.m_target) || (route.m_target == "log") || (route.m_target == "queue"))) {
+            return QString("Rule %1: there is no sink %2").arg(route.m_name).arg(route.m_target);
         }
 
-        QString error = route.m_filter.errors();
+        QString error = route.check();
 
         if (!error.isEmpty()) {
-            return QString("Route %1: a regular expression is not valid: %2").arg(route.m_name).arg(error);
+            return error;
         }
 
-        // The codepage a route decodes with: one of a protocol
+        // The codepage a rule decodes with: one of a protocol
         if (!route.m_decodeCharset.empty())
         {
             bool known = false;
@@ -896,18 +895,18 @@ QString MessageCenter::checkRouting(const MessageCenterSettings& settings)
                 known = known || (RadioPagingCharset::find(protocol, route.m_decodeCharset) != nullptr);
             }
             if (!known) {
-                return QString("Route %1: there is no codepage %2").arg(route.m_name).arg(RadioPagingPage::charsetText(route.m_decodeCharset));
+                return QString("Rule %1: there is no codepage %2").arg(route.m_name).arg(RadioPagingPage::charsetText(route.m_decodeCharset));
             }
         }
         if (!route.m_decodeType.isEmpty() && (route.m_decodeType != "alphanumeric") && (route.m_decodeType != "numeric")) {
-            return QString("Route %1: decodeType is alphanumeric or numeric").arg(route.m_name);
+            return QString("Rule %1: decodeType is alphanumeric or numeric").arg(route.m_name);
         }
 
-        // A source a route names: channels, api or a source of the settings
+        // A source a rule names: channels, api or a source of the settings
         for (const QString& source : route.m_filter.m_sources)
         {
             if ((source != "channels") && (source != "api") && !sourceNames.contains(source)) {
-                return QString("Route %1: there is no source %2").arg(route.m_name).arg(source);
+                return QString("Rule %1: there is no source %2").arg(route.m_name).arg(source);
             }
         }
     }

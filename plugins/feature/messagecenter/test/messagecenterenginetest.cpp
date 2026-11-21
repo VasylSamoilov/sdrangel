@@ -66,6 +66,63 @@ MessageRecord rx(const QString& id, const QString& protocol, const QString& addr
     return r;
 }
 
+typedef MessageCenterEngine::Route Rule;
+typedef std::vector<Rule> Rules;
+
+// The rules of a route as it was before (sinks, then stop): a rule for each sink, with the filter (log, page, or a
+// send to the sink), then drop
+Rules rules(const QString& name, const MessageCenterFilter& filter, const QStringList& sinks, bool stop = false)
+{
+    Rules out;
+
+    for (const QString& sink : sinks)
+    {
+        Rule rule;
+        rule.m_name = name;
+        rule.m_filter = filter;
+        rule.m_action = (sink == "log") ? Rule::ActionLog : (sink == "queue") ? Rule::ActionPage : Rule::ActionSend;
+        rule.m_target = ((sink == "log") || (sink == "queue")) ? QString() : sink;
+        out.push_back(rule);
+    }
+
+    if (stop)
+    {
+        Rule drop;
+        drop.m_name = name;
+        drop.m_filter = filter;
+        drop.m_action = Rule::ActionDrop;
+        out.push_back(drop);
+    }
+
+    return out;
+}
+
+Rules operator+(Rules a, const Rules& b)
+{
+    a.insert(a.end(), b.begin(), b.end());
+    return a;
+}
+
+Rule markRule(const QString& name, const QString& text, const QString& icon, quint32 color, quint32 background)
+{
+    Rule rule;
+    rule.m_name = name;
+    rule.m_filter.m_text = text;
+    rule.m_action = Rule::ActionMark;
+
+    if (!icon.isEmpty()) {
+        rule.m_mark.insert("icon", icon);
+    }
+    if (color != 0) {
+        rule.m_mark.insert("color", color);
+    }
+    if (background != 0) {
+        rule.m_mark.insert("background", background);
+    }
+
+    return rule;
+}
+
 MessageEndpoint transmitter(const QString& alias, const QStringList& protocols)
 {
     MessageEndpoint e;
@@ -153,20 +210,14 @@ void testLogAndRoutes()
 
     // The default route: the log. Routes: flex to the csv file and stop (not logged); everything else to the log and the
     // json file
-    MessageCenterEngine::Route flex;
-    flex.m_name = "flex to csv";
-    flex.m_filter.m_protocols = QStringList({"flex"});
-    flex.m_sinks = QStringList({"csv"});
-    flex.m_stop = true;
-    MessageCenterEngine::Route all;
-    all.m_name = "the rest";
-    all.m_sinks = QStringList({"log", "json"});
+    MessageCenterFilter flexOnly;
+    flexOnly.m_protocols = QStringList({"flex"});
 
     engine.setRoutes(MessageCenterEngine::defaultRoutes());
     engine.ingest(rx("1", "pocsag", "1", "no route", "A"), "channels", 1);
     check((engine.log().size() == 1) && !QFile::exists(jsonPath), "Engine: the default route logs a record");
 
-    engine.setRoutes({flex, all});
+    engine.setRoutes(rules("flex to csv", flexOnly, {"csv"}, true) + rules("the rest", MessageCenterFilter(), {"log", "json"}));
     engine.ingest(rx("2", "flex", "2", "to csv", "A", 3200), "channels", 2);
     engine.ingest(rx("3", "gsc", "3", "to log and json", "A", 600), "channels", 3);
     QFile csv(csvPath);
@@ -792,12 +843,10 @@ void testRoutesWithActions()
             seen.append(text);
         })));
 
-    MessageCenterEngine::Route route;
-    route.m_name = "fire";
-    route.m_filter.m_text = "^Fire (\\w+)";
-    route.m_filter.m_hideDuplicates = true;
-    route.m_sinks = QStringList({"alert"});
-    engine.setRoutes({MessageCenterEngine::defaultRoutes()[0], route});
+    MessageCenterFilter fireFilter;
+    fireFilter.m_text = "^Fire (\\w+)";
+    fireFilter.m_hideDuplicates = true;
+    engine.setRoutes(MessageCenterEngine::defaultRoutes() + rules("fire", fireFilter, {"alert"}));
 
     engine.ingest(rx("1", "pocsag", "1", "Fire alpha", "c"), "channels", 1);
     engine.ingest(rx("2", "pocsag", "1", "Flood", "c"), "channels", 2);
@@ -828,19 +877,11 @@ void testRouteOrderAndSources()
     engine.addSink(recorder("third"));
     engine.addSink(recorder("udp only"));
 
-    MessageCenterEngine::Route r1, r2, r3, r4;
-    r1.m_name = "1";
-    r1.m_sinks = QStringList({"first"});
-    r2.m_name = "2";
-    r2.m_filter.m_protocols = QStringList({"flex"});
-    r2.m_sinks = QStringList({"second"});
-    r2.m_stop = true;
-    r3.m_name = "3";
-    r3.m_sinks = QStringList({"third"});
-    r4.m_name = "4";
-    r4.m_filter.m_sources = QStringList({"udp in"});
-    r4.m_sinks = QStringList({"udp only"});
-    engine.setRoutes({r1, r2, r3, r4});
+    MessageCenterFilter any, flexOnly, udpIn;
+    flexOnly.m_protocols = QStringList({"flex"});
+    udpIn.m_sources = QStringList({"udp in"});
+    engine.setRoutes(rules("1", any, {"first"}) + rules("2", flexOnly, {"second"}, true) + rules("3", any, {"third"})
+        + rules("4", udpIn, {"udp only"}));
 
     engine.ingest(rx("p", "pocsag", "1", "x", "c"), "channels", 1);
     check(order == QStringList({"first", "third"}), "every route that selects a message acts, in order");
@@ -853,39 +894,31 @@ void testRouteOrderAndSources()
     check(engine.log().empty(), "without a route to the log nothing is logged");
 
     // The log is a sink: the routes stopped before it keep a message out of it
-    r3.m_sinks = QStringList({"third", "log"});
-    engine.setRoutes({r1, r2, r3, r4});
+    engine.setRoutes(rules("1", any, {"first"}) + rules("2", flexOnly, {"second"}, true) + rules("3", any, {"third", "log"})
+        + rules("4", udpIn, {"udp only"}));
     engine.ingest(rx("q", "pocsag", "1", "x", "c"), "channels", 4);
     engine.ingest(rx("g", "flex", "1", "x", "c"), "channels", 5);
     check(engine.find("q") && !engine.find("g"), "a message goes to the log through a route; one stopped before it is not logged");
 
     engine.setRoutes(MessageCenterEngine::defaultRoutes());
     engine.ingest(rx("d", "gsc", "1", "x", "c"), "channels", 6);
-    check(engine.find("d") && (engine.routes().size() == 1) && (engine.routes()[0].m_sinks == QStringList("log"))
+    check(engine.find("d") && (engine.routes().size() == 1) && (engine.routes()[0].m_action == Rule::ActionLog)
         && engine.routes()[0].m_filter.isEmpty(), "the default route sends every message to the log");
 
-    MessageCenterFilter f = MessageCenterFilter::fromJson(r4.m_filter.toJson());
+    MessageCenterFilter f = MessageCenterFilter::fromJson(udpIn.toJson());
     check(f.m_sources == QStringList({"udp in"}), "the sources of a filter in its JSON");
     check(f.matches(rx("z", "pocsag", "1", "x", "c")), "matching without a source looks at the record only");
 }
 
 // A filter on an address also selects the group messages of which it is a member
-// Marks: written into the record before it is routed, so the log has them; the routes in order, until one that stops
+// Marks: a change of the message by a rule; the deliveries are made at the end of the walk, so the log of the first rule
+// has the marks of the rules after it; the rules in order, until one that drops
 void testMarks()
 {
     MessageCenterEngine engine;
-    engine.addSink(std::unique_ptr<MessageCenterSink>(new MessageCenterMarkSink("fire", ":fire_engine", 0, 0xff401010)));
-    engine.addSink(std::unique_ptr<MessageCenterSink>(new MessageCenterMarkSink("accident", ":collision", 0xffffcc00, 0)));
-
-    MessageCenterEngine::Route fire;
-    fire.m_name = "Fire";
-    fire.m_filter.m_text = "brand|fire";
-    fire.m_sinks = QStringList("fire");
-    MessageCenterEngine::Route accident;
-    accident.m_name = "Accident";
-    accident.m_filter.m_text = "ongeval";
-    accident.m_sinks = QStringList("accident");
-    engine.setRoutes({MessageCenterEngine::defaultRoutes()[0], fire, accident});
+    const Rule fire = markRule("Fire", "brand|fire", ":fire_engine", 0, 0xff401010);
+    const Rule accident = markRule("Accident", "ongeval", ":collision", 0xffffcc00, 0);
+    engine.setRoutes(MessageCenterEngine::defaultRoutes() + Rules({fire, accident}));
 
     engine.ingest(rx("1", "flex", "1", "P 1 Brand woning, ongeval", "c"), "channels", 1);
     engine.ingest(rx("2", "flex", "1", "A1 Ambu", "c"), "channels", 2);
@@ -902,23 +935,126 @@ void testMarks()
     check(none && !none->m_protocolData.contains("marks"), "a message no route marks has none");
     check(one && (one->m_protocolData.value("marks").toList().size() == 1), "a message one route marks has one");
 
-    // A route that stops ends the marks too
-    fire.m_stop = true;
-    engine.setRoutes({MessageCenterEngine::defaultRoutes()[0], fire, accident});
+    // A drop ends the marks too
+    Rule drop;
+    drop.m_name = "Fire, nothing more";
+    drop.m_filter.m_text = "brand|fire";
+    drop.m_action = Rule::ActionDrop;
+    engine.setRoutes(MessageCenterEngine::defaultRoutes() + Rules({fire, drop, accident}));
     engine.ingest(rx("4", "flex", "1", "P 1 Brand, ongeval", "c"), "channels", 4);
     const MessageRecord *stopped = engine.find("4");
-    check(stopped && (stopped->m_protocolData.value("marks").toList().size() == 1), "the routes after one that stops do not mark");
+    check(stopped && (stopped->m_protocolData.value("marks").toList().size() == 1), "the rules after one that drops do not mark");
 
-    // A mark sink sets something
-    MessageCenterFileSetting setting;
-    setting.m_name = "m";
-    setting.m_type = "mark";
-    check(!setting.check(true).isEmpty(), "a mark without an icon or a colour is refused");
-    setting.m_background = 0xff000080;
-    check(setting.check(true).isEmpty(), "a mark with a colour of the row only is valid");
-    QList<MessageCenterFileSetting> back = MessageCenterSettings::filesFromJson(MessageCenterSettings::filesToJson({setting}));
-    check((back.size() == 1) && (back[0].m_background == 0xff000080) && (back[0].m_color == 0) && back[0].m_icon.isEmpty(),
-        "a mark in the JSON of the sinks: what it sets only");
+    // A mark sets something
+    Rule mark = markRule("m", "x", QString(), 0, 0);
+    check(!mark.check().isEmpty(), "a mark without an icon or a colour is refused");
+    mark.m_mark.insert("background", 0xff000080);
+    check(mark.check().isEmpty(), "a mark with a colour of the row only is valid");
+    Rules back = MessageCenterSettings::routesFromJson(MessageCenterSettings::routesToJson({mark}));
+    check((back.size() == 1) && (back[0].m_action == Rule::ActionMark) && (back[0].m_mark.value("background").toUInt() == 0xff000080)
+        && !back[0].m_mark.contains("color") && !back[0].m_mark.contains("icon"), "a mark in the JSON of the rules: what it sets only");
+
+    // Rules of before: a route to a mark sink and the log, with stop, becomes a mark, a log and a drop; the mark sink goes
+    const QByteArray before = "[{\"name\":\"Fire\",\"enabled\":true,\"stop\":true,\"sinks\":[\"fire\",\"log\"],"
+        "\"filter\":{\"text\":\"brand\"}}]";
+    Rules upgraded = MessageCenterSettings::routesFromJson(before);
+    QList<MessageCenterFileSetting> sinks;
+    MessageCenterFileSetting fireSink;
+    fireSink.m_name = "fire";
+    fireSink.m_type = "mark";
+    fireSink.m_icon = ":fire_engine";
+    MessageCenterFileSetting fileSink;
+    fileSink.m_name = "file";
+    fileSink.m_path = "x.jsonl";
+    sinks = {fireSink, fileSink};
+    MessageCenterSettings::upgradeRoutes(upgraded, sinks);
+    check((upgraded.size() == 3) && (upgraded[0].m_action == Rule::ActionMark) && (upgraded[0].m_mark.value("icon").toString() == ":fire_engine")
+        && (upgraded[1].m_action == Rule::ActionLog) && (upgraded[2].m_action == Rule::ActionDrop)
+        && (upgraded[2].m_filter.m_text == "brand") && (sinks.size() == 1) && (sinks[0].m_name == "file"),
+        "a route of before: a rule for each sink (a mark sink a mark rule), then a drop; the mark sinks go");
+}
+
+// The changes of the rules: decode, transform, replace; each for the rules after it; the deliveries with the message as
+// the changes left it; a drop ends the walk but the deliveries before it are made
+void testRuleChanges()
+{
+    MessageCenterEngine engine;
+    QStringList seen;
+    engine.addSink(std::unique_ptr<MessageCenterSink>(new MessageCenterActionSink("out", "speech", "${message}", 0,
+        [&seen](const QString&, const MessageRecord&, const QString& text, quint32) { seen.append(text); })));
+
+    Rule transform;
+    transform.m_name = "units";
+    transform.m_filter.m_text = "Unit:";
+    transform.m_action = Rule::ActionTransform;
+    transform.m_pattern = "Unit:(?<unit>\\w+) Job #(?<job>\\S+)";
+    transform.m_template = "Unit ${unit}: job ${job} (${address})";
+    Rule replace;
+    replace.m_name = "spaces";
+    replace.m_action = Rule::ActionReplace;
+    replace.m_pattern = "\\s+";
+    replace.m_template = " ";
+    Rule phone;
+    phone.m_name = "phone";
+    phone.m_filter.m_text = "^call";
+    phone.m_action = Rule::ActionReplace;
+    phone.m_pattern = "(\\d{3})(\\d{4})";
+    phone.m_template = "\\1-\\2";
+    phone.m_all = false;
+    MessageCenterFilter any;
+    engine.setRoutes(rules("send", any, {"out"}) + Rules({transform, replace, phone}) + rules("log", any, {"log"}));
+
+    engine.ingest(rx("1", "pocsag", "1234567", "Unit:NWLN1 Job #0324-1", "c"), "channels", 1);
+    const MessageRecord *t = engine.find("1");
+    check(t && (t->m_text == "Unit NWLN1: job 0324-1 (1234567)") && (t->m_protocolData.value("original_text").toString() == "Unit:NWLN1 Job #0324-1"),
+        "transform: the groups and the fields of the message in the template; the text before kept");
+    check(seen == QStringList({"Unit NWLN1: job 0324-1 (1234567)"}), "a send before a change: the message as the changes left it");
+
+    engine.ingest(rx("2", "pocsag", "1", "call   5551234  or   5559876", "c"), "channels", 2);
+    const MessageRecord *r = engine.find("2");
+    check(r && (r->m_text == "call 555-1234 or 5559876"), "replace: every match (spaces), the first one only (\\1-\\2)");
+    check(r && (r->m_protocolData.value("original_text").toString() == "call   5551234  or   5559876"), "replace: the text before kept, once");
+
+    engine.ingest(rx("3", "pocsag", "1", "nothing to do", "c"), "channels", 3);
+    const MessageRecord *n = engine.find("3");
+    check(n && (n->m_text == "nothing to do") && !n->m_protocolData.contains("original_text"), "a change that changes nothing keeps no original");
+
+    // A drop: the deliveries before it are made, the rules after it do not act
+    seen.clear();
+    Rule drop;
+    drop.m_name = "drop";
+    drop.m_action = Rule::ActionDrop;
+    engine.setRoutes(rules("send", any, {"out"}) + Rules({drop}) + rules("log", any, {"log"}));
+    engine.ingest(rx("4", "pocsag", "1", "dropped", "c"), "channels", 4);
+    check((seen == QStringList({"dropped"})) && !engine.find("4"), "drop: the send before it is made, the log after it is not");
+
+    // A sink takes a message once, whatever the rules that send it there
+    seen.clear();
+    engine.setRoutes(rules("a", any, {"out"}) + rules("b", any, {"out"}));
+    engine.ingest(rx("5", "pocsag", "1", "once", "c"), "channels", 5);
+    check(seen == QStringList({"once"}), "two rules sending to one sink: the message once");
+
+    // Checks
+    Rule bad = transform;
+    bad.m_pattern = "([";
+    check(!bad.check().isEmpty(), "a transform with an expression that is not valid is refused");
+    Rule sendNowhere;
+    sendNowhere.m_name = "x";
+    sendNowhere.m_action = Rule::ActionSend;
+    check(!sendNowhere.check().isEmpty(), "a send without a sink is refused");
+
+    // Through JSON: each action with what it takes
+    Rules all = Rules({transform, replace, phone, drop}) + rules("s", any, {"out", "log", "queue"});
+    Rules back = MessageCenterSettings::routesFromJson(MessageCenterSettings::routesToJson(all));
+    bool same = back.size() == all.size();
+
+    for (size_t i = 0; same && (i < all.size()); i++)
+    {
+        same = (back[i].m_action == all[i].m_action) && (back[i].m_target == all[i].m_target) && (back[i].m_pattern == all[i].m_pattern)
+            && (back[i].m_template == all[i].m_template) && (back[i].m_all == all[i].m_all) && (back[i].m_name == all[i].m_name);
+    }
+
+    check(same, "the rules through JSON: each action with what it takes");
 }
 
 // The presets: Empty is a new message center; Emergency marks the messages of a kind, its sinks those its routes send to
@@ -927,21 +1063,19 @@ void testPresets()
     std::vector<MessageCenterEngine::Route> routes;
     QList<MessageCenterFileSetting> sinks;
     check(MessageCenterSettings::preset("Empty", routes, sinks) && (routes.size() == 1) && sinks.isEmpty()
-        && (routes[0].m_sinks == QStringList("log")), "the Empty preset: every message to the log");
+        && (routes[0].m_action == Rule::ActionLog), "the Empty preset: every message to the log");
     check(!MessageCenterSettings::preset("None such", routes, sinks), "a preset that does not exist");
-    check(MessageCenterSettings::preset("Emergency", routes, sinks) && (routes.size() == (size_t) sinks.size() + 1),
-        "the Emergency preset: the log and a route for each of its marks");
+    check(MessageCenterSettings::preset("Emergency", routes, sinks) && (routes.size() > 2) && sinks.isEmpty()
+        && (routes[0].m_action == Rule::ActionLog), "the Emergency preset: the log and a mark rule for each kind");
 
     bool valid = true;
     MessageCenterEngine engine;
 
-    for (const MessageCenterFileSetting& sink : sinks)
-    {
-        valid = valid && sink.check(true).isEmpty() && (sink.m_type == "mark") && !sink.m_icon.isEmpty();
-        engine.addSink(std::unique_ptr<MessageCenterSink>(new MessageCenterMarkSink(sink.m_name, sink.m_icon, sink.m_color, sink.m_background)));
+    for (size_t i = 1; i < routes.size(); i++) {
+        valid = valid && routes[i].check().isEmpty() && (routes[i].m_action == Rule::ActionMark) && !routes[i].m_mark.value("icon").toString().isEmpty();
     }
 
-    check(valid, "its sinks are valid marks with an icon");
+    check(valid, "its rules are valid marks with an icon");
     engine.setRoutes(routes);
     engine.ingest(rx("p", "flex", "1", "P 1 BDH-01 Brand woning, Ongeval", "c"), "channels", 1);
     engine.ingest(rx("t", "flex", "1", "TESTOPROEP MOB", "c"), "channels", 2);
@@ -1026,22 +1160,22 @@ void testDecodingRoute()
         return;
     }
 
-    MessageCenterEngine::Route decode, after;
+    // A decode rule, then the log of the same messages, then a send of every message: a decode is a change, the rules
+    // after it have the message decoded
+    Rule decode;
     decode.m_name = "flex 1 cyrillic";
     decode.m_filter.m_protocols = QStringList({"flex"});
     decode.m_filter.m_address = "1";
-    decode.m_sinks = QStringList({"log"});
+    decode.m_action = Rule::ActionDecode;
     decode.m_decodeCharset = cyrillic->key();
-    after.m_name = "after";
-    after.m_sinks = QStringList({"after"});
-    engine.setRoutes({decode, after});
+    engine.setRoutes(Rules({decode}) + rules("flex 1 cyrillic", decode.m_filter, {"log"}) + rules("after", MessageCenterFilter(), {"after"}));
 
     MessageRecord flex = rx("f", "flex", "1", "AB", "c");
     flex.m_protocolData.insert("alpha_codes", QString("4142"));
     engine.ingest(flex, "channels", 1);
     check(engine.find("f") && (engine.find("f")->m_text == QString::fromUtf8("\xD0\xB0\xD0\xB1"))
-        && engine.find("f")->m_protocolData.value("redecoded").toBool(), "the sinks of a decoding route get the message decoded");
-    check(texts == QStringList({"AB"}), "the routes after it get the message as received");
+        && engine.find("f")->m_protocolData.value("redecoded").toBool(), "the log after a decode rule has the message decoded");
+    check(texts == QStringList({QString::fromUtf8("\xD0\xB0\xD0\xB1")}), "the rules after a decode have the message decoded");
 
     // A message that cannot be decoded so (no characters kept) goes as it is
     engine.ingest(rx("g", "flex", "1", "CD", "c"), "channels", 2);
@@ -1483,6 +1617,7 @@ int main(int argc, char **argv)
     testEndpointRemoval();
     testGroupMembers();
     testMarks();
+    testRuleChanges();
     testPresets();
     testUdp();
     testCsvSources();

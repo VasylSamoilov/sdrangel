@@ -19,6 +19,7 @@
 #include <memory>
 
 #include <QDateTime>
+#include <QStackedWidget>
 #include <QStandardItemModel>
 #include <QStyledItemDelegate>
 #include <QTextDocument>
@@ -1823,6 +1824,7 @@ void MessageCenterGUI::importRouting()
     settings.m_routes = MessageCenterSettings::routesFromJson(text("routes"));
     settings.m_sinks = MessageCenterSettings::filesFromJson(text("sinks"));
     settings.m_sources = MessageCenterSettings::filesFromJson(text("sources"));
+    MessageCenterSettings::upgradeRoutes(settings.m_routes, settings.m_sinks);
     QString error = MessageCenter::checkRouting(settings);
 
     if (!error.isEmpty())
@@ -2803,33 +2805,50 @@ void MessageCenterGUI::showMatches(const MessageCenterFilter& filter, const QStr
 // changes (marks, decoding), where it sends (and stop). Off: grey
 QString MessageCenterGUI::ruleSentence(const MessageCenterEngine::Route& route) const
 {
+    typedef MessageCenterEngine::Route Rule;
     const QString key = route.m_enabled ? QString("<b style=\"color:#88aacc\">%1</b>") : QString("<b>%1</b>");
     const QString pill = route.m_enabled ? QString("<span style=\"color:#e0e0e0\">%1</span>") : QString("%1");
-    QStringList changes;
-    QStringList places;
 
-    for (const QString& sink : route.m_sinks)
+    // What it finds: the messages of the log it selects (wherever they came from), counted without copying them
+    const MessageCenterFilter& filter = route.m_filter;
+    const int finds = (int) std::count_if(m_center->engine().log().begin(), m_center->engine().log().end(),
+        [&filter](const MessageRecord& r) { return filter.matches(r); });
+    const QString when = route.m_filter.isEmpty() ? QString("%1 any message").arg(key.arg("when"))
+        : QString("%1 a message is %2").arg(key.arg("when"), pill.arg(filterSummary(route.m_filter).toHtmlEscaped()));
+
+    // Its action, as a sentence
+    QString then;
+
+    switch (route.m_action)
     {
-        const auto it = std::find_if(m_settings.m_sinks.begin(), m_settings.m_sinks.end(),
-            [&sink](const MessageCenterFileSetting& f) { return f.m_name == sink; });
+    case Rule::ActionLog:
+        then = QString("%1 it").arg(key.arg("log"));
+        break;
+    case Rule::ActionSend:
+        then = QString("%1 %2").arg(key.arg("send to"), pill.arg(route.m_target.toHtmlEscaped()));
+        break;
+    case Rule::ActionPage:
+        then = QString("%1 it (queue it for its transmitter)").arg(key.arg("page"));
+        break;
+    case Rule::ActionMark:
+    {
+        QString mark;
+        const QString icon = route.m_mark.value("icon").toString();
 
-        if ((it != m_settings.m_sinks.end()) && (it->typeOrDefault() == "mark"))
+        if (!icon.isEmpty()) {
+            mark += QString("<img src=\"%1\" width=\"14\" height=\"14\"> ").arg(MessageCenterContact::iconPath(icon).toHtmlEscaped());
+        }
+        for (const char *colour : {"color", "background"})
         {
-            QString mark = QString("mark %1").arg(sink.toHtmlEscaped());
-
-            if (it->m_color != 0) {
-                mark += QString(" <span style=\"color:%1\">&#9632;</span>").arg(QColor::fromRgba(it->m_color).name());
+            if (route.m_mark.value(colour).toUInt() != 0) {
+                mark += QString("<span style=\"color:%1\">&#9632;</span> ").arg(QColor::fromRgba(route.m_mark.value(colour).toUInt()).name());
             }
+        }
 
-            changes.append(pill.arg(mark));
-        }
-        else
-        {
-            places.append(pill.arg(sink.toHtmlEscaped()));
-        }
+        then = QString("%1 it %2").arg(key.arg("mark"), mark);
+        break;
     }
-
-    if (route.decodes())
+    case Rule::ActionDecode:
     {
         QStringList as;
 
@@ -2840,25 +2859,28 @@ QString MessageCenterGUI::ruleSentence(const MessageCenterEngine::Route& route) 
             as.append(route.m_decodeType);
         }
 
-        changes.append(pill.arg(QString("decode as %1").arg(as.join(" ").toHtmlEscaped())));
+        then = QString("%1 %2").arg(key.arg("decode as"), pill.arg(as.join(" ").toHtmlEscaped()));
+        break;
     }
-
-    // What it finds: the messages of the log it selects (wherever they came from)
-    const int finds = (int) m_center->engine().select(route.m_filter).size();
-    const QString when = route.m_filter.isEmpty() ? QString("%1 any message").arg(key.arg("when"))
-        : QString("%1 a message is %2").arg(key.arg("when"), pill.arg(filterSummary(route.m_filter).toHtmlEscaped()));
+    case Rule::ActionTransform:
+        then = QString("%1 the text /%2/ into %3").arg(key.arg("transform"), pill.arg(route.m_pattern.toHtmlEscaped()),
+            pill.arg(route.m_template.toHtmlEscaped()));
+        break;
+    case Rule::ActionReplace:
+        then = QString("%1 /%2/ by %3%4").arg(key.arg("replace"), pill.arg(route.m_pattern.toHtmlEscaped()),
+            pill.arg(route.m_template.toHtmlEscaped()), route.m_all ? QString() : QString(" (the first one)"));
+        break;
+    case Rule::ActionDrop:
+        then = QString("%1 it: no rule after this one sees it").arg(key.arg("drop"));
+        break;
+    default:
+        break;
+    }
 
     QStringList lines;
     lines.append(QString("<b>%1</b>: %2 <span style=\"color:#888888\">(finds %3)</span>")
         .arg(route.m_name.toHtmlEscaped(), when).arg(finds));
-
-    if (!changes.isEmpty()) {
-        lines.append(QString("%1 %2").arg(key.arg("change"), changes.join(", ")));
-    }
-
-    lines.append(QString("%1 %2%3").arg(key.arg("send to"), places.isEmpty() ? QString("<i>nowhere</i>") : places.join(", "),
-        route.m_stop ? QString(", then %1").arg(key.arg("stop")) : QString()));
-
+    lines.append(then);
     const QString html = lines.join("<br>");
     return route.m_enabled ? html : QString("<span style=\"color:#777777\">(off) %1</span>").arg(html);
 }
@@ -2875,22 +2897,6 @@ QString fileTarget(const MessageCenterFileSetting& f)
     }
     if ((type == "command") || (type == "speech")) {
         return f.m_text;
-    }
-    if (type == "mark")
-    {
-        QStringList parts;
-
-        if (!f.m_icon.isEmpty()) {
-            parts << QString("icon %1").arg(f.m_icon.startsWith(':') ? f.m_icon.mid(1) : QFileInfo(f.m_icon).fileName());
-        }
-        if (f.m_color != 0) {
-            parts << QString("text %1").arg(QColor::fromRgba(f.m_color).name());
-        }
-        if (f.m_background != 0) {
-            parts << QString("row %1").arg(QColor::fromRgba(f.m_background).name());
-        }
-
-        return parts.join(", ");
     }
     if (type == "map") {
         return "the position in the message";
@@ -2925,10 +2931,16 @@ void MessageCenterGUI::refreshFiles()
     auto routesTo = [this](const QString& sink) {
         QStringList routes;
 
+        // The rules that deliver to it: the log, the page, or a send to it
         for (int r = 0; r < (int) m_settings.m_routes.size(); r++)
         {
-            if (m_settings.m_routes[r].m_sinks.contains(sink)) {
-                routes.append(QString("%1 %2").arg(r + 1).arg(m_settings.m_routes[r].m_name));
+            const MessageCenterEngine::Route& rule = m_settings.m_routes[r];
+            const bool to = (sink == "log") ? (rule.m_action == MessageCenterEngine::Route::ActionLog)
+                : (sink == "queue") ? (rule.m_action == MessageCenterEngine::Route::ActionPage)
+                : ((rule.m_action == MessageCenterEngine::Route::ActionSend) && (rule.m_target == sink));
+
+            if (to) {
+                routes.append(QString("%1 %2").arg(r + 1).arg(rule.m_name));
             }
         }
 
@@ -2946,9 +2958,9 @@ void MessageCenterGUI::refreshFiles()
     m_sinksTable->setRowCount(m_builtInSinks + m_settings.m_sinks.size());
     MessageCenterEngine::SinkStat logStat = stats.value("log");
     MessageCenterEngine::SinkStat queueStat = stats.value("queue");
-    setSinkRow(0, {"log", "built in", "the log of the Message Center", "", QString::number(logStat.m_accepted),
+    setSinkRow(0, {"log", "log", "built in: Messages and the history (the rules that log)", "", QString::number(logStat.m_accepted),
         QString::number(logStat.m_failed)}, routesTo("log"), true);
-    setSinkRow(1, {"queue", "built in", "the pages to transmit (messages for a transmitter)", "", QString::number(queueStat.m_accepted),
+    setSinkRow(1, {"queue", "queue", "built in: the pages to transmit (the rules that page)", "", QString::number(queueStat.m_accepted),
         QString::number(queueStat.m_failed)}, routesTo("queue"), true);
 
     for (int i = 0; i < m_settings.m_sinks.size(); i++)
@@ -2958,24 +2970,11 @@ void MessageCenterGUI::refreshFiles()
         int row = m_builtInSinks + i;
         setSinkRow(row, {f.m_name, f.typeOrDefault(), fileTarget(f), fileFormat(f),
             QString::number(stat.m_accepted), QString::number(stat.m_failed)}, routesTo(f.m_name), false);
-
-        if (f.typeOrDefault() == "mark")
-        {
-            m_sinksTable->item(row, 2)->setIcon(MessageCenterContactIcons::icon(f.m_icon));
-            m_sinksTable->item(row, 2)->setBackground(f.m_background ? QBrush(QColor::fromRgba(f.m_background)) : QBrush());
-            m_sinksTable->item(row, 2)->setForeground(f.m_color ? QBrush(QColor::fromRgba(f.m_color)) : QBrush());
-        }
-        else if (m_sinksTable->item(row, 2))
-        {
-            m_sinksTable->item(row, 2)->setIcon(QIcon());
-            m_sinksTable->item(row, 2)->setBackground(QBrush());
-            m_sinksTable->item(row, 2)->setForeground(QBrush());
-        }
     }
 
     m_sourcesTable->setRowCount(m_builtInSources + m_settings.m_sources.size());
-    setRow(m_sourcesTable, 0, {"channels", "built in", "the Radio Paging demodulators and modulators"});
-    setRow(m_sourcesTable, 1, {"api", "built in", "the ingest action of the WebAPI and of the MCP server"});
+    setRow(m_sourcesTable, 0, {"channels", "channels", "built in: the Radio Paging demodulators and modulators"});
+    setRow(m_sourcesTable, 1, {"api", "api", "built in: the ingest action of the WebAPI and of the MCP server"});
 
     for (int r = 0; r < m_builtInSources; r++)
     {
@@ -3148,55 +3147,159 @@ void MessageCenterGUI::editRoute(int index, const MessageCenterEngine::Route *pr
     findsLine->addWidget(showFound);
     findsLine->addStretch(1);
     layout->addLayout(findsLine);
-    QList<QCheckBox*> sinkChecks;
 
-    QStringList sinks = {"log", "queue"};
+    // The action of the rule, and below it the fields of that action only
+    typedef MessageCenterEngine::Route Rule;
+    static const QList<QPair<Rule::Action, const char*>> actions = {
+        {Rule::ActionLog, "Log: keep it in Messages and the history"},
+        {Rule::ActionSend, "Send: to a destination of Connections"},
+        {Rule::ActionPage, "Page: queue it for a transmitter"},
+        {Rule::ActionMark, "Mark: an icon and colours in the log"},
+        {Rule::ActionDecode, "Decode as: another codepage or type"},
+        {Rule::ActionTransform, "Transform: a new text from a template"},
+        {Rule::ActionReplace, "Replace: in the text, as sed does"},
+        {Rule::ActionDrop, "Drop: no rule after this one sees it"}
+    };
+    QComboBox *action = new QComboBox(&dialog);
+
+    for (const auto& a : actions) {
+        action->addItem(a.second, (int) a.first);
+    }
+
+    action->setCurrentIndex(std::max(0, action->findData((int) route.m_action)));
+    action->setToolTip("What the rule does with the messages it selects. The changes (mark, decode, transform, replace) are\n"
+        "for the rules after it; the log, the sends and the pages are made at the end, with the message as the changes left it");
+    QFormLayout *actionForm = new QFormLayout();
+    actionForm->addRow(new QLabel("<b>Then</b>", &dialog), action);
+    layout->addLayout(actionForm);
+    QStackedWidget *pages = new QStackedWidget(&dialog);
+    auto note = [&dialog](const QString& text) {
+        QLabel *label = new QLabel(text, &dialog);
+        label->setWordWrap(true);
+        label->setStyleSheet("QLabel { color: #aaaaaa; }");
+        return label;
+    };
+    auto form = [&dialog]() {
+        QWidget *page = new QWidget(&dialog);
+        QFormLayout *f = new QFormLayout(page);
+        f->setContentsMargins(0, 0, 0, 0);
+        return std::make_pair(page, f);
+    };
+
+    // Log, page, drop: what they do
+    QWidget *logPage = note("Every message the rule selects is kept in Messages and in the history (when it is kept).");
+    QWidget *pagePage = note("A message for a transmitter (sent through the API, or by a rule) becomes a page in the queue of "
+        "the Send tab; the others are left alone.");
+    QWidget *dropPage = note("The rules after this one do not see the messages it selects. What the rules before it did stays "
+        "(their log, sends and pages are made).");
+
+    // Send: a destination of Connections
+    auto sendForm = form();
+    QComboBox *target = new QComboBox(sendForm.first);
 
     for (const MessageCenterFileSetting& f : m_settings.m_sinks) {
-        sinks.append(f.m_name);
+        target->addItem(QString("%1 (%2)").arg(f.m_name, f.typeOrDefault()), f.m_name);
     }
 
-    // The sinks on a line that wraps, after what they are for
-    QWidget *sinkLine = new QWidget(&dialog);
-    FlowLayout *sinkFlow = new FlowLayout(sinkLine, 0, 10, 3);
-    QLabel *sendTo = new QLabel("<b>Send to</b>", sinkLine);
-    sendTo->setToolTip("Where the messages the rule selects go: the log, the transmit queue, and the sinks of Connections\n"
-        "(a mark sink changes the message: its icon and colours in the log)");
-    sinkFlow->addWidget(sendTo);
+    target->setCurrentIndex(std::max(0, target->findData(route.m_target)));
+    target->setToolTip("A file, UDP, a command, speech or the Map: added in the Connections tab");
+    sendForm.second->addRow("To", target);
 
-    // A mark sink changes the message (its icon and colours): with the changes, as the sentence of the rule has it
-    QWidget *markLine = new QWidget(&dialog);
-    FlowLayout *markFlow = new FlowLayout(markLine, 0, 10, 3);
+    if (target->count() == 0) {
+        sendForm.second->addRow(note("There is no destination yet: add one in the Connections tab."));
+    }
 
-    for (const QString& sink : sinks)
-    {
-        const auto it = std::find_if(m_settings.m_sinks.begin(), m_settings.m_sinks.end(),
-            [&sink](const MessageCenterFileSetting& f) { return f.m_name == sink; });
-        const bool mark = (it != m_settings.m_sinks.end()) && (it->typeOrDefault() == "mark");
-        QCheckBox *check = new QCheckBox(sink, mark ? markLine : sinkLine);
-        check->setProperty("sink", sink);
-        check->setChecked(route.m_sinks.contains(sink));
-        if (mark) {
-            markFlow->addWidget(check);
-        } else {
-            sinkFlow->addWidget(check);
+    // Mark: an icon, the colour of the text, of the row
+    auto markForm = form();
+    QWidget *markRow = new QWidget(markForm.first);
+    QHBoxLayout *markLayout = new QHBoxLayout(markRow);
+    markLayout->setContentsMargins(0, 0, 0, 0);
+    QToolButton *markIcon = new QToolButton(markRow);
+    QToolButton *markText = new QToolButton(markRow);
+    QToolButton *markBackground = new QToolButton(markRow);
+    markIcon->setToolTip("The icon before the message: click to choose, right click for none");
+    markText->setToolTip("The colour of the text of the message: click to choose, right click for none");
+    markBackground->setToolTip("The colour of the row of the message: click to choose, right click for none");
+    markLayout->addWidget(markIcon);
+    markLayout->addWidget(markText);
+    markLayout->addWidget(markBackground);
+    markLayout->addStretch();
+    markForm.second->addRow("Mark", markRow);
+    QString iconValue = route.m_mark.value("icon").toString();
+    quint32 textValue = route.m_mark.value("color").toUInt();
+    quint32 backgroundValue = route.m_mark.value("background").toUInt();
+    auto showMark = [&]() {
+        QIcon icon = MessageCenterContactIcons::icon(iconValue);
+        markIcon->setIcon(icon);
+        markIcon->setText(icon.isNull() ? QString("Icon") : QString());
+        markIcon->setToolButtonStyle(icon.isNull() ? Qt::ToolButtonTextOnly : Qt::ToolButtonIconOnly);
+
+        for (auto pair : {qMakePair(markText, textValue), qMakePair(markBackground, backgroundValue)})
+        {
+            QToolButton *button = pair.first;
+            const bool none = (pair.second == 0);
+            button->setText(none ? QString(button == markText ? "Text colour" : "Row colour") : QString());
+            button->setStyleSheet(none ? QString()
+                : QString("QToolButton { background-color: %1; min-width: 2em; }").arg(QColor::fromRgba(pair.second).name()));
         }
+    };
+    showMark();
 
-        sinkChecks.append(check);
+    for (QToolButton *button : {markIcon, markText, markBackground}) {
+        button->setContextMenuPolicy(Qt::CustomContextMenu);
     }
 
-    layout->addWidget(sinkLine);
+    connect(markIcon, &QToolButton::clicked, &dialog, [&]() {
+        MessageCenterIconPicker picker(iconValue, &dialog);
 
-    QCheckBox *stop = new QCheckBox("Stop: the rules after this one are not checked for the messages it selects", &dialog);
-    stop->setChecked(route.m_stop);
-    QCheckBox *enabled = new QCheckBox("Enabled", &dialog);
-    enabled->setChecked(route.m_enabled);
+        if (picker.exec() == QDialog::Accepted)
+        {
+            iconValue = picker.icon();
+            showMark();
+        }
+    });
+    connect(markIcon, &QWidget::customContextMenuRequested, &dialog, [&]() { iconValue.clear(); showMark(); });
+    const QPair<QToolButton*, quint32*> markColours[] = {qMakePair(markText, &textValue), qMakePair(markBackground, &backgroundValue)};
 
-    // Decode as: the codepages of every protocol, once each; a message of a protocol without it is sent as it is
-    QFormLayout *decodeForm = new QFormLayout();
+    for (const auto& pair : markColours)
+    {
+        QToolButton *button = pair.first;
+        quint32 *value = pair.second;
+        connect(button, &QToolButton::clicked, &dialog, [&, value, button]() {
+            QColor chosen = QColorDialog::getColor(*value ? QColor::fromRgba(*value) : QColor(Qt::white), &dialog,
+                button == markText ? QString("Colour of the text") : QString("Colour of the row"));
+
+            if (chosen.isValid())
+            {
+                *value = chosen.rgba();
+                showMark();
+            }
+        });
+        connect(button, &QWidget::customContextMenuRequested, &dialog, [&, value]() { *value = 0; showMark(); });
+    }
+
+    // Transform and replace: an expression, a template, the case
+    auto textForm = form();
+    QLineEdit *pattern = new QLineEdit(route.m_pattern, textForm.first);
+    pattern->setPlaceholderText("regular expression, e.g. Unit:(?<unit>\\w+) Job #(?<job>\\S+)");
+    QLineEdit *tmpl = new QLineEdit(route.m_template, textForm.first);
+    QCheckBox *caseInsensitive = new QCheckBox("Not case sensitive", textForm.first);
+    caseInsensitive->setChecked(route.m_caseInsensitive);
+    QCheckBox *all = new QCheckBox("Every match (else the first one only)", textForm.first);
+    all->setChecked(route.m_all);
+    QLabel *textHelp = note(QString());
+    textForm.second->addRow("Find", pattern);
+    textForm.second->addRow("Into", tmpl);
+    textForm.second->addRow(QString(), caseInsensitive);
+    textForm.second->addRow(QString(), all);
+    textForm.second->addRow(textHelp);
+
+    // Decode as: the codepages of every protocol, once each; a message of a protocol without it is left as it is
+    auto decodePage = form();
+    QFormLayout *decodeForm = decodePage.second;
     QComboBox *decodeCharset = new QComboBox(&dialog);
-    decodeCharset->setToolTip("The messages the rule selects are decoded again with this codepage before they are sent.\n"
-        "A message of a protocol that does not have it is sent as it was received");
+    decodeCharset->setToolTip("The messages the rule selects are decoded again with this codepage, for the rules after it.\n"
+        "A message of a protocol that does not have it is left as it was received");
     decodeCharset->addItem("As received");
     QList<RadioPagingCharset::Key> keys;
     keys.append(RadioPagingCharset::Key());
@@ -3237,18 +3340,56 @@ void MessageCenterGUI::editRoute(int index, const MessageCenterEngine::Route *pr
 
     showDecodeType();
     connect(filter, &MessageCenterFilterWidget::changed, &dialog, showDecodeType);
-    decodeForm->addRow(new QLabel("<b>Change</b>", &dialog));
+    decodeForm->addRow("Codepage", decodeCharset);
+    decodeForm->addRow("Type", decodeType);
 
-    if (markFlow->count() > 0) {
-        decodeForm->addRow("Mark", markLine);
-    } else {
-        markLine->hide();
+    // The page of each action; transform and replace share theirs
+    const QMap<int, QWidget*> pageOf = {
+        {Rule::ActionLog, logPage}, {Rule::ActionSend, sendForm.first}, {Rule::ActionPage, pagePage},
+        {Rule::ActionMark, markForm.first}, {Rule::ActionDecode, decodePage.first}, {Rule::ActionTransform, textForm.first},
+        {Rule::ActionReplace, textForm.first}, {Rule::ActionDrop, dropPage}
+    };
+
+    for (QWidget *page : {logPage, sendForm.first, pagePage, markForm.first, decodePage.first, textForm.first, dropPage}) {
+        pages->addWidget(page);
     }
 
-    decodeForm->addRow("Decode as codepage", decodeCharset);
-    decodeForm->addRow("Decode as type", decodeType);
+    auto showAction = [&]() {
+        const int a = action->currentData().toInt();
+        pages->setCurrentWidget(pageOf.value(a, logPage));
 
-    // A new route: where it goes, before route 1 by default
+        // As high as the page of the action, not the highest one
+        for (int i = 0; i < pages->count(); i++) {
+            pages->widget(i)->setSizePolicy(QSizePolicy::Preferred, (i == pages->currentIndex()) ? QSizePolicy::Preferred : QSizePolicy::Ignored);
+        }
+
+        pages->updateGeometry();
+
+        // Higher when the page needs it (the filters wrap: their height is that of the width), never lower
+        QTimer::singleShot(0, &dialog, [&dialog]() {
+            const int needed = dialog.layout()->hasHeightForWidth() ? dialog.layout()->totalHeightForWidth(dialog.width())
+                : dialog.layout()->totalSizeHint().height();
+
+            if (needed > dialog.height()) {
+                dialog.resize(dialog.width(), needed);
+            }
+        });
+        const bool replace = (a == Rule::ActionReplace);
+        all->setVisible(replace);
+        textHelp->setText(replace
+            ? QString("Each match of Find in the text (or the first one) is replaced by Into: \\1 or ${1} for a group, "
+                "${name} for a named group, ${address}, ${channel}, ${time}... for a field of the message")
+            : QString("When Find is found in the text, the text becomes Into: ${1} or ${name} for its groups, ${address}, "
+                "${channel}, ${time}, ${text}... for a field of the message. The text before is kept (original_text)"));
+    };
+    showAction();
+    connect(action, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, showAction);
+    layout->addWidget(pages);
+    QCheckBox *enabled = new QCheckBox("Enabled", &dialog);
+    enabled->setChecked(route.m_enabled);
+    QFormLayout *positionForm = new QFormLayout();
+
+    // A new rule: where it goes, before rule 1 by default
     QComboBox *position = nullptr;
 
     if (isNew)
@@ -3263,52 +3404,73 @@ void MessageCenterGUI::editRoute(int index, const MessageCenterEngine::Route *pr
         position->addItem(routes.empty() ? QString("First") : QString("After %1 %2").arg(routes.size()).arg(routes.back().m_name),
             (int) routes.size());
         position->setCurrentIndex(0);
-        decodeForm->addRow("Insert", position);
+        positionForm->addRow("Insert", position);
     }
 
+    QLabel *error = new QLabel(&dialog);
+    error->setStyleSheet("QLabel { color: #ff7777; }");
+    error->setWordWrap(true);
     QPushButton *ok = new QPushButton("OK", &dialog);
     QPushButton *cancel = new QPushButton("Cancel", &dialog);
     QHBoxLayout *buttons = new QHBoxLayout();
     buttons->addStretch();
     buttons->addWidget(ok);
     buttons->addWidget(cancel);
-    // In the order of the sentence: when, change, send to, then stop
-    const int sinkIndex = layout->indexOf(sinkLine);
-    layout->removeWidget(sinkLine);
-    layout->insertLayout(sinkIndex, decodeForm);
-    layout->insertWidget(sinkIndex + 1, sinkLine);
-    layout->addWidget(stop);
     layout->addWidget(enabled);
+    layout->addLayout(positionForm);
+    layout->addWidget(error);
     layout->addLayout(buttons);
-    connect(ok, &QPushButton::clicked, &dialog, &QDialog::accept);
+
+    // The rule of the dialog: its action with what that action takes, the rest not kept
+    auto ruleOfDialog = [&]() {
+        Rule r = route;
+        r.m_name = name->text().trimmed().isEmpty() ? QString("rule %1").arg(m_settings.m_routes.size() + 1) : name->text().trimmed();
+        r.m_filter = filter->filter();
+        r.m_enabled = enabled->isChecked();
+        r.m_action = (Rule::Action) action->currentData().toInt();
+        r.m_target = (r.m_action == Rule::ActionSend) ? target->currentData().toString() : QString();
+        r.m_mark.clear();
+
+        if (r.m_action == Rule::ActionMark)
+        {
+            if (!iconValue.isEmpty()) {
+                r.m_mark.insert("icon", iconValue);
+            }
+            if (textValue != 0) {
+                r.m_mark.insert("color", textValue);
+            }
+            if (backgroundValue != 0) {
+                r.m_mark.insert("background", backgroundValue);
+            }
+        }
+
+        const bool decode = (r.m_action == Rule::ActionDecode);
+        r.m_decodeCharset = decode ? keys.value(decodeCharset->currentIndex()) : RadioPagingCharset::Key();
+        r.m_decodeType = decode ? decodeType->currentData().toString() : QString();
+        const bool text = (r.m_action == Rule::ActionTransform) || (r.m_action == Rule::ActionReplace);
+        r.m_pattern = text ? pattern->text() : QString();
+        r.m_template = text ? tmpl->text() : QString();
+        r.m_caseInsensitive = text && caseInsensitive->isChecked();
+        r.m_all = all->isChecked();
+        return r;
+    };
+
+    // A rule that cannot work says why, the dialog stays
+    connect(ok, &QPushButton::clicked, &dialog, [&]() {
+        const QString why = ruleOfDialog().check();
+        error->setText(why);
+
+        if (why.isEmpty()) {
+            dialog.accept();
+        }
+    });
     connect(cancel, &QPushButton::clicked, &dialog, &QDialog::reject);
 
     if (dialog.exec() != QDialog::Accepted) {
         return;
     }
 
-    route.m_name = name->text().trimmed().isEmpty() ? QString("rule %1").arg(m_settings.m_routes.size() + 1) : name->text().trimmed();
-    route.m_filter = filter->filter();
-    route.m_sinks.clear();
-
-    for (QCheckBox *check : sinkChecks)
-    {
-        if (check->isChecked()) {
-            route.m_sinks.append(check->property("sink").toString());
-        }
-    }
-
-    route.m_stop = stop->isChecked();
-    route.m_enabled = enabled->isChecked();
-    route.m_decodeCharset = keys.value(decodeCharset->currentIndex());
-    route.m_decodeType = decodeType->currentData().toString();
-
-    // A route with an expression that is not valid would select nothing: said now
-    QString error = route.m_filter.errors();
-
-    if (!error.isEmpty()) {
-        QMessageBox::information(this, "Rule", QString("A condition can not match, the rule selects nothing:\n%1").arg(error));
-    }
+    route = ruleOfDialog();
 
     int at = index;
 
@@ -3340,15 +3502,16 @@ void MessageCenterGUI::createRouteFromRecord(const QString& recordJson, const QV
         return;
     }
 
+    // The messages of the address: decoded so when a codepage or a type was chosen (All codepages), else marked
     MessageCenterEngine::Route route;
     route.m_decodeCharset = RadioPagingPage::charsetKey(charset);
     route.m_decodeType = type;
+    route.m_action = (!route.m_decodeCharset.empty() || !type.isEmpty()) ? MessageCenterEngine::Route::ActionDecode
+        : MessageCenterEngine::Route::ActionMark;
     route.m_filter.m_protocols = QStringList(record.m_protocol.toLower());
     route.m_filter.m_polarity = (record.m_polarity == MessageRecord::PolarityUnknown) ? -1 : (int) record.m_polarity;
     route.m_filter.m_msgType = record.m_msgType;
     route.m_filter.m_address = QRegularExpression::escape(record.m_address);
-    route.m_sinks = QStringList("log");
-    route.m_stop = true;
     route.m_name = QString("%1 %2").arg(record.m_protocol.toUpper(), record.m_address);
 
     if (!route.m_decodeCharset.empty())
@@ -3404,8 +3567,8 @@ void MessageCenterGUI::editFile(bool sink, int index)
     type->setCurrentIndex(std::max(0, type->findText(setting.typeOrDefault())));
     type->setToolTip(sink
         ? "file: written as JSON lines, CSV or the CSV log of the Pager demodulator. udp: a datagram for each message.\n"
-          "command: run for each message. speech: said for each message.\n"
-          "mark: an icon before the message in the log, the colour of its text, of its row. map: the position in the message, on the Map"
+          "command: run for each message. speech: said for each message. map: the position in the message, on the Map.\n"
+          "A rule sends messages to it (its action Send); a mark is an action of a rule"
         : "file: a JSON lines file, read as it grows. csv: a CSV log of a message center or of the Pager\n"
           "demodulator, read as it grows. udp: datagrams in JSON or in the format of the Pager demodulator");
     QLineEdit *path = new QLineEdit(setting.m_path, &dialog);
@@ -3427,75 +3590,6 @@ void MessageCenterGUI::editFile(bool sink, int index)
     text->setToolTip("${address}, ${message}, ${protocol}, ${type}, ${channel}, ${mode}, ${id}, ${frequency}, ${time} and\n"
         "${0}, ${1}... (the captures of the text expression of the rule) are replaced.\n"
         "A command is split into the program and its arguments first: the message goes into the arguments only");
-    // A mark: an icon, a colour of the text and of the row, each optional (right click: none)
-    QWidget *markRow = new QWidget(&dialog);
-    QHBoxLayout *markLayout = new QHBoxLayout(markRow);
-    markLayout->setContentsMargins(0, 0, 0, 0);
-    QToolButton *markIcon = new QToolButton(markRow);
-    QToolButton *markText = new QToolButton(markRow);
-    QToolButton *markBackground = new QToolButton(markRow);
-    markIcon->setToolTip("The icon before the message: click to choose, right click for none");
-    markText->setToolTip("The colour of the text of the message: click to choose, right click for none");
-    markBackground->setToolTip("The colour of the row of the message: click to choose, right click for none");
-    markLayout->addWidget(markIcon);
-    markLayout->addWidget(markText);
-    markLayout->addWidget(markBackground);
-    markLayout->addStretch();
-    QString iconValue = setting.m_icon;
-    quint32 textValue = setting.m_color;
-    quint32 backgroundValue = setting.m_background;
-
-    auto showMark = [&]() {
-        QIcon icon = MessageCenterContactIcons::icon(iconValue);
-        markIcon->setIcon(icon);
-        markIcon->setText(icon.isNull() ? QString("Icon") : QString());
-        markIcon->setToolButtonStyle(icon.isNull() ? Qt::ToolButtonTextOnly : Qt::ToolButtonIconOnly);
-
-        for (auto pair : {qMakePair(markText, textValue), qMakePair(markBackground, backgroundValue)})
-        {
-            QToolButton *button = pair.first;
-            const bool none = (pair.second == 0);
-            button->setText(none ? QString(button == markText ? "Text colour" : "Row colour") : QString());
-            button->setStyleSheet(none ? QString()
-                : QString("QToolButton { background-color: %1; min-width: 2em; }").arg(QColor::fromRgba(pair.second).name()));
-        }
-    };
-    showMark();
-
-    for (QToolButton *button : {markIcon, markText, markBackground}) {
-        button->setContextMenuPolicy(Qt::CustomContextMenu);
-    }
-
-    connect(markIcon, &QToolButton::clicked, &dialog, [&]() {
-        MessageCenterIconPicker picker(iconValue, &dialog);
-
-        if (picker.exec() == QDialog::Accepted)
-        {
-            iconValue = picker.icon();
-            showMark();
-        }
-    });
-    connect(markIcon, &QWidget::customContextMenuRequested, &dialog, [&]() { iconValue.clear(); showMark(); });
-
-    const QPair<QToolButton*, quint32*> colourButtons[] = {qMakePair(markText, &textValue), qMakePair(markBackground, &backgroundValue)};
-
-    for (const auto& pair : colourButtons)
-    {
-        QToolButton *button = pair.first;
-        quint32 *value = pair.second;
-        connect(button, &QToolButton::clicked, &dialog, [&, value, button]() {
-            QColor chosen = QColorDialog::getColor(*value ? QColor::fromRgba(*value) : QColor(Qt::white), &dialog,
-                button == markText ? QString("Colour of the text") : QString("Colour of the row"));
-
-            if (chosen.isValid())
-            {
-                *value = chosen.rgba();
-                showMark();
-            }
-        });
-        connect(button, &QWidget::customContextMenuRequested, &dialog, [&, value]() { *value = 0; showMark(); });
-    }
-
     layout->addRow("Name", name);
     layout->addRow("Type", type);
     layout->addRow("File", pathRow);
@@ -3503,7 +3597,6 @@ void MessageCenterGUI::editFile(bool sink, int index)
     layout->addRow("Address", address);
     layout->addRow("Port", port);
     layout->addRow("Text", text);
-    layout->addRow("Mark", markRow);
 
     // The fields of the type. A row is shown or hidden with its label (QFormLayout::setRowVisible is Qt 6 only)
     auto setRowVisible = [layout](QWidget *field, bool visible) {
@@ -3523,7 +3616,6 @@ void MessageCenterGUI::editFile(bool sink, int index)
         setRowVisible(address, udp);
         setRowVisible(port, udp);
         setRowVisible(text, hasText);
-        setRowVisible(markRow, t == "mark");
         int current = format->currentIndex();
         format->blockSignals(true);
         format->clear();
@@ -3559,9 +3651,7 @@ void MessageCenterGUI::editFile(bool sink, int index)
     buttons->addWidget(ok);
     buttons->addWidget(cancel);
 
-    // A sink takes only what routes send to it: the routes are chosen here too. With no route, one that sends
-    // every message to it can be made
-    QList<QCheckBox*> routeChecks;
+    // A sink takes only what rules send to it: the rules that do, and a new rule that sends every message to it
     QCheckBox *newRoute = nullptr;
 
     if (sink)
@@ -3569,17 +3659,20 @@ void MessageCenterGUI::editFile(bool sink, int index)
         QWidget *routesBox = new QWidget(&dialog);
         QVBoxLayout *routesLayout = new QVBoxLayout(routesBox);
         routesLayout->setContentsMargins(0, 0, 0, 0);
+        QStringList sending;
 
         for (int r = 0; r < (int) m_settings.m_routes.size(); r++)
         {
             const MessageCenterEngine::Route& route = m_settings.m_routes[r];
-            QCheckBox *check = new QCheckBox(QString("%1 (%2)").arg(route.m_name).arg(filterSummary(route.m_filter)), routesBox);
-            check->setChecked(!isNew && route.m_sinks.contains(oldName));
-            check->setProperty("route", r);
-            routesLayout->addWidget(check);
-            routeChecks.append(check);
+
+            if (!isNew && (route.m_action == MessageCenterEngine::Route::ActionSend) && (route.m_target == oldName)) {
+                sending.append(QString("%1 %2").arg(r + 1).arg(route.m_name));
+            }
         }
 
+        QLabel *sendingLabel = new QLabel(sending.isEmpty() ? QString("none: it takes nothing") : sending.join(", "), routesBox);
+        sendingLabel->setWordWrap(true);
+        routesLayout->addWidget(sendingLabel);
         newRoute = new QCheckBox("New rule: every message to this sink", routesBox);
         newRoute->setToolTip("Adds a rule without a filter that sends every message to this sink.\n"
             "Edit it in Rules to select the messages");
@@ -3617,10 +3710,6 @@ void MessageCenterGUI::editFile(bool sink, int index)
         setting.m_address = (t == "udp") ? address->text().trimmed() : QString();
         setting.m_port = (t == "udp") ? port->value() : 0;
         setting.m_text = ((t == "command") || (t == "speech")) ? text->text() : QString();
-        const bool mark = (t == "mark");
-        setting.m_icon = mark ? iconValue : QString();
-        setting.m_color = mark ? textValue : 0;
-        setting.m_background = mark ? backgroundValue : 0;
 
         QString error = setting.check(sink);
 
@@ -3646,30 +3735,27 @@ void MessageCenterGUI::editFile(bool sink, int index)
 
     QStringList keys(sink ? "sinks" : "sources");
 
-    // The routes that send to the sink, as chosen; a sink renamed keeps its routes
+    // A sink renamed keeps its rules (they send to its new name); a new rule that sends every message to it
     if (sink)
     {
         bool routesChanged = false;
 
-        for (QCheckBox *check : routeChecks)
+        for (MessageCenterEngine::Route& route : m_settings.m_routes)
         {
-            MessageCenterEngine::Route& route = m_settings.m_routes[check->property("route").toInt()];
-            const QStringList before = route.m_sinks;
-            route.m_sinks.removeAll(oldName);
-            route.m_sinks.removeAll(setting.m_name);
-
-            if (check->isChecked()) {
-                route.m_sinks.append(setting.m_name);
+            if (!isNew && (oldName != setting.m_name) && (route.m_action == MessageCenterEngine::Route::ActionSend)
+                && (route.m_target == oldName))
+            {
+                route.m_target = setting.m_name;
+                routesChanged = true;
             }
-
-            routesChanged = routesChanged || (before != route.m_sinks);
         }
 
         if (newRoute && newRoute->isChecked())
         {
             MessageCenterEngine::Route route;
             route.m_name = QString("to %1").arg(setting.m_name);
-            route.m_sinks = QStringList(setting.m_name);
+            route.m_action = MessageCenterEngine::Route::ActionSend;
+            route.m_target = setting.m_name;
             m_settings.m_routes.push_back(route);
             routesChanged = true;
         }
@@ -3769,10 +3855,11 @@ void MessageCenterGUI::removeSink()
         QString name = m_settings.m_sinks[row].m_name;
         m_settings.m_sinks.removeAt(row);
 
-        // The routes do not send to a sink that is gone
-        for (MessageCenterEngine::Route& route : m_settings.m_routes) {
-            route.m_sinks.removeAll(name);
-        }
+        // The rules that sent to a sink that is gone go too: they would do nothing
+        auto& rules = m_settings.m_routes;
+        rules.erase(std::remove_if(rules.begin(), rules.end(), [&name](const MessageCenterEngine::Route& rule) {
+            return (rule.m_action == MessageCenterEngine::Route::ActionSend) && (rule.m_target == name);
+        }), rules.end());
 
         refreshFiles();
         refreshRoutes();
