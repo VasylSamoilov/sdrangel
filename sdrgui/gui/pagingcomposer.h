@@ -32,6 +32,8 @@ class PagingCodepageTable;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
+class QGridLayout;
+class QHBoxLayout;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -62,6 +64,11 @@ public:
     void setDestination(const QString& transmitter, const QString& protocol, const QString& address, int function, int polarity);
     //!< Copies and send delay are for the network mode (POCSAG and FLEX)
     void setNetworkMode(bool network);
+    //!< What the address is (its frame, function, capcode form) on a line below it, or (false) in its tool tip only:
+    //!< the rows of the form do not move while the address is typed
+    void setAddressHintShown(bool shown);
+    //!< The text alone on its row, the codepage and the send button on a last row: a narrow form keeps the text wide
+    void setSendOnOwnRow();
     //!< FLEX copies are for the numbered types of a network with message numbering (STD-43A 4.3.7)
     void setFlexNumbering(bool numbering);
     //!< A GSC voice page can come from the microphone, which the user takes
@@ -143,6 +150,11 @@ private:
     QDoubleSpinBox *m_sendDelay;
 
     bool m_network = false;
+    bool m_addressHintShown = true;
+    QGridLayout *m_grid = nullptr;
+    QHBoxLayout *m_textRow = nullptr;
+    QHBoxLayout *m_sendRow = nullptr;
+    int m_textGridRow = 0;
     bool m_flexNumbering = true;
     bool m_microphone = false;
     QString m_sendText;

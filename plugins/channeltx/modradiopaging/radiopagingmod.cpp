@@ -1096,6 +1096,9 @@ MessageRecord RadioPagingMod::endpointRecord(const QString& event)
     endpoint.m_capacity = m_settings.m_maxQueued;
     endpoint.m_capabilities.insert("maxText", m_maxTextLength);
     endpoint.m_capabilities.insert("voice", m_settings.m_protocol == RadioPagingModSettings::Gsc);
+    // Copies and a send delay need the network mode; FLEX copies need the numbering of the messages too
+    endpoint.m_capabilities.insert("network", m_settings.m_mode == RadioPagingModSettings::Network);
+    endpoint.m_capabilities.insert("flexNumbering", m_settings.m_flexNumbering);
     return MessageEndpoint::toRecord(endpoint, event);
 }
 
@@ -1333,10 +1336,11 @@ void RadioPagingMod::applySettings(const QStringList& settingsKeys, const RadioP
         m_settings.applySettings(settingsKeys, settings);
     }
 
-    // A new name (the title), frequency offset or protocol is announced at once
+    // A new name (the title), frequency offset, protocol or what it can send is announced at once
     if (m_announceTimer && !force
         && (settingsKeys.contains("title") || settingsKeys.contains("inputFrequencyOffset")
-            || settingsKeys.contains("protocol") || settingsKeys.contains("mode") || settingsKeys.contains("mixPocsag"))) {
+            || settingsKeys.contains("protocol") || settingsKeys.contains("mode") || settingsKeys.contains("mixPocsag")
+            || settingsKeys.contains("flexNumbering"))) {
         announce("status");
     }
 }

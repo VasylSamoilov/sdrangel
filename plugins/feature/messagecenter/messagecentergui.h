@@ -164,6 +164,14 @@ private:
     QLabel *m_toWhere;                  //!< Where the page to the contact goes
     bool m_fillingContact = false;      //!< The composer filled with the send to of the contact
     QToolButton *m_addContact = nullptr; //!< Add the destination of the composer to the contacts
+    QLabel *m_transmitterNote = nullptr; //!< What the transmitter cannot send (one-shot: no copies)
+    QLabel *m_sendResult = nullptr;     //!< The last page posted: waiting, sent, or why not
+    bool m_shownNetwork = true;         //!< What the composer was set to offer: copies, FLEX copies
+    bool m_shownNumbering = true;
+    QString m_lastPostId;
+    QDateTime m_lastPostTime;
+    QString m_lastPostTo;               //!< The contact, or the protocol and address
+    QString m_lastPostTransmitter;
     // The routes and the files
     QTableWidget *m_routesTable;
     QTableWidget *m_contactsTable;
@@ -208,6 +216,9 @@ private:
     void refreshEndpoints();
     void refreshQueue();
     void refreshComposeTransmitters();
+    void applyCapabilities();
+    void showSendResult();
+    void showSendError(const QString& error);
     void refreshRoutes();
     void refreshContacts();
     //!< -1: a new one, preset (if given) to start with

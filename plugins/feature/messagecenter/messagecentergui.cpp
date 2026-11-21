@@ -17,6 +17,7 @@
 
 #include <QApplication>
 #include <QDateTime>
+#include <QUuid>
 #include <QDateTimeEdit>
 #include <QPointer>
 #include <QSet>
@@ -890,9 +891,23 @@ void MessageCenterGUI::buildCompose(QWidget *container)
     // The transmitters say what they can send; the page is checked by the one that takes it (its mode, numbering)
     m_composer = new PagingComposer(container);
     m_composer->setNetworkMode(true);
+    m_composer->setAddressHintShown(false);     // In the tool tip of the address: the form does not move as it is typed
     m_composer->setSendText("Post the page");
+    m_composer->setSendOnOwnRow();
     m_composer->setTransmitters(QStringList());
     layout->addWidget(m_composer);
+    // What the transmitter cannot send (copies of a one-shot transmitter), and the result of the last page posted:
+    // below the form, they do not move it
+    m_transmitterNote = new QLabel(container);
+    m_transmitterNote->setWordWrap(true);
+    m_transmitterNote->setStyleSheet("QLabel { color: #aaaaaa; }");
+    m_transmitterNote->setVisible(false);
+    layout->addWidget(m_transmitterNote);
+    m_sendResult = new QLabel(container);
+    m_sendResult->setWordWrap(true);
+    m_sendResult->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_sendResult->setToolTip("The last page posted: waiting, sent, or why it failed. Its row in Messages has it too");
+    layout->addWidget(m_sendResult);
     // Its lines together at the top of the tab, not spread over its height
     layout->addStretch(1);
 
@@ -2253,6 +2268,107 @@ void MessageCenterGUI::refreshComposeTransmitters()
 
     // The composer keeps its choice when the transmitters did not change
     m_composer->setTransmitters(aliases);
+    // What the transmitter can send may have changed (its mode), and the page posted moved on
+    applyCapabilities();
+    showSendResult();
+}
+
+// What the transmitter announced it can send sets what the form offers: copies and a send delay in network mode
+// only, FLEX copies with the numbering of the messages. A transmitter that does not say: everything
+void MessageCenterGUI::applyCapabilities()
+{
+    if (!m_transmitterNote) {
+        return;     // The Send tab being made
+    }
+
+    const QString alias = m_composer->transmitter();
+    QVariantMap capabilities;
+
+    for (const MessageEndpoint& e : m_center->engine().endpoints())
+    {
+        if ((e.m_role == MessageEndpoint::Transmitter) && (e.m_channel == alias)) {
+            capabilities = e.m_capabilities;
+        }
+    }
+
+    const bool network = capabilities.value("network", true).toBool();
+    const bool numbering = capabilities.value("flexNumbering", true).toBool();
+
+    if ((network != m_shownNetwork) || (numbering != m_shownNumbering))
+    {
+        m_shownNetwork = network;
+        m_shownNumbering = numbering;
+        m_composer->setNetworkMode(network);
+        m_composer->setFlexNumbering(numbering);
+    }
+
+    QString note;
+
+    if (!network) {
+        note = QString("%1 is in one-shot mode: no copies, no send delay (network mode only)").arg(alias);
+    } else if (!numbering && m_composer->protocol() == "flex") {
+        note = QString("%1 does not number FLEX messages: no copies of FLEX messages").arg(alias);
+    }
+
+    m_transmitterNote->setText(note);
+    m_transmitterNote->setVisible(!note.isEmpty());
+}
+
+// The last page posted: where it is now, from the queue (or its row in the log once the queue let it go)
+void MessageCenterGUI::showSendResult()
+{
+    if (m_lastPostId.isEmpty() || !m_sendResult) {
+        return;
+    }
+
+    const MessageCenterEngine& engine = m_center->engine();
+    const MessageCenterPage *page = engine.page(m_lastPostId);
+    QString state;
+    QString reason;
+
+    if (page)
+    {
+        static const char *names[] = {"pending", "queued", "claimed", "transmitted", "sent", "dead"};
+        state = names[page->m_state];
+        reason = page->m_reason;
+    }
+    else if (const MessageRecord *record = engine.find(m_lastPostId))
+    {
+        state = record->m_channel.isEmpty() ? record->m_protocolData.value("page_state").toString() : QString("sent");
+        reason = record->m_protocolData.value("page_reason").toString();
+    }
+    else
+    {
+        return;     // Not known yet: the message to the Message Center is on its way
+    }
+
+    const QString when = m_lastPostTime.toString("HH:mm:ss");
+    QString text;
+    bool failed = false;
+
+    if ((state == "pending") || (state == "queued")) {
+        text = QString("Posted %1 to %2: waiting for %3").arg(when, m_lastPostTo, m_lastPostTransmitter);
+    } else if (state == "claimed") {
+        text = QString("Posted %1 to %2: %3 is sending it").arg(when, m_lastPostTo, m_lastPostTransmitter);
+    } else if ((state == "transmitted") || (state == "sent")) {
+        text = QString("Posted %1 to %2: sent by %3").arg(when, m_lastPostTo, m_lastPostTransmitter);
+    } else if (state == "cancelled") {
+        text = QString("Posted %1 to %2: cancelled").arg(when, m_lastPostTo);
+    } else {
+        text = QString("Not sent (%1) to %2: %3").arg(when, m_lastPostTo, reason.isEmpty() ? QString("failed") : reason);
+        failed = true;
+    }
+
+    m_sendResult->setText(text);
+    m_sendResult->setStyleSheet(failed ? "QLabel { color: #ff7777; }" : "QLabel { color: #66bb6a; }");
+}
+
+// A page that cannot be posted: why, where the result goes
+void MessageCenterGUI::showSendError(const QString& error)
+{
+    m_lastPostId.clear();
+    m_sendResult->setText(QString("Not posted: %1").arg(error));
+    m_sendResult->setStyleSheet("QLabel { color: #ff7777; }");
 }
 
 void MessageCenterGUI::refreshRoutes()
@@ -2454,6 +2570,7 @@ void MessageCenterGUI::transmitterChanged()
         }
 
         m_composer->setProtocols(protocols.isEmpty() ? RadioPagingPage::protocols() : protocols);
+        applyCapabilities();
         return;
     }
 
@@ -2466,6 +2583,7 @@ void MessageCenterGUI::transmitterChanged()
 
     // A transmitter that did not say what it sends: any
     m_composer->setProtocols(protocols.isEmpty() ? RadioPagingPage::protocols() : protocols);
+    applyCapabilities();
 }
 
 void MessageCenterGUI::post()
@@ -2478,13 +2596,13 @@ void MessageCenterGUI::post()
     {
         if (!contactPage(page, error))
         {
-            QMessageBox::information(this, "Page", error);
+            showSendError(error);
             return;
         }
     }
     else if (m_composer->transmitter().isEmpty())
     {
-        QMessageBox::information(this, "Page", "No transmitter has announced itself.");
+        showSendError("no transmitter has announced itself");
         return;
     }
 
@@ -2492,10 +2610,22 @@ void MessageCenterGUI::post()
 
     if (!error.isEmpty())
     {
-        QMessageBox::information(this, "Page", error);
+        showSendError(error);
         return;
     }
 
+    // Its id given here: the line below the form follows it
+    if (page.m_id.isEmpty()) {
+        page.m_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    }
+
+    m_lastPostId = page.m_id;
+    m_lastPostTime = QDateTime::currentDateTime();
+    m_lastPostTo = (m_toContact->currentIndex() > 0) ? m_toContact->currentData().toString()
+        : QString("%1 %2").arg(page.m_protocol.toUpper(), page.m_address);
+    m_lastPostTransmitter = page.m_transmitter;
+    m_sendResult->setText(QString("Posted %1 to %2").arg(m_lastPostTime.toString("HH:mm:ss"), m_lastPostTo));
+    m_sendResult->setStyleSheet(QString());
     m_center->getInputMessageQueue()->push(MessageCenter::MsgPostPage::create(page.toRecord()));
 }
 

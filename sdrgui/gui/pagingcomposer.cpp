@@ -249,7 +249,10 @@ PagingComposer::PagingComposer(QWidget *parent) :
     layout->addLayout(binaryRow, row++, 1, 1, 2);
     layout->addWidget(m_textLabel, row, 0);
     layout->addLayout(textRow, row, 1);
+    m_textGridRow = row;
     layout->addWidget(m_send, row++, 2);
+    m_grid = layout;
+    m_textRow = textRow;
     layout->addWidget(m_scheduleLabel, row, 0);
     layout->addLayout(scheduleRow, row++, 1, 1, 2);
     layout->setColumnStretch(1, 1);
@@ -398,6 +401,36 @@ QString PagingComposer::transmitter() const
 void PagingComposer::setNetworkMode(bool network)
 {
     m_network = network;
+    display();
+}
+
+void PagingComposer::setSendOnOwnRow()
+{
+    if (m_sendRow) {
+        return;
+    }
+
+    // The text alone on its row, across the width; the codepage, its table and the send button on the last row
+    m_sendRow = new QHBoxLayout();
+    m_sendRow->setSpacing(3);
+
+    for (QWidget *w : QList<QWidget*>({m_charsetLabel, m_charset, m_codepageTable}))
+    {
+        m_textRow->removeWidget(w);
+        m_sendRow->addWidget(w);
+    }
+
+    m_sendRow->addStretch(1);
+    m_grid->removeWidget(m_send);
+    m_sendRow->addWidget(m_send);
+    m_grid->removeItem(m_textRow);
+    m_grid->addLayout(m_textRow, m_textGridRow, 1, 1, 2);
+    m_grid->addLayout(m_sendRow, m_grid->rowCount(), 1, 1, 2);
+}
+
+void PagingComposer::setAddressHintShown(bool shown)
+{
+    m_addressHintShown = shown;
     display();
 }
 
@@ -580,9 +613,14 @@ void PagingComposer::display()
     // form, POCSAG the frame and function
     const QString capCode = m_address->text().trimmed();
     const bool suffix = gsc && (capCode.size() == 7);
-    m_capCode->setVisible(!capCode.isEmpty());
+    const QString description = RadioPagingPage::addressDescription(proto, capCode, m_function->currentIndex());
+    m_capCode->setVisible(m_addressHintShown && !capCode.isEmpty());
+    m_capCode->setText(description);
 
-    m_capCode->setText(RadioPagingPage::addressDescription(proto, capCode, m_function->currentIndex()));
+    // Not shown: what the address is comes first in the tool tip of the address, the rows do not move as it is typed
+    if (!m_addressHintShown && !capCode.isEmpty() && !description.isEmpty()) {
+        m_address->setToolTip(description + "\n\n" + m_address->toolTip());
+    }
 
     if (gsc)
     {
