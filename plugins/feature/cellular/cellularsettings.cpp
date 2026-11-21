@@ -305,6 +305,7 @@ QByteArray CellularSettings::serialize() const
     s.writeU32(21, m_rgbColor);
     s.writeS32(22, m_workspaceIndex);
     s.writeBlob(23, m_geometryBytes);
+    s.writeBlob(25, m_book);
     if (m_rollupState) {
         s.writeBlob(24, m_rollupState->serialize());
     }
@@ -357,6 +358,7 @@ bool CellularSettings::deserialize(const QByteArray& data)
     d.readU32(21, &m_rgbColor, QColor(0, 160, 120).rgb());
     d.readS32(22, &m_workspaceIndex, 0);
     d.readBlob(23, &m_geometryBytes);
+    d.readBlob(25, &m_book);
     if (m_rollupState)
     {
         d.readBlob(24, &bytetmp);

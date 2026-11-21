@@ -34,6 +34,7 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSpinBox>
@@ -54,31 +55,21 @@
 
 #include "nmtplan.h"
 
+#include "cellularbook.h"
 #include "cellularchannelgrid.h"
 #include "cellulargui.h"
+#include "cellularmobiles.h"
 
 const int CellularGUI::m_maxLogLines;
 
 namespace
 {
 
-enum PhoneColumn
+enum MobileColumn
 {
-    PhoneNumber,
-    PhoneState,
-    PhoneChannel,
-    PhoneNetwork,
-    PhoneRegistered,
-    PhoneLastHeard,
-    PhoneLevel,
-    PhoneQuality,
-    PhonePower,
-    PhoneLastFrame,
-    PhonePassword,
-    PhoneSmsCentre,
-    PhoneDialled,
-    PhoneKept,
-    PhoneColCount
+    MobileName,         // two lines: the state dot, name and number; the chips
+    MobileState,        // two lines: what it does now; where and how it was heard
+    MobileColCount
 };
 
 enum NetworkColumn
@@ -159,18 +150,6 @@ void setCell(QTableWidget *table, int row, int col, const QString& text)
     }
     if (item->text() != text) {
         item->setText(text);
-    }
-}
-
-QString powerName(int level)
-{
-    switch (level)
-    {
-    case 3: return "high";
-    case 2: return "medium";
-    case 1:
-    case 0: return "low";
-    default: return QString();
     }
 }
 
@@ -587,6 +566,8 @@ CellularGUI::CellularGUI(PluginAPI* pluginAPI, FeatureUISet *featureUISet, Featu
     m_settings.setRollupState(&m_rollupState);
     displaySettings();
     applySettings();
+    // the feature sends the records of its book
+    m_cellular->getInputMessageQueue()->push(Cellular::MsgBookReplace::create(QByteArray()));
     sizeToContents();
     m_resizer.enableChildMouseTracking();
 }
@@ -626,7 +607,7 @@ void CellularGUI::buildUI()
 
     m_tabs = new QTabWidget(main);
     m_tabs->setTabPosition(QTabWidget::West);
-    m_tabs->addTab(buildPhones(), "Phones");
+    m_tabs->addTab(buildPhones(), "Mobiles");
     m_tabs->addTab(buildTest(), "Test");
     m_tabs->addTab(buildLog(), "Log");
     m_tabs->addTab(buildNetworks(), "Networks");
@@ -646,36 +627,60 @@ QWidget *CellularGUI::buildPhones()
     QVBoxLayout *layout = new QVBoxLayout(page);
     layout->setContentsMargins(0, 0, 0, 0);
 
-    m_phones = makeTable(page, {"Number", "State", "Ch", "Network", "Reg", "Heard", "Rx dB", "Q", "Power", "Last frame",
-        "K", "SMS centre", "Dialled", "Kept"});
-    m_phones->horizontalHeaderItem(PhonePassword)->setToolTip("Password K of the phone as its seizure frames show it");
-    m_phones->horizontalHeaderItem(PhoneSmsCentre)->setToolTip("Numbers the phone sent short messages to or asked "
-        "for its waiting messages on, with the traffic area of that network");
-    m_phones->horizontalHeaderItem(PhoneDialled)->setToolTip("Numbers the phone dialled, the newest first");
-    m_phones->horizontalHeaderItem(PhoneKept)->setToolTip("Short messages the centre keeps for the phone, and "
-        "indicators postponed until it is free");
-    m_phones->horizontalHeaderItem(PhoneRegistered)->setToolTip("Yes: the phone made a roaming update to this network; "
-        "no: it was only heard (a call, an answer)");
-    m_phones->horizontalHeaderItem(PhoneLevel)->setToolTip("Received level of its channel when it was last heard, dB of full scale");
-    m_phones->horizontalHeaderItem(PhoneQuality)->setToolTip("Quality of its last frame, 0..1");
-    m_phones->horizontalHeaderItem(PhonePower)->setToolTip("Power level in its frames: high, medium or low");
-    m_phones->setToolTip("Every phone a network heard (its identity in a frame for the channel it came on) or that "
-        "registered. Right click: actions on the phone; double click: the phone in the Test tab");
+    // one row per phone: the book and the phones the networks hear; two lines each (the delegate)
+    m_phones = makeTable(page, {"Mobile", "State"});
+    m_phones->horizontalHeader()->setSectionResizeMode(MobileName, QHeaderView::Stretch);
+    m_phones->horizontalHeader()->setSectionResizeMode(MobileState, QHeaderView::ResizeToContents);
+    m_phones->horizontalHeader()->setStretchLastSection(false);
+    m_phones->setItemDelegateForColumn(MobileName, new CellularMobileDelegate(m_phones));
+    m_phones->setWordWrap(true);
+    m_phones->setToolTip("The phones the tester knows (its book) and the ones the networks hear. "
+        "Double click: the record of the phone; right click: actions on it");
     m_phones->setContextMenuPolicy(Qt::CustomContextMenu);
     layout->addWidget(m_phones);
+    QToolButton *add = iconButton(nullptr, ":/plus.png", "Add a phone to the book by its number");
+    QToolButton *edit = iconButton(nullptr, ":/edit.png", "The record of the selected phone");
+    QToolButton *forget = iconButton(nullptr, ":/bin.png", "Forget the selected phone (its record goes; a phone the "
+        "networks hear comes back)");
+    layout->addWidget(flowRow(page, {add, edit, forget}));
 
+    auto selected = [this](modemnmt::System& system, QString& number) {
+        const QModelIndexList rows = m_phones->selectionModel()->selectedRows();
+        const QTableWidgetItem *item = rows.isEmpty() ? nullptr : m_phones->item(rows.first().row(), MobileName);
+        if (!item) {
+            return false;
+        }
+        system = static_cast<modemnmt::System>(item->data(CellularMobileRole::System).toInt());
+        number = item->data(CellularMobileRole::Number).toString();
+        return true;
+    };
     connect(m_phones, &QTableWidget::customContextMenuRequested, this, &CellularGUI::phoneMenu);
     connect(m_phones, &QTableWidget::cellDoubleClicked, this, [this](int row, int) {
-        const QTableWidgetItem *item = m_phones->item(row, PhoneNumber);
-        if (!item) {
-            return;
+        if (const QTableWidgetItem *item = m_phones->item(row, MobileName)) {
+            editMobile(static_cast<modemnmt::System>(item->data(CellularMobileRole::System).toInt()),
+                item->data(CellularMobileRole::Number).toString());
         }
-        const int at = m_testNetwork->findData(item->data(Qt::UserRole).toInt());
-        if (at >= 0) {
-            m_testNetwork->setCurrentIndex(at);
+    });
+    connect(add, &QToolButton::clicked, this, &CellularGUI::addMobile);
+    connect(edit, &QToolButton::clicked, this, [this, selected]() {
+        modemnmt::System system;
+        QString number;
+        if (selected(system, number)) {
+            editMobile(system, number);
         }
-        m_testPhone->setCurrentText(item->text());
-        m_tabs->setCurrentIndex(1);
+    });
+    connect(forget, &QToolButton::clicked, this, [this, selected]() {
+        modemnmt::System system;
+        QString number;
+        if (selected(system, number)) {
+            forgetMobile(system, number);
+        }
+    });
+    // the chips wrap to the width of the column
+    connect(m_phones->horizontalHeader(), &QHeaderView::sectionResized, this, [this](int section) {
+        if (section == MobileName) {
+            m_phones->resizeRowsToContents();
+        }
     });
     return page;
 }
@@ -981,15 +986,20 @@ void CellularGUI::requestAction(int network, const QString& number, int action, 
 void CellularGUI::phoneMenu(const QPoint& pos)
 {
     const QTableWidgetItem *item = m_phones->itemAt(pos);
-    const QTableWidgetItem *numberItem = item ? m_phones->item(item->row(), PhoneNumber) : nullptr;
+    const QTableWidgetItem *numberItem = item ? m_phones->item(item->row(), MobileName) : nullptr;
 
     if (!numberItem) {
         return;
     }
-    const QString number = numberItem->text();
-    const int network = numberItem->data(Qt::UserRole).toInt();
+    const QString number = numberItem->data(CellularMobileRole::Number).toString();
+    const modemnmt::System system = static_cast<modemnmt::System>(numberItem->data(CellularMobileRole::System).toInt());
+    // the network that heard it last acts; a phone no network heard: the one of the Test tab
+    const int heardOn = numberItem->data(CellularMobileRole::Network).toInt();
+    const int network = heardOn ? heardOn : m_testNetwork->currentData().toInt();
     QMenu menu(this);
 
+    menu.addAction("Record...", this, [this, system, number]() { editMobile(system, number); });
+    menu.addSeparator();
     menu.addAction("Call", this, [=]() { requestAction(network, number, Cellular::MsgAction::Call, QString(), 0); });
     menu.addAction("Hang up", this, [=]() { requestAction(network, number, Cellular::MsgAction::HangUp, QString(), 0); });
     menu.addAction("Release", this, [=]() { requestAction(network, number, Cellular::MsgAction::Release, QString(), 0); });
@@ -1037,7 +1047,226 @@ void CellularGUI::phoneMenu(const QPoint& pos)
         m_testPhone->setCurrentText(number);
         m_tabs->setCurrentIndex(1);
     });
+    menu.addAction("Forget", this, [this, system, number]() { forgetMobile(system, number); });
     menu.exec(m_phones->viewport()->mapToGlobal(pos));
+}
+
+// ---- the book ----
+
+modemnmt::System CellularGUI::systemOf(int network) const
+{
+    const CellularNetworkSettings *n = m_settings.network(network);
+    return n && n->m_system == 1 ? modemnmt::System::Nmt900 : modemnmt::System::Nmt450;
+}
+
+// What the phone does on the networks now: the network that heard it last gives the state; the
+// other networks that know it are listed in `line`.
+QString CellularGUI::liveText(const QString& number, int& network, QColor& colour, QString& line) const
+{
+    QDateTime last;
+    QString state;
+    QStringList where;
+
+    network = 0;
+    colour = QColor(0x55, 0x55, 0x55);
+    line.clear();
+    for (auto it = m_status.constBegin(); it != m_status.constEnd(); ++it)
+    {
+        for (const Cellular::MsgReportStatus::Phone& p : it->phones)
+        {
+            if (p.number != number) {
+                continue;
+            }
+            where.append(networkName(it.key()) + (p.registered ? " (reg)" : ""));
+            if (!network || (p.lastHeard.isValid() && (!last.isValid() || p.lastHeard > last)))
+            {
+                network = it.key();
+                last = p.lastHeard;
+                state = p.state.isEmpty() ? QString("idle") : p.state;
+                line = QString("%1%2").arg(networkName(it.key()))
+                    .arg(p.lastHeard.isValid() ? QString(", %1 dB, %2").arg(p.level, 0, 'f', 1).arg(p.lastHeard.toString("HH:mm:ss")) : QString());
+                colour = state.contains("call") || state.contains("conversation") ? QColor(0x3f, 0xbf, 0x5f)
+                    : state.contains("ring") || state.contains("pag") || state.contains("sms") ? QColor(0xe0, 0xa0, 0x30)
+                    : p.registered ? QColor(0x4a, 0x8a, 0xd0) : QColor(0x9a, 0x9a, 0x9a);
+            }
+        }
+    }
+    if (!network) {
+        return "not seen";
+    }
+    if (where.size() > 1) {
+        line += " (also " + where.mid(1).join(", ") + ")";
+    }
+    return state;
+}
+
+int CellularGUI::mobileRow(modemnmt::System system, const QString& number) const
+{
+    for (int row = 0; row < m_phones->rowCount(); row++)
+    {
+        const QTableWidgetItem *item = m_phones->item(row, MobileName);
+        if (item && item->data(CellularMobileRole::Number).toString() == number
+            && item->data(CellularMobileRole::System).toInt() == static_cast<int>(system)) {
+            return row;
+        }
+    }
+    return -1;
+}
+
+// One row per phone, the book and the phones the networks hear. Rows stay where they are; new
+// phones come at the end; a forgotten phone that no network hears goes.
+void CellularGUI::showMobiles()
+{
+    struct Key { modemnmt::System system; QString number; };
+    std::vector<Key> keys;
+    const auto add = [&keys](modemnmt::System system, const QString& number) {
+        if (std::none_of(keys.begin(), keys.end(), [&](const Key& k) { return k.system == system && k.number == number; })) {
+            keys.push_back({system, number});
+        }
+    };
+    for (const modemnmt::NmtPhoneRecord *r : m_book.all()) {
+        add(r->system, QString::fromStdString(r->number));
+    }
+    for (auto it = m_status.constBegin(); it != m_status.constEnd(); ++it) {
+        for (const Cellular::MsgReportStatus::Phone& p : it->phones) {
+            add(systemOf(it.key()), p.number);
+        }
+    }
+
+    bool heightChanged = false;
+    for (const Key& k : keys)
+    {
+        const modemnmt::NmtPhoneRecord *r = m_book.find(k.system, k.number.toStdString());
+        int network;
+        QColor colour;
+        QString line;
+        const QString state = liveText(k.number, network, colour, line);
+        const QString name = r ? QString::fromStdString(r->value(modemnmt::NmtPhoneRecord::Name)) : QString();
+        QStringList chips;
+        if (r)
+        {
+            if (!r->areas.empty()) {
+                chips << QString("Y1 %1|#2b4867").arg(r->areas.front().first);
+            }
+            if (!r->value(modemnmt::NmtPhoneRecord::Password).empty()) {
+                chips << QString("K %1|#2b4867").arg(QString::fromStdString(r->value(modemnmt::NmtPhoneRecord::Password)));
+            }
+            if (!r->value(modemnmt::NmtPhoneRecord::SmsCentre).empty()) {
+                chips << QString("SMSC %1|#5b4a20").arg(QString::fromStdString(r->value(modemnmt::NmtPhoneRecord::SmsCentre)));
+            }
+            if (!r->value(modemnmt::NmtPhoneRecord::VoiceMail).empty()) {
+                chips << QString("VM %1|#2b5b47").arg(QString::fromStdString(r->value(modemnmt::NmtPhoneRecord::VoiceMail)));
+            }
+        }
+        // what waits for it on the network that knows it
+        for (auto it = m_status.constBegin(); it != m_status.constEnd(); ++it)
+        {
+            for (const Cellular::MsgReportStatus::Phone& p : it->phones)
+            {
+                if (p.number != k.number) {
+                    continue;
+                }
+                if (p.held > 0) {
+                    chips << QString("%1 SMS kept|#4a3b6b").arg(p.held);
+                }
+                if (p.pendingMwi) {
+                    chips << QString("indicator waits|#4a3b6b");
+                }
+            }
+        }
+
+        int row = mobileRow(k.system, k.number);
+        if (row < 0)
+        {
+            row = m_phones->rowCount();
+            m_phones->insertRow(row);
+            QTableWidgetItem *item = new QTableWidgetItem();
+            m_phones->setItem(row, MobileName, item);
+            setCell(m_phones, row, MobileState, QString());
+            heightChanged = true;
+        }
+        QTableWidgetItem *item = m_phones->item(row, MobileName);
+        const QStringList oldChips = item->data(CellularMobileRole::Chips).toStringList();
+        item->setData(CellularMobileRole::Number, k.number);
+        item->setData(CellularMobileRole::System, static_cast<int>(k.system));
+        item->setData(CellularMobileRole::Network, network);
+        item->setData(CellularMobileRole::Title, name.isEmpty() ? k.number : name);
+        item->setData(CellularMobileRole::Subtitle, name.isEmpty() ? QString() : k.number);
+        item->setData(CellularMobileRole::StateColour, colour);
+        item->setData(CellularMobileRole::Chips, chips);
+        item->setText(name.isEmpty() ? k.number : name + " " + k.number);     // for search and copy
+        setCell(m_phones, row, MobileState, line.isEmpty() ? state : state + "\n" + line);
+        heightChanged = heightChanged || oldChips != chips;
+    }
+    // rows of phones that are neither in the book nor heard any more
+    for (int row = m_phones->rowCount() - 1; row >= 0; row--)
+    {
+        const QTableWidgetItem *item = m_phones->item(row, MobileName);
+        const QString number = item ? item->data(CellularMobileRole::Number).toString() : QString();
+        const modemnmt::System system = static_cast<modemnmt::System>(item ? item->data(CellularMobileRole::System).toInt() : 0);
+        const bool keep = std::any_of(keys.begin(), keys.end(), [&](const Key& k) { return k.system == system && k.number == number; });
+        if (!keep)
+        {
+            m_phones->removeRow(row);
+            heightChanged = true;
+        }
+    }
+    if (heightChanged) {
+        m_phones->resizeRowsToContents();
+    }
+}
+
+void CellularGUI::editMobile(modemnmt::System system, const QString& number)
+{
+    const modemnmt::NmtPhoneRecord *found = m_book.find(system, number.toStdString());
+    modemnmt::NmtPhoneRecord record;
+
+    if (found) {
+        record = *found;
+    }
+    else
+    {
+        record.system = system;
+        record.number = number.toStdString();
+    }
+    int network;
+    QColor colour;
+    QString line;
+    const QString state = liveText(number, network, colour, line);
+    CellularMobileDialog dialog(record, line.isEmpty() ? state : state + ", " + line, this);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    // only what the user changed: what was learned meanwhile stays
+    for (const auto& change : dialog.changes()) {
+        m_cellular->getInputMessageQueue()->push(Cellular::MsgBookEdit::create(system, number.toStdString(), change.first, change.second));
+    }
+}
+
+void CellularGUI::addMobile()
+{
+    bool ok = false;
+    const QString number = QInputDialog::getText(this, "Add a phone", "Number: the country digit and the six digits",
+        QLineEdit::Normal, QString(), &ok).trimmed();
+
+    if (!ok || number.size() != 7 || number.contains(QRegularExpression("[^0-9]"))) {
+        return;
+    }
+    const modemnmt::System system = systemOf(m_testNetwork->currentData().toInt());
+    // a record with no name yet: the feature makes it and sends it back
+    m_cellular->getInputMessageQueue()->push(Cellular::MsgBookEdit::create(system, number.toStdString(),
+        modemnmt::NmtPhoneRecord::Name, std::string()));
+    editMobile(system, number);
+}
+
+void CellularGUI::forgetMobile(modemnmt::System system, const QString& number)
+{
+    if (QMessageBox::question(this, "Forget", QString("Forget the phone %1 and what was learned of it?").arg(number))
+            != QMessageBox::Yes) {
+        return;
+    }
+    m_cellular->getInputMessageQueue()->push(Cellular::MsgBookEdit::create(system, number.toStdString(), -1, std::string()));
 }
 
 // The lists of networks of the Test and Log tabs follow the settings; the choices stay.
@@ -1132,59 +1361,10 @@ void CellularGUI::showStatus(const Cellular::MsgReportStatus& report)
     s.summary = report.m_summary;
     s.carriers = report.m_carriers;
     s.phones = report.m_phones;
-    showPhones(report.m_network, report.m_phones);
+    showMobiles();
     showCarriers();
     showSummary();
     showTestPhone();
-}
-
-// A phone keeps its row (by network and number): rows are updated in place and new phones come at
-// the end, so the view does not move under the user.
-void CellularGUI::showPhones(int network, const QList<Cellular::MsgReportStatus::Phone>& phones)
-{
-    for (const Cellular::MsgReportStatus::Phone& p : phones)
-    {
-        int row = 0;
-        for (; row < m_phones->rowCount(); row++)
-        {
-            const QTableWidgetItem *item = m_phones->item(row, PhoneNumber);
-            if (item && item->text() == p.number && item->data(Qt::UserRole).toInt() == network) {
-                break;
-            }
-        }
-        if (row == m_phones->rowCount()) {
-            m_phones->insertRow(row);
-        }
-        setCell(m_phones, row, PhoneNumber, p.number);
-        m_phones->item(row, PhoneNumber)->setData(Qt::UserRole, network);
-        setCell(m_phones, row, PhoneState, p.state.isEmpty() ? "idle" : p.state);
-        setCell(m_phones, row, PhoneChannel, p.channel ? QString::number(p.channel) : QString());
-        setCell(m_phones, row, PhoneNetwork, networkName(network));
-        setCell(m_phones, row, PhoneRegistered, p.registered ? "yes" : "no");
-        setCell(m_phones, row, PhoneLastHeard, p.lastHeard.isValid() ? p.lastHeard.toString("HH:mm:ss") : QString());
-        setCell(m_phones, row, PhoneLevel, p.lastHeard.isValid() ? QString::number(p.level, 'f', 1) : QString());
-        setCell(m_phones, row, PhoneQuality, p.lastHeard.isValid() ? QString::number(p.quality, 'f', 2) : QString());
-        setCell(m_phones, row, PhonePower, powerName(p.power));
-        setCell(m_phones, row, PhoneLastFrame, p.lastFrame);
-        // what was learned stays when a report does not know it (the tester started again)
-        if (!p.password.isEmpty()) {
-            setCell(m_phones, row, PhonePassword, p.password);
-        }
-        if (!p.smsCentre.isEmpty()) {
-            setCell(m_phones, row, PhoneSmsCentre, p.smsCentre);
-        }
-        if (!p.dialled.isEmpty()) {
-            setCell(m_phones, row, PhoneDialled, p.dialled);
-        }
-        QStringList kept;
-        if (p.held > 0) {
-            kept.append(QString("%1 SMS").arg(p.held));
-        }
-        if (p.pendingMwi) {
-            kept.append("indicator");
-        }
-        setCell(m_phones, row, PhoneKept, kept.join(", "));
-    }
 }
 
 // The carriers of all networks, in the order of the networks.
@@ -1349,9 +1529,13 @@ void CellularGUI::resetToDefaults()
     applySettings();
 }
 
+// the settings with the book (presets are saved from here)
 QByteArray CellularGUI::serialize() const
 {
-    return m_settings.serialize();
+    CellularSettings settings = m_settings;
+
+    settings.m_book = CellularBook::toBytes(m_book);
+    return settings.serialize();
 }
 
 bool CellularGUI::deserialize(const QByteArray& data)
@@ -1361,6 +1545,16 @@ bool CellularGUI::deserialize(const QByteArray& data)
     m_feature->setWorkspaceIndex(m_settings.m_workspaceIndex);
     displaySettings();
     applySettings();
+    // the book of the settings replaces the feature's (settings without a book leave it); the
+    // feature sends its records back
+    if (!m_settings.m_book.isEmpty())
+    {
+        m_book = modemnmt::NmtPhoneBook();
+        CellularBook::fromBytes(m_settings.m_book, m_book);
+        m_cellular->getInputMessageQueue()->push(Cellular::MsgBookReplace::create(m_settings.m_book));
+        m_phones->setRowCount(0);
+        showMobiles();
+    }
     return ok;
 }
 
@@ -1399,6 +1593,17 @@ bool CellularGUI::handleMessage(const Message& message)
     else if (Cellular::MsgReportStatus::match(message))
     {
         showStatus(static_cast<const Cellular::MsgReportStatus&>(message));
+        return true;
+    }
+    else if (Cellular::MsgBookRecord::match(message))
+    {
+        // the feature's record as it is now: the copy follows it exactly
+        const Cellular::MsgBookRecord& msg = static_cast<const Cellular::MsgBookRecord&>(message);
+        m_book.forget(msg.m_record.system, msg.m_record.number);
+        if (!msg.m_removed) {
+            m_book.merge(msg.m_record);
+        }
+        showMobiles();
         return true;
     }
     else if (Cellular::MsgConfigureCellular::match(message))

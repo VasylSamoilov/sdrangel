@@ -30,6 +30,7 @@
 #include "util/message.h"
 
 #include "cellularsettings.h"
+#include "nmtphonebook.h"
 
 class WebAPIAdapterInterface;
 class ChannelAPI;
@@ -137,6 +138,73 @@ public:
             Message(), m_network(network), m_action(action), m_number(number), m_text(text), m_value(value) { }
     };
 
+    // The book of phones. The feature keeps it; the worker tells what it learned, the GUI keeps a
+    // copy (for presets) and sends the user's edits.
+    // worker -> feature: an observation of a phone
+    class MsgBookLearn : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        enum Kind { Password, Dialled, SmsCentre, Area };
+        Kind m_kind;
+        modemnmt::System m_system;
+        std::string m_number;
+        std::string m_value;
+        int m_y1;
+        int m_area;
+        static MsgBookLearn* create(Kind kind, modemnmt::System system, const std::string& number, const std::string& value,
+                int y1 = 0, int area = 0) {
+            return new MsgBookLearn(kind, system, number, value, y1, area);
+        }
+
+    private:
+        MsgBookLearn(Kind kind, modemnmt::System system, const std::string& number, const std::string& value, int y1, int area) :
+            Message(), m_kind(kind), m_system(system), m_number(number), m_value(value), m_y1(y1), m_area(area) { }
+    };
+    // feature -> GUI: a record as it is now (or that it is gone)
+    class MsgBookRecord : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        modemnmt::NmtPhoneRecord m_record;
+        bool m_removed;
+        static MsgBookRecord* create(const modemnmt::NmtPhoneRecord& record, bool removed = false) {
+            return new MsgBookRecord(record, removed);
+        }
+
+    private:
+        MsgBookRecord(const modemnmt::NmtPhoneRecord& record, bool removed) : Message(), m_record(record), m_removed(removed) { }
+    };
+    // GUI -> feature: the user's value of one field, or (field -1) forget the phone
+    class MsgBookEdit : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        modemnmt::System m_system;
+        std::string m_number;
+        int m_field;
+        std::string m_value;
+        static MsgBookEdit* create(modemnmt::System system, const std::string& number, int field, const std::string& value) {
+            return new MsgBookEdit(system, number, field, value);
+        }
+
+    private:
+        MsgBookEdit(modemnmt::System system, const std::string& number, int field, const std::string& value) :
+            Message(), m_system(system), m_number(number), m_field(field), m_value(value) { }
+    };
+    // GUI -> feature: the book of loaded settings replaces the feature's (CellularBook bytes);
+    // empty: send every record to the GUI
+    class MsgBookReplace : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        QByteArray m_bytes;
+        static MsgBookReplace* create(const QByteArray& bytes) { return new MsgBookReplace(bytes); }
+
+    private:
+        explicit MsgBookReplace(const QByteArray& bytes) : Message(), m_bytes(bytes) { }
+    };
+
     // a line for the event log of a network (0: the controller)
     class MsgReportLog : public Message {
         MESSAGE_CLASS_DECLARATION
@@ -222,7 +290,7 @@ public:
     QString getIdentifier() const override { return objectName(); }
     void getTitle(QString& title) const override { title = m_settings.m_title; }
 
-    QByteArray serialize() const override { return m_settings.serialize(); }
+    QByteArray serialize() const override;
     bool deserialize(const QByteArray& data) override;
 
     int webapiRun(bool run, SWGSDRangel::SWGDeviceState& response, QString& errorMessage) override;
@@ -266,8 +334,12 @@ private:
     std::map<ChannelAPI*, Pipe> m_pipes;        // the radios in use
     mutable QMutex m_reportMutex;
     std::map<int, std::unique_ptr<MsgReportStatus>> m_reports;  // the last state of each network that runs
+    // the book of phones: changed in the thread of the feature, read by the web API
+    modemnmt::NmtPhoneBook m_book;
+    mutable QMutex m_bookMutex;
 
     void start();
+    void sendBookRecord(const modemnmt::NmtPhoneRecord& record, bool removed = false);
     void stop();
     void startNetwork(const CellularNetworkSettings& network);
     void stopNetwork(int id);

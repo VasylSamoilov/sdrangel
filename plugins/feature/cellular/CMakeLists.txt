@@ -2,6 +2,7 @@ project(cellular)
 
 set(cellular_SOURCES
     cellular.cpp
+    cellularbook.cpp
     cellularsettings.cpp
     cellularworker.cpp
     cellularplugin.cpp
@@ -10,6 +11,7 @@ set(cellular_SOURCES
 
 set(cellular_HEADERS
     cellular.h
+    cellularbook.h
     cellularsettings.h
     cellularworker.h
     cellularplugin.h
@@ -27,11 +29,13 @@ if(NOT SERVER_MODE)
         ${cellular_SOURCES}
         cellularchannelgrid.cpp
         cellulargui.cpp
+        cellularmobiles.cpp
     )
     set(cellular_HEADERS
         ${cellular_HEADERS}
         cellularchannelgrid.h
         cellulargui.h
+        cellularmobiles.h
     )
 
     set(TARGET_NAME ${PLUGINS_PREFIX}featurecellular)

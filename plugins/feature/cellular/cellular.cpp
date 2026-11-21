@@ -37,6 +37,7 @@
 #include "SWGCellularActions.h"
 #include "SWGFeatureActions.h"
 
+#include "cellularbook.h"
 #include "cellularworker.h"
 #include "cellular.h"
 
@@ -44,6 +45,10 @@ MESSAGE_CLASS_DEFINITION(Cellular::MsgConfigureCellular, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgStartStop, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgToRadio, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgReportLog, Message)
+MESSAGE_CLASS_DEFINITION(Cellular::MsgBookLearn, Message)
+MESSAGE_CLASS_DEFINITION(Cellular::MsgBookRecord, Message)
+MESSAGE_CLASS_DEFINITION(Cellular::MsgBookEdit, Message)
+MESSAGE_CLASS_DEFINITION(Cellular::MsgBookReplace, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgReportStatus, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgAction, Message)
 
@@ -97,12 +102,40 @@ Cellular::~Cellular()
     stop();
 }
 
+// the settings with the book of phones as it is now
+QByteArray Cellular::serialize() const
+{
+    CellularSettings settings;
+    {
+        QMutexLocker locker(&m_settingsMutex);
+        settings = m_settings;
+    }
+    {
+        QMutexLocker locker(&m_bookMutex);
+        settings.m_book = CellularBook::toBytes(m_book);
+    }
+    return settings.serialize();
+}
+
+void Cellular::sendBookRecord(const modemnmt::NmtPhoneRecord& record, bool removed)
+{
+    if (getMessageQueueToGUI()) {
+        getMessageQueueToGUI()->push(MsgBookRecord::create(record, removed));
+    }
+}
+
 bool Cellular::deserialize(const QByteArray& data)
 {
     bool ok;
     {
         QMutexLocker locker(&m_settingsMutex);
         ok = m_settings.deserialize(data);
+    }
+    // the book of the settings replaces the one there was
+    {
+        QMutexLocker locker(&m_bookMutex);
+        m_book = modemnmt::NmtPhoneBook();
+        CellularBook::fromBytes(m_settings.m_book, m_book);
     }
 
     if (m_guiMessageQueue) {
@@ -417,6 +450,81 @@ bool Cellular::handleMessage(const Message& cmd)
 
         if (m_pipes.find(msg.getChannel()) != m_pipes.end()) {
             msg.getChannel()->getInputMessageQueue()->push(MainCore::MsgPacket::create(msg.getSource(), msg.getPacket()));
+        }
+        return true;
+    }
+    else if (MsgBookLearn::match(cmd))
+    {
+        // what the worker learned of a phone, into the book
+        const MsgBookLearn& learn = static_cast<const MsgBookLearn&>(cmd);
+        modemnmt::NmtPhoneRecord record;
+        bool changed = false;
+        {
+            QMutexLocker locker(&m_bookMutex);
+            switch (learn.m_kind)
+            {
+            case MsgBookLearn::Password:
+                changed = m_book.learnPassword(learn.m_system, learn.m_number, learn.m_value);
+                break;
+            case MsgBookLearn::Dialled:
+                changed = m_book.learnDialled(learn.m_system, learn.m_number, learn.m_value, learn.m_y1, learn.m_area);
+                break;
+            case MsgBookLearn::SmsCentre:
+                changed = m_book.learnSmsCentre(learn.m_system, learn.m_number, learn.m_value, learn.m_y1, learn.m_area);
+                break;
+            case MsgBookLearn::Area:
+                changed = m_book.learnArea(learn.m_system, learn.m_number, learn.m_y1, learn.m_area);
+                break;
+            }
+            if (changed) {
+                record = *m_book.find(learn.m_system, learn.m_number);
+            }
+        }
+        if (changed) {
+            sendBookRecord(record);
+        }
+        return true;
+    }
+    else if (MsgBookEdit::match(cmd))
+    {
+        // the user's value of a field, or forget the phone; the GUI gets the record as it is then
+        const MsgBookEdit& edit = static_cast<const MsgBookEdit&>(cmd);
+        modemnmt::NmtPhoneRecord record;
+        bool removed = false;
+        {
+            QMutexLocker locker(&m_bookMutex);
+            if (edit.m_field < 0)
+            {
+                record.system = edit.m_system;
+                record.number = edit.m_number;
+                removed = m_book.forget(edit.m_system, edit.m_number);
+            }
+            else
+            {
+                m_book.edit(edit.m_system, edit.m_number, static_cast<modemnmt::NmtPhoneRecord::Field>(edit.m_field), edit.m_value);
+                record = *m_book.find(edit.m_system, edit.m_number);
+            }
+        }
+        sendBookRecord(record, removed || edit.m_field < 0);
+        return true;
+    }
+    else if (MsgBookReplace::match(cmd))
+    {
+        const MsgBookReplace& replace = static_cast<const MsgBookReplace&>(cmd);
+        std::vector<modemnmt::NmtPhoneRecord> records;
+        {
+            QMutexLocker locker(&m_bookMutex);
+            if (!replace.m_bytes.isNull())
+            {
+                m_book = modemnmt::NmtPhoneBook();
+                CellularBook::fromBytes(replace.m_bytes, m_book);
+            }
+            for (const modemnmt::NmtPhoneRecord *r : m_book.all()) {
+                records.push_back(*r);
+            }
+        }
+        for (const modemnmt::NmtPhoneRecord& r : records) {
+            sendBookRecord(r);
         }
         return true;
     }
