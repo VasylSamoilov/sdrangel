@@ -5285,7 +5285,7 @@ margin-bottom: 20px;
     },
     "action" : {
       "type" : "string",
-      "description" : "call (the network calls the phone, registered or not; the far end is echo or music), hangup (ends that call), release (releases any call of the phone), sms (text to the phone), mwi (message waiting indicators, value: flags; text for a phone in a call: incall or clearing, empty for both), power (level 0..3 of the phone in its call), move (the call to another traffic channel, value: channel, 0 for any free one), hold (text the SMS centre keeps until the phone calls it for its waiting messages)\n"
+      "description" : "call (the network calls the phone, registered or not; the far end is echo or music), hangup (ends that call), release (releases any call of the phone), sms (text to the phone), mwi (message waiting indicators, value: flags; text for a phone in a call: incall or clearing, empty for both), power (level 0..3 of the phone in its call), move (the call to another traffic channel, value: channel, 0 for any free one), hold (text the SMS centre keeps until the phone calls it for its waiting messages), forget (the phone's record in the book; the system is the one of the network)\n"
     },
     "number" : {
       "type" : "string",
@@ -5342,6 +5342,56 @@ margin-bottom: 20px;
     }
   },
   "description" : "The state of one carrier of a network"
+};
+            defs.CellularMobile = {
+  "properties" : {
+    "number" : {
+      "type" : "string",
+      "description" : "Country digit and six digits."
+    },
+    "system" : {
+      "type" : "integer",
+      "description" : "0 NMT-450, 1 NMT-900."
+    },
+    "name" : {
+      "type" : "string"
+    },
+    "notes" : {
+      "type" : "string"
+    },
+    "password" : {
+      "type" : "string",
+      "description" : "Password K (three digits)."
+    },
+    "smsCentre" : {
+      "type" : "string",
+      "description" : "SMS centre of the phone: it reaches the centre on this number whatever the network's is."
+    },
+    "voiceMail" : {
+      "type" : "string",
+      "description" : "Number the phone calls for its voice mail."
+    },
+    "voiceMailCode" : {
+      "type" : "string"
+    },
+    "typed" : {
+      "type" : "string",
+      "description" : "The fields typed by the user, comma separated (the others are learned). Read only."
+    },
+    "dialled" : {
+      "type" : "string",
+      "description" : "Numbers the phone dialled, the newest first. Read only."
+    },
+    "smsCentresUsed" : {
+      "type" : "string",
+      "description" : "Numbers it sent short messages to or fetched them from, with the traffic area. Read only."
+    },
+    "areas" : {
+      "type" : "string",
+      "description" : "Traffic areas (Y1 Y2) of the networks it was heard on, the newest first. Read only."
+    }
+  },
+  "description" : "What the tester knows of a phone: values learned from it or typed by the user"
 };
             defs.CellularNetworkReport = {
   "properties" : {
@@ -5548,6 +5598,13 @@ margin-bottom: 20px;
       "description" : "The networks. When present the list replaces the networks of the controller; while it runs, networks that are switched on start and networks that are switched off or not in the list stop.",
       "items" : {
         "$ref" : "#/definitions/CellularNetworkSettings"
+      }
+    },
+    "mobiles" : {
+      "type" : "array",
+      "description" : "The book of phones. When present, each item merges into the book by system and number (a phone that is not in the book is added); the fields given become typed values (an empty string gives the field back to learning). Phones are forgotten with the action forget. Changes of the book do not restart networks.",
+      "items" : {
+        "$ref" : "#/definitions/CellularMobile"
       }
     },
     "title" : {
@@ -75040,7 +75097,7 @@ $(document).ready(function() {
           </div>
           <div id="generator">
             <div class="content">
-              Generated 2026-11-20T23:23:58.251Z
+              Generated 2026-11-21T00:16:49.264Z
             </div>
           </div>
       </div>

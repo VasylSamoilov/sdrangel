@@ -32,6 +32,8 @@ SWGCellularSettings::SWGCellularSettings() {
     m_lead_ms_isSet = false;
     networks = nullptr;
     m_networks_isSet = false;
+    mobiles = nullptr;
+    m_mobiles_isSet = false;
     title = nullptr;
     m_title_isSet = false;
     rgb_color = 0;
@@ -48,6 +50,8 @@ SWGCellularSettings::init() {
     m_lead_ms_isSet = false;
     networks = new QList<SWGCellularNetworkSettings*>();
     m_networks_isSet = false;
+    mobiles = new QList<SWGCellularMobile*>();
+    m_mobiles_isSet = false;
     title = new QString("");
     m_title_isSet = false;
     rgb_color = 0;
@@ -63,6 +67,13 @@ SWGCellularSettings::cleanup() {
             delete o;
         }
         delete networks;
+    }
+    if(mobiles != nullptr) { 
+        auto arr = mobiles;
+        for(auto o: *arr) { 
+            delete o;
+        }
+        delete mobiles;
     }
     if(title != nullptr) { 
         delete title;
@@ -85,6 +96,8 @@ SWGCellularSettings::fromJsonObject(QJsonObject &pJson) {
     
     
     ::SWGSDRangel::setValue(&networks, pJson["networks"], "QList", "SWGCellularNetworkSettings");
+    
+    ::SWGSDRangel::setValue(&mobiles, pJson["mobiles"], "QList", "SWGCellularMobile");
     ::SWGSDRangel::setValue(&title, pJson["title"], "QString", "QString");
     
     ::SWGSDRangel::setValue(&rgb_color, pJson["rgbColor"], "qint32", "");
@@ -110,6 +123,9 @@ SWGCellularSettings::asJsonObject() {
     }
     if(networks && networks->size() > 0){
         toJsonArray((QList<void*>*)networks, obj, "networks", "SWGCellularNetworkSettings");
+    }
+    if(mobiles && mobiles->size() > 0){
+        toJsonArray((QList<void*>*)mobiles, obj, "mobiles", "SWGCellularMobile");
     }
     if(title != nullptr && *title != QString("")){
         toJsonValue(QString("title"), title, obj, QString("QString"));
@@ -141,6 +157,16 @@ SWGCellularSettings::setNetworks(QList<SWGCellularNetworkSettings*>* networks) {
     this->m_networks_isSet = true;
 }
 
+QList<SWGCellularMobile*>*
+SWGCellularSettings::getMobiles() {
+    return mobiles;
+}
+void
+SWGCellularSettings::setMobiles(QList<SWGCellularMobile*>* mobiles) {
+    this->mobiles = mobiles;
+    this->m_mobiles_isSet = true;
+}
+
 QString*
 SWGCellularSettings::getTitle() {
     return title;
@@ -170,6 +196,9 @@ SWGCellularSettings::isSet(){
             isObjectUpdated = true; break;
         }
         if(networks && (networks->size() > 0)){
+            isObjectUpdated = true; break;
+        }
+        if(mobiles && (mobiles->size() > 0)){
             isObjectUpdated = true; break;
         }
         if(title && *title != QString("")){

@@ -463,6 +463,8 @@ void CellularWorker::action(const Cellular::MsgAction& msg)
         ok = system.moveCall(country, digits, msg.getValue());
         refused = "the phone has no connected call on one channel, a switch is going on, or there is no such free traffic channel";
         break;
+    case Cellular::MsgAction::Forget:
+        return;         // the book is the feature's: it does it
     }
     log(n.id, what + (ok ? ": started" : ": refused: " + refused));
 }

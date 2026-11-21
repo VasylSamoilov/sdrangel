@@ -114,7 +114,8 @@ public:
             Mwi,        // message waiting indicators (value: flags)
             Power,      // power level of the phone in its call (value: 0..3)
             Move,       // the call of the phone to another traffic channel (value: channel, 0 any)
-            Hold        // a short message (text) the centre keeps until the phone fetches it
+            Hold,       // a short message (text) the centre keeps until the phone fetches it
+            Forget      // the record of the phone in the book (the system of the network)
         };
         static bool parse(const QString& name, Action& action);
         static const char* name(Action action);
@@ -302,6 +303,8 @@ public:
                           QString& errorMessage) override;
 
     static void webapiFormatFeatureSettings(SWGSDRangel::SWGFeatureSettings& response, const CellularSettings& settings);
+    void webapiFormatMobiles(SWGSDRangel::SWGFeatureSettings& response) const;
+    void webapiUpdateMobiles(const QStringList& featureSettingsKeys, SWGSDRangel::SWGFeatureSettings& response);
     // The keys are those of the top level. A network in the list takes the fields it has; the
     // others come from the network with its id, or from the defaults for a new id.
     static void webapiUpdateFeatureSettings(CellularSettings& settings, const QStringList& featureSettingsKeys,

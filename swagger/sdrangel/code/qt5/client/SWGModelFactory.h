@@ -94,6 +94,7 @@
 #include "SWGCapture.h"
 #include "SWGCellularActions.h"
 #include "SWGCellularCarrierReport.h"
+#include "SWGCellularMobile.h"
 #include "SWGCellularNetworkReport.h"
 #include "SWGCellularNetworkSettings.h"
 #include "SWGCellularPhoneReport.h"
@@ -888,6 +889,11 @@ namespace SWGSDRangel {
     }
     if(QString("SWGCellularCarrierReport").compare(type) == 0) {
       SWGCellularCarrierReport *obj = new SWGCellularCarrierReport();
+      obj->init();
+      return obj;
+    }
+    if(QString("SWGCellularMobile").compare(type) == 0) {
+      SWGCellularMobile *obj = new SWGCellularMobile();
       obj->init();
       return obj;
     }
