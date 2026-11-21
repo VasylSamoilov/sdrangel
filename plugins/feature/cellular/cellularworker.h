@@ -72,6 +72,18 @@ public:
         MsgAddNetwork() : Message() { }
     };
 
+    // the SMS centre of each phone the book knows one of, by system and number
+    class MsgSmsCentres : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        std::map<std::pair<int, std::string>, std::string> m_centres;
+        static MsgSmsCentres* create() { return new MsgSmsCentres(); }
+
+    private:
+        MsgSmsCentres() : Message() { }
+    };
+
     // reports: the input queue of the feature; producer: the controller as the radios see it (the
     // feature, which outlives the worker): the source of the packets and the producer of the
     // audio pipes; lead: samples of lead of the transmitters
@@ -182,6 +194,7 @@ private:
     std::map<ChannelAPI*, std::unique_ptr<Radio>> m_radios;
     std::vector<std::unique_ptr<Network>> m_networks;
     std::map<std::string, modemnmt::NmtPhoneInfo> m_known;
+    std::map<std::pair<int, std::string>, std::string> m_smsCentres;   // of the phones, from the book
     // short messages the centre keeps for a phone (by its number) until the phone fetches them
     std::map<std::string, std::deque<modemnmt::SmsDeliver>> m_held;
     modemcellular::CarrierBatch m_rx;

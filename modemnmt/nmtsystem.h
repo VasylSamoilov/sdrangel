@@ -99,6 +99,10 @@ public:
     // default); the submit handler gets the message and returns the RP cause to answer with, 0
     // to accept. Without a handler messages are refused (temporary failure).
     void setSmscNumber(const std::string& number) { m_smscNumber = number; }
+    // The SMS centre number known for one phone (empty: none); a phone that dials it reaches the
+    // centre too. A tester learns it from the phone, or the user picks it.
+    using SmsCentreOf = std::function<std::string(const NmtSubscriber& subscriber)>;
+    void setSmsCentreOf(SmsCentreOf resolver) { m_smsCentreOf = std::move(resolver); }
     using SmsSubmitHandler = std::function<uint8_t(const NmtSubscriber& subscriber, const SmsSubmit& message)>;
     using SmsResultHandler = std::function<void(const NmtSubscriber& subscriber, NmtServiceEnd result, uint8_t cause)>;
     void setSmsHandlers(SmsSubmitHandler submit, SmsResultHandler result)
@@ -203,7 +207,7 @@ public:
     void roamingConfirmed(const NmtSubscriber& subscriber) override;
     bool callDialled(NmtTransaction& transaction, const std::string& dialled) override;
     void callCleared(NmtTransaction& transaction) override;
-    bool isSmsCenter(const std::string& dialled) override;
+    bool isSmsCenter(const NmtTransaction& transaction, const std::string& dialled) override;
     uint8_t smsSubmitted(NmtTransaction& transaction, const SmsSubmit& message) override;
     bool smsRequested(NmtTransaction& transaction, SmsRpKind kind) override;
     void numberDialled(NmtTransaction& transaction, const std::string& dialled) override;
@@ -273,6 +277,7 @@ private:
     SmsSubmitHandler m_smsSubmitHandler;
     SmsRequestHandler m_smsRequestHandler;
     DialObserver m_dialObserver;
+    SmsCentreOf m_smsCentreOf;
     SmsResultHandler m_smsResultHandler;
     uint8_t m_smsRef = 0;
     PowerHandler m_powerHandler;

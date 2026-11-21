@@ -122,6 +122,27 @@ void Cellular::sendBookRecord(const modemnmt::NmtPhoneRecord& record, bool remov
     if (getMessageQueueToGUI()) {
         getMessageQueueToGUI()->push(MsgBookRecord::create(record, removed));
     }
+    sendSmsCentres();
+}
+
+// the worker answers each phone's own SMS centre
+void Cellular::sendSmsCentres()
+{
+    if (!m_running || !m_worker) {
+        return;
+    }
+    CellularWorker::MsgSmsCentres *msg = CellularWorker::MsgSmsCentres::create();
+    {
+        QMutexLocker locker(&m_bookMutex);
+        for (const modemnmt::NmtPhoneRecord *r : m_book.all())
+        {
+            const std::string& centre = r->value(modemnmt::NmtPhoneRecord::SmsCentre);
+            if (!centre.empty()) {
+                msg->m_centres[std::make_pair(static_cast<int>(r->system), r->number)] = centre;
+            }
+        }
+    }
+    m_worker->getInputMessageQueue()->push(msg);
 }
 
 bool Cellular::deserialize(const QByteArray& data)
@@ -137,6 +158,7 @@ bool Cellular::deserialize(const QByteArray& data)
         m_book = modemnmt::NmtPhoneBook();
         CellularBook::fromBytes(m_settings.m_book, m_book);
     }
+    sendSmsCentres();
 
     if (m_guiMessageQueue) {
         m_guiMessageQueue->push(MsgConfigureCellular::create(m_settings));
@@ -261,6 +283,7 @@ void Cellular::start()
     m_worker->moveToThread(m_thread);
     m_thread->start();
     m_running = true;
+    sendSmsCentres();
     setState(StRunning);
     report(0, QString("started, transmit lead %1 ms").arg(m_settings.m_leadMs));
     applyNetworks();
@@ -519,13 +542,17 @@ bool Cellular::handleMessage(const Message& cmd)
                 m_book = modemnmt::NmtPhoneBook();
                 CellularBook::fromBytes(replace.m_bytes, m_book);
             }
-            for (const modemnmt::NmtPhoneRecord *r : m_book.all()) {
-                records.push_back(*r);
+            const std::vector<const modemnmt::NmtPhoneRecord*> all = m_book.all();
+            records.resize(all.size());
+            std::transform(all.begin(), all.end(), records.begin(), [](const modemnmt::NmtPhoneRecord *r) { return *r; });
+        }
+        if (getMessageQueueToGUI())
+        {
+            for (const modemnmt::NmtPhoneRecord& r : records) {
+                getMessageQueueToGUI()->push(MsgBookRecord::create(r, false));
             }
         }
-        for (const modemnmt::NmtPhoneRecord& r : records) {
-            sendBookRecord(r);
-        }
+        sendSmsCentres();
         return true;
     }
     else if (MsgReportLog::match(cmd))

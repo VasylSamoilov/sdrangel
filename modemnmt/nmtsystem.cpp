@@ -277,9 +277,12 @@ bool NmtSystem::sendSms(char country, const std::string& number, const SmsDelive
     return true;
 }
 
-bool NmtSystem::isSmsCenter(const std::string& dialled)
+bool NmtSystem::isSmsCenter(const NmtTransaction& transaction, const std::string& dialled)
 {
-    return !m_smscNumber.empty() && dialled == m_smscNumber;
+    if (!m_smscNumber.empty() && dialled == m_smscNumber) {
+        return true;
+    }
+    return m_smsCentreOf && !dialled.empty() && m_smsCentreOf(transaction.subscriber) == dialled;
 }
 
 uint8_t NmtSystem::smsSubmitted(NmtTransaction& transaction, const SmsSubmit& message)
