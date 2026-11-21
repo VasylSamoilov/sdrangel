@@ -246,7 +246,7 @@ int checkTone(const QString& check)
 }
 
 const char *headers[PagingMessageTable::ColumnCount] = {
-    "Time", "Dir", "Channel", "Proto", "Rate", "Pol", "Address", "Type", "Message", "Fragment", "Info", "Errors", "State", "Date",
+    "Time", "Dir", "Channel", "Proto", "Rate", "Pol", "Address", "Type", "Message", "Fragment", "Info", "Quality", "State", "Date",
     "Contact"
 };
 
@@ -1135,33 +1135,39 @@ void PagingMessageTable::fillRow(int row, const MessageRecord& record, const QSt
     infoItem->setData(chipTextsRole, chipTexts);
     infoItem->setData(chipTipsRole, chipTips);
 
-    // Errors: X uncorrectable codewords, ~ corrected bits; none for a message that was not received
-    if ((record.m_errorsCorrected < 0) && (record.m_errorsUncorrectable < 0))
+    // Errors: the quality of a received message. X uncorrectable codewords, ~ corrected bits, ok clean; a failed check
+    // (FLEX checksum K, signature S) damages a message whose bits were all corrected: bad. None for a message sent
+    const MessageRecord::Quality quality = RadioPagingPage::quality(record);
+
+    if ((record.m_direction == MessageRecord::DirectionTX) || (quality == MessageRecord::QualityNone))
     {
         cell(ColErrors, QString());
     }
     else
     {
-        QString errors, errorsHtml;
+        QString errors, color;
+        const QString reason = RadioPagingPage::qualityReason(record);
 
-        if (record.m_errorsUncorrectable > 0)
+        if (quality == MessageRecord::QualityDamaged)
         {
-            errors = QString("X%1").arg(record.m_errorsUncorrectable);
-            errorsHtml = QString("<span style=\"color:#ff5252;font-weight:bold\">%1</span>").arg(errors);
+            errors = (record.m_errorsUncorrectable > 0) ? QString("X%1").arg(record.m_errorsUncorrectable) : QString("bad");
+            color = "#ff5252";
         }
-        else if (record.m_errorsCorrected > 0)
+        else if (quality == MessageRecord::QualityCorrected)
         {
-            errors = QString("~%1").arg(record.m_errorsCorrected);
-            errorsHtml = QString("<span style=\"color:#ffca28\">%1</span>").arg(errors);
+            errors = QString("~%1").arg(std::max(0, record.m_errorsCorrected));
+            color = "#ffca28";
         }
         else
         {
             errors = "ok";
-            errorsHtml = "<span style=\"color:#66bb6a\">ok</span>";
+            color = "#66bb6a";
         }
 
-        cell(ColErrors, errors, errorsHtml,
-            tr("%1 bit errors corrected, %2 codewords uncorrectable").arg(record.m_errorsCorrected).arg(record.m_errorsUncorrectable));
+        const QString name = (quality == MessageRecord::QualityDamaged) ? tr("Damaged")
+            : (quality == MessageRecord::QualityCorrected) ? tr("Corrected") : tr("Clean");
+        cell(ColErrors, errors, QString("<span style=\"color:%1;font-weight:bold\">%2</span>").arg(color, errors),
+            reason.isEmpty() ? tr("%1: no bit errors, every check passed").arg(name) : QString("%1: %2").arg(name, reason));
     }
 
     // The state: as given, else that of a page of the Message Center (waiting, failed with its reason...), else sent for
@@ -1482,12 +1488,12 @@ void PagingMessageTable::setupMessageCenterButton(QToolButton *button)
         button->setStyleSheet(count > 0 ? QString("QToolButton { background-color : green; }") : QString("QToolButton { background:rgb(79,79,79); }"));
         button->setToolTip(count == 0
             ? tr("Message Center: there is none. Click to add one and open it.\n"
-                 "It keeps the log of the messages of all the paging channels, with their history, routes, sinks and\n"
-                 "sources, and the pages to transmit")
+                 "It keeps the messages of all the paging channels with their history, sends pages to the transmitters,\n"
+                 "and has the contacts and the rules (what to do with each message)")
             : (count == 1
                 ? tr("Message Center: it takes the messages of this channel. Click to open it.\n"
-                     "It keeps the log of the messages of all the paging channels, with their history, routes, sinks and\n"
-                     "sources, and the pages to transmit")
+                     "It keeps the messages of all the paging channels with their history, sends pages to the transmitters,\n"
+                     "and has the contacts and the rules (what to do with each message)")
                 : tr("Message Centers: %1, each takes the messages of this channel. Click to open the first one").arg(count)));
     };
 
@@ -1586,8 +1592,8 @@ void PagingMessageTable::showAllCodepages(const MessageRecord& record)
 
         const Reading reading = readings[clicked->row()];
         QMenu menu(table);
-        QAction *route = menu.addAction(tr("Create route..."));
-        route->setToolTip(tr("A route of the Message Center for the messages of this address, decoded so"));
+        QAction *route = menu.addAction(tr("Create rule..."));
+        route->setToolTip(tr("A rule of the Message Center for the messages of this address, decoded so"));
         route->setEnabled(canRoute);
         connect(route, &QAction::triggered, table, [record, reading]() {
             createRoute(record, reading.m_key.empty() ? QVariantMap() : RadioPagingPage::charsetData(reading.m_key), reading.m_type);
@@ -1728,6 +1734,26 @@ void PagingMessageTable::showRecord(const QString& json, QWidget *parent)
     dialog->setWindowTitle(tr("Message %1 %2").arg(object.value("protocol").toString(), object.value("address").toString()));
     tree->setColumnCount(2);
     tree->setHeaderLabels({tr("Field"), tr("Value")});
+
+    // A received message: how well it came through, and why, first
+    MessageRecord record;
+
+    if (MessageRecord::fromJson(object, record) && (record.m_direction == MessageRecord::DirectionRX))
+    {
+        const MessageRecord::Quality quality = RadioPagingPage::quality(record);
+        const QString reason = RadioPagingPage::qualityReason(record);
+
+        if (quality != MessageRecord::QualityNone)
+        {
+            const QString name = MessageRecord::qualityToString(quality);
+            QTreeWidgetItem *item = new QTreeWidgetItem(tree->invisibleRootItem(),
+                QStringList({tr("Quality"), reason.isEmpty() ? name : QString("%1: %2").arg(name, reason)}));
+            item->setForeground(1, QColor((quality == MessageRecord::QualityDamaged) ? "#ff5252"
+                : (quality == MessageRecord::QualityCorrected) ? "#ffca28" : "#66bb6a"));
+            item->setToolTip(1, tr("Clean: no bit errors, every check passed. Corrected: bit errors, all corrected. "
+                "Damaged: something lost (uncorrectable errors, a failed or incomplete check)"));
+        }
+    }
 
     // A group message: its members first, the list closed when it is long
     const QJsonArray members = object.value("protocolData").toObject().value("group_capcodes").toArray();
@@ -1959,8 +1985,8 @@ void PagingMessageTable::showRowMenu(const QPoint& pos)
     // A route of the Message Center filled from the message
     if (parsed && (record.m_kind == MessageRecord::KindMessage) && !record.m_address.isEmpty())
     {
-        QAction *route = menu.addAction(tr("Create route..."));
-        route->setToolTip(tr("A route of the Message Center for the messages of this address"));
+        QAction *route = menu.addAction(tr("Create rule..."));
+        route->setToolTip(tr("A rule of the Message Center for the messages of this address"));
         route->setEnabled(messageCenterGui() != nullptr);
         connect(route, &QAction::triggered, this, [record]() { createRoute(record, QVariantMap(), QString()); });
     }

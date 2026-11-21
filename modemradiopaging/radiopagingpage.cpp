@@ -188,6 +188,54 @@ MessageRecord::Quality RadioPagingPage::receivedQuality(const MessageRecord& rec
     return ((q == MessageRecord::QualityNone) && checked) ? MessageRecord::QualityClean : q;
 }
 
+MessageRecord::Quality RadioPagingPage::quality(const MessageRecord& record)
+{
+    if (record.m_quality != MessageRecord::QualityUnknown) {
+        return record.m_quality;
+    }
+    if (record.m_direction == MessageRecord::DirectionTX) {
+        return MessageRecord::QualityClean;     // Nothing was received: nothing went wrong
+    }
+
+    return receivedQuality(record);
+}
+
+QString RadioPagingPage::qualityReason(const MessageRecord& record)
+{
+    const QVariantMap& d = record.m_protocolData;
+    const bool unfinished = record.m_partial || d.value("is_fragment").toBool();
+    QStringList reasons;
+
+    if (record.m_errorsUncorrectable > 0) {
+        reasons.append(QString("%1 codeword%2 uncorrectable").arg(record.m_errorsUncorrectable).arg(record.m_errorsUncorrectable > 1 ? "s" : ""));
+    }
+    if (record.m_charStatus.contains('b')) {
+        reasons.append("characters lost");
+    }
+
+    const QList<QPair<const char*, const char*>> checks = {{"checksum", "checksum K"}, {"signature", "signature S"}};
+
+    for (const auto& field : checks)
+    {
+        const QString result = d.value(field.first).toString();
+
+        if (result == "failed") {
+            reasons.append(QString("%1 failed").arg(field.second));
+        } else if ((result == "incomplete") && !unfinished) {
+            reasons.append(QString("%1 incomplete").arg(field.second));
+        }
+    }
+
+    if (d.value("checksum_errors").toInt() > 0) {
+        reasons.append(QString("%1 blocks with a wrong checksum").arg(d.value("checksum_errors").toInt()));
+    }
+    if (record.m_errorsCorrected > 0) {
+        reasons.append(QString("%1 bit error%2 corrected").arg(record.m_errorsCorrected).arg(record.m_errorsCorrected > 1 ? "s" : ""));
+    }
+
+    return reasons.join(", ");
+}
+
 QString RadioPagingPage::addressDescription(const QString& protocol, const QString& address, int function)
 {
     // GSC the digits of the cap code (a suffix digit sets the function), FLEX the capcode form, POCSAG the frame and

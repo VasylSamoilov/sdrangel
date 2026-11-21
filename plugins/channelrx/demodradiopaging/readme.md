@@ -194,7 +194,7 @@ The Message Center button next to it opens the Message Center (and adds it when 
 
 ![The fields of a message record: a FLEX message with the network time of its frame (flextime)](../../../doc/img/RadioPagingDemod_plugin_details.png)
 
-The latest messages, newest at the bottom. The table follows new messages while it is scrolled to the bottom. While a row is selected or the table is scrolled up the rows stay where they are: the new messages wait, a button in the corner of the table counts them, and they come when it is clicked or when the table is at the bottom again with no row selected. The end of a GSC voice message updates the row of its voice page. Duplicates are flagged DUP or DUP+ in the info column. Right click on the header selects the columns. A click on the icon of a voice message plays its file. Double click on a message opens a window with all the fields of its record: the common fields, protocolData and the raw payload (also as bits). Right click on a message: details, copy, voice and decode again. Decode as, All codepages... shows the message decoded with every codepage of its protocol; Create route... (on a message, or on a row of that window) opens the route dialog of the Message Center filled from the message.
+The latest messages, newest at the bottom. The table follows new messages while it is scrolled to the bottom. While a row is selected or the table is scrolled up the rows stay where they are: the new messages wait, a button in the corner of the table counts them, and they come when it is clicked or when the table is at the bottom again with no row selected. The end of a GSC voice message updates the row of its voice page. Duplicates are flagged DUP or DUP+ in the info column. Right click on the header selects the columns. A click on the icon of a voice message plays its file. Double click on a message opens a window with all the fields of its record: its quality and why first, then the common fields, protocolData and the raw payload (also as bits). Right click on a message: details, copy, voice and decode again. Decode as, All codepages... shows the message decoded with every codepage of its protocol; Create rule... (on a message, or on a row of that window) opens the rule dialog of the Message Center filled from the message.
 
 * Time - time the message was received (hover for the date)
 * Proto - POCSAG, FLEX or GSC
@@ -209,7 +209,7 @@ The latest messages, newest at the bottom. The table follows new messages while 
   * FLEX: PH phase, C cycle / F frame, # message number, R retrieval, MD maildrop, PRI priority, LONG long address (or the special address type), Gs[members] group message (hover for the members), K checksum and S signature (ok, bad or ? incomplete)
   * GSC: BATCH or NBS, S slot, CK checksum, INTL interleaved in an alert time, TRUNC truncated
   * DUP duplicate, DUP+ retransmission that recovered lost words
-* Errors - ok, ~n bits corrected (yellow) or Xn codewords that could not be corrected (red)
+* Quality - how well the message came through: ok (green, clean: no bit errors, every check passed), ~n bits corrected (yellow, corrected: nothing lost), or damaged (red): Xn codewords that could not be corrected, or bad when the bits were corrected but a check failed (FLEX checksum K or signature S, a GSC block) or the message is incomplete. The tooltip gives why; the window of the record has it first. The Message Center filters on it
 
 <h2>Message records</h2>
 

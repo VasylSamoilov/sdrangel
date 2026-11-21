@@ -7,7 +7,7 @@ The Message Center collects the messages of the radio paging channels (Radio Pag
 The channels publish their messages as message records on the "messages" pipe, and announce themselves with event records: the Message Center knows the receivers and transmitters without configuration. It is added like any feature, or with the Message Center button of the Radio Paging demodulator and modulator, which opens it (and adds it when there is none).
 
 ```
-  source ---> routes 1, 2, 3... (filter) ---> sink(s)
+  source ---> rules 1, 2, 3... (when, change) ---> sink(s)
   sources: the channels, the API, a JSON lines file, a CSV log, UDP datagrams
   sinks:   the log, the transmit queue, a JSON lines file, a CSV file, UDP datagrams,
            a command, speech, a mark in the log, a position on the Map
@@ -17,7 +17,7 @@ The channels publish their messages as message records on the "messages" pipe, a
 
 ![Message Center plugin GUI: the messages received over the air from a Radio Paging modulator, POCSAG at 512, 1200 and 2400 baud (one inverted), FLEX 1600/2, 3200/4 and 6400/4 and GSC, with their contacts and the marks of the Emergency preset](../../../doc/img/MessageCenter_plugin.png)
 
-The window has a tab for each section: Log, Channels, Queue, Page, Contacts, Routes and I/O. The button at the right of the tabs opens the options.
+The window has five tabs on its left side: Messages (the log, live or searched), Send (a page, and the queue of the pages), Contacts, Rules and Connections (the channels, the sinks and the sources). Options... at the bottom of Messages opens the options.
 
 <h3>Log</h3>
 
@@ -36,16 +36,16 @@ The messages received and sent, newest at the bottom.
   * Fragments (above the table): the fragments of a FLEX message as rows of their own; hidden by default, the whole message is one row.
 
   An expression that is not valid is shown in red and selects nothing. Only the messages the filters select are shown. An address selects the FLEX group messages of which it is a member too (the members received with the assignments).
-* The table has the columns of the message tables of the channels: date, time, direction, channel, protocol, rate, polarity, contact, address, type, message, fragment, info, errors and state. Right click on the header selects the columns. The direction is RX (received) or TX (sent by its channel); a page posted to the Message Center that is not sent yet is QU while it is in the queue and NS (not sent) when it failed, was cancelled or is no longer queued (the queue is not kept when SDRangel is restarted). The tooltip of QU and NS gives the state and the reason, e.g. "waiting: tx1 sends pocsag now, not flex".
+* The table has the columns of the message tables of the channels: date, time, direction, channel, protocol, rate, polarity, contact, address, type, message, fragment, info, quality and state. Right click on the header selects the columns. The direction is RX (received) or TX (sent by its channel); a page posted to the Message Center that is not sent yet is QU while it is in the queue and NS (not sent) when it failed, was cancelled or is no longer queued (the queue is not kept when SDRangel is restarted). The tooltip of QU and NS gives the state and the reason, e.g. "waiting: tx1 sends pocsag now, not flex".
 * A click on the icon of a voice message plays its file. Double click on a message opens a window with all the fields of its record: the common fields, protocolData (the flags and parameters of the protocol) and the raw payload, also as bits.
 * Right click on a message: details, copy the cell, the row or the record as JSON, play the voice, select the audio output, and decode a received message again as the other type or with another codepage of its protocol.
-* Decode as, All codepages...: a window with the message decoded with every codepage of its protocol (and as numeric, POCSAG and GSC), a row each; the reading shown is in bold. Right click on a row: Create route..., the route dialog filled to decode the messages of the address so.
-* Create route... (right click on a message): the route dialog filled from the message: its protocol, polarity, type and address, to the log, with Stop. The tables of the Radio Paging channels have both too, for the Message Center there is (none: they are greyed out).
+* Decode as, All codepages...: a window with the message decoded with every codepage of its protocol (and as numeric, POCSAG and GSC), a row each; the reading shown is in bold. Right click on a row: Create rule..., the rule dialog filled to decode the messages of the address so.
+* Create rule... (right click on a message): the rule dialog filled from the message: its protocol, polarity, type and address, to the log, with Stop. The tables of the Radio Paging channels have both too, for the Message Center there is (none: they are greyed out).
 * The filters are on a line that wraps at the width of the window.
 * Import (open icon): reads the messages of a file into the log: a JSON lines file, or a CSV log of a message center or of the Pager demodulator. They are logged, not routed, so no action is taken on them again.
 * Export (save icon): saves the messages the filters select to a CSV file, which Import reads again.
 * Clear (bin icon): removes all the messages of the log (in memory) after a confirmation; the history stays, unless "Also delete the history" is checked there. The items the map sinks put on the Map are removed too.
-* A message a mark sink took has the icon of the mark before its text, its text and its row in the colours of the mark (those it sets). A message several routes mark has their icons side by side.
+* A message a mark sink took has the icon of the mark before its text, its text and its row in the colours of the mark (those it sets). A message several rules mark has their icons side by side.
 
 <h3>Channels</h3>
 
@@ -75,7 +75,7 @@ The composer of a page, the same as in the Radio Paging modulator: transmitter (
 
 ![Message Center contacts](../../../doc/img/MessageCenter_plugin_contacts.png)
 
-The address book: a name, an icon and a colour for the messages of a pager or a station. The log shows them in the Contact column, and the filters (of the log and of the routes) choose the messages of a contact (Any contact).
+The address book: a name, an icon and a colour for the messages of a pager or a station. The log shows them in the Contact column, and the filters (of the log and of the rules) choose the messages of a contact (Any contact).
 
 ![Message Center contacts in the log](../../../doc/img/MessageCenter_plugin_contacts_log.png)
 
@@ -91,37 +91,37 @@ A message of a contact has its name, icon and colour in its data (contact, conta
 
 A page can go to a contact instead of a transmitter and an address (`contact` in a post of the WebAPI or of the MCP tool message_center_post_page). The contact's send to list says how: in order, conditions on the page (protocol, type, text, priority... as a post has them; none for always) and the fields it sets (transmitter, protocol, address, function...). The first one whose conditions the page meets is taken, e.g. voice pages by GSC, binary ones by FLEX, the others by POCSAG. A page no send to takes is refused with the reason.
 
-<h3>Routes</h3>
+<h3>Rules</h3>
 
-Every message is checked against all the routes in their number order (#), not only the first. Each route whose filter selects the message sends it to the sinks of the route: the log, the transmit queue or the sinks of I/O. A route with Stop ends the check for the messages it selects, so the routes after it do not see them. The log is a sink as the others: a message no route sends to it is not logged. A new Message Center has one route, 1 "All messages to the log", without a filter. A sink takes only what a route sends to it.
+A rule says what happens to messages, as a sentence: when (the messages its filter selects), change (a mark, decode again), send to (the log, the transmit queue or the sinks of Connections), and stop. The table shows each rule so, on its lines, with the number of messages of the log it finds; a rule switched off is grey. Every message is checked against all the rules in their number order (#), not only the first. A rule with Stop ends the check for the messages it selects, so the rules after it do not see them. The log is a sink as the others: a message no rule sends to it is not logged. A new Message Center has one rule, 1 "All messages to the log", without a filter. A sink takes only what a rule sends to it. In the WebAPI and the MCP the rules are the routes.
 
 ![Message Center routes: the Emergency preset, all the messages to the log and a mark for each kind of message](../../../doc/img/MessageCenter_plugin_routes.png)
 
 ![A route: the messages whose text has brand, fire or smoke, to the mark Fire](../../../doc/img/MessageCenter_plugin_route.png)
 
-A filter on several contacts (set through the WebAPI) is one item of the contact list. Editing a route keeps what its dialog does not show of its filter.
+A filter on several contacts (set through the WebAPI) is one item of the contact list. Editing a rule keeps what its dialog does not show of its filter. The dialog of a rule is in the order of its sentence: its name, when (the filters, with the number of messages of the log they find as they are changed), change, send to, stop and enabled.
 
-The tool tip of the table of the routes recalls how they work.
+The tool tip of the table of the rules recalls how they work.
 
-* Add (plus icon), Edit (pencil icon, or double click) and Remove (bin icon) manage the routes; a route can be switched off. Up and Down (arrows) change the order.
-* Insert: where a new route goes, before route 1 by default, or before or after another.
-* Decode as codepage and type: the messages the route selects are decoded again with the codepage and as the type before they go to its sinks; the routes after it get them as they were received. A message that cannot be decoded so (a codepage of another protocol, a transmitted message) is sent as it is.
-* Presets: replace the routes and the sinks (after a confirmation; the sources and the contacts stay) with those of a preset. Empty: every message to the log, as a new Message Center. Emergency, an example to adapt: the log, and a route with a mark (an icon) for each kind of message, by a few words of its text, in English and in Dutch (the P2000 network): ambulance (ambu, reanimatie, cardiac, drowning), fire (brand, fire, smoke), accident (ongeval, accident, crash), hazardous (gaslucht, hazmat), helicopter (lifeliner, helicopter), police (politie, police), call back (graag contact, please call), plant alarm (high level, fault), test (test page, testoproep). A message of several kinds has their icons side by side.
-* Export (save icon) saves the routes, the sinks and the sources to a JSON file; Import (open icon) replaces them with those of a file, after a check and a confirmation.
+* Add (plus icon), Edit (pencil icon, or double click) and Remove (bin icon) manage the rules; a rule can be switched off. Up and Down (arrows) change the order.
+* Insert: where a new rule goes, before rule 1 by default, or before or after another.
+* Decode as codepage and type: the messages the rule selects are decoded again with the codepage and as the type before they are sent; the rules after it get them as they were received. A message that cannot be decoded so (a codepage of another protocol, a transmitted message) is sent as it is.
+* Presets: replace the rules and the sinks (after a confirmation; the sources and the contacts stay) with those of a preset. Empty: every message to the log, as a new Message Center. Emergency, an example to adapt: the log, and a rule with a mark (an icon) for each kind of message, by a few words of its text, in English and in Dutch (the P2000 network): ambulance (ambu, reanimatie, cardiac, drowning), fire (brand, fire, smoke), accident (ongeval, accident, crash), hazardous (gaslucht, hazmat), helicopter (lifeliner, helicopter), police (politie, police), call back (graag contact, please call), plant alarm (high level, fault), test (test page, testoproep). A message of several kinds has their icons side by side.
+* Export (save icon) saves the rules, the sinks and the sources to a JSON file; Import (open icon) replaces them with those of a file, after a check and a confirmation.
 
-The filter of a route has the fields of the filter of the log, and the source of the message: the channels, the API (ingest) or a source of I/O. The captures of its text expression are ${1}, ${2}... in the texts of the sinks the route sends to: text Fire at (.*) gives the place as ${1}. Decode as type is for POCSAG and GSC: a FLEX message is sent with its type, it keeps it.
+The filter of a rule has the fields of the filter of the log (quality and conditions too), and the source of the message: the channels, the API (ingest) or a source of Connections. The captures of its text expression are ${1}, ${2}... in the texts of the sinks the rule sends to: text Fire at (.*) gives the place as ${1}. Decode as type is for POCSAG and GSC: a FLEX message is sent with its type, it keeps it.
 
 <h3>I/O</h3>
 
 ![Message Center sinks and sources: the built in ones and the marks of the Emergency preset, with the messages each took](../../../doc/img/MessageCenter_plugin_io.png)
 
-The sources and sinks: where messages come from besides the channels (files read as they grow, UDP), and where the routes send them besides the log and the queue (files, UDP, commands, speech, marks in the log, the Map). Each has a name and a type. The built in ones come first: the sinks log and queue, the sources channels and api. Double click to edit; a sink renamed is renamed in the routes too. The editor of a sink also chooses the routes that send to it, and can add a route that sends every message to it. The table of the sinks gives the records each took and refused and the routes that send to it (none: it takes nothing). Plus adds a sink or a source, bin removes the one selected. The errors of the sinks and sources are shown below them from the first one.
+The sources and sinks: where messages come from besides the channels (files read as they grow, UDP), and where the rules send them besides the log and the queue (files, UDP, commands, speech, marks in the log, the Map). Each has a name and a type. The built in ones come first: the sinks log and queue, the sources channels and api. Double click to edit; a sink renamed is renamed in the rules too. The editor of a sink also chooses the rules that send to it, and can add a rule that sends every message to it. The table of the sinks gives the records each took and refused and the rules that send to it (none: it takes nothing). Plus adds a sink or a source, bin removes the one selected. The errors of the sinks and sources are shown below them from the first one.
 
 Sinks:
 
 * file: records written to a file, in JSON lines (one record a line, lossless), CSV (the columns of the record, header first), or Pager CSV: the log the Pager demodulator writes, its columns (date, time, address, function bits, alphanumeric, numeric, even parity errors, BCH parity errors, baud, protocol, type, frame) and its messages only, for the tools that read that log. As the Pager demodulator counts them, BCH parity errors are the uncorrectable errors of the message, and even parity errors are 0. Read back, both columns are uncorrectable errors.
 * udp: a datagram for each message to an address and port. Pager format: the fields of the Pager demodulator, each ended by a NUL (date, time, address, function bits, alphanumeric, numeric, protocol, type); the address has 7 digits for POCSAG and 9 for FLEX, the function bits are POCSAG only, and the other reading of a message (numeric or alphanumeric) is in the other field. JSON format: the record as one line.
-* command: a command run for each message. The command is split into the program and its arguments first, then ${address}, ${message}, ${protocol}, ${type}, ${channel}, ${mode}, ${id}, ${frequency}, ${time} (UTC) and ${0}, ${1}... (the captures of the route) are replaced in the arguments, so a message cannot add arguments or change the program. At most 5 are run in a second; the others are refused and reported.
+* command: a command run for each message. The command is split into the program and its arguments first, then ${address}, ${message}, ${protocol}, ${type}, ${channel}, ${mode}, ${id}, ${frequency}, ${time} (UTC) and ${0}, ${1}... (the captures of the rule) are replaced in the arguments, so a message cannot add arguments or change the program. At most 5 are run in a second; the others are refused and reported.
 * speech: the text, with the same replacements, is said (when SDRangel is built with text to speech).
 * mark: an icon (the icons of the contacts, or an image file), a colour of the text and a colour of the row, each optional (right click on its button: none). The mark is written into the record (protocolData marks) before it is logged: the history, the exports and the WebAPI have it, and it is there again after a restart.
 

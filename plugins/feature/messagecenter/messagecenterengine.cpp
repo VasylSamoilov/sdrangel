@@ -208,16 +208,8 @@ QString MessageCenterFilter::errors() const
 
 MessageRecord::Quality MessageCenterFilter::quality(const MessageRecord& record)
 {
-    if (record.m_quality != MessageRecord::QualityUnknown) {
-        return record.m_quality;
-    }
-    if (record.m_direction == MessageRecord::DirectionTX) {
-        return MessageRecord::QualityClean;     // Nothing was received: nothing went wrong
-    }
-
-    // A record of before quality (the history, an imported file): as the paging receiver judges it now, its errors
-    // and the checks of its protocol
-    return RadioPagingPage::receivedQuality(record);
+    // A record of before quality (the history, an imported file): as the paging receiver judges it now
+    return RadioPagingPage::quality(record);
 }
 
 QStringList MessageCenterFilter::captures(const MessageRecord& record) const

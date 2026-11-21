@@ -88,6 +88,10 @@ struct MODEMRADIOPAGING_API RadioPagingPage
     //!< its protocol (a failed FLEX checksum K or signature S, a GSC block with a wrong checksum: damaged; incomplete:
     //!< damaged unless it is a fragment or a part, whose rest is still to come). Checks passed and no error count: clean
     static MessageRecord::Quality receivedQuality(const MessageRecord& record);
+    //!< The quality of a record as its producer set it, else as receivedQuality judges it; sent: clean
+    static MessageRecord::Quality quality(const MessageRecord& record);
+    //!< Why: e.g. "checksum K failed", "1 codeword uncorrectable", "3 bit errors corrected"; empty when clean
+    static QString qualityReason(const MessageRecord& record);
     //!< The capcodes of m_groupMembers (digits or the capcode forms of STD-43A Appendix A: their addresses)
     QList<qulonglong> groupMembers(bool *ok = nullptr) const;
     //!< FLEX: the address of the capcode in m_address, digits or a capcode form of STD-43A Appendix A (only the

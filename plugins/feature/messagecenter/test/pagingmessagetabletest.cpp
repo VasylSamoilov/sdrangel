@@ -89,6 +89,26 @@ int main(int argc, char **argv)
     check((cell(table, 1, PagingMessageTable::ColErrors) == "ok") && (cell(table, 1, PagingMessageTable::ColDirection) == "RX"),
         "a received message shows its errors");
 
+    // The quality: corrected bits, lost codewords, and a failed check of a message whose bits were all corrected
+    {
+        PagingMessageTable quality;
+        MessageRecord corrected = record("c", "flex", "0001234567", "FLEX");
+        corrected.m_errorsCorrected = 3;
+        quality.addRecord(corrected);
+        MessageRecord lost = record("l", "flex", "0001234567", "FLEX");
+        lost.m_errorsUncorrectable = 2;
+        quality.addRecord(lost);
+        MessageRecord failed = record("f", "flex", "0001234567", "FLEX");
+        failed.m_errorsCorrected = 9;
+        failed.m_protocolData.insert("checksum", "failed");
+        quality.addRecord(failed);
+        check(cell(quality, 0, PagingMessageTable::ColErrors) == "~3", "corrected bits: ~n");
+        check(cell(quality, 1, PagingMessageTable::ColErrors) == "X2", "lost codewords: Xn");
+        check((cell(quality, 2, PagingMessageTable::ColErrors) == "bad")
+            && quality.item(2, PagingMessageTable::ColErrors)->toolTip().contains("checksum K failed"),
+            "a failed check of a message whose bits were corrected: bad, and why");
+    }
+
     // A page of the Message Center not sent yet: QU in the queue, NS not sent; TX once its channel sent it
     {
         PagingMessageTable pages;
