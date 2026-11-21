@@ -60,9 +60,11 @@ public:
     const std::vector<Seen>& smsCentres() const { return m_smsCentres; }
     // "000501 (Y1 8, area 3)", several comma separated; empty if none
     static std::string text(const std::vector<Seen>& seen, bool withArea);
+    // a number into a list: the same number on the same kind of network moves to the front with
+    // its count, the list keeps at most `max`
+    static void note(std::vector<Seen>& list, const std::string& number, int y1, int area, size_t max);
 
 private:
-    static void note(std::vector<Seen>& list, const std::string& number, int y1, int area, size_t max);
 
     int m_password = -1;
     int m_candidate = -1;           // a value seen once
