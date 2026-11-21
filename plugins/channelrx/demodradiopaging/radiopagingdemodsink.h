@@ -89,6 +89,8 @@ public:
         quint32 m_locksDropped[3] = {0, 0, 0};  //!< Locks found in the data of a FLEX frame being received, dropped
         int m_remembered[3];            //!< Messages remembered for duplicate detection
         qint64 m_resetTime[3];          //!< When the state of the protocol was last reset, ms since epoch
+        qint64 m_signalMs = 0;          //!< Time of the signal processed since the start, from its samples: a clock that
+                                        //!< follows the signal (a file played faster or paused too)
 
         //! The network of one polarity of a protocol
         struct Polarity
@@ -306,6 +308,7 @@ private:
     mutable QMutex m_statusMutex;
     Status m_status;
     int m_statusCount;
+    quint64 m_statusPeriods = 0;        //!< Status periods of signal processed since the start
 
     void processOneSample(Complex& ci);
     // Scope: the two signals selected, in blocks

@@ -59,6 +59,85 @@ enum Protocol {
     ProtocolGsc
 };
 
+// The time zone as multimon-ng FLEX_NEXT writes it: +2h, -3h30m, with DST when the time is daylight saving time
+QString flexZoneValue(const RadioPagingFlexDecoder::NetworkTime& t)
+{
+    const int offset = t.m_zoneMinutes;
+    const int magnitude = std::abs(offset);
+    QString value = (magnitude % 60 == 0) ? QString::asprintf("%+dh", offset / 60)
+        : QString::asprintf("%+dh%02dm", offset / 60, magnitude % 60);
+
+    return (t.m_dst == 0) ? value + " DST" : value;  // L0 = 0: daylight saving time (STD-43A 3.7.2)
+}
+
+// The network time of a FLEX message, in the form of the flextime object of multimon-ng FLEX_NEXT: the time of the
+// frame of the message (the frame offset added to a time of frame 0), its precision, each component with its age in
+// frames, and the time mode. Empty when the network sent none
+QVariantMap flexTimeData(const RadioPagingFlexDecoder::NetworkTime& t)
+{
+    QVariantMap ft;
+
+    if (!t.m_dateValid && !t.m_timeValid && !t.m_zoneValid) {
+        return ft;
+    }
+
+    auto age = [](QVariantMap& component, int frames) {
+        component.insert("age_frames", frames);
+        component.insert("age_seconds", ((int) (frames * 187.5)) / 100.0);
+    };
+
+    if (t.m_dateValid && t.m_timeValid)
+    {
+        QString timestamp = QString::asprintf("%04d-%02u-%02u %02u:%02u:%05.2f", t.m_year, t.m_month, t.m_day,
+            t.m_currentHour, t.m_currentMinute, t.m_currentSecond);
+
+        if (t.m_zoneValid) {
+            timestamp += " " + flexZoneValue(t);
+        }
+
+        ft.insert("timestamp", timestamp);
+        // The extended second of the zone word refines the 7.5 s of the time word
+        ft.insert("precision_seconds", t.m_zoneValid ? 0.9375 : 7.5);
+    }
+    if (t.m_dateValid)
+    {
+        QVariantMap date;
+        date.insert("value", QString::asprintf("%04d-%02u-%02u", t.m_year, t.m_month, t.m_day));
+        age(date, t.m_dateAge);
+        ft.insert("date", date);
+    }
+    if (t.m_timeValid)
+    {
+        QVariantMap time;
+        time.insert("value", QString::asprintf("%02u:%02u", t.m_hour, t.m_minute));
+        time.insert("sec_coarse", t.m_second7_5);
+        age(time, t.m_timeAge);
+        ft.insert("time", time);
+    }
+    if (t.m_zoneValid)
+    {
+        QVariantMap tz;
+        tz.insert("value", flexZoneValue(t));
+        tz.insert("offset_min", t.m_zoneMinutes);
+        tz.insert("dst", t.m_dst == 0);
+        tz.insert("zone_code", t.m_zone);
+        tz.insert("sec_ext", t.m_extendedSeconds);
+
+        if (t.m_timeValid) {
+            tz.insert("sec_combined", t.m_second7_5 * 7.5 + t.m_extendedSeconds * 0.9375);
+        }
+
+        age(tz, t.m_zoneAge);
+        ft.insert("tz", tz);
+    }
+
+    // Standard: the time word is the time of frame 0 of the cycle, the frame offset is added; direct: the time of the
+    // frame. Not confirmed: assumed standard, the time words of a cycle have not told it yet
+    ft.insert("time_mode", (t.m_mode == 1) ? "direct" : "standard");
+    ft.insert("time_mode_confirmed", t.m_modeConfirmed);
+    return ft;
+}
+
 } // namespace
 
 void RadioPagingDemodSink::Leg::create(double huntBandwidth, double trackBandwidth, double channelBandwidth, double deviation)
@@ -431,6 +510,7 @@ void RadioPagingDemodSink::processOneSample(Complex& ci)
     if (++m_statusCount >= statusPeriodSamples)
     {
         m_statusCount = 0;
+        m_statusPeriods++;
         updateStatus();
 
         if (++m_afcCount >= 10)
@@ -968,6 +1048,8 @@ void RadioPagingDemodSink::updateStatus()
         }
     }
 
+    // Every sample counts, signal or noise: the time of the signal processed
+    status.m_signalMs = (qint64) (m_statusPeriods * statusPeriodSamples * 1000 / RadioPagingDemodSettings::m_channelSampleRate);
     m_status = status;
 }
 
@@ -1017,19 +1099,28 @@ void RadioPagingDemodSink::updatePolarityStatus(Status& status, const RadioPagin
         status.m_flexTimePol[pol] = m_flex.networkTime(pol == 1);
     }
 
-    // FLEX: one polarity at a time, the one of the frame
+    // FLEX, the frame being received: its polarity, mode and carrier offset
     if (status.m_flexSync)
     {
         int pol = flex.m_inverted ? 1 : 0;
         sync[1][pol] = true;
-        if (flex.m_ber.valid()) {
-            m_polLast[1][pol].m_ber = flex.m_ber;
-        }
         m_polLast[1][pol].m_offset = m_flexLeg.m_shift + flex.m_dc * m_settings.m_flexDeviation;
         m_polLast[1][pol].m_offsetValid = true;
         m_flexLastMode[pol] = RadioPagingFlex::modeName(flex.m_mode);
-        m_flexLastFrame[pol] = flex.m_frameReport;
-        std::copy(flex.m_phaseBer, flex.m_phaseBer + 4, m_flexLastPhaseBer[pol]);
+    }
+
+    // FLEX, the last frame decoded of each polarity and its bit error rates, kept by the decoder for each network:
+    // the frames of the two polarities may come in turn, the frame being received is not the last one decoded
+    for (int pol = 0; pol < 2; pol++)
+    {
+        if (flex.m_berPol[pol].valid()) {
+            m_polLast[1][pol].m_ber = flex.m_berPol[pol];
+        }
+        if (flex.m_frameReportPol[pol].m_fiwValid)
+        {
+            m_flexLastFrame[pol] = flex.m_frameReportPol[pol];
+            std::copy(flex.m_phaseBerPol[pol], flex.m_phaseBerPol[pol] + 4, m_flexLastPhaseBer[pol]);
+        }
     }
 
     for (int pol = 0; pol < 2; pol++)
@@ -1233,6 +1324,13 @@ void RadioPagingDemodSink::sendFlex(const RadioPagingFlexDecoder::Message& messa
     record.m_protocolData.insert("cycle", message.m_cycle);
     record.m_protocolData.insert("frame", message.m_frame);
     record.m_protocolData.insert("phase", QString(QChar(message.m_phase)));
+
+    // The network time as of the frame of the message (the network of its polarity)
+    const QVariantMap flexTime = flexTimeData(m_flex.networkTime(message.m_inverted));
+
+    if (!flexTime.isEmpty()) {
+        record.m_protocolData.insert("flextime", flexTime);
+    }
 
     // Multiple transmission (STD-43A 3.4.2): a subframe of the frame, its copies combined
     if (message.m_transmissions > 1)

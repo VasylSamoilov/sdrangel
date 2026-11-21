@@ -40,6 +40,7 @@ class BasebandSampleSink;
 class RadioPagingDemod;
 class QLabel;
 class QCheckBox;
+class QTableWidget;
 class ScopeVis;
 
 namespace Ui {
@@ -125,40 +126,23 @@ private:
     void leaveEvent(QEvent*);
     void enterEvent(EnterEventType*);
     void updateStatus();
-    //!< The rows of each protocol: the live line, the options and the network lines of each polarity
+    //!< The protocols: their status rows in the settings, their settings and their details
     void layoutProtocols();
     //!< The polarity of the network being received by a protocol (in sync, else received last)
     int currentPolarity(const RadioPagingDemodSink::Status& status, int protocol);
-    //!< The live line of a protocol: state, what is received, polarity, quality, carrier offset, messages
-    static QString statusLine(const RadioPagingDemodSink::Status& status, int protocol, int pol, bool sync,
-        const QString& state, const QString& detail);
-    //!< FLEX: the lines of the network of the last frame of a polarity
-    static QString flexNetworkLines(const RadioPagingDemodSink::Status& status, int pol);
-    //!< What the receivers of a polarity remember and when they were reset
-    static QString memoryLine(const RadioPagingDemodSink::Status& status, int protocol, int pol);
-    //!< The polarities shown: those received since the reset, the normal one when none was
-    static void shownPolarities(const RadioPagingDemodSink::Status& status, int protocol, bool shown[2]);
-    //!< The group slot bars of FLEX, one for each polarity shown, with the state of each slot
-    void updateGroupBars(const RadioPagingDemodSink::Status& status, const bool shown[2]);
+    //!< The group slot bars of FLEX, one for each polarity, with the state of each slot
+    void updateGroupBars(const RadioPagingDemodSink::Status& status);
     static QString groupSlotToolTip(const RadioPagingFlexDecoder::GroupSlot& slot, int pol, const RadioPagingDemodSink::Status& status);
-    static QString polarityHtml(bool inverted);
-    static QStringList flexDetails(const RadioPagingDemodSink::Status& status);
-    static QString flexToolTip(const RadioPagingDemodSink::Status& status);
-    static QString qualityHtml(const RadioPagingBerWindow& ber, bool live);
-    static QString offsetHtml(float offset, bool live);
 
     // FLEX: between the frames of a transmission the decoder hunts for the next sync 1. The
     // display keeps SYNC until that sync is due: a frame (1.875 s, STD-43A 3.2) after the start
     // of the last one, plus one status period (the display sees the start that much late)
     static const qint64 m_flexFrameMs = 1875;
     static const qint64 m_statusPeriodMs = 200;
-    QString m_pocsagToolTip;            //!< Descriptions of the status fields (from the form)
-    QString m_gscToolTip;
     QElapsedTimer m_statusClock;
     qint64 m_flexFrameStart = -1;       //!< m_statusClock when the last frame was first seen, -1 none
     bool m_flexWasSync = false;
     int m_currentPol[3] = {0, 0, 0};    //!< The polarity of the live line of each protocol
-    QLabel *m_networkLabel[3][2];       //!< The network lines of each protocol and polarity
     QLabel *m_codepageLabel[3];
     //!< The editor of the custom codepage of a protocol (0 POCSAG, 1 FLEX, 2 GSC): a character for each code of the
     //!< default table, the direction, export and import
@@ -167,6 +151,42 @@ private:
     void fillCodepageLists();
     QWidget *m_flexGroupBar[2] = {nullptr, nullptr};    //!< The 16 group slots of each polarity
     QLabel *m_flexGroupCell[2][16];
+
+    // The status of each protocol in the settings: what is received (speeds or mode) and its polarity; FLEX also the
+    // cycle and frame and the network time indicator
+    QLabel *m_receivingLabel[3] = {nullptr, nullptr, nullptr};
+    QLabel *m_polarityLabel[3] = {nullptr, nullptr, nullptr};
+    QLabel *m_berLabel[3] = {nullptr, nullptr, nullptr};
+    QLabel *m_offsetLabel[3] = {nullptr, nullptr, nullptr};     //!< The carrier offset of each protocol
+    QLabel *m_flexFrameLabel = nullptr;
+    QLabel *m_flexClockLabel = nullptr;
+    int m_switchState[3] = {-1, -1, -1};    //!< The colour state of each protocol switch (to restyle on a change only)
+    // The details: a table for each protocol, a row for each value, the normal and inverted networks in columns
+    QTableWidget *m_detailsTable[3] = {nullptr, nullptr, nullptr};
+    //!< FLEX: the bit error rate of each phase, a box each; for each polarity, a row for phases A and B, one for C and D
+    QLabel *m_flexPhaseLabel[2][2] = {{nullptr, nullptr}, {nullptr, nullptr}};
+    //!< FLEX: the network words (time, zone, local ID, country) of each polarity, a chip while fresh
+    QLabel *m_flexWordLabel[2][4] = {{nullptr, nullptr, nullptr, nullptr}, {nullptr, nullptr, nullptr, nullptr}};
+
+    // FLEX: when (the time of the signal processed, from its samples) and in which frame each kind of network word
+    // was last received, for each polarity, -1 never. Its age, received or not since: in the last frame, in this cycle
+    // (128 frames, 4 minutes), in this hour (the least a network sends the time, STD-43A 3.7.2), older
+    enum FlexWord { WordDateTime, WordZone, WordSsid1, WordSsid2, WordCount };
+    enum FlexWordAge { AgeNever, AgeFrame, AgeCycle, AgeHour, AgeOld };
+    qint64 m_flexWordMs[2][WordCount] = {{-1, -1, -1, -1}, {-1, -1, -1, -1}};
+    int m_flexWordFrame[2][WordCount] = {{-1, -1, -1, -1}, {-1, -1, -1, -1}};
+    int m_flexLastFrame[2] = {-1, -1};      //!< The last frame (cycle * 128 + frame) of each polarity whose words were taken
+    qint64 m_flexLastFrameMs[2] = {-1, -1}; //!< When it was taken
+    void stampFlexWords(const RadioPagingDemodSink::Status& status);
+    FlexWordAge flexWordAge(int pol, FlexWord word, qint64 signalMs) const;
+    //!< A network word in a cell of the details, by its age: a green chip in the last frame, a light green chip in this
+    //!< cycle, the text colour in this hour, grey after
+    //!< assumed: the time mode is assumed (not confirmed by the time words of a cycle), a light yellow chip
+    void setNetworkDetail(FlexWord word, int pol, const QString& text, FlexWordAge age, bool assumed = false);
+    //!< The kind of the network time, its precision and when it was received, for its tooltips
+    static QString flexTimeKind(const RadioPagingFlexDecoder::NetworkTime& t);
+    void setDetail(int protocol, int row, int pol, const QString& text, bool live, const QColor& colour = QColor());
+    void updateDetails(const RadioPagingDemodSink::Status& status, int flexPol, bool flexHeld);
 
 private slots:
     void on_deltaFrequency_changed(qint64 value);

@@ -22,6 +22,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <memory>
 #include <random>
 #include <set>
@@ -103,6 +104,7 @@ struct Received
     double m_voiceSeconds = 0.0;        //!< Length of the last voice message
     int m_systemEvents = 0;             //!< FLEX System Event Notification records
     unsigned m_eventFlags = 0;          //!< Their event flags, or-ed
+    std::map<std::string, QVariantMap> m_flexTimes;     //!< The FLEX network time of the records, by their text
 };
 
 // The source output, with noise, into the demodulator sink at the same rate and offset
@@ -215,6 +217,10 @@ struct Loop
                 {
                     m_received.m_systemEvents++;
                     m_received.m_eventFlags |= rec.m_protocolData["event_flags"].toUInt();
+                }
+
+                if (rec.m_protocolData.contains("flextime")) {
+                    m_received.m_flexTimes[rec.m_text.toStdString()] = rec.m_protocolData["flextime"].toMap();
                 }
 
                 m_received.m_records++;
@@ -766,7 +772,13 @@ void testFlexRoaming(bool mixed)
     loop.m_settings.m_ssidCountryCode = 262;
     loop.m_settings.m_ssidTrafficFlags = 5;
     loop.m_settings.m_flexMixPocsag = mixed;
-    loop.apply(QStringList({"flexMode", "flexRoaming", "ssidLocalId", "ssidCoverageZone", "ssidCountryCode", "ssidTrafficFlags", "mixPocsag"}));
+    // The time service too, in the same request: another FLEX mode, the stream is made again with all of them (was:
+    // a stream made again, as at start, did not get the roaming nor the time, sent only after another change)
+    loop.m_settings.m_flexTime = true;
+    loop.m_settings.m_flexTimeSendZone = true;
+    loop.m_settings.m_flexTimeZoneMinutes = 120;
+    loop.apply(QStringList({"flexMode", "flexRoaming", "ssidLocalId", "ssidCoverageZone", "ssidCountryCode", "ssidTrafficFlags",
+        "mixPocsag", "flexTime", "flexTimeSendZone", "flexTimeZoneMinutes"}));
     loop.runSeconds(3.0);
 
     loop.m_source.addRequest(flexRequest(200, 2101300, "ROAMING TEXT", true));
@@ -777,6 +789,22 @@ void testFlexRoaming(bool mixed)
             flexKey(RadioPagingFlex::Mode3200_4, 1234567, false, "ROAMING TWO") })
         && (loop.m_source.getStatus().m_sent == 2),
         mixed ? "FLEX roaming mixed: messages received" : "FLEX roaming: messages received");
+
+    // The system ID and the time of the network received, in its frames of the normal polarity
+    const RadioPagingFlexDecoder::NetworkTime& network = loop.m_sink.getStatus().m_flexTimePol[0];
+    check(network.m_ssid1Valid && (network.m_localId == 300) && (network.m_coverageZone == 17),
+        mixed ? "FLEX roaming mixed: system ID received" : "FLEX roaming: system ID received");
+    check(network.m_timeValid && network.m_zoneValid && (network.m_zoneMinutes == 120),
+        mixed ? "FLEX roaming mixed: time and zone received" : "FLEX roaming: time and zone received");
+
+    // A message once the time is known: its record has the network time of its frame, as multimon-ng FLEX_NEXT
+    loop.m_source.addRequest(flexRequest(202, 1234571, "ROAMING TIME", false));
+    loop.runSeconds(5.0);
+    const QVariantMap ft = loop.take().m_flexTimes.count("ROAMING TIME") ? loop.take().m_flexTimes.at("ROAMING TIME") : QVariantMap();
+    check(ft.contains("timestamp") && ft["timestamp"].toString().endsWith("+2h") && (ft["precision_seconds"].toDouble() == 0.9375)
+            && (ft["time_mode"].toString() == "standard") && ft["tz"].toMap().contains("age_frames")
+            && (ft["tz"].toMap()["offset_min"].toInt() == 120),
+        mixed ? "FLEX roaming mixed: network time in the record" : "FLEX roaming: network time in the record");
 }
 
 // ---------------------------------------------------------------------------

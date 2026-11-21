@@ -45,6 +45,7 @@
 #include <QRegularExpression>
 #include <QScrollBar>
 #include <QStyledItemDelegate>
+#include <QTabWidget>
 #include <QTextDocument>
 #include <QToolButton>
 
@@ -77,13 +78,6 @@
 #include "radiopagingdemodnotificationdialog.h"
 #include "radiopagingpagerformat.h"
 #include "radiopagingvoicestore.h"
-
-namespace {
-
-// Between the fields of a status line: a gap the line may wrap at (a field itself does not wrap)
-const char *statusGap = "&nbsp;&nbsp; ";
-
-} // namespace
 
 const int RadioPagingDemodGUI::m_maxRows;
 
@@ -1089,7 +1083,10 @@ RadioPagingDemodGUI::RadioPagingDemodGUI(PluginAPI* pluginAPI, DeviceUISet *devi
     // Set before the rollups are arranged, so that the window is sized for it
     ui->messages->setMinimumHeight(ui->messages->horizontalHeader()->sizeHint().height()
         + 6 * ui->messages->verticalHeader()->defaultSectionSize() + 2 * ui->messages->frameWidth());
-    // Output and waveforms are rolled up until the user opens them (a state saved before wins)
+    // The protocol settings, the details, output and waveforms are rolled up until the user opens them (a state saved
+    // before wins)
+    ui->protocolsContainer->hide();
+    ui->detailsContainer->hide();
     ui->outputContainer->hide();
     ui->scopeContainer->hide();
     rollupContents->arrangeRollups();
@@ -1183,8 +1180,6 @@ RadioPagingDemodGUI::RadioPagingDemodGUI(PluginAPI* pluginAPI, DeviceUISet *devi
     fillCodepageLists();
 
     layoutProtocols();
-    m_pocsagToolTip = ui->pocsagStatus->toolTip();
-    m_gscToolTip = ui->gscStatus->toolTip();
     m_statusClock.start();
 
     displaySettings();
@@ -1317,187 +1312,6 @@ void RadioPagingDemodGUI::tick()
     m_tickCount++;
 }
 
-// Extended FLEX status of the network of the last frame: frame, network time and
-// identification (once received several times the same), groups and reassemblies
-QStringList RadioPagingDemodGUI::flexDetails(const RadioPagingDemodSink::Status& status)
-{
-    const RadioPagingFlexDecoder::FrameReport& frame = status.m_flexFrame;
-    const RadioPagingFlexDecoder::NetworkTime& t = status.m_flexTime;
-    QStringList lines;
-
-    if (frame.m_fiwValid)
-    {
-        QString text = QString("C%1/F%2").arg(frame.m_cycle, 2, 10, QChar('0')).arg(frame.m_frame, 3, 10, QChar('0'));
-        if (!frame.m_blocks.empty()) {
-            text += QString(" collapse %1").arg(frame.m_blocks.front().m_collapse);
-        }
-        if (frame.m_roaming) {
-            text += " roaming";
-        }
-        if (frame.m_repeat) {
-            text += QString(" repeat x%1").arg(frame.m_transmissions);
-        }
-        lines.append(text);
-    }
-
-    QStringList network;
-
-    if (t.m_dateValid) {
-        network.append(QString("%1-%2-%3").arg(t.m_year).arg(t.m_month, 2, 10, QChar('0')).arg(t.m_day, 2, 10, QChar('0')));
-    }
-    if (t.m_timeValid)
-    {
-        network.append(QString("%1:%2:%3").arg(t.m_currentHour, 2, 10, QChar('0')).arg(t.m_currentMinute, 2, 10, QChar('0'))
-            .arg((int) t.m_currentSecond, 2, 10, QChar('0')));
-    }
-    if (t.m_zoneValid)
-    {
-        // L0 = 0: the time is daylight saving time (STD-43A 3.7.2)
-        QString saving = (t.m_dst == 0) ? "dst" : "std";
-
-        if (t.m_zoneDefined)
-        {
-            int minutes = t.m_zoneMinutes;
-            network.append(QString("UTC%1%2:%3 %4").arg(minutes < 0 ? "-" : "+").arg(std::abs(minutes) / 60)
-                .arg(std::abs(minutes) % 60, 2, 10, QChar('0')).arg(saving));
-        }
-        else
-        {
-            network.append(QString("zone %1 (not defined) %2").arg(t.m_zone).arg(saving));
-        }
-    }
-    if (t.m_ssid1Valid) {
-        network.append(QString("LID %1 coverage %2").arg(t.m_localId).arg(t.m_coverageZone));
-    }
-    if (t.m_ssid2Valid) {
-        network.append(QString("country %1 TMF %2").arg(t.m_country).arg(t.m_tmf));
-    }
-    if (!network.isEmpty()) {
-        lines.append(network.join("  "));
-    }
-
-    QStringList groups;
-
-    for (const auto& g : status.m_flexGroups) {
-        groups.append(QString("G%1[%2]>F%3").arg(g.m_slot).arg(g.m_members.size()).arg(g.m_targetFrame, 3, 10, QChar('0')));
-    }
-    if (!groups.isEmpty() || (status.m_flexReassemblies > 0))
-    {
-        lines.append(QString("Groups %1/16 %2  reasm %3/%4").arg(status.m_flexGroups.size()).arg(groups.join(" "))
-            .arg(status.m_flexReassemblies).arg(RadioPagingFlexDecoder::m_reassemblySlots));
-    }
-    if ((status.m_flexErsCount > 0) && !status.m_flexErs)
-    {
-        lines.append(QString("Last ERS %1 s (%2)").arg(status.m_flexErsSeconds, 0, 'f', 2).arg(status.m_flexErsCount));
-    }
-
-    return lines;
-}
-
-QString RadioPagingDemodGUI::flexToolTip(const RadioPagingDemodSink::Status& status)
-{
-    QString tip = tr("FLEX state: SYNC or HUNT, mode and polarity of the frame,\n"
-        "BER the bit error rate of the recent codewords (green no errors, yellow errors corrected,\n"
-        "red errors that could not be corrected, grey after the reception),\n"
-        "%1f the carrier frequency offset (DC offset of the discriminator; the levels of sync 1 are kept through\n"
-        "4-level frames) and messages received.\n"
-        "Line 2: cycle and frame, collapse cN, R roaming, xN repeated frame, network date, time and zone.\n"
-        "Line 3: BER of each phase of a frame of several phases; LID local id, CZ coverage zone,\n"
-        "CC country code, TMF traffic management flags.\n"
-        "Between the frames of a transmission SYNC stays shown until the sync of the next frame is due\n"
-        "(1.875 s after the start of the last one).\n"
-        "ERS: emergency re-synchronization being received (no mode or polarity), with its length so far;\n"
-        "last ERS: length of the last one and the number received.\n"
-        "Cxx/Fxxx: cycle and frame of the last frame. Collapse n: pagers wake up every 2^n frames.\n"
-        "Roaming: roaming bit of the frame. Repeat xN: the frame content is sent N times.\n"
-        "Date, time and zone: network time from the block information words.\n"
-        "LID: local id, coverage: coverage zone, country: country code,\n"
-        "TMF: traffic management flags (which frames this transmitter sends).\n"
-        "Groups: temporary addresses in use, Gs[members]>F target frame of the group message.\n"
-        "Reasm: fragmented messages being reassembled.").arg(QChar(0x394));
-
-    if (status.m_enabled[1])
-    {
-        QStringList details = flexDetails(status);
-        if (!details.isEmpty()) {
-            tip += "\n\n" + details.join("\n");
-        }
-    }
-
-    for (const auto& g : status.m_flexGroups)
-    {
-        QStringList members;
-        for (uint64_t capcode : g.m_members) {
-            members.append(QString("%1").arg((qulonglong) capcode, 10, 10, QChar('0')));
-        }
-        tip += QString("\nG%1: %2 (set up C%3/F%4)").arg(g.m_slot).arg(members.join(", "))
-            .arg(g.m_setupCycle, 2, 10, QChar('0')).arg(g.m_setupFrame, 3, 10, QChar('0'));
-    }
-
-    return tip;
-}
-
-QString RadioPagingDemodGUI::polarityHtml(bool inverted)
-{
-    return inverted ? QString("<span style=\"color:#ffcc44\">INV</span>") : QString("<span style=\"color:#88aacc\">NORM</span>");
-}
-
-// Carrier frequency offset measured as the DC offset of the discriminator. Grey once the
-// reception ended (the last value is kept)
-QString RadioPagingDemodGUI::offsetHtml(float offset, bool live)
-{
-    QString text = QString("%1f %2%3 Hz").arg(QChar(0x394)).arg(offset < 0.0f ? "-" : "+").arg((int) std::round(std::fabs(offset)));
-    return live ? text : QString("<span style=\"color:#888888\">%1</span>").arg(text);
-}
-
-// Bit error rate of the reception. Green: no bit errors, yellow: errors the code corrected, light red: errors the
-// code could not correct. Grey once the reception ended
-QString RadioPagingDemodGUI::qualityHtml(const RadioPagingBerWindow& ber, bool live)
-{
-    if (!ber.valid()) {
-        return QString();
-    }
-
-    QString colour = !live ? "#888888" : (ber.m_uncorrectable > 0) ? "#ff6644" : (ber.m_errorBits > 0) ? "#ffcc44" : "#44cc44";
-
-    return QString("<span style=\"color:%1\">BER %2%</span>").arg(colour).arg(100.0 * ber.ber(), 0, 'f', 2);
-}
-
-namespace {
-
-// A field of a status line kept in one piece: the spaces of its text (not those of its tags) do not break
-QString statusField(const QString& html)
-{
-    static const QRegularExpression parts("(<[^>]*>)|([^<]+)");
-    QString out;
-    QRegularExpressionMatchIterator it = parts.globalMatch(html);
-
-    while (it.hasNext())
-    {
-        QRegularExpressionMatch m = it.next();
-        out += m.captured(1).isEmpty() ? QString(m.captured(2)).replace(' ', "&nbsp;") : m.captured(1);
-    }
-
-    return out;
-}
-
-// The fields of a line, those not empty, with the gap between them
-QString statusFields(const QStringList& fields)
-{
-    QStringList shown;
-
-    for (const QString& f : fields)
-    {
-        if (!f.isEmpty()) {
-            shown.append(statusField(f));
-        }
-    }
-
-    return shown.join(statusGap);
-}
-
-} // namespace
-
 QString RadioPagingDemodGUI::groupSlotToolTip(const RadioPagingFlexDecoder::GroupSlot& slot, int pol,
     const RadioPagingDemodSink::Status& status)
 {
@@ -1536,29 +1350,89 @@ QString RadioPagingDemodGUI::groupSlotToolTip(const RadioPagingFlexDecoder::Grou
 // The colours of the status. Grey is what is not active: a reception that ended, a slot that is free
 namespace {
 
-const char *colourInactive = "#888888";
-const char *colourLive = "#e8e8e8";         // Values of a reception in progress
-const char *colourFrame = "#b8b8b8";        // FLEX cycle and frame
-const char *colourFlags = "#b8b8b8";        // FLEX collapse, roaming, repeats
-const char *colourSystem = "#b8b8b8";       // FLEX system ID
-const char *colourMemory = "#b8b8b8";       // What the receivers remember
-const char *colourPage = "#b8b8b8";         // GSC page: preamble, batch, slot
+const char *colourInactive = "#a8a8a8";     // Values of a reception that ended: readable on the dark background
 
-QString coloured(const QString& text, const QString& colour)
+// The boxes of the status (bit error rate, phases, polarity): light tints with dark text, for contrast
+enum Chip { ChipGood, ChipCorrected, ChipBad, ChipEnded, ChipNormal, ChipInverted };
+
+const char *chipBackground(Chip chip)
 {
-    return text.isEmpty() ? text : QString("<span style=\"color:%1\">%2</span>").arg(colour, text.toHtmlEscaped());
+    static const char *colours[] = {"#a8e0a8", "#f0dc8c", "#f4aca4", "#b4b4b4", "#a8c8ec", "#f4d070"};
+    return colours[chip];
 }
 
-// A value in its colour while the reception is in progress, grey once it ended
-QString value(const QString& text, const char *colour, bool live)
+const char *chipText = "#141414";
+const char lowTrafficSeparator = '`';       // FLEX phase box: A`0.00% when the low traffic flag of the phase is set
+
+// The quality of a bit error rate window as a box: errors the code could not correct, errors corrected, none
+Chip qualityChip(const RadioPagingBerWindow& ber, bool live)
 {
-    return coloured(text, live ? QString(colour) : QString(colourInactive));
+    return !live ? ChipEnded : (ber.m_uncorrectable > 0) ? ChipBad : (ber.m_errorBits > 0) ? ChipCorrected : ChipGood;
 }
 
-QString berColour(const RadioPagingBerWindow& ber, bool live)
+QString chipStyle(Chip chip)
 {
-    return !live ? QString(colourInactive) : (ber.m_uncorrectable > 0) ? QString("#e07a66")
-        : (ber.m_errorBits > 0) ? QString("#d9c26a") : QString("#7fc47f");
+    return QString("QLabel { background-color : %1; color : %2; border-radius : 3px; }").arg(chipBackground(chip)).arg(chipText);
+}
+
+QString chipHtml(Chip chip, const QString& text)
+{
+    return QString("<span style=\"background-color:%1; color:%2;\">&nbsp;%3&nbsp;</span>")
+        .arg(chipBackground(chip)).arg(chipText).arg(text.toHtmlEscaped());
+}
+
+// The FLEX network date and the time of the last frame as received; empty when the network sends none
+QString flexDateTimeText(const RadioPagingFlexDecoder::NetworkTime& t)
+{
+    QStringList when;
+
+    if (t.m_dateValid) {
+        when.append(QString("%1-%2-%3").arg(t.m_year).arg(t.m_month, 2, 10, QChar('0')).arg(t.m_day, 2, 10, QChar('0')));
+    }
+    if (t.m_timeValid)
+    {
+        when.append(QString("%1:%2:%3").arg(t.m_currentHour, 2, 10, QChar('0')).arg(t.m_currentMinute, 2, 10, QChar('0'))
+            .arg((int) t.m_currentSecond, 2, 10, QChar('0')));
+    }
+
+    return when.join(" ");
+}
+
+// The FLEX time zone word (STD-43A 3.7.2): the offset from UTC, DST in daylight saving time (L0 = 0), the extended
+// second (S5-S3, steps of 1/64 minute); empty when the network sends none
+QString flexZoneText(const RadioPagingFlexDecoder::NetworkTime& t)
+{
+    if (!t.m_zoneValid) {
+        return QString();
+    }
+
+    int minutes = t.m_zoneMinutes;
+    QString zone = t.m_zoneDefined
+        ? QString("UTC%1%2:%3").arg(minutes < 0 ? "-" : "+").arg(std::abs(minutes) / 60, 2, 10, QChar('0'))
+            .arg(std::abs(minutes) % 60, 2, 10, QChar('0'))
+        : QString("zone %1 (not defined)").arg(t.m_zone);
+
+    if (t.m_dst == 0) {
+        zone += " DST";
+    }
+    zone += QString(" ext +%1 s").arg(t.m_extendedSeconds * 0.9375, 0, 'f', 4);
+
+    return zone;
+}
+
+// The FLEX network time as received: date, time and zone
+QString flexTimeText(const RadioPagingFlexDecoder::NetworkTime& t)
+{
+    QStringList parts;
+
+    for (const QString& part : {flexDateTimeText(t), flexZoneText(t)})
+    {
+        if (!part.isEmpty()) {
+            parts.append(part);
+        }
+    }
+
+    return parts.join(" ");
 }
 
 // The colours of the group slots: their state, a white digit on a muted background (free: grey digit)
@@ -1579,24 +1453,150 @@ SlotStyle slotStyle(RadioPagingFlexDecoder::GroupState state)
     case RadioPagingFlexDecoder::GroupMissed: return {"#87392d", "#ffffff"};
     case RadioPagingFlexDecoder::GroupDiscarded: return {"#5a4785", "#ffffff"};
     case RadioPagingFlexDecoder::GroupTimeout: return {"#8f5523", "#ffffff"};
-    default: return {nullptr, "#666666"};
+    default: return {nullptr, "#a8a8a8"};     // Free: readable on the dark background
     }
 }
 
 } // namespace
 
-// The protocol rows: for each protocol, the live line (button, deviation, DC correction and the status of the network
-// being received), the line of its options (labels before their fields, the codepage, the reset button) and the
-// network lines of each polarity received, under the button. FLEX adds the group slots of each polarity
+namespace {
+
+// A row of the details of a protocol: its name, what it is, and whether it is a value of the protocol (across both
+// network columns) rather than of each network
+struct DetailRow
+{
+    const char *m_name;
+    const char *m_toolTip;
+    bool m_single;
+};
+
+// The bit error rate and the carrier offset are in the status row of each protocol (of the network being received)
+enum PocsagDetail { PocsagSpeeds, PocsagBatches, PocsagRemembered, PocsagMessages, PocsagReset };
+enum FlexDetail { FlexMode, FlexFrame, FlexFlags, FlexRoaming, FlexTime, FlexZone, FlexSystem, FlexCountry, FlexPhasesAB,
+    FlexPhasesCD, FlexRemembered, FlexReassembling, FlexErs, FlexMessages, FlexReset };
+enum GscDetail { GscState, GscPage, GscRemembered, GscMessages, GscReset };
+
+const DetailRow berRow = {"Bit error rate",
+    "How clean the signal is: the share of the received bits that were wrong.\n"
+    "Measured by the error correction: each codeword it corrects tells how many bits were wrong; a codeword\n"
+    "too damaged to correct counts as 3 wrong bits. Over the last 64 codewords, halved each time the window\n"
+    "fills, so that the recent codewords count most.\n"
+    "The code corrects 2 wrong bits in a codeword of 32 (POCSAG, FLEX: BCH 31,21) or 3 in 23 (GSC: Golay),\n"
+    "so a small rate still decodes every message. For errors spread at random, at 1% about 1 codeword in 250\n"
+    "cannot be corrected, at 3% about 1 in 14: below 1% is a good signal, above 3% messages get damaged.\n"
+    "Green: no bit errors. Yellow: errors, all corrected. Red: codewords too damaged to correct (their\n"
+    "characters may be wrong or lost). Grey once the reception ended.", false};
+const DetailRow offsetRow = {"Carrier offset",
+    "How far the transmitter is from the frequency of the channel, measured on the known patterns of the protocol.\n"
+    "Positive: the signal is above the channel. The receiver follows it; a large offset is worth correcting\n"
+    "with the frequency of the channel (Settings).", false};
+const DetailRow rememberedRow = {"Remembered",
+    "Messages the receivers keep in memory to recognise one received again (a duplicate: networks repeat\n"
+    "pages). A duplicate is marked in the messages, not taken as a new message.", false};
+const DetailRow messagesRow = {"Messages", "Messages received since the channel started.", true};
+const DetailRow resetRow = {"Last reset",
+    "When the receivers last forgot what they remember: the duplicates, and for FLEX the fragments, groups\n"
+    "and message numbers. Done with the reset button in Protocols, and when the device starts.", true};
+
+const QList<DetailRow>& detailRows(int protocol)
+{
+    static const QList<DetailRow> pocsag = {
+        {"Speeds",
+            "Speeds in sync (bit/s: 512, 1200, 2400). A network sends at one speed; several at once means\n"
+            "several transmitters or a mixed network.", false},
+        {"Batches",
+            "Batches of the transmission being received, or of the last one. A batch is a sync word and 16\n"
+            "codewords (8 frames of 2): about 0.45 s at 1200 bit/s. A long transmission carries many pages.", false},
+        rememberedRow, messagesRow, resetRow
+    };
+    static const QList<DetailRow> flex = {
+        {"Mode",
+            "Speed and levels of the last frame: bit/s / number of frequency levels.\n"
+            "A frame carries 1, 2 or 4 phases: independent 1600 bit/s channels, each with its own addresses\n"
+            "and messages, sent together. More phases carry more pages in the same time.\n"
+            "  1600/2: 1 phase (A); 2 levels (+-4.8 kHz), 1600 symbols/s of 1 bit.\n"
+            "  3200/2: 2 phases (A, C); 2 levels, 3200 symbols/s of 1 bit.\n"
+            "  3200/4: 2 phases (A, C); 4 levels (+-4.8, +-1.6 kHz), 1600 symbols/s of 2 bits, one of each phase.\n"
+            "  6400/4: 4 phases (A to D); 4 levels, 3200 symbols/s of 2 bits.\n"
+            "4 levels are closer together (3.2 kHz apart instead of 9.6): they need a stronger signal.\n"
+            "A pager listens to one phase, or looks for its address in all of them (its phase mode).", false},
+        {"Cycle / frame",
+            "Where the network is in its hour: 15 cycles of 128 frames of 1.875 s (a cycle is 4 minutes).\n"
+            "Cycle 0, frame 0 starts at the top of the hour; a pager listens to its own frames only.", false},
+        {"Collapse, repeats",
+            "Collapse m: a pager wakes up for one frame in 2^m (its frame n, n + 2^m, ...) and sleeps otherwise.\n"
+            "In brackets: the longest a page waits for the next frame of its pager. A smaller collapse pages\n"
+            "faster, a larger one saves the battery of the pagers.\n"
+            "Repeats: - the frame is sent once (the usual). xN: it is sent N times for pagers in poor coverage;\n"
+            "TD: the collapse of the repeats.", false},
+        {"Roaming",
+            "Whether the network lets pagers roam to it (the roaming bit of every frame). A roaming network also\n"
+            "sends its system ID (below), that pagers compare with theirs.", false},
+        {"Network time",
+            "The date and the time the network sends, as of the last frame: pagers set their clock from it.\n"
+            "Networks must send it at least once an hour (cycle 0, frame 0); many send it in more frames.\n"
+            "The time goes on with the frames between. Green box: received in the last frame. Light green: in this\n"
+            "cycle (4 minutes). Plain: in this hour. Grey: not received for more than an hour. Light yellow: the kind of\n"
+            "the time (of frame 0 of the cycle, or of the frame) is assumed, not told yet by the time words of a cycle.", false},
+        {"Time zone",
+            "The time zone the network sends with the time: offset from UTC, DST when the time is daylight saving time,\n"
+            "ext the extended second (0 to 7 steps of 0.9375 s) that corrects the time of frames not aligned to the\n"
+            "second. Green box: received in the last frame. Light green: in this cycle (4 minutes). Plain: in this\n"
+            "hour. Grey: not received for more than an hour.", false},
+        {"Local ID, zone",
+            "Who is transmitting: the local channel ID and the coverage zone of a roaming network, in every frame.\n"
+            "A roaming pager looks for its own ID and zone to know it is at home or in a partner network.\n"
+            "Green box: received in the last frame. Light green: in this cycle (4 minutes). Plain: in this hour.\n"
+            "Grey: not received for more than an hour.", false},
+        {"Country, TMF",
+            "The country code (ITU-T E.212) of the network, and its traffic management flags T3 T2 T1 T0:\n"
+            "the traffic groups this channel carries (a pager of a group set to 0 looks for another channel).\n"
+            "Sent in frames 0 to 3 of each cycle. Green box: received in the last frame. Light green: in this cycle\n"
+            "(4 minutes). Plain: in this hour. Grey: not received for more than an hour.", false},
+        {"Phases A, B",
+            "Bit error rate of phases A and B of the last frame: the independent 1600 bit/s channels of the frame\n"
+            "(A at 1600; A and C at 3200; A to D at 6400, where a symbol carries A and B, the next one C and D).\n"
+            "A phase in error damages only the pages it carries.", false},
+        {"Phases C, D",
+            "Bit error rate of phases C and D of the last frame (C at 3200, C and D at 6400).", false},
+        rememberedRow,
+        {"Reassembling",
+            "Long messages being put together from their fragments. A message too long for one frame is sent\n"
+            "in fragments in the following frames; it is shown once all of them arrived.", false},
+        {"Re-sync, count",
+            "Emergency re-synchronization (ERS): a special signal a network sends when its time reference failed,\n"
+            "for 4 minutes so that every pager receives it once and finds the frames again.\n"
+            "The length of the last one, and how many were received since the start.", true},
+        messagesRow, resetRow
+    };
+    static const QList<DetailRow> gsc = {
+        {"State",
+            "SYNC while a transmission is received, HUNT between them, VOICE while a voice page is played.", false},
+        {"Preamble, batch, slot",
+            "The last page. Preamble 0 to 9: pagers sleep until the preamble of their group, which saves their\n"
+            "battery; NBS: sent without it (non battery saver), to every pager. batch: it was sent in a batch with\n"
+            "other pages of the same preamble, - alone. Slot: its place in the batch.", false},
+        rememberedRow, messagesRow, resetRow
+    };
+
+    return (protocol == 0) ? pocsag : (protocol == 1) ? flex : gsc;
+}
+
+} // namespace
+
+// The protocols, in three places:
+// - Settings: a row for each protocol, always shown: its switch, coloured by the state of its reception, what is
+//   received (POCSAG the speeds, FLEX the mode) and its polarity; FLEX also the cycle and frame and the network time
+//   indicator, GSC the voice button (the mute of the voice, green while it is played)
+// - Protocols (rolled up at first): the settings of each protocol, set once
+// - Details (rolled up at first): a table for each protocol, the normal and inverted networks in columns, and the
+//   FLEX group slots
 void RadioPagingDemodGUI::layoutProtocols()
 {
-    // The font of the window for the live lines, one point smaller for the network lines
-    QFont normal = font();
-    double size = normal.pointSizeF();
-    QFont small = normal;
+    QFont small = font();
 
-    if (size > 1) {
-        small.setPointSizeF(size - 1.0);
+    if (small.pointSizeF() > 1) {
+        small.setPointSizeF(small.pointSizeF() - 1.0);
     }
 
     // The widgets leave the grid of the form
@@ -1616,117 +1616,252 @@ void RadioPagingDemodGUI::layoutProtocols()
     QWidget *deviationLabel[3] = {ui->pocsagDeviationLabel, ui->flexDeviationLabel, ui->gscDeviationLabel};
     QWidget *deviation[3] = {ui->pocsagDeviation, ui->flexDeviation, ui->gscDeviation};
     QWidget *dc[3] = {ui->pocsagDcCorrection, ui->flexDcCorrection, ui->gscDcCorrection};
-    QLabel *status[3] = {ui->pocsagStatus, ui->flexStatus, ui->gscStatus};
     QComboBox *charset[3] = {ui->pocsagCharset, ui->flexCharset, ui->gscCharset};
-    // The protocol switch starts the first line of its protocol, as wide as its name (as the switches of other
-    // channels); the lines under it are indented a little, not by the width of the switch
-    const int indent = fontMetrics().horizontalAdvance("MM");
     ui->flexMaxMessageNumber->hide();     // 63, as the networks are; the WebAPI sets another
+
+    // Settings: the status row of each protocol
+    static const char *receivingTips[3] = {
+        "POCSAG speeds in sync (bit/s: 512, 1200, 2400). A network sends at one speed; several at once\n"
+        "means several transmitters or a mixed network. Grey once the reception ended.",
+        "FLEX mode of the frame being received: bit/s / number of frequency levels.\n"
+        "  1600/2: 1 phase (A); 2 levels (+-4.8 kHz), 1600 symbols/s of 1 bit.\n"
+        "  3200/2: 2 phases (A, C); 2 levels, 3200 symbols/s of 1 bit.\n"
+        "  3200/4: 2 phases (A, C); 4 levels (+-4.8, +-1.6 kHz), 1600 symbols/s of 2 bits.\n"
+        "  6400/4: 4 phases (A to D); 4 levels, 3200 symbols/s of 2 bits.\n"
+        "A phase is an independent 1600 bit/s channel: more phases carry more pages. 4 levels need a\n"
+        "stronger signal (3.2 kHz apart instead of 9.6).\n"
+        "ERS during an emergency re-synchronization, with its length so far. Grey once the reception ended.",
+        "GSC: VOICE while a voice page is played (the speaker button on the right mutes it)."
+    };
 
     for (int p = 0; p < 3; p++)
     {
-        QWidget *block = new QWidget(ui->settingsContainer);
-        QVBoxLayout *column = new QVBoxLayout(block);
-        column->setContentsMargins(0, 0, 0, 0);
-        column->setSpacing(1);
-
-        // The controls of the protocol on one line, as the settings lines of the other channels: its switch, then each
-        // label with its field (deviation, DC correction, strip or voice, codepage) and the small buttons of the
-        // codepage editor and the reset; a narrow window wraps them
-        QWidget *controls = new QWidget(block);
-        FlowLayout *flow = new FlowLayout(controls, 0, 6, 2);
-        auto group = [&](QWidget *first, QWidget *field = nullptr, QLayout *fields = nullptr) {
-            QWidget *w = new QWidget(controls);
-            QHBoxLayout *row = new QHBoxLayout(w);
-            row->setContentsMargins(0, 0, 0, 0);
-            row->setSpacing(3);
-            row->addWidget(first);
-            if (field) {
-                row->addWidget(field);
-            }
-            if (fields) {
-                row->addLayout(fields);
-            }
-            flow->addWidget(w);
-            return row;
-        };
-
         enabled[p]->setMinimumWidth(0);
         enabled[p]->setMaximumWidth(QWIDGETSIZE_MAX);
         enabled[p]->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-        QHBoxLayout *head = group(enabled[p], deviationLabel[p], nullptr);
-        head->addWidget(deviation[p]);
-        head->addWidget(dc[p]);
+        enabled[p]->setToolTip(tr("%1 decoding on or off.\n"
+            "Its colour is the state of the reception: grey off; the colour of a switch on while it looks for a\n"
+            "signal (hunting); green while it is in sync with a transmission%2.").arg(names[p])
+            .arg(p == 1 ? tr(";\namber during an emergency re-synchronization of the network")
+                : p == 2 ? tr(";\namber while a voice page is received") : QString()));
+        grid->addWidget(enabled[p], p, 0);
 
-        if (p == 0) {
-            group(new QLabel(tr("Strip"), controls), ui->pocsagFill);
-        } else if (p == 2) {
-            group(new QLabel(tr("Voice"), controls), nullptr, ui->gscVoiceLayout);
-        }
+        m_receivingLabel[p] = new QLabel(ui->settingsContainer);
+        m_receivingLabel[p]->setToolTip(tr(receivingTips[p]));
+        grid->addWidget(m_receivingLabel[p], p, 1);
 
-        if (p == 2)
-        {
-            // Its two codepages, shown whole
-            charset[p]->setMaximumWidth(QWIDGETSIZE_MAX);
-            charset[p]->setSizeAdjustPolicy(QComboBox::AdjustToContents);
-        }
+        m_polarityLabel[p] = new QLabel(ui->settingsContainer);
+        m_polarityLabel[p]->setAlignment(Qt::AlignCenter);
+        m_polarityLabel[p]->setFixedWidth(fontMetrics().horizontalAdvance("N") + 10);
+        m_polarityLabel[p]->setToolTip(tr("Polarity of the %1 network being received: N normal, I inverted.\n"
+            "Which way the transmitter shifts its frequency for a 1 and a 0. A network uses one polarity, and\n"
+            "its pagers are made for it: the same address on the other polarity is another pager.\n"
+            "Both are decoded at once; the Details have a column for each. Grey once the reception ended.").arg(names[p]));
+        grid->addWidget(m_polarityLabel[p], p, 2);
 
-        m_codepageLabel[p] = new QLabel(tr("Codepage"), controls);
-        QHBoxLayout *codepage = group(m_codepageLabel[p], charset[p]);
+        // The bit error rate: a box in the colour of the quality with the rate in it
+        m_berLabel[p] = new QLabel(ui->settingsContainer);
+        m_berLabel[p]->setAlignment(Qt::AlignCenter);
+        m_berLabel[p]->setFixedWidth(fontMetrics().horizontalAdvance("00.00%") + 10);
+        grid->addWidget(m_berLabel[p], p, 3);
+
+        // The carrier offset, after the bit error rate
+        m_offsetLabel[p] = new QLabel(ui->settingsContainer);
+        m_offsetLabel[p]->setFixedWidth(fontMetrics().horizontalAdvance(QString("%1f -9999 Hz").arg(QChar(0x394))) + 4);
+        grid->addWidget(m_offsetLabel[p], p, 4);
+    }
+
+    m_flexFrameLabel = new QLabel(ui->settingsContainer);
+    m_flexFrameLabel->setToolTip(tr("FLEX cycle and frame of the last frame received.\n"
+        "The network runs on a fixed hourly grid: 15 cycles of 128 frames of 1.875 s (a cycle is 4 minutes),\n"
+        "cycle 0 frame 0 at the top of the hour. A pager listens to its own frames only, so the frame of a\n"
+        "page tells which pagers can receive it. Grey once the reception ended."));
+    grid->addWidget(m_flexFrameLabel, 1, 5);
+
+    // The FLEX network time: lit while the network sends it, its tooltip gives the date, time and zone
+    m_flexClockLabel = new QLabel(ui->settingsContainer);
+    m_flexClockLabel->setPixmap(QIcon(":/clockcurrent.png").pixmap(16, 16));
+    m_flexClockLabel->setAlignment(Qt::AlignCenter);
+    m_flexClockLabel->setFixedSize(22, 22);
+    grid->addWidget(m_flexClockLabel, 1, 7);
+
+    // The voice of GSC voice pages: its mute, green while it is played
+    ui->gscVoiceLayout->removeWidget(ui->gscAudio);
+    grid->addWidget(ui->gscAudio, 2, 7);
+
+    grid->setColumnMinimumWidth(1, fontMetrics().horizontalAdvance("512 1200 2400") + 8);
+    grid->setColumnStretch(6, 1);
+    grid->setHorizontalSpacing(8);
+    grid->setVerticalSpacing(2);
+
+    // Protocols: the settings of each protocol in aligned columns (name, deviation, DC correction, codepage and its
+    // editor, reset); POCSAG strip and GSC voice on a line under their protocol
+    QWidget *settingsGrid = new QWidget(ui->protocolsContainer);
+    QGridLayout *columns = new QGridLayout(settingsGrid);
+    columns->setContentsMargins(0, 0, 0, 0);
+    columns->setHorizontalSpacing(6);
+    columns->setVerticalSpacing(2);
+    int row = 0;
+
+    for (int p = 0; p < 3; p++, row++)
+    {
+        QLabel *name = new QLabel(names[p], settingsGrid);
+        QFont bold = name->font();
+        bold.setBold(true);
+        name->setFont(bold);
+        columns->addWidget(name, row, 0);
+        columns->addWidget(deviationLabel[p], row, 1);
+        columns->addWidget(deviation[p], row, 2);
+        columns->addWidget(dc[p], row, 3);
+
+        m_codepageLabel[p] = new QLabel(tr("Codepage"), settingsGrid);
+        columns->addWidget(m_codepageLabel[p], row, 4);
+        // Not wider than the window: a long codepage name is cut in the box, whole in its list
+        charset[p]->setMaximumWidth(QWIDGETSIZE_MAX);
+        charset[p]->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        charset[p]->setMinimumContentsLength(12);
+        charset[p]->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        columns->addWidget(charset[p], row, 5);
 
         // The custom codepage of the protocol: its editor (the character set button of the Pager demodulator)
-        QToolButton *custom = new QToolButton(controls);
+        QToolButton *custom = new QToolButton(settingsGrid);
         custom->setIcon(QIcon(":/keyboard.png"));
         custom->setToolTip(tr("Edit the custom codepage of %1: the character of each code and the direction of the text.\n"
             "Choose Custom in the codepages to decode with it").arg(names[p]));
         connect(custom, &QToolButton::clicked, this, [this, p]() { editCustomCodepage(p); });
-        codepage->addWidget(custom);
+        columns->addWidget(custom, row, 6);
 
-        QToolButton *reset = new QToolButton(controls);
+        QToolButton *reset = new QToolButton(settingsGrid);
         reset->setIcon(QIcon(":/recycle.png"));
         reset->setToolTip(tr("Forget what the %1 receivers remember: the messages for duplicate detection%2.\n"
             "Done when the device starts too, so that a file played again is not taken as duplicates")
             .arg(names[p]).arg(p == 1 ? tr(", fragments, groups, message numbers and network time") : QString()));
         connect(reset, &QToolButton::clicked, this, [this, p]() { m_radioPagingDemod->resetProtocol(p); });
-        codepage->addWidget(reset);
-        column->addWidget(controls);
+        columns->addWidget(reset, row, 7);
 
-        // Its status under the controls: the network being received, then a line for each network (polarity)
-        status[p]->setFont(normal);
-        status[p]->setTextFormat(Qt::RichText);
-        // A narrow window wraps the line between its fields; nothing is cut
-        status[p]->setWordWrap(true);
-        status[p]->setMinimumHeight(0);
-        status[p]->setMaximumHeight(QWIDGETSIZE_MAX);
-        status[p]->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-        status[p]->setContentsMargins(indent, 0, 0, 0);
-        column->addWidget(status[p]);
-
-        for (int pol = 0; pol < 2; pol++)
+        // The line under the protocol: POCSAG the fill stripped, GSC the voice
+        if ((p == 0) || (p == 2))
         {
-            m_networkLabel[p][pol] = new QLabel(block);
-            m_networkLabel[p][pol]->setFont(small);
-            m_networkLabel[p][pol]->setTextFormat(Qt::RichText);
-            m_networkLabel[p][pol]->setWordWrap(true);
-            m_networkLabel[p][pol]->setContentsMargins(indent, 0, 0, 0);
-            m_networkLabel[p][pol]->setVisible(false);
-            column->addWidget(m_networkLabel[p][pol]);
+            row++;
+            QHBoxLayout *extra = new QHBoxLayout();
+            extra->setSpacing(4);
+            extra->addWidget(new QLabel((p == 0) ? tr("Strip") : tr("Voice"), settingsGrid));
 
-            if (p != 1) {
-                continue;
+            if (p == 0) {
+                extra->addWidget(ui->pocsagFill);
+            } else {
+                extra->addLayout(ui->gscVoiceLayout);
             }
 
-            // FLEX: the 16 group slots (temporary addresses) of the network, under its lines
-            m_flexGroupBar[pol] = new QWidget(block);
+            extra->addStretch(1);
+            columns->addLayout(extra, row, 1, 1, 7);
+        }
+    }
+
+    columns->setColumnStretch(5, 1);
+    ui->protocolsLayout->addWidget(settingsGrid);
+
+    // Details: a tab for each protocol, its table and (FLEX) the group slots of each network
+    QTabWidget *tabs = new QTabWidget(ui->detailsContainer);
+    ui->detailsLayout->addWidget(tabs);
+    const int rowHeight = fontMetrics().height() + 4;
+
+    for (int p = 0; p < 3; p++)
+    {
+        const QList<DetailRow>& rows = detailRows(p);
+        QWidget *page = new QWidget(tabs);
+        QVBoxLayout *pageLayout = new QVBoxLayout(page);
+        pageLayout->setContentsMargins(2, 2, 2, 2);
+        pageLayout->setSpacing(2);
+
+        QTableWidget *table = new QTableWidget(rows.size(), 3, page);
+        table->setHorizontalHeaderLabels({QString(), tr("Normal"), tr("Inverted")});
+        table->verticalHeader()->setVisible(false);
+        table->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
+        table->verticalHeader()->setDefaultSectionSize(rowHeight);
+        table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        table->setSelectionMode(QAbstractItemView::NoSelection);
+        table->setFocusPolicy(Qt::NoFocus);
+        table->setAlternatingRowColors(true);
+        table->setShowGrid(false);
+        table->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        table->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        int nameWidth = 0;
+
+        for (int r = 0; r < rows.size(); r++)
+        {
+            QTableWidgetItem *name = new QTableWidgetItem(tr(rows[r].m_name));
+            name->setToolTip(tr(rows[r].m_toolTip));
+            table->setItem(r, 0, name);
+
+            // The values explain themselves too
+            for (int column = 1; column <= 2; column++)
+            {
+                QTableWidgetItem *value = new QTableWidgetItem("-");
+                value->setToolTip(name->toolTip());
+                table->setItem(r, column, value);
+            }
+            nameWidth = std::max(nameWidth, fontMetrics().horizontalAdvance(name->text()));
+
+            // A value of the protocol, not of one network: across both columns
+            if (rows[r].m_single) {
+                table->setSpan(r, 1, 1, 2);
+            }
+        }
+
+        table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Fixed);
+        table->setColumnWidth(0, nameWidth + 16);
+        table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+        table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+        table->setFixedHeight(table->horizontalHeader()->sizeHint().height() + rows.size() * rowHeight + 2 * table->frameWidth());
+        m_detailsTable[p] = table;
+        pageLayout->addWidget(table);
+
+        // FLEX: the bit error rate of each phase in a box of the colour of its quality, A and B on a row, C and D on the
+        // next (as the symbols of 6400/4 pair them)
+        for (int pol = 0; (p == 1) && (pol < 2); pol++)
+        {
+            for (int half = 0; half < 2; half++)
+            {
+                QLabel *label = new QLabel(table);
+                label->setTextFormat(Qt::RichText);
+                label->setContentsMargins(3, 0, 0, 0);
+                label->setText("-");
+                table->setCellWidget(half == 0 ? FlexPhasesAB : FlexPhasesCD, 1 + pol, label);
+                m_flexPhaseLabel[pol][half] = label;
+            }
+
+            // The network words: a chip around the value while it is fresh
+            const int wordRows[WordCount] = {FlexTime, FlexZone, FlexSystem, FlexCountry};
+
+            for (int word = 0; word < WordCount; word++)
+            {
+                QLabel *label = new QLabel(table);
+                label->setTextFormat(Qt::RichText);
+                label->setContentsMargins(3, 0, 0, 0);
+                label->setText("-");
+                label->setToolTip(tr(rows[wordRows[word]].m_toolTip));
+                table->setCellWidget(wordRows[word], 1 + pol, label);
+                m_flexWordLabel[pol][word] = label;
+            }
+        }
+
+        // FLEX: the 16 group slots (temporary addresses) of each network
+        for (int pol = 0; (p == 1) && (pol < 2); pol++)
+        {
+            m_flexGroupBar[pol] = new QWidget(page);
             QHBoxLayout *bar = new QHBoxLayout(m_flexGroupBar[pol]);
-            bar->setContentsMargins(indent, 0, 0, 0);
+            bar->setContentsMargins(0, 0, 0, 0);
             bar->setSpacing(1);
-            QLabel *title = new QLabel("GRP", m_flexGroupBar[pol]);
-            title->setFont(small);
-            title->setToolTip(tr("Group slots of the %1 network: the 16 temporary addresses (2029568 to 2029583) a short "
-                "instruction assigns to pagers for a group message.\nBlue: members being assigned. Amber: waiting for the "
-                "group message. Teal: the group message being received. Green: delivered. Red: its frame went by without it. "
-                "Violet: assigned again to another frame before it. Orange: the group message did not end.\nGrey: free")
+            QLabel *title = new QLabel(pol == 1 ? tr("Groups, inverted") : tr("Groups, normal"), m_flexGroupBar[pol]);
+            title->setFixedWidth(nameWidth + 16);
+            title->setToolTip(tr("Group slots of the %1 network.\n"
+                "To send one message to several pagers, the network first tells each of them (a short instruction)\n"
+                "to also listen to a temporary address, 0 to F here (2029568 to 2029583), in a given frame; the\n"
+                "message is then sent once to that address. Hover a slot for its members and frame.\n"
+                "Blue: members being assigned. Amber: waiting for the group message. Teal: the group message\n"
+                "being received. Green: delivered. Red: its frame went by without it. Violet: assigned again to\n"
+                "another frame before it. Orange: the group message did not end. Grey: free.")
                 .arg(pol == 1 ? tr("inverted") : tr("normal")));
             bar->addWidget(title);
 
@@ -1741,11 +1876,11 @@ void RadioPagingDemodGUI::layoutProtocols()
             }
 
             bar->addStretch(1);
-            m_flexGroupBar[pol]->setVisible(false);
-            column->addWidget(m_flexGroupBar[pol]);
+            pageLayout->addWidget(m_flexGroupBar[pol]);
         }
 
-        grid->addWidget(block, p, 0);
+        pageLayout->addStretch(1);
+        tabs->addTab(page, names[p]);
     }
 }
 
@@ -1765,209 +1900,15 @@ int RadioPagingDemodGUI::currentPolarity(const RadioPagingDemodSink::Status& sta
     return m_currentPol[protocol];
 }
 
-// The live line of a protocol: state, mode or speeds, polarity, BER, carrier offset and the messages received
-QString RadioPagingDemodGUI::statusLine(const RadioPagingDemodSink::Status& status, int protocol, int pol, bool sync,
-    const QString& state, const QString& detail)
-{
-    if (!status.m_enabled[protocol]) {
-        return coloured("OFF", colourInactive);
-    }
-
-    const RadioPagingDemodSink::Status::Polarity& s = status.m_pol[protocol][pol];
-    const char *stateColour = (state == "VOICE") ? "#e0a050" : (state == "ERS") ? "#e08060" : "#6cc070";
-    QString stateHtml = sync ? QString("<b style=\"color:%1\">%2</b>").arg(stateColour, state)
-        : QString("<b style=\"color:%1\">HUNT</b>").arg(colourInactive);
-    QString ber = s.m_ber.valid()
-        ? coloured(QString("BER %1%").arg(100.0 * s.m_ber.ber(), 0, 'f', 2), berColour(s.m_ber, s.m_berLive)) : QString();
-    QString offset = s.m_offsetValid
-        ? value(QString("%1f %2%3 Hz").arg(QChar(0x394)).arg(s.m_offset < 0.0f ? "-" : "+").arg((int) std::round(std::fabs(s.m_offset))),
-            colourLive, s.m_berLive) : QString();
-    // The polarity of the network shown once both were received
-    bool both = status.m_pol[protocol][0].m_seen && status.m_pol[protocol][1].m_seen;
-    QString polarity = (both || (pol == 1)) ? polarityHtml(pol == 1) : QString();
-
-    return statusFields({stateHtml, sync ? value(detail, colourLive, true) : QString(), polarity, ber, offset,
-        QString("(%1)").arg(status.m_messages[protocol])});
-}
-
-// The polarities received since the reset; the normal one while none was
-void RadioPagingDemodGUI::shownPolarities(const RadioPagingDemodSink::Status& status, int protocol, bool shown[2])
-{
-    shown[0] = status.m_enabled[protocol] && status.m_pol[protocol][0].m_seen;
-    shown[1] = status.m_enabled[protocol] && status.m_pol[protocol][1].m_seen;
-
-    if (!shown[0] && !shown[1]) {
-        shown[0] = true;
-    }
-}
-
-// MEM 12, FLEX also the fragments being reassembled, and the time of the last reset
-QString RadioPagingDemodGUI::memoryLine(const RadioPagingDemodSink::Status& status, int protocol, int pol)
-{
-    if (!status.m_enabled[protocol]) {
-        return QString();
-    }
-
-    const bool live = status.m_pol[protocol][pol].m_sync || status.m_pol[protocol][pol].m_berLive;
-    QStringList fields = {value(QString("MEM %1").arg(status.m_pol[protocol][pol].m_remembered), colourMemory, live)};
-
-    if (protocol == 1) {
-        fields.append(value(QString("FRAG %1").arg(status.m_flexReassembliesPol[pol]), colourMemory, live));
-    }
-    if (status.m_resetTime[protocol] > 0) {
-        fields.append(coloured("RESET " + QDateTime::fromMSecsSinceEpoch(status.m_resetTime[protocol]).toString("HH:mm:ss"), colourInactive));
-    }
-
-    return statusFields(fields);
-}
-
-// FLEX: the network of the last frame of the polarity. Line 1: cycle and frame, collapse, roaming and repeats, the network
-// date, time and time zone. Line 2: the system ID and the BER of each phase of a frame of several phases. Only the fields
-// received; in colour during the reception, grey once it ended
-QString RadioPagingDemodGUI::flexNetworkLines(const RadioPagingDemodSink::Status& status, int pol)
-{
-    const RadioPagingFlexDecoder::FrameReport& frame = status.m_flexFramePol[pol];
-    const RadioPagingFlexDecoder::NetworkTime& t = status.m_flexTimePol[pol];
-    const bool live = status.m_pol[1][pol].m_berLive;
-    QStringList line1, line2;
-
-    if (frame.m_fiwValid)
-    {
-        line1.append(value(QString("C%1/F%2").arg(frame.m_cycle, 2, 10, QChar('0')).arg(frame.m_frame, 3, 10, QChar('0')), colourFrame, live));
-        QStringList flags;
-
-        if (!frame.m_blocks.empty()) {
-            flags.append(QString("c%1").arg(frame.m_blocks.front().m_collapse));
-        }
-        if (frame.m_roaming) {
-            flags.append("R");
-        }
-        if (frame.m_repeat) {
-            flags.append(QString("x%1").arg(frame.m_transmissions));
-        }
-        if (!flags.isEmpty()) {
-            line1.append(value(flags.join(" "), colourFlags, live));
-        }
-    }
-
-    QStringList when;
-
-    if (t.m_dateValid) {
-        when.append(QString("%1-%2-%3").arg(t.m_year).arg(t.m_month, 2, 10, QChar('0')).arg(t.m_day, 2, 10, QChar('0')));
-    }
-    if (t.m_timeValid)
-    {
-        when.append(QString("%1:%2:%3").arg(t.m_currentHour, 2, 10, QChar('0')).arg(t.m_currentMinute, 2, 10, QChar('0'))
-            .arg((int) t.m_currentSecond, 2, 10, QChar('0')));
-    }
-    if (t.m_zoneValid)
-    {
-        // L0 = 0: daylight saving time (STD-43A 3.7.2)
-        int minutes = t.m_zoneMinutes;
-        QString zone = t.m_zoneDefined
-            ? QString("UTC%1%2:%3").arg(minutes < 0 ? "-" : "+").arg(std::abs(minutes) / 60, 2, 10, QChar('0'))
-                .arg(std::abs(minutes) % 60, 2, 10, QChar('0'))
-            : QString("zone %1").arg(t.m_zone);
-        when.append(zone + ((t.m_dst == 0) ? " DST" : ""));
-    }
-    if (!when.isEmpty()) {
-        line1.append(value(when.join(" "), colourLive, live));
-    }
-
-    QStringList system;
-
-    if (t.m_ssid1Valid) {
-        system.append(QString("LID %1 CZ %2").arg(t.m_localId).arg(t.m_coverageZone));
-    }
-    if (t.m_ssid2Valid) {
-        system.append(QString("CC %1 TMF %2").arg(t.m_country).arg(t.m_tmf));
-    }
-    if (!system.isEmpty()) {
-        line2.append(value(system.join("  "), colourSystem, live));
-    }
-
-    // The phases of the last frame: only for a frame of several phases (one phase: the BER of the live line)
-    if (frame.m_blocks.size() > 1)
-    {
-        for (const auto& block : frame.m_blocks)
-        {
-            const RadioPagingBerWindow& ber = status.m_flexPhaseBerPol[pol][(block.m_phase - 'A') & 3];
-
-            if (ber.valid()) {
-                line2.append(coloured(QString("%1 %2%").arg(block.m_phase).arg(100.0 * ber.ber(), 0, 'f', 2), berColour(ber, live)));
-            }
-        }
-    }
-
-    QStringList lines;
-
-    if (!line1.isEmpty()) {
-        lines.append(statusFields(line1));
-    }
-    if (!line2.isEmpty()) {
-        lines.append(statusFields(line2));
-    }
-
-    return lines.join("<br>");
-}
-
-// The live line of each protocol, and the network lines of each polarity received
+// The status row of each protocol in the settings (its switch coloured by the state of its reception, what is
+// received, the polarity; FLEX the cycle and frame and the network time) and the details
 void RadioPagingDemodGUI::updateStatus()
 {
     RadioPagingDemodSink::Status status = m_radioPagingDemod->getStatus();
-    bool shown[3][2];
-
-    for (int p = 0; p < 3; p++) {
-        shownPolarities(status, p, shown[p]);
-    }
-
-    // The network lines of a polarity: its tag when both were received, then its lines; nothing for a protocol off
-    auto setNetwork = [&](int p, int pol, const QStringList& lines) {
-        QLabel *label = m_networkLabel[p][pol];
-        QStringList shownLines;
-
-        for (const QString& line : lines)
-        {
-            if (!line.isEmpty()) {
-                shownLines.append(line);
-            }
-        }
-
-        bool visible = status.m_enabled[p] && shown[p][pol] && !shownLines.isEmpty();
-        label->setVisible(visible);
-
-        if (!visible) {
-            return;
-        }
-
-        bool both = shown[p][0] && shown[p][1];
-        // The polarity before the first line of each network when both were received
-        if (both) {
-            shownLines[0] = statusField(polarityHtml(pol == 1)) + statusGap + shownLines[0];
-        }
-
-        label->setText(shownLines.join("<br>"));
-    };
-
-    // POCSAG: the speeds being received on the polarity of the network
-    int pol = currentPolarity(status, 0);
-    QStringList speeds;
-
-    for (int i = 0; i < RadioPagingDemodSettings::m_nbPocsagSpeeds; i++)
-    {
-        if (status.m_pocsagSpeedSync[pol][i]) {
-            speeds.append(QString::number(RadioPagingDemodSettings::m_pocsagSpeeds[i]));
-        }
-    }
-
-    ui->pocsagStatus->setText(statusLine(status, 0, pol, status.m_pol[0][pol].m_sync, "SYNC", speeds.join(" ")));
-
-    for (int p = 0; p < 2; p++)
-    {
-        QString batches = ((p == pol) && (status.m_pocsagBatches > 0))
-            ? value(QString("B%1").arg(status.m_pocsagBatches), colourFrame, status.m_pol[0][p].m_berLive) : QString();
-        setNetwork(0, p, {batches.isEmpty() ? memoryLine(status, 0, p) : statusField(batches) + statusGap + memoryLine(status, 0, p)});
-    }
+    // A protocol is off by its switch (the receivers report nothing before the device runs)
+    status.m_enabled[0] = m_settings.m_pocsagEnabled;
+    status.m_enabled[1] = m_settings.m_flexEnabled;
+    status.m_enabled[2] = m_settings.m_gscEnabled;
 
     // FLEX: between the frames the decoder hunts for the next sync 1; SYNC stays shown until
     // that sync is due, then HUNT (the decoder state is not changed)
@@ -1988,95 +1929,455 @@ void RadioPagingDemodGUI::updateStatus()
     // The polarity of the frame being received, or of the last one
     int flexPol = status.m_flexInverted ? 1 : 0;
     m_currentPol[1] = flexPol;
+    const int pol[3] = {currentPolarity(status, 0), flexPol, currentPolarity(status, 2)};
+    ButtonSwitch *switches[3] = {ui->pocsagEnabled, ui->flexEnabled, ui->gscEnabled};
+    const char *names[3] = {"POCSAG", "FLEX", "GSC"};
 
-    // The re-synchronization has no mode or polarity: it is shown with the network of the last frame
-    if (status.m_flexErs && !status.m_flexSync) {
-        ui->flexStatus->setText(statusLine(status, 1, flexPol, true, "ERS", QString("%1 s").arg(status.m_flexErsSeconds, 0, 'f', 2)));
-    } else {
-        ui->flexStatus->setText(statusLine(status, 1, flexPol, status.m_pol[1][flexPol].m_sync || flexHeld, "SYNC",
-            status.m_flexModePol[flexPol]));
-    }
-
-    for (int p = 0; p < 2; p++) {
-        setNetwork(1, p, {flexNetworkLines(status, p), memoryLine(status, 1, p)});
-    }
-
-    updateGroupBars(status, shown[1]);
-
-    // GSC: the last page (preamble or non battery saver, batch, slot) with the network it was on
-    pol = currentPolarity(status, 2);
-    ui->gscStatus->setText(statusLine(status, 2, pol, status.m_pol[2][pol].m_sync, status.m_gscVoicePol[pol] ? "VOICE" : "SYNC", QString()));
-
-    for (int p = 0; p < 2; p++)
+    for (int p = 0; p < 3; p++)
     {
-        QString page;
+        const RadioPagingDemodSink::Status::Polarity& s = status.m_pol[p][pol[p]];
+        const bool sync = s.m_sync || ((p == 1) && flexHeld);
+        const bool live = sync || s.m_berLive;
+        const bool ers = (p == 1) && status.m_flexErs && !status.m_flexSync;
+        const bool voice = (p == 2) && status.m_gscVoicePol[pol[p]];
 
-        if ((p == pol) && (status.m_messages[2] > 0))
+        // The switch: its own colours off and while hunting, green in sync, amber in a voice page or a re-synchronization
+        const int state = !status.m_enabled[p] ? 0 : (ers || voice) ? 2 : sync ? 1 : 0;
+
+        if (state != m_switchState[p])
         {
-            QStringList fields;
-            fields.append(status.m_gscNbs ? QString("NBS") : QString("P%1").arg(status.m_gscPreamble));
+            m_switchState[p] = state;
 
-            if (status.m_gscBatch) {
-                fields.append("BATCH");
+            if (state == 0) {
+                switches[p]->resetColor();
+            } else {
+                switches[p]->setColor(state == 1 ? QColor(Qt::darkGreen) : QColor(0xb0, 0x70, 0x10));
             }
-
-            fields.append(QString("S%1").arg(status.m_gscSlot));
-            page = value(fields.join(" "), colourPage, status.m_pol[2][p].m_berLive);
         }
 
-        setNetwork(2, p, {page.isEmpty() ? memoryLine(status, 2, p) : statusField(page) + statusGap + memoryLine(status, 2, p)});
+        // What is received: POCSAG the speeds in sync, FLEX the mode of the frame, GSC a voice page
+        QString receiving;
+
+        if (!status.m_enabled[p])
+        {
+            receiving = tr("off");
+        }
+        else if (p == 0)
+        {
+            QStringList speeds;
+
+            for (int i = 0; i < RadioPagingDemodSettings::m_nbPocsagSpeeds; i++)
+            {
+                if (status.m_pocsagSpeedSync[pol[p]][i]) {
+                    speeds.append(QString::number(RadioPagingDemodSettings::m_pocsagSpeeds[i]));
+                }
+            }
+
+            receiving = speeds.join(" ");
+        }
+        else if (p == 1)
+        {
+            receiving = ers ? tr("ERS %1 s").arg(status.m_flexErsSeconds, 0, 'f', 1) : status.m_flexModePol[pol[p]];
+        }
+        else if (voice)
+        {
+            receiving = tr("VOICE");
+        }
+
+        m_receivingLabel[p]->setText(receiving.isEmpty() ? QString("-") : receiving);
+        m_receivingLabel[p]->setStyleSheet((live && status.m_enabled[p]) ? QString() : QString("QLabel { color : %1; }").arg(colourInactive));
+
+        // The polarity, in the colours of the Pol column of the messages
+        if (status.m_enabled[p] && s.m_seen)
+        {
+            const bool inverted = pol[p] == 1;
+            m_polarityLabel[p]->setText(inverted ? "I" : "N");
+            // Live: the colours of the Pol column of the messages; ended: the grey box
+            m_polarityLabel[p]->setStyleSheet(!live ? chipStyle(ChipEnded)
+                : QString("QLabel { background-color : %1; color : %2; border-radius : 3px; }")
+                    .arg(inverted ? "#2a1f00" : "#0d1a2a").arg(inverted ? "#ffcc44" : "#88aacc"));
+        }
+        else
+        {
+            m_polarityLabel[p]->setText(QString());
+            m_polarityLabel[p]->setStyleSheet(QString());
+        }
+
+        // The bit error rate in a box of the colour of the quality: green no errors, yellow errors corrected, red
+        // codewords that could not be corrected, grey once the reception ended
+        const RadioPagingBerWindow& ber = s.m_ber;
+
+        if (status.m_enabled[p] && ber.valid())
+        {
+            const double rate = 100.0 * ber.ber();
+            m_berLabel[p]->setText(QString("%1%").arg(rate, 0, 'f', rate < 10.0 ? 2 : 1));
+            m_berLabel[p]->setStyleSheet(chipStyle(qualityChip(ber, live)));
+            m_berLabel[p]->setToolTip(tr("%1 bit error rate.\n%2\n\nNow%3: %4 wrong bits of %5 over the last %6 codewords, %7 codewords not corrected.")
+                .arg(names[p]).arg(tr(berRow.m_toolTip)).arg(pol[p] == 1 ? tr(" (inverted network)") : QString())
+                .arg(ber.m_errorBits).arg(ber.m_bits).arg(ber.m_codewords).arg(ber.m_uncorrectable));
+        }
+        else
+        {
+            m_berLabel[p]->setText(QString());
+            m_berLabel[p]->setStyleSheet(QString());
+            m_berLabel[p]->setToolTip(tr("%1 bit error rate.\n%2\n\nNone measured yet.").arg(names[p]).arg(tr(berRow.m_toolTip)));
+        }
+
+        // The carrier offset of the network, grey once the reception ended
+        if (status.m_enabled[p] && s.m_offsetValid)
+        {
+            m_offsetLabel[p]->setText(QString("%1f %2%3 Hz").arg(QChar(0x394)).arg(s.m_offset < 0.0f ? "-" : "+")
+                .arg((int) std::round(std::fabs(s.m_offset))));
+            m_offsetLabel[p]->setStyleSheet(live ? QString() : QString("QLabel { color : %1; }").arg(colourInactive));
+        }
+        else
+        {
+            m_offsetLabel[p]->setText(QString());
+        }
+
+        m_offsetLabel[p]->setToolTip(tr("%1 carrier offset%2.\n%3").arg(names[p])
+            .arg(pol[p] == 1 ? tr(" (inverted network)") : QString()).arg(tr(offsetRow.m_toolTip)));
     }
 
-    QString pocsagTip = m_pocsagToolTip;
-    if (status.m_enabled[0] && (status.m_pocsagBatches > 0)) {
-        pocsagTip += tr("\n\nBatches of the last reception: %1").arg(status.m_pocsagBatches);
-    }
-    ui->pocsagStatus->setToolTip(pocsagTip);
-    ui->flexStatus->setToolTip(flexToolTip(status));
+    // FLEX: the network words of the frames received, the cycle and frame of the last frame, the network time indicator
+    stampFlexWords(status);
+    const RadioPagingFlexDecoder::FrameReport& frame = status.m_flexFramePol[flexPol];
+    const bool flexLive = status.m_pol[1][flexPol].m_sync || flexHeld || status.m_pol[1][flexPol].m_berLive;
+    m_flexFrameLabel->setText((status.m_enabled[1] && frame.m_fiwValid)
+        ? QString("C%1/F%2").arg(frame.m_cycle, 2, 10, QChar('0')).arg(frame.m_frame, 3, 10, QChar('0')) : QString());
+    m_flexFrameLabel->setStyleSheet(flexLive ? QString() : QString("QLabel { color : %1; }").arg(colourInactive));
 
-    QString gscTip = m_gscToolTip;
-    if (status.m_enabled[2] && (status.m_messages[2] > 0))
-    {
-        QString last = status.m_gscNbs ? QString("non battery saver")
-            : QString("preamble %1%2").arg(status.m_gscPreamble).arg(status.m_gscBatch ? ", batch" : "");
-        gscTip += tr("\n\nLast page: %1, slot %2").arg(last).arg(status.m_gscSlot);
-    }
-    ui->gscStatus->setToolTip(gscTip);
+    const QString time = status.m_enabled[1] ? flexTimeText(status.m_flexTimePol[flexPol]) : QString();
+    // By the age of the newest time word (date, time or zone), as the details: a green box received in the last
+    // frame, light green in this cycle, the icon alone in this hour, dimmed older or never
+    const FlexWordAge dateAge = flexWordAge(flexPol, WordDateTime, status.m_signalMs);
+    const FlexWordAge zoneAge = flexWordAge(flexPol, WordZone, status.m_signalMs);
+    const FlexWordAge timeAge = (dateAge == AgeNever) ? zoneAge : (zoneAge == AgeNever) ? dateAge : std::min(dateAge, zoneAge);
+    const bool timeShown = !time.isEmpty() && (timeAge != AgeNever) && (timeAge != AgeOld);
+    // A disabled label does not dim its pixmap
+    m_flexClockLabel->setPixmap(QIcon(":/clockcurrent.png").pixmap(16, 16, timeShown ? QIcon::Normal : QIcon::Disabled));
+    // The time mode assumed (not confirmed by the time words of a cycle): light yellow, as the network time of the details
+    const RadioPagingFlexDecoder::NetworkTime& flexTime = status.m_flexTimePol[flexPol];
+    const bool assumed = timeShown && flexTime.m_timeValid && !flexTime.m_modeConfirmed;
+    m_flexClockLabel->setStyleSheet(assumed ? QString("QLabel { background-color : #f0e6a0; border-radius : 3px; }")
+        : (timeAge == AgeFrame) ? QString("QLabel { background-color : #6cc070; border-radius : 3px; }")
+        : (timeAge == AgeCycle) ? QString("QLabel { background-color : #bfe6bf; border-radius : 3px; }") : QString());
+    static const char *ages[] = {"", "received in the last frame", "received in this cycle (4 minutes)",
+        "received in this hour", "not received for more than an hour"};
+    const QString legend = tr("Green box: received in the last frame. Light green: in this cycle (4 minutes). The icon alone:\n"
+        "in this hour (networks must send it at least once an hour). Dimmed: older. Light yellow: the kind of the time\n"
+        "(time of frame 0 or of the frame) is assumed, not told yet.");
+    const QString kind = flexTimeKind(flexTime);
+    m_flexClockLabel->setToolTip(time.isEmpty()
+        ? tr("FLEX network time: not sent by the network (or no frame received yet).\n%1").arg(legend)
+        : tr("FLEX network time, %1:\n%2%3\n\n%4").arg(tr(ages[timeAge])).arg(time)
+            .arg(kind.isEmpty() ? QString() : "\n\n" + kind).arg(legend));
 
     // Green while the voice is played
     bool playing = status.m_enabled[2] && status.m_gscAudio;
     ui->gscAudio->setStyleSheet(playing ? "QToolButton { background-color : green; }" : "");
 
-    // The status lines come and go with what is received: the sections are arranged again for them (nothing is done
-    // when nothing changed) and a window too short for them grows (its minimum size follows its contents), else its
-    // last sections would be under its bottom bar
-    getRollupContents()->arrangeRollups();
+    updateDetails(status, flexPol, flexHeld);
+    updateGroupBars(status);
+}
 
-    if (!isMaximized() && (getRollupContents()->minimumHeight() + getAdditionalHeight() > height())) {
-        sizeToContents();
+// FLEX: the frame each kind of network word of each polarity was last received in. The GUI sees every frame (it is
+// updated more often than the 1.875 s of a frame): the words of a frame are taken once, when it is new
+void RadioPagingDemodGUI::stampFlexWords(const RadioPagingDemodSink::Status& status)
+{
+    for (int pol = 0; pol < 2; pol++)
+    {
+        const RadioPagingFlexDecoder::FrameReport& frame = status.m_flexFramePol[pol];
+
+        if (!frame.m_fiwValid) {
+            continue;
+        }
+
+        const int index = (int) (frame.m_cycle * 128 + frame.m_frame);
+
+        if (index == m_flexLastFrame[pol]) {
+            continue;
+        }
+
+        const qint64 now = status.m_signalMs;
+        m_flexLastFrame[pol] = index;
+        m_flexLastFrameMs[pol] = now;
+        auto stamp = [&](FlexWord word) {
+            m_flexWordMs[pol][word] = now;
+            m_flexWordFrame[pol][word] = index;
+        };
+
+        for (const auto& block : frame.m_blocks)
+        {
+            for (const RadioPagingFlexDecoder::ExtraBiw& e : block.m_extra)
+            {
+                switch (e.m_kind)
+                {
+                case RadioPagingFlexDecoder::ExtraBiw::Date:
+                case RadioPagingFlexDecoder::ExtraBiw::Time:
+                    stamp(WordDateTime);
+                    break;
+                case RadioPagingFlexDecoder::ExtraBiw::SystemInfo:
+                    // A = 4 or 5: the time zone word
+                    if ((e.m_infoType == 4) || (e.m_infoType == 5)) {
+                        stamp(WordZone);
+                    }
+                    break;
+                case RadioPagingFlexDecoder::ExtraBiw::Ssid1:
+                    stamp(WordSsid1);
+                    break;
+                case RadioPagingFlexDecoder::ExtraBiw::Ssid2:
+                    stamp(WordSsid2);
+                    break;
+                default:
+                    break;
+                }
+            }
+        }
+    }
+}
+
+// The kind of the network time (standard: the time of frame 0 of its cycle with the frame offset added, direct: the time
+// of the frame), whether the time words of a cycle told it or it is assumed, its precision and when it was received
+QString RadioPagingDemodGUI::flexTimeKind(const RadioPagingFlexDecoder::NetworkTime& t)
+{
+    if (!t.m_timeValid) {
+        return QString();
+    }
+
+    QString kind = (t.m_mode == 1)
+        ? tr("Direct: the time word is the time of the frame that carries it.")
+        : tr("Standard: the time word is the time of frame 0 of its cycle; the offset of the frame is added.");
+    kind += t.m_modeConfirmed
+        ? tr("\nConfirmed by the time words of a cycle (the same in frames 5 or more apart, or not).")
+        : tr("\nAssumed (light yellow): the time words of a cycle have not told it yet; if the network sends the time\n"
+            "of each frame instead, the time shown is ahead by the offset of the frame.");
+    kind += t.m_zoneValid
+        ? tr("\nPrecision 0.9375 s: the 7.5 s steps of the time word and the extended second of the zone word.")
+        : tr("\nPrecision 7.5 s: the steps of the time word (the zone word, not received, refines it to 0.9375 s).");
+    kind += tr("\nTime word received %1 frames ago (%2 s); the time goes on with the frames since.")
+        .arg(t.m_timeAge).arg(t.m_timeAge * 1.875, 0, 'f', 1);
+    return kind;
+}
+
+// The age of a network word, in time of signal (its samples, signal or noise: a file played faster too), received or
+// not since: in the last frame of its network (while that frame is the latest one, at most two frames ago), in this
+// cycle (128 frames, 4 minutes), in this hour (15 cycles: the least a network sends the time), older
+RadioPagingDemodGUI::FlexWordAge RadioPagingDemodGUI::flexWordAge(int pol, FlexWord word, qint64 signalMs) const
+{
+    const qint64 received = m_flexWordMs[pol][word];
+
+    if ((received < 0) || (received > signalMs)) {
+        return AgeNever;
+    }
+
+    const qint64 age = signalMs - received;
+
+    if ((m_flexWordFrame[pol][word] == m_flexLastFrame[pol]) && (age < 2 * m_flexFrameMs)) {
+        return AgeFrame;
+    }
+
+    return (age < 128 * m_flexFrameMs) ? AgeCycle : (age < 15 * 128 * m_flexFrameMs) ? AgeHour : AgeOld;
+}
+
+void RadioPagingDemodGUI::setNetworkDetail(FlexWord word, int pol, const QString& text, FlexWordAge age, bool assumed)
+{
+    QLabel *label = m_flexWordLabel[pol][word];
+
+    if (text.isEmpty())
+    {
+        label->setText(QString("<span style=\"color:%1\">-</span>").arg(colourInactive));
+    }
+    else if (assumed && (age != AgeOld))
+    {
+        // The time mode not confirmed yet: the frame offset may be wrong, a light yellow chip
+        label->setText(QString("<span style=\"background-color:#f0e6a0; color:%1;\">&nbsp;%2&nbsp;</span>")
+            .arg(chipText).arg(text.toHtmlEscaped()));
+    }
+    else if ((age == AgeFrame) || (age == AgeCycle))
+    {
+        // Received in the last frame: a green chip, in this cycle: a light green chip
+        label->setText(QString("<span style=\"background-color:%1; color:%2;\">&nbsp;%3&nbsp;</span>")
+            .arg(age == AgeFrame ? "#6cc070" : "#bfe6bf").arg(chipText).arg(text.toHtmlEscaped()));
+    }
+    else
+    {
+        // In this hour: the text colour; older: grey
+        label->setText(QString("<span style=\"color:%1\">%2</span>")
+            .arg((age == AgeOld) ? QString(colourInactive) : palette().text().color().name()).arg(text.toHtmlEscaped()));
+    }
+}
+
+// A value of the details: grey once its reception ended, else in its colour (the text colour if none)
+void RadioPagingDemodGUI::setDetail(int protocol, int row, int pol, const QString& text, bool live, const QColor& colour)
+{
+    QTableWidgetItem *item = m_detailsTable[protocol]->item(row, 1 + pol);
+    item->setText(text.isEmpty() ? QString("-") : text);
+    item->setForeground(!live ? QBrush(QColor(colourInactive)) : colour.isValid() ? QBrush(colour) : palette().text());
+}
+
+// The details of each protocol: the values of each network (polarity) in its column
+void RadioPagingDemodGUI::updateDetails(const RadioPagingDemodSink::Status& status, int flexPol, bool flexHeld)
+{
+    for (int p = 0; p < 3; p++)
+    {
+        const int rememberedRows[3] = {PocsagRemembered, FlexRemembered, GscRemembered};
+        const int messagesRows[3] = {PocsagMessages, FlexMessages, GscMessages};
+        const int resetRows[3] = {PocsagReset, FlexReset, GscReset};
+        const int rememberedRowIndex = rememberedRows[p];
+        const int messagesRowIndex = messagesRows[p];
+        const int resetRowIndex = resetRows[p];
+        const int current = (p == 1) ? flexPol : m_currentPol[p];
+
+        for (int pol = 0; pol < 2; pol++)
+        {
+            const RadioPagingDemodSink::Status::Polarity& s = status.m_pol[p][pol];
+            // FLEX: live between the frames of a transmission too, as its status row
+            const bool held = (p == 1) && (pol == flexPol) && flexHeld;
+            const bool live = status.m_enabled[p] && (s.m_sync || s.m_berLive || held);
+            setDetail(p, rememberedRowIndex, pol, s.m_seen || s.m_remembered ? QString::number(s.m_remembered) : QString(), live);
+
+            if (p == 0)
+            {
+                QStringList speeds;
+
+                for (int i = 0; i < RadioPagingDemodSettings::m_nbPocsagSpeeds; i++)
+                {
+                    if (status.m_pocsagSpeedSync[pol][i]) {
+                        speeds.append(QString::number(RadioPagingDemodSettings::m_pocsagSpeeds[i]));
+                    }
+                }
+
+                setDetail(p, PocsagSpeeds, pol, speeds.join(" "), live);
+                setDetail(p, PocsagBatches, pol, ((pol == current) && (status.m_pocsagBatches > 0))
+                    ? QString::number(status.m_pocsagBatches) : QString(), live);
+            }
+            else if (p == 1)
+            {
+                const RadioPagingFlexDecoder::FrameReport& frame = status.m_flexFramePol[pol];
+                const RadioPagingFlexDecoder::NetworkTime& t = status.m_flexTimePol[pol];
+                QString collapse;
+
+                if (frame.m_fiwValid && !frame.m_blocks.empty())
+                {
+                    // The collapse and the longest wait of a page for the frame of its pager: 2^m frames of 1.875 s
+                    const unsigned m = frame.m_blocks.front().m_collapse;
+                    const double wait = (1 << m) * 1.875;
+                    collapse = QString("%1 (%2)").arg(m)
+                        .arg(wait < 60.0 ? QString("%1 s").arg(wait, 0, 'f', 1) : QString("%1 min").arg(wait / 60.0));
+                    // Sent several times: the count and the TD collapse that replaces the system collapse (3.6)
+                    collapse += frame.m_repeat ? QString(", x%1%2").arg(frame.m_transmissions)
+                        .arg(frame.m_tdCollapse >= 0 ? QString(" TD %1").arg(frame.m_tdCollapse) : QString()) : QString(", -");
+                }
+
+                // Every phase of the last frame (A at 1600, A and C at 3200, A to D at 6400), a box each in the colour
+                // of its quality, grey once the reception ended. The separator after the phase is its low traffic flag
+                // (STD-43A 3.6, t0-t3 for phases a-d when the frame is not repeated: its address field ends in block 0):
+                // ':' not set, '`' set. A and B on a row, C and D on the next. The tooltip has the block information
+                // of each phase
+                QStringList phaseTips;
+                QStringList halves[2];
+
+                for (const auto& block : frame.m_blocks)
+                {
+                    const int index = (block.m_phase - 'A') & 3;
+                    const RadioPagingBerWindow& phaseBer = status.m_flexPhaseBerPol[pol][index];
+                    const bool lowTraffic = !frame.m_repeat && ((frame.m_traffic >> index) & 1);
+
+                    if (phaseBer.valid())
+                    {
+                        halves[index / 2].append(chipHtml(qualityChip(phaseBer, live), QString("%1%2%3%").arg(QChar(block.m_phase))
+                            .arg(lowTraffic ? lowTrafficSeparator : ':').arg(100.0 * phaseBer.ber(), 0, 'f', 2)));
+                        phaseTips.append(tr("%1: bit error rate %2% (%3 bits corrected of %4, %5 codewords not corrected)%6\n"
+                            "   collapse %7, carry-on %8 frames, %9 priority address words, %10 block information words")
+                            .arg(QChar(block.m_phase)).arg(100.0 * phaseBer.ber(), 0, 'f', 2).arg(phaseBer.m_errorBits)
+                            .arg(phaseBer.m_bits).arg(phaseBer.m_uncorrectable)
+                            .arg(lowTraffic ? tr(", low traffic (the addresses end in block 0)") : QString())
+                            .arg(block.m_collapse).arg(block.m_carryOn).arg(block.m_priorityWords).arg(1 + block.m_extra.size()));
+                    }
+                }
+
+                const QString phaseTip = tr("Bit error rate of each phase of the last frame (%1 network): the independent\n"
+                    "1600 bit/s channels of the frame, A at 1600, A and C at 3200, A to D at 6400.\n"
+                    "A%3: the low traffic flag of the phase is set: its addresses end in the first block, so its pagers\n"
+                    "can stop listening early and save their battery.\n"
+                    "Green: no bit errors. Yellow: errors corrected. Red: errors the code could not correct. Grey: the\n"
+                    "reception ended.%2")
+                    .arg(pol == 1 ? tr("inverted") : tr("normal"))
+                    .arg(phaseTips.isEmpty() ? QString() : "\n\n" + phaseTips.join("\n")).arg(lowTrafficSeparator);
+
+                for (int half = 0; half < 2; half++)
+                {
+                    m_flexPhaseLabel[pol][half]->setToolTip(phaseTip);
+                    m_flexPhaseLabel[pol][half]->setText(halves[half].isEmpty() ? QString("-") : halves[half].join("&nbsp;"));
+                }
+
+                // The mode of the frame of the column (its frame number, phases and flags are of the same frame)
+                setDetail(p, FlexMode, pol, frame.m_fiwValid ? RadioPagingFlex::modeName(frame.m_mode) : QString(), live);
+                setDetail(p, FlexFrame, pol, frame.m_fiwValid
+                    ? QString("C%1/F%2").arg(frame.m_cycle, 2, 10, QChar('0')).arg(frame.m_frame, 3, 10, QChar('0')) : QString(), live);
+                setDetail(p, FlexFlags, pol, collapse, live);
+                setDetail(p, FlexRoaming, pol, frame.m_fiwValid ? (frame.m_roaming ? tr("allowed") : tr("not allowed")) : QString(), live);
+                // The network words by their age: received in the last frame, in this cycle, in this hour, older
+                const qint64 at = status.m_signalMs;
+                setNetworkDetail(WordDateTime, pol, flexDateTimeText(t), flexWordAge(pol, WordDateTime, at),
+                    t.m_timeValid && !t.m_modeConfirmed);
+                {
+                    const DetailRow& row = detailRows(1)[FlexTime];
+                    const QString kind = flexTimeKind(t);
+                    m_flexWordLabel[pol][WordDateTime]->setToolTip(tr(row.m_toolTip) + (kind.isEmpty() ? QString() : "\n\n" + kind));
+                }
+                setNetworkDetail(WordZone, pol, flexZoneText(t), flexWordAge(pol, WordZone, at));
+                setNetworkDetail(WordSsid1, pol, t.m_ssid1Valid
+                    ? QString("%1, %2").arg(t.m_localId).arg(t.m_coverageZone) : QString(), flexWordAge(pol, WordSsid1, at));
+                // The traffic management flags as their bits T3 T2 T1 T0
+                setNetworkDetail(WordSsid2, pol, t.m_ssid2Valid
+                    ? QString("%1, %2").arg(t.m_country).arg(t.m_tmf, 4, 2, QChar('0')) : QString(), flexWordAge(pol, WordSsid2, at));
+                setDetail(p, FlexTime, pol, QString(" "), true);
+                setDetail(p, FlexZone, pol, QString(" "), true);
+                setDetail(p, FlexSystem, pol, QString(" "), true);
+                setDetail(p, FlexCountry, pol, QString(" "), true);
+                setDetail(p, FlexPhasesAB, pol, QString(" "), live);
+                setDetail(p, FlexPhasesCD, pol, QString(" "), live);
+                setDetail(p, FlexReassembling, pol, s.m_seen ? QString::number(status.m_flexReassembliesPol[pol]) : QString(), live);
+            }
+            else
+            {
+                QString page;
+
+                if ((pol == current) && (status.m_messages[2] > 0))
+                {
+                    page = QString("%1, %2, %3").arg(status.m_gscNbs ? QString("NBS") : QString::number(status.m_gscPreamble))
+                        .arg(status.m_gscBatch ? tr("batch") : QString("-")).arg(status.m_gscSlot);
+                }
+
+                setDetail(p, GscState, pol, !status.m_enabled[p] ? QString() : status.m_gscVoicePol[pol] ? tr("VOICE")
+                    : s.m_sync ? tr("SYNC") : tr("HUNT"), live);
+                setDetail(p, GscPage, pol, page, live);
+            }
+        }
+
+        // The values of the protocol, across both columns
+        setDetail(p, messagesRowIndex, 0, QString::number(status.m_messages[p]), true);
+        setDetail(p, resetRowIndex, 0, (status.m_resetTime[p] > 0)
+            ? QDateTime::fromMSecsSinceEpoch(status.m_resetTime[p]).toString("HH:mm:ss") : QString(), true);
+
+        if (p == 1) {
+            setDetail(p, FlexErs, 0, (status.m_flexErsCount > 0)
+                ? QString("%1 s, %2").arg(status.m_flexErsSeconds, 0, 'f', 2).arg(status.m_flexErsCount) : QString(),
+                status.m_flexErs);
+        }
     }
 }
 
 // FLEX: the group slots of each polarity received, while a slot is in use or has an outcome to show. The colour of a
 // slot is its state; its tooltip gives the state, the members and the frame of the group message
-void RadioPagingDemodGUI::updateGroupBars(const RadioPagingDemodSink::Status& status, const bool shown[2])
+void RadioPagingDemodGUI::updateGroupBars(const RadioPagingDemodSink::Status& status)
 {
     for (int pol = 0; pol < 2; pol++)
     {
+        // Both networks always shown (the details keep their size): the slots free are grey
         const std::vector<RadioPagingFlexDecoder::GroupSlotState>& states = status.m_flexGroupStatesPol[pol];
-        bool any = false;
-
-        for (const auto& state : states) {
-            any = any || (state.m_state != RadioPagingFlexDecoder::GroupFree);
-        }
-
-        bool visible = status.m_enabled[1] && shown[pol] && any;
-        m_flexGroupBar[pol]->setVisible(visible);
-
-        if (!visible) {
-            continue;
-        }
-
         const RadioPagingFlexDecoder::GroupSlot *inUse[16] = {};
 
         for (const RadioPagingFlexDecoder::GroupSlot& slot : status.m_flexGroupsPol[pol])

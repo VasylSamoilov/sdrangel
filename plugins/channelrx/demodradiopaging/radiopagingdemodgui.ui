@@ -339,16 +339,6 @@
         </item>
        </widget>
       </item>
-      <item row="0" column="5">
-       <widget class="QLabel" name="pocsagStatus">
-        <property name="toolTip">
-         <string>POCSAG state: HUNT or SYNC with the speeds being received and their polarity,&#10;the bit error rate of the reception (green: no errors, yellow: errors corrected, red: errors the code cannot correct),&#10;&#916;f the carrier frequency offset (measured as the DC offset of the discriminator) and the number of messages.&#10;The details of the last reception follow</string>
-        </property>
-        <property name="text">
-         <string>HUNT</string>
-        </property>
-       </widget>
-      </item>
       <item row="1" column="0">
        <widget class="ButtonSwitch" name="flexEnabled">
         <property name="toolTip">
@@ -404,16 +394,6 @@
         </property>
         <property name="value">
          <number>63</number>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="5">
-       <widget class="QLabel" name="flexStatus">
-        <property name="toolTip">
-         <string>FLEX state: HUNT or SYNC with the mode and polarity of the frame,&#10;the bit error rate of the reception (green: no errors, yellow: errors corrected, red: errors the code cannot correct),&#10;&#916;f the carrier frequency offset (measured as the DC offset of the discriminator) and the number of messages.&#10;The details of the last frame follow</string>
-        </property>
-        <property name="text">
-         <string>HUNT</string>
         </property>
        </widget>
       </item>
@@ -561,16 +541,6 @@
         </item>
        </layout>
       </item>
-      <item row="2" column="5">
-       <widget class="QLabel" name="gscStatus">
-        <property name="toolTip">
-         <string>GSC state: HUNT, SYNC or VOICE with the polarity,&#10;the bit error rate of the reception (green: no errors, yellow: errors corrected, red: errors the code cannot correct),&#10;&#916;f the carrier frequency offset (measured as the DC offset of the discriminator) and the number of messages.&#10;The details of the last page follow</string>
-        </property>
-        <property name="text">
-         <string>HUNT</string>
-        </property>
-       </widget>
-      </item>
       <item row="0" column="3">
        <widget class="QCheckBox" name="pocsagDcCorrection">
         <property name="toolTip">
@@ -651,6 +621,62 @@
       </item>
      </layout>
     </item>
+   </layout>
+  </widget>
+  <widget class="QWidget" name="protocolsContainer" native="true">
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
+   <property name="windowTitle">
+    <string>Protocols</string>
+   </property>
+   <layout class="QVBoxLayout" name="protocolsLayout">
+    <property name="spacing">
+     <number>2</number>
+    </property>
+    <property name="leftMargin">
+     <number>3</number>
+    </property>
+    <property name="topMargin">
+     <number>3</number>
+    </property>
+    <property name="rightMargin">
+     <number>3</number>
+    </property>
+    <property name="bottomMargin">
+     <number>3</number>
+    </property>
+   </layout>
+  </widget>
+  <widget class="QWidget" name="detailsContainer" native="true">
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
+   <property name="windowTitle">
+    <string>Details</string>
+   </property>
+   <layout class="QVBoxLayout" name="detailsLayout">
+    <property name="spacing">
+     <number>2</number>
+    </property>
+    <property name="leftMargin">
+     <number>3</number>
+    </property>
+    <property name="topMargin">
+     <number>3</number>
+    </property>
+    <property name="rightMargin">
+     <number>3</number>
+    </property>
+    <property name="bottomMargin">
+     <number>3</number>
+    </property>
    </layout>
   </widget>
   <widget class="QWidget" name="messageContainer" native="true">
