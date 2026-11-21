@@ -814,6 +814,11 @@ void testCommand()
         const MessageCenterCommandSink::Run& run = runs[1];
         check(run.m_environment.contains("MC_ADDRESS=0001234A") && run.m_environment.contains("MC_TEXT=" + r.m_text)
             && run.m_environment.contains("MC_PROTOCOL=pocsag"), "the fields in the environment, as they are");
+        check(run.m_environment.contains(r.m_frequency < 0 ? QString("MC_FREQUENCY=") : "MC_FREQUENCY=" + QString::number(r.m_frequency)),
+            "the frequency in the environment, empty if unknown");
+        MessageRecord noFrequency = r;
+        noFrequency.m_frequency = -1;
+        check(MessageCenterCommandSink::environment(noFrequency).contains("MC_FREQUENCY="), "an unknown frequency is empty");
         MessageRecord back;
         check(MessageRecord::fromJson(QJsonDocument::fromJson(run.m_stdin).object(), back) && (back.m_text == r.m_text)
             && run.m_stdin.endsWith('\n'), "the record as one line of JSON on the input");

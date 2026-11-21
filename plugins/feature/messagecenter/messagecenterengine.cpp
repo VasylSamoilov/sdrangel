@@ -1427,7 +1427,7 @@ QStringList MessageCenterCommandSink::environment(const MessageRecord& record)
         "MC_TYPE=" + record.m_msgType,
         "MC_TEXT=" + record.m_text,
         "MC_CHANNEL=" + record.m_channel,
-        "MC_FREQUENCY=" + QString::number(record.m_frequency),
+        "MC_FREQUENCY=" + ((record.m_frequency < 0) ? QString() : QString::number(record.m_frequency)),     // Empty if unknown
         "MC_POLARITY=" + MessageRecord::polarityToString(record.m_polarity),
         "MC_QUALITY=" + MessageRecord::qualityToString(RadioPagingPage::quality(record)),
         "MC_CONTACT=" + d.value("contact").toString(),
