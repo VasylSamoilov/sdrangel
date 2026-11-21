@@ -126,6 +126,9 @@ public:
     qint32 getFlexTimeExtendedSeconds();
     void setFlexTimeExtendedSeconds(qint32 flex_time_extended_seconds);
 
+    qint32 getMaxQueued();
+    void setMaxQueued(qint32 max_queued);
+
     qint32 getFlexNumbering();
     void setFlexNumbering(qint32 flex_numbering);
 
@@ -294,6 +297,9 @@ private:
 
     qint32 flex_time_extended_seconds;
     bool m_flex_time_extended_seconds_isSet;
+
+    qint32 max_queued;
+    bool m_max_queued_isSet;
 
     qint32 flex_numbering;
     bool m_flex_numbering_isSet;

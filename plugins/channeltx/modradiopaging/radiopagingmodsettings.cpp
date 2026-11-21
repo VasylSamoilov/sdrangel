@@ -135,6 +135,7 @@ void RadioPagingModSettings::resetToDefaults()
     m_flexTimeOffsetSeconds = 0;
     m_flexTimeEquivalentYear = true;
     m_flexTimeExtendedSeconds = 0;
+    m_maxQueued = 10000;
     m_flexNumbering = true;
     m_flexMaxMessageNumber = 63;
     m_gscMode = (int) RadioPagingGsc::Auto;
@@ -203,6 +204,7 @@ void RadioPagingModSettings::validate()
         m_flexTimeZoneMinutes = 0;
     }
     m_flexTimeExtendedSeconds = std::max(0, std::min(7, m_flexTimeExtendedSeconds));
+    m_maxQueued = std::max(1, std::min((int) m_maxQueuedLimit, m_maxQueued));
 
     m_flexMaxMessageNumber = std::max(0, std::min(63, m_flexMaxMessageNumber));
     m_gscVoiceSeconds = std::max(1, std::min(50, m_gscVoiceSeconds));
@@ -333,6 +335,7 @@ QByteArray RadioPagingModSettings::serialize() const
     writeCharset(s, 69, m_gscCharset);
     s.writeBool(72, m_flexTimeEquivalentYear);
     s.writeS32(73, m_flexTimeExtendedSeconds);
+    s.writeS32(74, m_maxQueued);
 
     return s.final();
 }
@@ -443,6 +446,7 @@ bool RadioPagingModSettings::deserialize(const QByteArray& data)
         m_gscCharset = readCharset(d, 69, "gsc");
         d.readBool(72, &m_flexTimeEquivalentYear, true);
         d.readS32(73, &m_flexTimeExtendedSeconds, 0);
+        d.readS32(74, &m_maxQueued, 10000);
         m_gscVoiceKeepDays = std::max(0, std::min(3650, m_gscVoiceKeepDays));
         m_gscVoiceKeepMin = std::max(0, std::min(100000, m_gscVoiceKeepMin));
 
@@ -539,6 +543,9 @@ void RadioPagingModSettings::applySettings(const QStringList& settingsKeys, cons
     }
     if (settingsKeys.contains("flexTimeExtendedSeconds")) {
         m_flexTimeExtendedSeconds = settings.m_flexTimeExtendedSeconds;
+    }
+    if (settingsKeys.contains("maxQueued")) {
+        m_maxQueued = settings.m_maxQueued;
     }
     if (settingsKeys.contains("flexNumbering")) {
         m_flexNumbering = settings.m_flexNumbering;
@@ -719,6 +726,9 @@ QString RadioPagingModSettings::getDebugString(const QStringList& settingsKeys, 
     }
     if (settingsKeys.contains("flexTimeExtendedSeconds") || force) {
         ostr << " m_flexTimeExtendedSeconds: " << m_flexTimeExtendedSeconds;
+    }
+    if (settingsKeys.contains("maxQueued") || force) {
+        ostr << " m_maxQueued: " << m_maxQueued;
     }
     if (settingsKeys.contains("flexNumbering") || force) {
         ostr << " m_flexNumbering: " << m_flexNumbering;

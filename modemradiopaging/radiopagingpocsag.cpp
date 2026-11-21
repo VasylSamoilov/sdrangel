@@ -127,6 +127,7 @@ RadioPagingPocsag::EncodeResult RadioPagingPocsag::encode(const std::vector<TxMe
     auto startBatch = [&]() {
         result.m_codewords.push_back(m_syncWord);
         slot = 0;
+        result.m_batches++;
     };
 
     auto put = [&](uint32_t word) {
@@ -189,6 +190,9 @@ RadioPagingPocsag::EncodeResult RadioPagingPocsag::encode(const std::vector<TxMe
 
         uint32_t data = ((message.m_address >> 3) << 2) | message.m_function;
         put(RadioPagingBCH::encode(data));
+        EncodeResult::Placement placement;
+        placement.m_batch = result.m_batches - 1;
+        placement.m_frame = frame;
 
         for (size_t i = 0; i < bits.size(); i += dataBitsPerCodeword)
         {
@@ -198,6 +202,10 @@ RadioPagingPocsag::EncodeResult RadioPagingPocsag::encode(const std::vector<TxMe
             }
             put(RadioPagingBCH::encode((1u << 20) | chunk));
         }
+
+        placement.m_lastBatch = result.m_batches - 1;
+        placement.m_codewords = 1 + (int) (bits.size() / dataBitsPerCodeword);
+        result.m_placements.push_back(placement);
 
         previousHadMessage = !bits.empty();
     }

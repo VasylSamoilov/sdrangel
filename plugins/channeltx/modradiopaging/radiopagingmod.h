@@ -264,7 +264,6 @@ public:
         { }
     };
 
-    static const int m_maxQueued = 10000;   //!< Messages not sent yet before requests are refused
     static const int m_maxTextLength = 2000;    //!< Characters of a message
     static const qint64 m_copySlackMs = 3600000;    //!< Retransmissions: longest wait of a copy past its interval (queue, frames)
 
@@ -341,6 +340,18 @@ public:
     //! Status of the source; queued counts the messages accepted and not being sent yet
     RadioPagingModSource::Status getStatus() const;
 
+    //! Requests refused since the channel was created, from the GUI, the Message Center or the WebAPI, and the last reason
+    quint64 getRefused(QString *lastReason = nullptr) const
+    {
+        QMutexLocker mutexLocker(&m_refusedMutex);
+
+        if (lastReason) {
+            *lastReason = m_lastRefusal;
+        }
+
+        return m_refused;
+    }
+
     //! Queue a message: its id, or 0 and an error. Main thread
     quint64 transmit(const TxRequest& request, QString& error, QString *warning = nullptr);
     void clear(bool abort);
@@ -378,6 +389,16 @@ private:
         qint64 m_copySpanMs = 0;                //!< Longest time from one copy to the next
     };
     std::map<quint64, PendingTx> m_pending;
+    // Requests refused (getRefused): counted in the main thread and in the WebAPI thread
+    mutable QMutex m_refusedMutex;
+    quint64 m_refused = 0;
+    QString m_lastRefusal;
+    void refused(const QString& error)
+    {
+        QMutexLocker mutexLocker(&m_refusedMutex);
+        m_refused++;
+        m_lastRefusal = error;
+    }
     // Messages sent with copies to go (main thread only): the record of the copies. A copy that is not sent (the
     // queue cleared, the transmission cut) is not reported: the entry goes when no copy can come any more
     struct RepeatingTx

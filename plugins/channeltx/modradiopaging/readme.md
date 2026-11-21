@@ -12,7 +12,7 @@ A channel transmits one protocol. Its settings are the defaults of the messages 
 
 The symbols are shaped with a Gaussian filter and frequency modulated with the deviation of the channel. The power ramps up at the start of a transmission and down after its last symbol. The radio paging demodulator (demodradiopaging) receives what this plugin transmits.
 
-Messages are queued from the composer of the channel window, from the Message Center (pages sent to the channel by its name) or with the `tx` action of the WebAPI. A message that can not be sent is refused with the reason. At most 10000 messages wait.
+Messages are queued from the composer of the channel window, from the Message Center (pages sent to the channel by its name) or with the `tx` action of the WebAPI. A message that can not be sent is refused with the reason. At most 10000 messages wait, a setting (Max, `maxQueued`) of 1 to 100000.
 
 <h2>Modes</h2>
 
@@ -99,23 +99,30 @@ The composer of a message:
 
 <h3>Queue</h3>
 
-* State (idle, ramp up, transmitting, ramp down), the message being sent, the messages waiting and sent.
+* The state and the queue as boxes: the state (idle, ramp up, transmitting, ramp down, and the FLEX re-synchronization being sent), Waiting (messages not sent yet), Sending (the message going out), Sent, Dropped (when some were) and Refused (requests refused, from this window, the Message Center or the WebAPI; the tooltip gives the last reason). Click Waiting, Sent or Dropped to show only those messages in the table, again to show all. Click Sending to show the message on air: the table follows it until you scroll or select a row.
+* Max: the queue size, 1 to 100000 (default 10000). Lowered below the messages queued, they stay and new ones are refused until the queue is down.
 * Clear drops the messages waiting. Abort drops them and, in one-shot mode, ends the transmission being sent.
-* Message Center opens the Message Center (and adds it when there is none).
-* The table of the last messages transmitted: queued, sent or dropped, with the message number, fragments and copies of FLEX messages. A click on the icon of a voice message plays the voice sent. Double click on a message opens all the fields of its record. Right click on the header selects the columns. While a row is selected or the table is scrolled up, the new rows wait (a button in the corner counts them) so that the rows do not move.
-* The log of the messages queued and of the requests refused. A page from the Message Center or the API is logged with its address, type and text.
+* The Message Center button: green while there is a Message Center (it takes the messages of every paging channel); a click opens it, or adds one when there is none.
+* The table of the messages, one row each from the time it is queued to its last event, in the order they were queued: id, state (waiting, on air with a yellow background, sent, dropped), the date and time of its first event (queued), the time of its last event, the number of events, protocol, address, type, the message and the chips of its protocol fields (frame, batch, phase, message number, fragments...). A row is updated in place by its events: queued, on air, sent or dropped, each copy sent. The tooltip of a row lists its events with their times; double click a row (or right click, Details) for every field of its record, the history in `events`. A click on the message of a voice message plays the voice sent; right click to choose the audio output. Right click on the header selects the columns; their order and sizes are kept. All the messages not finished are kept, and the last 1000 finished ones. The table draws only the rows in view: a queue of 100000 messages costs as much as a few.
+* The log of what the table does not show: the requests refused here and their reason, warnings, the voice and the System Event Notification.
 
 <h2>Message records</h2>
 
 Each message sent is published on the "messages" pipe as a message record (direction TX) with the protocol, mode, speed, address, polarity, type, text and the protocol fields in protocolData, the same keys as the records of the demodulator. Its state goes from queued to transmitted and sent, or dropped; pages of the Message Center report it back to the Message Center.
 
+The record gathers the facts of the message as they are known, and they do not change after:
+
+* Queued: POCSAG `frame`, the frame of the batch its address goes in (the 3 LSBs of the address).
+* Sent: FLEX `cycle`, `frame` and `phase` of its last fragment, `first_cycle` and `first_frame` of its first fragment when it is in fragments, `fragment_count`, `message_number` and `retrieval`. POCSAG `batch`, the batch of its address counted from the preamble (from 0, as the demodulator counts it), `last_batch`, the batch of its last codeword, and `codewords`, its address and message codewords. GSC `preamble`, `batch_mode`, `slot`, the slot of its address in its batch, and `blocks`, its 121 bit blocks. A FLEX group message has the cycle, frame and phase of its last phase, no message number (it goes to a temporary address).
+* Its history: `events`, each event with its time (UTC): queued, on air, sent, failed or dropped, and copy N sent. A copy is a record of its own (`retransmission_of` the message) with all the history.
+
 <h2>REST API</h2>
 
-Settings: `RadioPagingModSettings` (channel type `RadioPagingMod`), all the settings above, and the ramps at the start and end of a transmission (`rampUpMs`, `rampDownMs`, default 5 ms, and `rampRange`, default 60 dB). Report: `RadioPagingModReport` with the state, the messages waiting (`queued`) and being sent (`inFlight`), the ids of the message being sent and of the last one sent, the number sent and dropped, the samples produced and the FLEX re-synchronization.
+Settings: `RadioPagingModSettings` (channel type `RadioPagingMod`), all the settings above, and the ramps at the start and end of a transmission (`rampUpMs`, `rampDownMs`, default 5 ms, and `rampRange`, default 60 dB). Report: `RadioPagingModReport` with the state, the messages waiting (`queued`) and being sent (`inFlight`), the ids of the message being sent and of the last one sent, the number sent and dropped, the requests refused (`refused`), the samples produced and the FLEX re-synchronization.
 
 Actions: `RadioPagingModActions`:
 
-* `tx`: a message. `address` is a string for every protocol, as in the posts of the Message Center: the POCSAG address, the FLEX capcode (digits or a form with letters) or the GSC cap code, for example `{"protocol":"flex","address":"1234567","type":"alphanumeric","text":"Hello"}`. POCSAG: `function`, `speed`. FLEX: `priority`, `groupMembers`, `shortType`, `source`, `blocking`, `mailDrop`, `rightToLeft`, `headerMessage`, `statusInfo`, `secureType`. GSC: `function`. All: `protocol`, `type`, `text`, `polarity` (normal or inverted), `charset`, `retransmit`, `retransmitInterval`, `sendDelay`, `id`. 202 when queued, 400 with the reason when it is not valid for the channel or when 10000 messages are waiting.
+* `tx`: a message. `address` is a string for every protocol, as in the posts of the Message Center: the POCSAG address, the FLEX capcode (digits or a form with letters) or the GSC cap code, for example `{"protocol":"flex","address":"1234567","type":"alphanumeric","text":"Hello"}`. POCSAG: `function`, `speed`. FLEX: `priority`, `groupMembers`, `shortType`, `source`, `blocking`, `mailDrop`, `rightToLeft`, `headerMessage`, `statusInfo`, `secureType`. GSC: `function`. All: `protocol`, `type`, `text`, `polarity` (normal or inverted), `charset`, `retransmit`, `retransmitInterval`, `sendDelay`, `id`. 202 when queued, 400 with the reason when it is not valid for the channel or when the queue is full (`maxQueued`).
 * `clear`: 1 to drop the messages waiting.
 * `abort`: 1 to drop them and end the one being sent.
 * `systemEvent` and `systemEventFrames`: start the FLEX System Event Notification of the events (0 stops it).

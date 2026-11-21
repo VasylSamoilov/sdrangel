@@ -120,7 +120,7 @@ Bandwidth of the channel filter, from 10 to 25 kHz in 100 Hz steps (default 20 k
 
 <h3>5: Protocol status rows</h3>
 
-A row for each protocol, always shown, about the network being received (the polarity in sync, else the one received last). The values are grey once the reception ended (the last ones are kept).
+A row for each protocol, always shown, about the network being received (the polarity in sync, else the one received last). The values are grey once the reception ended (the last ones are kept). A protocol is in sync on a real signal only: POCSAG once a sync codeword is confirmed by the next one or a batch is decoded, GSC once the start code or an address follows the preamble, FLEX on the frame sync. A sync codeword or a preamble found by chance in noise or in another protocol changes nothing.
 
 * Protocol button - decode the protocol. Its colour is the state of the reception: grey off, the colour of a switch on while it looks for a signal, green in sync, amber during a FLEX emergency re-synchronization or a GSC voice page. A protocol switched off is reset.
 * What is received - POCSAG the speeds in sync, FLEX the mode of the frame (or ERS with its length during an emergency re-synchronization), GSC VOICE during a voice page. Between the frames of a FLEX transmission the reception stays shown until the sync of the next frame is due (1.875 s after the start of the last one).
@@ -149,16 +149,16 @@ The settings of each protocol, in aligned columns:
 
 A tab for each protocol, with a table of the values of each network: the normal polarity in a column, the inverted one in the other. A value of the protocol (the messages, the last reset) is across both. The tooltip of each row says what the value is.
 
-* POCSAG: the speeds in sync, the batches of the transmission, the messages remembered for duplicate detection, the messages received and the last reset.
+* POCSAG: the speeds in sync, the batches of the transmission, the messages in the deduplication memory (kept 60 s), the messages received and the last reset.
 * FLEX, the last frame of each network:
   * Mode, cycle and frame.
   * Collapse, repeats - the system collapse with, in brackets, the longest a page waits for the frame of its pager; xN and the TD collapse for a frame sent N times, - when sent once.
   * Roaming - the roaming bit of the frame.
   * Network time, time zone (with the extended second), local ID and coverage zone, country code and traffic management flags (T3 T2 T1 T0). By the age of the word: a green chip received in the last frame, light green in this cycle, plain in this hour, grey older. The network time goes on with the frames since its time word, for the whole hour a network may go without sending it. Its kind (standard: the time of frame 0 of the cycle, the offset of the frame added; direct: the time of the frame) is assumed standard, a light yellow chip, until the time words of a cycle tell it.
   * Phases A, B and Phases C, D - the bit error rate of each phase of the frame in a box of the colour of its quality (A at 1600, A and C at 3200, A to D at 6400), A&#96; when the low traffic flag of the phase is set (its addresses end in block 0). The tooltip has the block information of each phase: collapse, carry-on, priority address words and block information words.
-  * The messages remembered, the messages being reassembled, the last emergency re-synchronization and how many were received, the messages received and the last reset.
+  * The messages in the deduplication memory (kept 30 minutes), the messages being reassembled, the last emergency re-synchronization and how many were received, the messages received and the last reset.
   * Group slots - the 16 group slots of each network (temporary addresses 2029568 to 2029583). The colour of a slot is its state: blue members being assigned, amber waiting for the group message, teal the group message being received, green delivered, red missed (its frame went by without it), violet discarded (assigned again to another frame before it), orange timeout (the group message did not end), grey free. An outcome stays shown for 16 frames. The tooltip of a slot gives its state, the number of its members and the first of them, the frame of the group message, the cycle and frame of the assignment and how many frames on the group message is.
-* GSC: the state (SYNC, HUNT or VOICE), the preamble, batch and slot of the last page, the messages remembered, the messages received and the last reset.
+* GSC: the state (SYNC, HUNT or VOICE), the preamble, batch and slot of the last page, the messages in the deduplication memory (kept 60 s), the messages received and the last reset.
 
 GSC has in addition, in Protocols:
 

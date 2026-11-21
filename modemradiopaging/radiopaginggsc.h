@@ -139,6 +139,9 @@ public:
         std::vector<uint8_t> m_bits;    //!< One bit per element in transmission order, 1 = positive deviation
         int m_preamble = -1;            //!< Preamble value index used, -1 if none
         int m_slots = 0;                //!< 121 bit blocks after the first start code (or the 1100 pattern)
+        bool m_batch = false;           //!< Batch mode (the complemented preamble)
+        std::vector<int> m_messageSlots;    //!< Of each message: the slot of its address in its batch, from 0
+        std::vector<int> m_messageBlocks;   //!< Of each message: its 121 bit blocks, the address included
     };
 
     struct GolayResult

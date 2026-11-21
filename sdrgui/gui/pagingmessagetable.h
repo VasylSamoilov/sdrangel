@@ -31,6 +31,7 @@
 
 class FeatureGUI;
 class QMouseEvent;
+class QStyledItemDelegate;
 class QResizeEvent;
 class QToolButton;
 class PagingVoicePlayer;
@@ -112,8 +113,19 @@ public:
     void toggleVoice(int row);
     //!< A window with every field of the record of a row: the common fields, protocolData and the raw payload
     void showDetails(int row);
+    //!< The window of every field of a record, from its JSON (MessageRecord::toJson)
+    static void showRecord(const QString& json, QWidget *parent);
+    //!< For a view of records on a model: the HTML of a cell in this role is drawn (chips, colours), and its text
+    //!< stays plain; the delegate that draws it
+    static const int m_htmlRole = Qt::UserRole + 1;
+    static QStyledItemDelegate *createHtmlDelegate(QObject *parent);
+    //!< The chip of a message type (ALPHA, NUM, TONE...), HTML
+    static QString typeChipHtml(const QString& type);
     //!< Shows the Message Center window, adding the feature first if there is none
     static void openMessageCenter();
+    //!< The Message Center button of a paging channel: green while there is a Message Center (every one takes the
+    //!< messages of all the paging channels), its icon otherwise; a click opens it (openMessageCenter)
+    static void setupMessageCenterButton(QToolButton *button);
     //!< The route dialog of the Message Center filled from a message: its protocol, polarity, type and address, decoded
     //!< as the codepage (vendor, model and codepage as in the records; empty: as received) and the type (empty: as
     //!< received). Nothing without a Message Center

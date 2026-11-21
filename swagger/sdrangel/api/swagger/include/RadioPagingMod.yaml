@@ -110,6 +110,10 @@ RadioPagingModSettings:
       description: "FLEX time: extended second S5-S3 of the time zone word, 0-7 steps of 1/64 minute (0.9375 s), to correct the time a pager shows when the frames are not aligned to the second"
       type: integer
       format: int32
+    maxQueued:
+      description: "Queue size: messages not sent yet before new ones are refused, 1 to 100000 (default 10000). Lowered below the messages queued: they stay, new ones are refused until the queue is down"
+      type: integer
+      format: int32
     flexNumbering:
       description: "FLEX message numbering of the network (STD-43A 8.4, optional): 1 the alphanumeric, HEX/binary and numbered short messages of each address are numbered 0, 1 ... flexMaxMessageNumber, 0 ... with R = 1; 0 the network does not number them: N = 0 and R = 0 (a message in fragments takes a number apart from the other messages of the address in progress) and numbered short messages are refused"
       type: integer
@@ -244,6 +248,10 @@ RadioPagingModReport:
       format: int64
     dropped:
       description: Messages cleared, aborted or dropped by a change of protocol or mode since the channel was created
+      type: integer
+      format: int64
+    refused:
+      description: Requests refused (not valid, queue full) since the channel was created, from the GUI, the Message Center or the WebAPI
       type: integer
       format: int64
     sampleCounter:

@@ -985,7 +985,7 @@
       <item>
        <widget class="QLabel" name="status">
         <property name="toolTip">
-         <string>State, message being sent, messages waiting, messages sent</string>
+         <string>The state of the transmitter and of its queue</string>
         </property>
         <property name="text">
          <string>Idle</string>
@@ -1006,12 +1006,28 @@
        </spacer>
       </item>
       <item>
-       <widget class="QPushButton" name="openMessageCenter">
+       <widget class="QSpinBox" name="maxQueued">
+        <property name="toolTip">
+         <string>Queue size: messages not sent yet before new ones are refused. Lowered below the messages queued: they stay, new ones are refused until the queue is down</string>
+        </property>
+        <property name="prefix">
+         <string>Max </string>
+        </property>
+        <property name="minimum">
+         <number>1</number>
+        </property>
+        <property name="maximum">
+         <number>100000</number>
+        </property>
+        <property name="value">
+         <number>10000</number>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="openMessageCenter">
         <property name="toolTip">
          <string>Open the Message Center: the log of the messages of all the paging channels, its routes, sinks and sources, and the pages to transmit (it is added if there is none)</string>
-        </property>
-        <property name="text">
-         <string>Message Center</string>
         </property>
        </widget>
       </item>
@@ -1038,9 +1054,15 @@
      </layout>
     </item>
     <item>
-     <widget class="PagingMessageTable" name="txLog">
-      <property name="toolTip">
-       <string>The last messages transmitted: queued, sent or dropped. Click the icon of a voice message to play the voice recorded.&#10;Double-click a message for all its fields. Right click the header to choose the columns</string>
+     <widget class="QTableView" name="messages">
+      <property name="editTriggers">
+       <set>QAbstractItemView::NoEditTriggers</set>
+      </property>
+      <property name="selectionBehavior">
+       <enum>QAbstractItemView::SelectRows</enum>
+      </property>
+      <property name="selectionMode">
+       <enum>QAbstractItemView::SingleSelection</enum>
       </property>
      </widget>
     </item>
@@ -1078,11 +1100,6 @@
    <extends>QWidget</extends>
    <header>gui/levelmeter.h</header>
    <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>PagingMessageTable</class>
-   <extends>QTableWidget</extends>
-   <header>gui/pagingmessagetable.h</header>
   </customwidget>
   <customwidget>
    <class>PagingComposer</class>

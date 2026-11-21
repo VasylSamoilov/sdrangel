@@ -46,6 +46,8 @@ SWGRadioPagingModReport::SWGRadioPagingModReport() {
     m_sent_isSet = false;
     dropped = 0L;
     m_dropped_isSet = false;
+    refused = 0L;
+    m_refused_isSet = false;
     sample_counter = 0L;
     m_sample_counter_isSet = false;
     ers = 0;
@@ -80,6 +82,8 @@ SWGRadioPagingModReport::init() {
     m_sent_isSet = false;
     dropped = 0L;
     m_dropped_isSet = false;
+    refused = 0L;
+    m_refused_isSet = false;
     sample_counter = 0L;
     m_sample_counter_isSet = false;
     ers = 0;
@@ -92,6 +96,7 @@ SWGRadioPagingModReport::init() {
 
 void
 SWGRadioPagingModReport::cleanup() {
+
 
 
 
@@ -135,6 +140,8 @@ SWGRadioPagingModReport::fromJsonObject(QJsonObject &pJson) {
     ::SWGSDRangel::setValue(&sent, pJson["sent"], "qint64", "");
     
     ::SWGSDRangel::setValue(&dropped, pJson["dropped"], "qint64", "");
+    
+    ::SWGSDRangel::setValue(&refused, pJson["refused"], "qint64", "");
     
     ::SWGSDRangel::setValue(&sample_counter, pJson["sampleCounter"], "qint64", "");
     
@@ -186,6 +193,9 @@ SWGRadioPagingModReport::asJsonObject() {
     }
     if(m_dropped_isSet){
         obj->insert("dropped", QJsonValue(dropped));
+    }
+    if(m_refused_isSet){
+        obj->insert("refused", QJsonValue(refused));
     }
     if(m_sample_counter_isSet){
         obj->insert("sampleCounter", QJsonValue(sample_counter));
@@ -294,6 +304,16 @@ SWGRadioPagingModReport::setDropped(qint64 dropped) {
 }
 
 qint64
+SWGRadioPagingModReport::getRefused() {
+    return refused;
+}
+void
+SWGRadioPagingModReport::setRefused(qint64 refused) {
+    this->refused = refused;
+    this->m_refused_isSet = true;
+}
+
+qint64
 SWGRadioPagingModReport::getSampleCounter() {
     return sample_counter;
 }
@@ -363,6 +383,9 @@ SWGRadioPagingModReport::isSet(){
             isObjectUpdated = true; break;
         }
         if(m_dropped_isSet){
+            isObjectUpdated = true; break;
+        }
+        if(m_refused_isSet){
             isObjectUpdated = true; break;
         }
         if(m_sample_counter_isSet){

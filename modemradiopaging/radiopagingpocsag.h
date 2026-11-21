@@ -73,6 +73,16 @@ public:
         std::string m_error;
         std::vector<uint32_t> m_codewords;  //!< Sync words and codewords of all batches
         std::vector<uint8_t> m_bits;        //!< Preamble (if any) and codewords, one bit per element, in transmission order
+        //!< Where each message went, in the order of the messages
+        struct Placement
+        {
+            int m_batch = 0;                //!< Batch of its address codeword, from 0 in this result
+            int m_lastBatch = 0;            //!< Batch of its last codeword
+            int m_frame = 0;                //!< Frame of the batch: the 3 LSBs of the address
+            int m_codewords = 0;            //!< Address and message codewords
+        };
+        std::vector<Placement> m_placements;
+        int m_batches = 0;                  //!< Batches of the result
     };
 
     struct Interpretation

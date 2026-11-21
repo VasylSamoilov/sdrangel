@@ -154,6 +154,18 @@ public:
         int m_number = -1;
         int m_fragments = 1;
         bool m_retrieval = false;
+        int m_cycle = -1;           //!< Where it went: the cycle, frame and phase (0 to 3: A to D) of its last fragment
+        int m_frame = -1;
+        int m_phase = -1;
+        int m_firstCycle = -1;      //!< A message in fragments: the cycle and frame of its first fragment
+        int m_firstFrame = -1;
+        // The streams of the other protocols report where their messages went in the same structure
+        int m_batch = -1;           //!< POCSAG: batch of the address after the preamble, from 0; GSC: batch mode (0, 1)
+        int m_lastBatch = -1;       //!< POCSAG: batch of the last codeword
+        int m_codewords = -1;       //!< POCSAG: address and message codewords
+        int m_preamble = -1;        //!< GSC: preamble value index
+        int m_slot = -1;            //!< GSC: slot of the address in its batch, from 0
+        int m_blocks = -1;          //!< GSC: 121 bit blocks of the message, the address included
     };
 
     struct Frame
@@ -318,6 +330,8 @@ private:
         int m_fragments = 1;
         int m_signature = -1;   //!< Alphanumeric and HEX/binary first fragment: signature of the whole message
         int m_phase = -1;       //!< Fragments after the first: the phase of the first fragment, -1 until it is sent
+        int m_firstCycle = -1;  //!< Fragments after the first: the cycle and frame of the first fragment, -1 until it is sent
+        int m_firstFrame = -1;
         int m_delay = 0;            //!< Frames to wait from the first frame built after it was queued
         int64_t m_notBefore = -1;   //!< First frame index it may go in, -1 until set (with m_delay)
         int m_retransmitsLeft = 0;  //!< Retransmissions still to come after this transmission

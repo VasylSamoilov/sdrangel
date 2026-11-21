@@ -239,23 +239,48 @@ bool RadioPagingPocsagTxStream::hasDue(const std::deque<Item>& queue) const
     return false;
 }
 
-std::vector<uint64_t> RadioPagingPocsagTxStream::takeSent(std::deque<Item>& queue, const std::vector<size_t>& sent,
-    std::vector<uint64_t>& repeatIds)
+// Where a POCSAG message went, from its placement in the encoding
+static RadioPagingFlexEncoder::SentStatus pocsagStatus(const RadioPagingPocsag::EncodeResult& result, size_t index, int firstBatch)
 {
-    std::vector<uint64_t> ids;
+    RadioPagingFlexEncoder::SentStatus status;
+
+    if (index < result.m_placements.size())
+    {
+        const RadioPagingPocsag::EncodeResult::Placement& placement = result.m_placements[index];
+        status.m_batch = firstBatch + placement.m_batch;
+        status.m_lastBatch = firstBatch + placement.m_lastBatch;
+        status.m_frame = placement.m_frame;
+        status.m_codewords = placement.m_codewords;
+    }
+
+    return status;
+}
+
+void RadioPagingPocsagTxStream::takeSent(std::deque<Item>& queue, const std::vector<size_t>& sent,
+    const RadioPagingPocsag::EncodeResult& result, int firstBatch, RadioPagingTxBlock& block)
+{
     std::vector<Item> repeats;
 
-    repeatIds.clear();
+    block.m_ids.clear();
+    block.m_repeatIds.clear();
+    block.m_status.clear();
+    block.m_repeatStatus.clear();
 
     for (size_t k = sent.size(); k-- > 0;)
     {
         Item item = queue[sent[k]];
         queue.erase(queue.begin() + (long) sent[k]);
+        const RadioPagingFlexEncoder::SentStatus status = pocsagStatus(result, k, firstBatch);
 
-        if (!item.m_repeat) {
-            ids.insert(ids.begin(), item.m_id);
-        } else {
-            repeatIds.insert(repeatIds.begin(), item.m_id);
+        if (!item.m_repeat)
+        {
+            block.m_ids.insert(block.m_ids.begin(), item.m_id);
+            block.m_status.insert(block.m_status.begin(), status);
+        }
+        else
+        {
+            block.m_repeatIds.insert(block.m_repeatIds.begin(), item.m_id);
+            block.m_repeatStatus.insert(block.m_repeatStatus.begin(), status);
         }
         if (item.m_repeatsLeft > 0)
         {
@@ -267,7 +292,6 @@ std::vector<uint64_t> RadioPagingPocsagTxStream::takeSent(std::deque<Item>& queu
     }
 
     queue.insert(queue.end(), repeats.begin(), repeats.end());
-    return ids;
 }
 
 // Next group after the current one in the carousel order that has messages
@@ -318,6 +342,7 @@ bool RadioPagingPocsagTxStream::next(RadioPagingTxBlock& block)
         block.m_shaping = entry.first.first;
         block.m_levels = levels(result.m_bits, entry.first.second);
         block.m_ids.push_back(entry.second.m_id);
+        block.m_status.push_back(pocsagStatus(result, 0, 0));
         m_inTransmission = true;
         return true;
     }
@@ -345,6 +370,7 @@ void RadioPagingPocsagTxStream::nextNetwork(RadioPagingTxBlock& block)
         block.m_levels = levels(preambleBits(), m_group.second);
         m_preambleDue = false;
         m_idleBatches = 0;
+        m_batchesSincePreamble = 0;
         return;
     }
 
@@ -376,7 +402,8 @@ void RadioPagingPocsagTxStream::nextNetwork(RadioPagingTxBlock& block)
             result = RadioPagingPocsag::encode(messages, options);
         }
 
-        block.m_ids = takeSent(queue, due, block.m_repeatIds);
+        takeSent(queue, due, result, m_batchesSincePreamble, block);
+        m_batchesSincePreamble += result.m_batches;
         block.m_baud = m_group.first;
         block.m_shaping = m_group.first;
         block.m_levels = levels(result.m_bits, m_group.second);
@@ -405,6 +432,7 @@ void RadioPagingPocsagTxStream::nextNetwork(RadioPagingTxBlock& block)
         block.m_levels = levels(preambleBits(), m_group.second);
         m_idleBatches = 0;
         m_turnBlocks = 0;
+        m_batchesSincePreamble = 0;
         return;
     }
 
@@ -412,6 +440,7 @@ void RadioPagingPocsagTxStream::nextNetwork(RadioPagingTxBlock& block)
     block.m_shaping = m_group.first;
     block.m_levels = levels(idleBatchBits(), m_group.second);
     m_idleBatches++;
+    m_batchesSincePreamble++;
     m_turnBlocks = 0;
 }
 
@@ -478,7 +507,14 @@ bool RadioPagingPocsagTxStream::nextMixed(RadioPagingTxBlock& block, int64_t max
     }
 
     due.resize(used);
-    block.m_ids = takeSent(queue, due, block.m_repeatIds);
+
+    // After a preamble the batches count from 0
+    if (m_preambleDue) {
+        m_batchesSincePreamble = 0;
+    }
+
+    takeSent(queue, due, best, m_batchesSincePreamble, block);
+    m_batchesSincePreamble += best.m_batches;
 
     block.m_baud = m_group.first;
     block.m_shaping = m_group.first;
@@ -1110,10 +1146,27 @@ bool RadioPagingGscTxStream::next(RadioPagingTxBlock& block)
     block.m_shaping = m_baud;
     block.m_levels = symbols(result.m_bits);
 
+    // Where each page went
+    auto gscStatus = [&result](size_t index) {
+        RadioPagingFlexEncoder::SentStatus status;
+        status.m_preamble = result.m_preamble;
+        status.m_batch = result.m_batch ? 1 : 0;
+
+        if (index < result.m_messageSlots.size())
+        {
+            status.m_slot = result.m_messageSlots[index];
+            status.m_blocks = result.m_messageBlocks[index];
+        }
+
+        return status;
+    };
+
     if (!voicePage)
     {
-        for (const Item& item : group) {
-            block.m_ids.push_back(item.m_id);
+        for (size_t i = 0; i < group.size(); i++)
+        {
+            block.m_ids.push_back(group[i].m_id);
+            block.m_status.push_back(gscStatus(i));
         }
     }
     else if (first.m_live)
@@ -1133,6 +1186,7 @@ bool RadioPagingGscTxStream::next(RadioPagingTxBlock& block)
         m_liveEnd.m_shaping = m_baud;
         m_liveEnd.m_levels = symbols(turnOff);
         m_liveEnd.m_ids.push_back(first.m_id);
+        m_liveEnd.m_status.push_back(gscStatus(0));
 
         m_blocks.push_back(alert);
         m_live = LiveAlert;
@@ -1178,6 +1232,7 @@ bool RadioPagingGscTxStream::next(RadioPagingTxBlock& block)
         end.m_shaping = m_baud;
         end.m_levels = symbols(turnOff);
         end.m_ids.push_back(first.m_id);
+        end.m_status.push_back(gscStatus(0));
 
         m_blocks.push_back(audio);
         m_blocks.push_back(end);

@@ -68,6 +68,9 @@ public:
     qint64 getDropped();
     void setDropped(qint64 dropped);
 
+    qint64 getRefused();
+    void setRefused(qint64 refused);
+
     qint64 getSampleCounter();
     void setSampleCounter(qint64 sample_counter);
 
@@ -110,6 +113,9 @@ private:
 
     qint64 dropped;
     bool m_dropped_isSet;
+
+    qint64 refused;
+    bool m_refused_isSet;
 
     qint64 sample_counter;
     bool m_sample_counter_isSet;

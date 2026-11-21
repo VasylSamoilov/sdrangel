@@ -21,6 +21,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -1433,8 +1434,82 @@ void testGscVoice()
     }
 }
 
+// Where each message went, reported with the block that completes it (the facts of the record of the message)
+void testSentFacts()
+{
+    std::string error;
+
+    // POCSAG network: after the preamble and an idle batch, the address of frame 7 in batch 1, the next address (frame
+    // 0) in the batch after
+    {
+        RadioPagingPocsagTxStream stream(true, 1200, false);
+        RadioPagingTxBlock block;
+        stream.begin(0);
+        stream.next(block);     // Preamble
+        stream.next(block);     // Idle batch
+        stream.add(pocsag(1234567, "NETWORK"), 1200, false, 1, error);
+        stream.add(pocsag(1000, "SECOND"), 1200, false, 2, error);
+        stream.next(block);
+        const bool both = (block.m_ids.size() == 2) && (block.m_status.size() == 2);
+        // Frame 7 is the last 2 codewords of batch 1: its 3 message codewords run on into batch 2
+        check(both && (block.m_status[0].m_batch == 1) && (block.m_status[0].m_frame == 7) && (block.m_status[0].m_codewords == 4)
+            && (block.m_status[0].m_lastBatch == 2),
+            "Sent facts: POCSAG address in frame 7 of batch 1 after the preamble, 3 message codewords to batch 2");
+        // After an idle codeword frame 0 of batch 2 is gone: batch 3
+        check(both && (block.m_status[1].m_batch == 3) && (block.m_status[1].m_frame == 0) && (block.m_status[1].m_lastBatch == 3),
+            "Sent facts: POCSAG the next address, frame 0, in the batch after");
+    }
+
+    // FLEX one-shot: the cycle, frame and phase; a message in fragments the frame of its first fragment too
+    {
+        RadioPagingFlexTxStream stream(false, RadioPagingFlex::Mode1600_2, false, 0);
+        RadioPagingTxBlock block;
+        std::map<uint64_t, RadioPagingFlexEncoder::SentStatus> status;
+        stream.add(flex(123456, "WHOLE"), false, 1, error);
+        stream.add(flex(123460, std::string(600, 'X').c_str()), false, 2, error);
+        stream.begin(0);
+
+        while (stream.next(block))
+        {
+            for (size_t i = 0; (i < block.m_ids.size()) && (i < block.m_status.size()); i++) {
+                status[block.m_ids[i]] = block.m_status[i];
+            }
+        }
+
+        const RadioPagingFlexEncoder::SentStatus& whole = status[1];
+        const RadioPagingFlexEncoder::SentStatus& parts = status[2];
+        check((status.size() == 2) && (whole.m_cycle >= 0) && (whole.m_frame >= 0) && (whole.m_phase == 0)
+            && (whole.m_fragments == 1) && (whole.m_firstFrame == -1),
+            "Sent facts: FLEX cycle, frame and phase A (1600), no first fragment for a whole message");
+        check((parts.m_fragments > 1) && (parts.m_firstFrame >= 0) && (parts.m_firstCycle >= 0)
+            && ((parts.m_firstCycle * 128 + parts.m_firstFrame) < (parts.m_cycle * 128 + parts.m_frame)),
+            "Sent facts: FLEX in fragments, its first fragment in an earlier frame than its last");
+    }
+
+    // GSC batch: the preamble, the batch mode, each address in its slot
+    {
+        const std::string a = "123456";
+        const std::string same = gscAddressLike(a, true);
+        RadioPagingGscTxStream stream(RadioPagingGsc::Batch);
+        RadioPagingTxBlock block;
+        std::vector<RadioPagingFlexEncoder::SentStatus> status;
+        stream.add(gsc(a, 1, "ONE"), false, 1, error);
+        stream.add(gsc(same, 1, "TWO"), false, 2, error);
+        stream.begin(0);
+
+        while (stream.next(block)) {
+            status.insert(status.end(), block.m_status.begin(), block.m_status.end());
+        }
+
+        check((status.size() == 2) && (status[0].m_preamble == gscPreamble(a)) && (status[0].m_batch == 1)
+            && (status[0].m_slot == 0) && (status[0].m_blocks > 1) && (status[1].m_slot == status[0].m_blocks),
+            "Sent facts: GSC preamble, batch mode, the first address in slot 0, the second after the blocks of the first");
+    }
+}
+
 int main()
 {
+    testSentFacts();
     testGscVoice();
     testGsc();
     testMixed();

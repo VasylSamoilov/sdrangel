@@ -82,6 +82,8 @@ SWGRadioPagingModSettings::SWGRadioPagingModSettings() {
     m_flex_time_equivalent_year_isSet = false;
     flex_time_extended_seconds = 0;
     m_flex_time_extended_seconds_isSet = false;
+    max_queued = 0;
+    m_max_queued_isSet = false;
     flex_numbering = 0;
     m_flex_numbering_isSet = false;
     flex_max_message_number = 0;
@@ -200,6 +202,8 @@ SWGRadioPagingModSettings::init() {
     m_flex_time_equivalent_year_isSet = false;
     flex_time_extended_seconds = 0;
     m_flex_time_extended_seconds_isSet = false;
+    max_queued = 0;
+    m_max_queued_isSet = false;
     flex_numbering = 0;
     m_flex_numbering_isSet = false;
     flex_max_message_number = 0;
@@ -260,6 +264,7 @@ SWGRadioPagingModSettings::init() {
 
 void
 SWGRadioPagingModSettings::cleanup() {
+
 
 
 
@@ -397,6 +402,8 @@ SWGRadioPagingModSettings::fromJsonObject(QJsonObject &pJson) {
     ::SWGSDRangel::setValue(&flex_time_equivalent_year, pJson["flexTimeEquivalentYear"], "qint32", "");
     
     ::SWGSDRangel::setValue(&flex_time_extended_seconds, pJson["flexTimeExtendedSeconds"], "qint32", "");
+    
+    ::SWGSDRangel::setValue(&max_queued, pJson["maxQueued"], "qint32", "");
     
     ::SWGSDRangel::setValue(&flex_numbering, pJson["flexNumbering"], "qint32", "");
     
@@ -550,6 +557,9 @@ SWGRadioPagingModSettings::asJsonObject() {
     }
     if(m_flex_time_extended_seconds_isSet){
         obj->insert("flexTimeExtendedSeconds", QJsonValue(flex_time_extended_seconds));
+    }
+    if(m_max_queued_isSet){
+        obj->insert("maxQueued", QJsonValue(max_queued));
     }
     if(m_flex_numbering_isSet){
         obj->insert("flexNumbering", QJsonValue(flex_numbering));
@@ -907,6 +917,16 @@ void
 SWGRadioPagingModSettings::setFlexTimeExtendedSeconds(qint32 flex_time_extended_seconds) {
     this->flex_time_extended_seconds = flex_time_extended_seconds;
     this->m_flex_time_extended_seconds_isSet = true;
+}
+
+qint32
+SWGRadioPagingModSettings::getMaxQueued() {
+    return max_queued;
+}
+void
+SWGRadioPagingModSettings::setMaxQueued(qint32 max_queued) {
+    this->max_queued = max_queued;
+    this->m_max_queued_isSet = true;
 }
 
 qint32
@@ -1273,6 +1293,9 @@ SWGRadioPagingModSettings::isSet(){
             isObjectUpdated = true; break;
         }
         if(m_flex_time_extended_seconds_isSet){
+            isObjectUpdated = true; break;
+        }
+        if(m_max_queued_isSet){
             isObjectUpdated = true; break;
         }
         if(m_flex_numbering_isSet){

@@ -42,6 +42,7 @@
 #include <QAbstractTextDocumentLayout>
 #include <QHelpEvent>
 #include <QToolTip>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QIcon>
 #include <QVBoxLayout>
@@ -51,6 +52,8 @@
 #include "dsp/dspengine.h"
 #include "feature/feature.h"
 #include "feature/featuregui.h"
+#include "feature/featureset.h"
+#include "maincore.h"
 #include "feature/featurewebapiutils.h"
 #include "gui/audioselectdialog.h"
 #include "gui/dialogpositioner.h"
@@ -62,7 +65,7 @@
 namespace {
 
 // The cells with chips and colours keep their HTML in this role; the display text stays plain (copy, width)
-const int htmlRole = Qt::UserRole + 1;
+const int htmlRole = PagingMessageTable::m_htmlRole;
 const int voiceFileRole = Qt::UserRole + 2;     // On the time item of a voice message: the file recorded
 const int jsonRole = Qt::UserRole + 3;          // On the time item: the record as JSON
 const int tipRole = Qt::UserRole + 4;           // On the message item: its tool tip without the voice file
@@ -1376,6 +1379,49 @@ void PagingMessageTable::openMessageCenter()
     gui->activateWindow();
 }
 
+void PagingMessageTable::setupMessageCenterButton(QToolButton *button)
+{
+    button->setIcon(QIcon(":/sms.png"));
+    button->setText(QString());
+
+    // The Message Centers there are now, counted again when a feature comes or goes (after it is gone)
+    auto update = [button]()
+    {
+        int count = 0;
+
+        for (const FeatureSet *featureSet : MainCore::instance()->getFeatureeSets())
+        {
+            for (int index = 0; index < featureSet->getNumberOfFeatures(); index++)
+            {
+                const Feature *feature = featureSet->getFeatureAt(index);
+
+                if (feature && (feature->getURI() == "sdrangel.feature.messagecenter")) {
+                    count++;
+                }
+            }
+        }
+
+        // On: the grey of the button with a green hue, as light as it is (the icon keeps its contrast)
+        const QColor grey = QApplication::palette().button().color();
+        const QColor green = QColor::fromHsv(120, 110, std::max(grey.value(), 60));
+        button->setStyleSheet(count > 0 ? QString("QToolButton{ background-color: %1; }").arg(green.name()) : QString());
+        button->setToolTip(count == 0
+            ? tr("Message Center: there is none. Click to add one and open it.\n"
+                 "It keeps the log of the messages of all the paging channels, with their history, routes, sinks and\n"
+                 "sources, and the pages to transmit")
+            : (count == 1
+                ? tr("Message Center: it takes the messages of this channel. Click to open it.\n"
+                     "It keeps the log of the messages of all the paging channels, with their history, routes, sinks and\n"
+                     "sources, and the pages to transmit")
+                : tr("Message Centers: %1, each takes the messages of this channel. Click to open the first one").arg(count)));
+    };
+
+    update();
+    QObject::connect(button, &QToolButton::clicked, button, []() { openMessageCenter(); });
+    QObject::connect(MainCore::instance(), &MainCore::featureAdded, button, [button, update]() { QTimer::singleShot(0, button, update); });
+    QObject::connect(MainCore::instance(), &MainCore::featureRemoved, button, [button, update]() { QTimer::singleShot(0, button, update); });
+}
+
 void PagingMessageTable::createRoute(const MessageRecord& record, const QVariantMap& charset, const QString& type)
 {
     FeatureGUI *gui = messageCenterGui();
@@ -1557,17 +1603,29 @@ void PagingMessageTable::showGroupMembers(const MessageRecord& record)
     dialog->show();
 }
 
+QStyledItemDelegate *PagingMessageTable::createHtmlDelegate(QObject *parent)
+{
+    return new HtmlDelegate(parent);
+}
+
+QString PagingMessageTable::typeChipHtml(const QString& type)
+{
+    return typeChip(type);
+}
+
 void PagingMessageTable::showDetails(int row)
 {
     QTableWidgetItem *timeItem = item(row, ColTime);
 
-    if (!timeItem) {
-        return;
+    if (timeItem) {
+        showRecord(timeItem->data(jsonRole).toString(), this);
     }
+}
 
-    const QString json = timeItem->data(jsonRole).toString();
+void PagingMessageTable::showRecord(const QString& json, QWidget *parent)
+{
     const QJsonObject object = QJsonDocument::fromJson(json.toUtf8()).object();
-    QDialog *dialog = new QDialog(this);
+    QDialog *dialog = new QDialog(parent);
     QVBoxLayout *layout = new QVBoxLayout(dialog);
     QTreeWidget *tree = new QTreeWidget(dialog);
     QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);

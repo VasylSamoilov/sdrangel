@@ -276,15 +276,12 @@ std::vector<int> receiveWithOffset(double offset, float rfBandwidth, std::vector
 // One carrier is one protocol at a time: the data of FLEX frames (any bits, among them by chance a POCSAG sync codeword
 // and an address of 2 corrected bits) gives no POCSAG or GSC message, and a POCSAG and a GSC transmission after them are
 // received (the decoders kept hunting). Found with a radio round trip: POCSAG tone pages in a FLEX group transmission
-void testNoFalseLocks()
+// FLEX frames of the 4 modes full of text of every character (any data: the bits of a lot of different words)
+void addFlexFrames(Modulator& mod, std::set<std::string>& sent)
 {
-    Modulator mod;
-    std::set<std::string> sent;
     std::mt19937 rng(20261120);
     std::uniform_int_distribution<int> character(32, 126);
     static const float levels4[4] = {-1.0f, -1.0f/3.0f, 1.0f/3.0f, 1.0f};
-
-    mod.noise(3000);
 
     for (RadioPagingFlex::Mode mode : {RadioPagingFlex::Mode1600_2, RadioPagingFlex::Mode3200_2, RadioPagingFlex::Mode3200_4, RadioPagingFlex::Mode6400_4})
     {
@@ -322,6 +319,62 @@ void testNoFalseLocks()
             }
         }
     }
+}
+
+// A FLEX transmission alone: POCSAG and GSC are never synchronised (a sync codeword or a preamble found by chance in
+// the frames is not a signal: the protocol shows none). Seen on the radio: POCSAG and GSC polarities shown in a FLEX
+// transmission
+void testFlexAloneNoOtherSync()
+{
+    Modulator mod;
+    std::set<std::string> sent;
+
+    // A weak FLEX transmission: noisy symbols, where the other protocols find a sync of a moment (from a noise of 0.7
+    // a POCSAG or GSC sync codeword or preamble is found)
+    mod.m_noise = std::normal_distribution<float>(0.0f, 1.0f);
+    mod.noise(3000);
+    addFlexFrames(mod, sent);
+    mod.noise(3000);
+
+    MessageQueue queue;
+    RadioPagingDemodSink sink;
+    RadioPagingDemodSettings settings;
+    sink.setMessageQueueToChannel(&queue);
+    sink.applyChannelSettings((int) sampleRate, 0, true);
+    sink.applySettings(QStringList(), settings, true);
+    bool otherSync = false;
+
+    // The status between the blocks: a sync of a moment is seen too
+    for (size_t i = 0; i < mod.m_samples.size(); i += 4096)
+    {
+        size_t end = std::min(mod.m_samples.size(), i + 4096);
+        sink.feed(mod.m_samples.begin() + i, mod.m_samples.begin() + end);
+        RadioPagingDemodSink::Status status = sink.getStatus();
+
+        for (int pol = 0; pol < 2; pol++) {
+            otherSync = otherSync || status.m_pol[0][pol].m_sync || status.m_pol[2][pol].m_sync;
+        }
+    }
+
+    RadioPagingDemodSink::Status status = sink.getStatus();
+    const bool seen = status.m_pol[0][0].m_seen || status.m_pol[0][1].m_seen || status.m_pol[2][0].m_seen || status.m_pol[2][1].m_seen;
+    std::printf("      POCSAG or GSC synchronised: %s, a polarity shown: %s\n", otherSync ? "yes" : "no", seen ? "yes" : "no");
+    check(!otherSync && !seen, "FLEX alone: POCSAG and GSC never synchronised, no polarity of theirs shown");
+
+    Message *message;
+
+    while ((message = queue.pop())) {
+        delete message;
+    }
+}
+
+void testNoFalseLocks()
+{
+    Modulator mod;
+    std::set<std::string> sent;
+
+    mod.noise(3000);
+    addFlexFrames(mod, sent);
 
     // Right after the last frame: the other protocols are received
     addPocsag(mod, sent, 1200, 1234567, "POCSAG AFTER THE FLEX FRAMES", false);
@@ -1092,6 +1145,7 @@ int main(int argc, char **argv)
     testVoiceRecording();
     testVoiceStore();
     testNoFalseLocks();
+    testFlexAloneNoOtherSync();
     testFrequencyOffset();
 
     std::printf("%d passed, %d failed\n", passes, failures);

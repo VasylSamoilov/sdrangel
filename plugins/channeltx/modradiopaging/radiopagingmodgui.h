@@ -22,6 +22,7 @@
 #include <vector>
 
 #include <QDateTime>
+#include <QTimer>
 
 #include "audio/audiofifo.h"
 #include "channel/channelgui.h"
@@ -40,6 +41,10 @@ class PluginAPI;
 class DeviceUISet;
 class BasebandSampleSource;
 class QAction;
+class QModelIndex;
+class QSortFilterProxyModel;
+class PagingVoicePlayer;
+class RadioPagingModMessageModel;
 
 namespace Ui {
     class RadioPagingModGUI;
@@ -86,7 +91,25 @@ private:
 
     RadioPagingMod* m_radioPagingMod;
     MovingAverageUtil<double, double, 2> m_channelPowerDbAvg;   // Short: transmissions are short
-    quint64 m_lastLoggedSent;
+    // The messages, one row each from queued to their last event; the chips filter them
+    RadioPagingModMessageModel *m_messageModel;
+    QSortFilterProxyModel *m_messageFilter;
+    PagingVoicePlayer *m_voicePlayer;
+    QTimer m_columnsTimer;              //!< The columns are saved once they stop changing
+    bool m_follow;                      //!< The table shows the message on air (until the user scrolls or selects)
+    bool m_scrolling;                   //!< The table is scrolled by followOnAir, not by the user
+    int m_onAirShown;                   //!< Row of the model shown on air, -1 if none
+    quint64 m_localRefused;             //!< Requests refused in the window before they were posted to the channel
+    QString m_lastLocalRefusal;
+    void updateQueueStatus(const RadioPagingModSource::Status& status);
+    void refused(const QString& error);
+    void statusLinkActivated(const QString& link);
+    void followOnAir();
+    void messagesContextMenu(const QPoint& pos);
+    void messagesHeaderMenu(const QPoint& pos);
+    void messageClicked(const QModelIndex& index);
+    void showMessage(const QModelIndex& index);
+    void setupMessages();
 
     MessageQueue m_inputMessageQueue;
 
@@ -120,7 +143,6 @@ private:
     quint64 m_liveId = 0;                       //!< The live voice page being sent, 0 if none
     bool m_liveSeen = false;                    //!< The transmitter has started it
     bool m_liveWaiting = false;                 //!< Its request was posted, the id is not known yet
-    bool m_composerSent = false;                //!< A page of the composer was posted: its line is in the log already
     void startMic();
     void stopMic();
     void readMic();

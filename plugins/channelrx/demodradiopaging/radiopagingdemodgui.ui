@@ -746,12 +746,9 @@
        </spacer>
       </item>
       <item>
-       <widget class="QPushButton" name="openMessageCenter">
+       <widget class="QToolButton" name="openMessageCenter">
         <property name="toolTip">
          <string>Open the Message Center: the log of the messages of all the paging channels, its routes, sinks and sources, and the pages to transmit (it is added if there is none)</string>
-        </property>
-        <property name="text">
-         <string>Message Center</string>
         </property>
        </widget>
       </item>

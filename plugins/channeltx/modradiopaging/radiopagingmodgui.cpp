@@ -35,6 +35,13 @@
 #include <QStyle>
 #include <QSignalBlocker>
 #include <QStandardItemModel>
+#include <QHeaderView>
+#include <QJsonDocument>
+#include <QMenu>
+#include <QScrollBar>
+#include <QSortFilterProxyModel>
+#include <QStyledItemDelegate>
+#include <QTableView>
 
 #include <algorithm>
 #include <cstdlib>
@@ -49,6 +56,8 @@
 #include "gui/audioselectdialog.h"
 #include "gui/crightclickenabler.h"
 #include "gui/pagingmessagetable.h"
+#include "gui/pagingvoiceplayer.h"
+#include "radiopagingmodmessagemodel.h"
 #include "dsp/dspengine.h"
 #include "audio/audiodevicemanager.h"
 #include "radiopagingwav.h"
@@ -87,6 +96,22 @@ QString stateName(RadioPagingModSource::State state)
     }
 
     return "";
+}
+
+// Status chips, as in the receiver: dark text on a light colour
+enum Chip { ChipActive, ChipBusy, ChipBad, ChipQuiet, ChipWaiting };
+
+// The saved columns of the table of the messages start with it (RadioPagingModMessageModel columns)
+const QByteArray messageColumnsTag("RPMM1:");
+
+// A chip; with a link, a click on it is the link (a filter of the messages). The filter shown is underlined
+QString chipHtml(Chip chip, const QString& text, const QString& link = QString(), bool active = false)
+{
+    static const char *colours[] = {"#a8e0a8", "#f0dc8c", "#f4aca4", "#d4d4d4", "#a8c8ec"};
+    const QString span = QString("<span style=\"background-color:%1; color:#141414;%2\">&nbsp;%3&nbsp;</span>")
+        .arg(colours[chip]).arg(active ? " text-decoration:underline; font-weight:bold;" : "").arg(text.toHtmlEscaped());
+
+    return link.isEmpty() ? span : QString("<a href=\"%1\" style=\"text-decoration:none;\">%2</a>").arg(link, span);
 }
 
 // A combo box item that cannot be selected
@@ -179,17 +204,15 @@ bool RadioPagingModGUI::handleMessage(const Message& message)
             }
         }
 
+        // The message is in the tables; the log has what they do not show
         if (report.getId() != 0)
         {
-            log(QString("#%1 queued").arg(report.getId()));
-
             if (!report.getWarning().isEmpty()) {
                 log(QString("Warning: %1").arg(report.getWarning()));
             }
         }
         else {
-            m_composerSent = false;
-            log(QString("Refused: %1").arg(report.getError()));
+            refused(report.getError());
         }
         return true;
     }
@@ -197,21 +220,6 @@ bool RadioPagingModGUI::handleMessage(const Message& message)
     {
         const RadioPagingMod::MsgTxLog& entry = (const RadioPagingMod::MsgTxLog&) message;
         showTx(entry.getRecord(), entry.getStatus());
-
-        // A page that does not come from the composer (the Message Center, the API): what it is, as the composer says it
-        if (entry.getStatus() == "queued")
-        {
-            if (m_composerSent)
-            {
-                m_composerSent = false;
-            }
-            else
-            {
-                const MessageRecord& r = entry.getRecord();
-                const QString text = PagingMessageTable::recordText(r);
-                log(text.isEmpty() ? QString("%1 %2").arg(r.m_address, r.m_msgType) : QString("%1 %2: %3").arg(r.m_address, r.m_msgType, text));
-            }
-        }
 
         // A live voice page that is dropped (aborted, cleared) is over
         if ((entry.getStatus() == "dropped") && (m_liveId != 0)
@@ -722,7 +730,7 @@ void RadioPagingModGUI::send()
     }
     if (!error.isEmpty())
     {
-        log(QString("Refused: %1").arg(error));
+        refused(error);
         return;
     }
 
@@ -737,8 +745,6 @@ void RadioPagingModGUI::send()
         ui->composer->setSendEnabled(false);
     }
 
-    log(ui->composer->summary());
-    m_composerSent = true;
     m_radioPagingMod->getInputMessageQueue()->push(RadioPagingMod::MsgTx::create(request));
 }
 
@@ -920,7 +926,7 @@ void RadioPagingModGUI::updateLive(const RadioPagingModSource::Status& status)
 // (retransmission) has a row of its own
 void RadioPagingModGUI::showTx(const MessageRecord& record, const QString& status)
 {
-    ui->txLog->addRecord(record, status);
+    m_messageModel->update(record, status);
 }
 
 // The files of the voice sent: the statistics of the directory, the files kept, the deletion of the old ones
@@ -1012,6 +1018,258 @@ void RadioPagingModGUI::log(const QString& text)
     ui->log->appendPlainText(QString("%1 %2").arg(QDateTime::currentDateTime().toString("HH:mm:ss")).arg(text));
 }
 
+// Refused here, before it was posted to the channel (the channel counts the ones it refuses)
+void RadioPagingModGUI::refused(const QString& error)
+{
+    m_localRefused++;
+    m_lastLocalRefusal = error;
+    log(QString("Refused: %1").arg(error));
+}
+
+// The state of the transmitter and of its queue, as chips: the numbers, and colours only where something happens
+void RadioPagingModGUI::updateQueueStatus(const RadioPagingModSource::Status& status)
+{
+    QString state = stateName(status.m_state);
+
+    if (status.m_ers) {
+        state += QString(" ERS %1 s").arg(status.m_ersMs / 1000.0, 0, 'f', 3);
+    }
+
+    // Refused by the channel (the GUI, the Message Center, the WebAPI) and here before posting
+    QString lastRefusal;
+    const quint64 refusedCount = m_radioPagingMod->getRefused(&lastRefusal) + m_localRefused;
+
+    if (m_localRefused > 0 && lastRefusal.isEmpty()) {
+        lastRefusal = m_lastLocalRefusal;
+    }
+
+    // Waiting, Sent and Dropped show their messages in the table, again for all; Sending shows the message on air
+    // and the table follows it again
+    const int filter = m_messageFilter->filterRegularExpression().pattern().isEmpty() ? -1
+        : m_messageFilter->filterRegularExpression().pattern().mid(1, 1).toInt();
+    QStringList chips;
+    chips.append(chipHtml(status.m_state == RadioPagingModSource::Idle ? ChipQuiet : ChipActive, state));
+    chips.append(chipHtml(status.m_queued > 0 ? ChipWaiting : ChipQuiet, tr("Waiting %1").arg(status.m_queued),
+        "filter:0", filter == RadioPagingModMessageModel::Waiting));
+
+    if (status.m_currentId != 0) {
+        chips.append(chipHtml(ChipBusy, tr("Sending #%1").arg(status.m_currentId), "follow", m_follow));
+    }
+
+    chips.append(chipHtml(ChipQuiet, tr("Sent %1").arg(status.m_sent), "filter:2", filter == RadioPagingModMessageModel::Sent));
+
+    if (status.m_dropped > 0) {
+        chips.append(chipHtml(ChipQuiet, tr("Dropped %1").arg(status.m_dropped), "filter:3", filter == RadioPagingModMessageModel::Dropped));
+    }
+    if (refusedCount > 0) {
+        chips.append(chipHtml(ChipBad, tr("Refused %1").arg(refusedCount)));
+    }
+
+    const QString text = chips.join(" ");
+
+    if (text != ui->status->text())
+    {
+        ui->status->setText(text);
+        ui->status->setToolTip(tr(
+            "The transmitter and its queue:\n"
+            "- the state: Idle (the carrier off), Ramp up, Transmitting, Ramp down; ERS while a FLEX emergency\n"
+            "  re-synchronization is sent, with its length;\n"
+            "- Waiting: messages queued and not sent yet (at most %1, Max);\n"
+            "- Sending: the message going out now;\n"
+            "- Sent: messages sent since the channel started;\n"
+            "- Dropped: messages cleared, aborted or refused by the stream after they were queued;\n"
+            "- Refused: requests refused before they were queued, from this window, the Message Center or the WebAPI.\n"
+            "Click Waiting, Sent or Dropped to show only those messages in the table, again to show all.\n"
+            "Click Sending to show the message on air: the table follows it (scrolling or selecting stops that).%2")
+            .arg(m_settings.m_maxQueued)
+            .arg(refusedCount > 0 ? tr("\n\nThe last refusal: %1").arg(lastRefusal) : QString()));
+    }
+}
+
+// A click on a chip: a filter of the table (the same one again: all), or follow the message on air
+void RadioPagingModGUI::statusLinkActivated(const QString& link)
+{
+    if (link == "follow")
+    {
+        m_messageFilter->setFilterRegularExpression(QString());
+        m_follow = true;
+        m_onAirShown = -1;      // Shown at the next tick
+        return;
+    }
+
+    const QString pattern = QString("^%1$").arg(link.mid(7));
+    m_messageFilter->setFilterRegularExpression(m_messageFilter->filterRegularExpression().pattern() == pattern ? QString() : pattern);
+    m_follow = false;
+}
+
+// The table shows the message on air while it follows it
+void RadioPagingModGUI::followOnAir()
+{
+    const int row = m_messageModel->onAirRow();
+
+    if (!m_follow || (row < 0) || (row == m_onAirShown)) {
+        return;
+    }
+
+    const QModelIndex index = m_messageFilter->mapFromSource(m_messageModel->index(row, 0));
+
+    if (index.isValid())
+    {
+        m_scrolling = true;
+        ui->messages->scrollTo(index, QAbstractItemView::PositionAtCenter);
+        m_scrolling = false;
+    }
+
+    m_onAirShown = row;
+}
+
+// The record of a row, its voice played, the audio output, the columns
+void RadioPagingModGUI::messagesContextMenu(const QPoint& pos)
+{
+    const QModelIndex index = ui->messages->indexAt(pos);
+    QMenu menu(this);
+
+    if (index.isValid())
+    {
+        connect(menu.addAction(tr("Details...")), &QAction::triggered, this, [this, index]() { showMessage(index); });
+        menu.addSeparator();
+    }
+
+    connect(menu.addAction(tr("Audio output of the voice...")), &QAction::triggered, this, [this, pos]()
+    {
+        AudioSelectDialog audioSelect(DSPEngine::instance()->getAudioDeviceManager(), m_settings.m_voicePlaybackDeviceName, false);
+        audioSelect.move(ui->messages->viewport()->mapToGlobal(pos));
+        new DialogPositioner(&audioSelect, false);
+        audioSelect.exec();
+
+        if (audioSelect.m_selected)
+        {
+            m_settings.m_voicePlaybackDeviceName = audioSelect.m_audioDeviceName;
+            m_voicePlayer->setAudioDevice(m_settings.m_voicePlaybackDeviceName);
+            applySettings(QStringList("voicePlaybackDeviceName"));
+        }
+    });
+
+    menu.exec(ui->messages->viewport()->mapToGlobal(pos));
+}
+
+void RadioPagingModGUI::showMessage(const QModelIndex& index)
+{
+    const QModelIndex source = m_messageFilter->mapToSource(index);
+
+    if (source.isValid())
+    {
+        const MessageRecord& record = m_messageModel->record(source.row());
+        PagingMessageTable::showRecord(QString::fromUtf8(QJsonDocument(record.toJson()).toJson(QJsonDocument::Compact)), this);
+    }
+}
+
+// A click on the message of a voice message plays its voice, or stops it
+void RadioPagingModGUI::messageClicked(const QModelIndex& index)
+{
+    const QModelIndex source = m_messageFilter->mapToSource(index);
+
+    if (!source.isValid() || (source.column() != RadioPagingModMessageModel::ColMessage)) {
+        return;
+    }
+
+    const QString file = m_messageModel->record(source.row()).m_protocolData.value("voice_file").toString();
+
+    if (file.isEmpty()) {
+        return;
+    }
+    if (m_voicePlayer->isPlaying() && (m_voicePlayer->file() == file))
+    {
+        m_voicePlayer->stop();
+        return;
+    }
+
+    QString error;
+
+    if (!m_voicePlayer->play(file, error)) {
+        QMessageBox::information(this, tr("Voice message"), error);
+    }
+}
+
+// The header: a menu of the columns shown
+void RadioPagingModGUI::messagesHeaderMenu(const QPoint& pos)
+{
+    QHeaderView *header = ui->messages->horizontalHeader();
+    QMenu menu(this);
+
+    for (int column = 0; column < RadioPagingModMessageModel::ColCount; column++)
+    {
+        QAction *action = menu.addAction(m_messageModel->headerData(column, Qt::Horizontal, Qt::DisplayRole).toString());
+        action->setCheckable(true);
+        action->setChecked(!header->isSectionHidden(column));
+        connect(action, &QAction::toggled, this, [header, column](bool shown) { header->setSectionHidden(column, !shown); });
+    }
+
+    menu.exec(header->mapToGlobal(pos));
+    m_columnsTimer.start();
+}
+
+// The table of the messages: on a model, filtered by state (the chips); rows of one line and one height, so that
+// tens of thousands of them cost no more than the ones in view
+void RadioPagingModGUI::setupMessages()
+{
+    QTableView *view = ui->messages;
+
+    m_messageModel = new RadioPagingModMessageModel(this);
+    m_messageModel->setRetention(1000);     // Finished messages kept, as the received messages of the demodulator
+    m_messageFilter = new QSortFilterProxyModel(this);
+    m_messageFilter->setSourceModel(m_messageModel);
+    m_messageFilter->setFilterRole(RadioPagingModMessageModel::m_stateRole);
+    m_messageFilter->setFilterKeyColumn(0);
+    view->setModel(m_messageFilter);
+    view->setItemDelegate(PagingMessageTable::createHtmlDelegate(view));
+    view->setWordWrap(false);
+    view->setTextElideMode(Qt::ElideRight);
+    view->verticalHeader()->hide();
+    view->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
+    view->verticalHeader()->setDefaultSectionSize(view->fontMetrics().height() + 6);
+    view->horizontalHeader()->setStretchLastSection(true);
+    view->horizontalHeader()->setSectionsMovable(true);
+    view->setMinimumHeight(view->horizontalHeader()->sizeHint().height()
+        + 8 * view->verticalHeader()->defaultSectionSize() + 2 * view->frameWidth());
+    view->setToolTip(QString());
+
+    const QFontMetrics fm = view->fontMetrics();
+    const QStringList widest = {"000000", "dropped", "2026-11-21 00:00:00", "00:00:00", "Events", "POCSAG 1200",
+        "0000000000A", "ALPHA", "QUEUE TEST 000 THE QUICK BROWN FOX"};
+
+    for (int column = 0; column < widest.size(); column++) {
+        view->setColumnWidth(column, fm.horizontalAdvance(widest[column]) + 16);
+    }
+
+    // Following the message on air stops when the user scrolls or selects a row
+    connect(view->verticalScrollBar(), &QScrollBar::actionTriggered, this, [this](int) { m_follow = false; });
+    connect(view->verticalScrollBar(), &QScrollBar::valueChanged, this, [this](int) {
+        if (!m_scrolling && ui->messages->underMouse()) {
+            m_follow = false;
+        }
+    });
+    connect(view, &QTableView::pressed, this, [this](const QModelIndex&) { m_follow = false; });
+    connect(view, &QTableView::clicked, this, &RadioPagingModGUI::messageClicked);
+    connect(view, &QTableView::doubleClicked, this, &RadioPagingModGUI::showMessage);
+    view->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(view, &QWidget::customContextMenuRequested, this, &RadioPagingModGUI::messagesContextMenu);
+    view->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(view->horizontalHeader(), &QWidget::customContextMenuRequested, this, &RadioPagingModGUI::messagesHeaderMenu);
+
+    // The order, the sizes and the columns shown are saved once they stop changing
+    m_columnsTimer.setSingleShot(true);
+    m_columnsTimer.setInterval(500);
+    connect(&m_columnsTimer, &QTimer::timeout, this, [this]() {
+        m_settings.m_messageColumns = messageColumnsTag + ui->messages->horizontalHeader()->saveState();
+        applySettings(QStringList("messageColumns"));
+    });
+    connect(view->horizontalHeader(), &QHeaderView::sectionMoved, this, [this]() { m_columnsTimer.start(); });
+    connect(view->horizontalHeader(), &QHeaderView::sectionResized, this, [this]() { m_columnsTimer.start(); });
+
+    m_voicePlayer = new PagingVoicePlayer(this);
+}
+
 void RadioPagingModGUI::onWidgetRolled(QWidget* widget, bool rollDown)
 {
     (void) widget;
@@ -1078,7 +1336,13 @@ RadioPagingModGUI::RadioPagingModGUI(PluginAPI* pluginAPI, DeviceUISet *deviceUI
     m_deviceCenterFrequency(0),
     m_basebandSampleRate(1),
     m_doApplySettings(true),
-    m_lastLoggedSent(0)
+    m_messageModel(nullptr),
+    m_messageFilter(nullptr),
+    m_voicePlayer(nullptr),
+    m_follow(true),
+    m_scrolling(false),
+    m_onAirShown(-1),
+    m_localRefused(0)
 {
     setAttribute(Qt::WA_DeleteOnClose, true);
     m_helpURL = "plugins/channeltx/modradiopaging/readme.md";
@@ -1096,11 +1360,13 @@ RadioPagingModGUI::RadioPagingModGUI(PluginAPI* pluginAPI, DeviceUISet *deviceUI
     }
     ui->networkLayout->setColumnStretch(ui->networkLayout->columnCount(), 1);
 
-    // The log of the requests and events: a few lines under the table of the messages
-    ui->log->setMaximumHeight(ui->log->fontMetrics().lineSpacing() * 5 + 2 * ui->log->frameWidth() + 8);
-    // The table of the messages shows a few of them in a new window
-    ui->txLog->setMinimumHeight(ui->txLog->horizontalHeader()->sizeHint().height()
-        + 4 * ui->txLog->verticalHeader()->defaultSectionSize() + 2 * ui->txLog->frameWidth());
+    // The log of the refusals, warnings and events: rare, two lines under the table of the messages (it scrolls)
+    ui->log->setMaximumHeight(ui->log->fontMetrics().lineSpacing() * 2 + 2 * ui->log->frameWidth() + 8);
+    // The state and the queue as chips; Waiting, Sent, Dropped and Sending are links (the filters of the table)
+    ui->status->setTextFormat(Qt::RichText);
+    ui->status->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
+    connect(ui->status, &QLabel::linkActivated, this, &RadioPagingModGUI::statusLinkActivated);
+    setupMessages();
     // The switch times of POCSAG mixed into FLEX, one per speed: named by their speed, as the roaming fields by their
     // letter
     ui->mixSwitch512->setPrefix("512: ");
@@ -1112,7 +1378,6 @@ RadioPagingModGUI::RadioPagingModGUI(PluginAPI* pluginAPI, DeviceUISet *deviceUI
 
     m_radioPagingMod = (RadioPagingMod*) channelTx;
     m_radioPagingMod->setMessageQueueToGUI(getInputMessageQueue());
-    m_lastLoggedSent = m_radioPagingMod->getStatus().m_sent;   // Only what is sent from now on is logged
 
     connect(&MainCore::instance()->getMasterTimer(), SIGNAL(timeout()), this, SLOT(tick()));
 
@@ -1139,18 +1404,11 @@ RadioPagingModGUI::RadioPagingModGUI(PluginAPI* pluginAPI, DeviceUISet *deviceUI
     m_settings.setChannelMarker(&m_channelMarker);
     m_settings.setRollupState(&m_rollupState);
 
-    ui->txLog->setMaxRows(100);
-    // The log keeps its last lines: thousands of messages queued at once would make it grow without end
+    // The log keeps its last lines
     ui->log->setMaximumBlockCount(1000);
-    ui->txLog->setDefaultColumns({PagingMessageTable::ColDate, PagingMessageTable::ColTime, PagingMessageTable::ColProtocol, PagingMessageTable::ColAddress,
-        PagingMessageTable::ColType, PagingMessageTable::ColMessage, PagingMessageTable::ColInfo, PagingMessageTable::ColState});
-    connect(ui->txLog, &PagingMessageTable::columnsChanged, this, [this]() {
-        m_settings.m_messageColumns = ui->txLog->columns();
-        applySettings(QStringList("messageColumns"));
-    });
-    connect(ui->txLog, &PagingMessageTable::audioDeviceChanged, this, [this](const QString& deviceName) {
-        m_settings.m_voicePlaybackDeviceName = deviceName;
-        applySettings(QStringList("voicePlaybackDeviceName"));
+    connect(ui->maxQueued, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int value) {
+        m_settings.m_maxQueued = value;
+        applySettings(QStringList("maxQueued"));
     });
 
     displayProtocolAvailability();
@@ -1480,12 +1738,16 @@ void RadioPagingModGUI::displaySettings()
     ui->gainText->setText(QString("%1dB").arg((int) m_settings.m_gain));
     displayProtocol();
 
-    // The columns the user chose; the first time the usual ones
-    if (!ui->txLog->setColumns(m_settings.m_messageColumns)) {
-        ui->txLog->sizeColumns();
+    // The columns the user chose. Saved with the tag of this table: a state of the table of before is not one of
+    // this table, it gives the usual columns
+    if (m_settings.m_messageColumns.startsWith(messageColumnsTag))
+    {
+        ui->messages->horizontalHeader()->restoreState(m_settings.m_messageColumns.mid(messageColumnsTag.size()));
+        m_columnsTimer.stop();      // Restored, not changed
     }
 
-    ui->txLog->setAudioDevice(m_settings.m_voicePlaybackDeviceName);
+    ui->maxQueued->setValue(m_settings.m_maxQueued);
+    m_voicePlayer->setAudioDevice(m_settings.m_voicePlaybackDeviceName);
     getRollupContents()->restoreState(m_rollupState);
     updateAbsoluteCenterFrequency();
     blockApplySettings(false);
@@ -1510,33 +1772,10 @@ void RadioPagingModGUI::tick()
     ui->channelPower->setText(tr("%1 dB").arg(m_channelPowerDbAvg.asDouble(), 0, 'f', 1));
 
     RadioPagingModSource::Status status = m_radioPagingMod->getStatus();
-    QString text = stateName(status.m_state);
-
-    if (status.m_ers) {
-        text += QString(" ERS %1 s").arg(status.m_ersMs / 1000.0, 0, 'f', 3);
-    }
-    if (status.m_currentId != 0) {
-        text += QString(" #%1").arg(status.m_currentId);
-    }
-
-    text += QString(", %1 waiting, %2 sent").arg(status.m_queued).arg(status.m_sent);
-    ui->status->setText(text);
+    updateQueueStatus(status);
+    followOnAir();
     updateLive(status);
     updateSystemEvent(status);
-
-    // Several transmissions may end between two ticks
-    if (status.m_sent > m_lastLoggedSent)
-    {
-        quint64 count = status.m_sent - m_lastLoggedSent;
-
-        if (count == 1) {
-            log(QString("#%1 sent").arg(status.m_lastSentId));
-        } else {
-            log(QString("%1 sent, the last #%2").arg(count).arg(status.m_lastSentId));
-        }
-
-        m_lastLoggedSent = status.m_sent;
-    }
 }
 
 void RadioPagingModGUI::makeUIConnections()
@@ -1604,7 +1843,7 @@ void RadioPagingModGUI::makeUIConnections()
     QObject::connect(&m_micFifo, &AudioFifo::dataReady, this, &RadioPagingModGUI::micDataReady);
     QObject::connect(ui->voiceFiles, &QToolButton::clicked, this, &RadioPagingModGUI::on_voiceFiles_clicked);
     QObject::connect(ui->clear, &QPushButton::clicked, this, &RadioPagingModGUI::on_clear_clicked);
-    QObject::connect(ui->openMessageCenter, &QPushButton::clicked, this, []() { PagingMessageTable::openMessageCenter(); });
+    PagingMessageTable::setupMessageCenterButton(ui->openMessageCenter);
     QObject::connect(ui->abort, &QPushButton::clicked, this, &RadioPagingModGUI::on_abort_clicked);
 }
 

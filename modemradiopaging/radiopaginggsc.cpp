@@ -913,7 +913,10 @@ RadioPagingGsc::EncodeResult RadioPagingGsc::encode(const std::vector<TxMessage>
             break;
         }
 
-        used += (int) ((bits.size() - messageStart) / m_blockBits);
+        const int blocks = (int) ((bits.size() - messageStart) / m_blockBits);
+        result.m_messageSlots.push_back(used);
+        result.m_messageBlocks.push_back(blocks);
+        used += blocks;
     }
 
     // Unfilled batches are filled out with comma (Rep. 900-2 Annex I 2.1)
@@ -925,6 +928,7 @@ RadioPagingGsc::EncodeResult RadioPagingGsc::encode(const std::vector<TxMessage>
     }
 
     result.m_slots = (int) ((bits.size() - slotsStart) / m_blockBits);
+    result.m_batch = (mode == Batch);
 
     result.m_ok = true;
     return result;

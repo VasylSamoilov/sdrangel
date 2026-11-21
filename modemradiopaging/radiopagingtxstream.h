@@ -51,8 +51,8 @@ struct RadioPagingTxBlock
     double m_deviation = 0.0;           //!< Deviation of the outer symbol, Hz; 0: the modulator's
     std::vector<uint64_t> m_ids;        //!< Messages completed by the block
     std::vector<uint64_t> m_repeatIds;  //!< Copies completed by the block of messages sent before (retransmissions)
-    //!< FLEX: how each message of m_ids and of m_repeatIds went (message number, fragments, R); empty for the other
-    //!< protocols
+    //!< How each message of m_ids and of m_repeatIds went: FLEX its message number, fragments, R, cycle, frame and phase;
+    //!< POCSAG its batch, frame and codewords; GSC its preamble, batch mode and blocks. Empty when not known
     std::vector<RadioPagingFlexEncoder::SentStatus> m_status;
     std::vector<RadioPagingFlexEncoder::SentStatus> m_repeatStatus;
     std::vector<uint64_t> m_failedIds;  //!< Messages dropped before they were sent (a group message that missed its frame)
@@ -180,6 +180,7 @@ private:
     std::deque<std::pair<Group, Item>> m_oneShot;   //!< One-shot: in arrival order
     bool m_inTransmission;
     int64_t m_nowMs = 0;
+    int m_batchesSincePreamble = 0;         //!< Batches sent after the last preamble: the batch numbers of the messages
 
     bool nextGroup(Group& group) const;
     //!< The next block of the network: a preamble, messages or idle batches (there is always one)
@@ -190,8 +191,10 @@ private:
     std::vector<size_t> dueItems(std::deque<Item>& queue);
     bool hasDue(const std::deque<Item>& queue) const;
     //!< Take the items sent from the queue (indexes ascending), queue their repeats; the ids of first transmissions,
-    //!< and of the copies in repeatIds
-    std::vector<uint64_t> takeSent(std::deque<Item>& queue, const std::vector<size_t>& sent, std::vector<uint64_t>& repeatIds);
+    //!< and of the copies in repeatIds, in the block with where each went (the placements of the encoding, in the order
+    //!< of sent, their batches counted from firstBatch)
+    void takeSent(std::deque<Item>& queue, const std::vector<size_t>& sent, const RadioPagingPocsag::EncodeResult& result,
+        int firstBatch, RadioPagingTxBlock& block);
 };
 
 // FLEX (ARIB RCR STD-43A): one network, in one mode and polarity (2.1.3 defines one mapping

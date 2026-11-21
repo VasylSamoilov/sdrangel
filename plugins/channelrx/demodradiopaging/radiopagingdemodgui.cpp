@@ -1490,9 +1490,11 @@ const DetailRow offsetRow = {"Carrier offset",
     "How far the transmitter is from the frequency of the channel, measured on the known patterns of the protocol.\n"
     "Positive: the signal is above the channel. The receiver follows it; a large offset is worth correcting\n"
     "with the frequency of the channel (Settings).", false};
-const DetailRow rememberedRow = {"Remembered",
-    "Messages the receivers keep in memory to recognise one received again (a duplicate: networks repeat\n"
-    "pages). A duplicate is marked in the messages, not taken as a new message.", false};
+const DetailRow rememberedRow = {"Dedup memory",
+    "Deduplication memory: the messages the receivers keep to recognise one received again (a duplicate:\n"
+    "networks repeat pages). A duplicate is marked in the messages, not taken as a new message.\n"
+    "A message stays in this memory for 60 s in POCSAG and GSC, and for 30 minutes in FLEX (with its fragments,\n"
+    "groups and message numbers): 0 a minute after the last POCSAG or GSC message is normal.", false};
 const DetailRow messagesRow = {"Messages", "Messages received since the channel started.", true};
 const DetailRow resetRow = {"Last reset",
     "When the receivers last forgot what they remember: the duplicates, and for FLEX the fragments, groups\n"
@@ -1995,7 +1997,7 @@ void RadioPagingDemodGUI::updateStatus()
             // Live: the colours of the Pol column of the messages; ended: the grey box
             m_polarityLabel[p]->setStyleSheet(!live ? chipStyle(ChipEnded)
                 : QString("QLabel { background-color : %1; color : %2; border-radius : 3px; }")
-                    .arg(inverted ? "#2a1f00" : "#0d1a2a").arg(inverted ? "#ffcc44" : "#88aacc"));
+                    .arg(inverted ? "#ffcc44" : "#88aacc").arg(inverted ? "#2a1f00" : "#0d1a2a"));
         }
         else
         {
@@ -2458,7 +2460,7 @@ void RadioPagingDemodGUI::makeUIConnections()
     QObject::connect(ui->gscVoiceFiles, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_gscVoiceFiles_clicked);
     QObject::connect(ui->volume, &QDial::valueChanged, this, &RadioPagingDemodGUI::on_volume_valueChanged);
     QObject::connect(ui->clearTable, &QToolButton::clicked, this, &RadioPagingDemodGUI::on_clearTable_clicked);
-    QObject::connect(ui->openMessageCenter, &QPushButton::clicked, this, []() { PagingMessageTable::openMessageCenter(); });
+    PagingMessageTable::setupMessageCenterButton(ui->openMessageCenter);
     QObject::connect(ui->udpEnabled, &QCheckBox::clicked, this, &RadioPagingDemodGUI::on_udpEnabled_clicked);
     QObject::connect(ui->udpAddress, &QLineEdit::editingFinished, this, &RadioPagingDemodGUI::on_udpAddress_editingFinished);
     QObject::connect(ui->udpPort, QOverload<int>::of(&QSpinBox::valueChanged), this, &RadioPagingDemodGUI::on_udpPort_valueChanged);

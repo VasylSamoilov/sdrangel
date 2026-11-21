@@ -73,6 +73,8 @@ struct RadioPagingModSettings
     qint64 m_flexTimeOffsetSeconds;             //!< Added to the time of the frame grid (UTC): any date and time can be sent
     bool m_flexTimeEquivalentYear;              //!< A year after 2025 as the equivalent year of 1994-2025 (same calendar)
     int m_flexTimeExtendedSeconds;              //!< S5-S3 of the time zone word, 0-7 steps of 0.9375 s: time display correction
+    int m_maxQueued;                            //!< Messages not sent yet before requests are refused
+    static const int m_maxQueuedLimit = 100000; //!< Largest m_maxQueued
     bool m_flexNumbering;                       //!< The network numbers the messages of each address (STD-43A 8.4); off: N = 0, R = 0
     int m_flexMaxMessageNumber;                 //!< Largest message number of the network, 0-63: then 0 again
     int m_gscMode;                              //!< RadioPagingGsc::Mode: auto, single, batch, non battery saver. One-shot only

@@ -28,10 +28,12 @@ if(NOT SERVER_MODE)
         ${modradiopaging_SOURCES}
         radiopagingmodgui.cpp
         radiopagingmodgui.ui
+        radiopagingmodmessagemodel.cpp
     )
     set(modradiopaging_HEADERS
         ${modradiopaging_HEADERS}
         radiopagingmodgui.h
+        radiopagingmodmessagemodel.h
     )
 
     set(TARGET_NAME ${PLUGINS_PREFIX}modradiopaging)

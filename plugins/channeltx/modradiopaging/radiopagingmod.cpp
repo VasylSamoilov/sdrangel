@@ -113,18 +113,70 @@ QByteArray packBits(const std::vector<uint8_t>& bits)
     return data;
 }
 
-// FLEX: how a message went, in the keys of the decoder record: message number (none for a group message), fragments,
-// R (STD-43A 3.10.1)
+// An event of the message in its record, with its time (UTC, ms): its history, in "events"
+void addEvent(MessageRecord& record, const QString& event)
+{
+    QVariantList events = record.m_protocolData.value("events").toList();
+    QVariantMap entry;
+    entry.insert("event", event);
+    entry.insert("time", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    events.append(entry);
+    record.m_protocolData.insert("events", events);
+}
+
+// How a message went, facts added to its record as it goes, in the keys of the decoder records.
+// FLEX: message number (none for a group message), fragments, R (STD-43A 3.10.1), the cycle, frame and phase of
+// its last fragment, those of its first fragment. POCSAG: the batch of its address after the preamble, the batch of
+// its last codeword, its frame and codewords. GSC: preamble, batch mode, slot and blocks
 void setStatus(MessageRecord& record, const RadioPagingFlexEncoder::SentStatus& status)
 {
-    if (status.m_number >= 0)
-    {
-        record.m_protocolData.insert("message_number", status.m_number);
-        record.m_protocolData.insert("retrieval", status.m_retrieval);
-    }
+    QVariantMap& data = record.m_protocolData;
 
-    record.m_protocolData.insert("fragment_count", status.m_fragments);
-    record.m_protocolData.insert("fragmented", status.m_fragments > 1);
+    if (record.m_protocol == "flex")
+    {
+        if (status.m_number >= 0)
+        {
+            data.insert("message_number", status.m_number);
+            data.insert("retrieval", status.m_retrieval);
+        }
+
+        data.insert("fragment_count", status.m_fragments);
+        data.insert("fragmented", status.m_fragments > 1);
+
+        if (status.m_frame >= 0)
+        {
+            data.insert("cycle", status.m_cycle);
+            data.insert("frame", status.m_frame);
+            data.insert("phase", QString(QChar('A' + status.m_phase)));
+        }
+        if (status.m_firstFrame >= 0)
+        {
+            data.insert("first_cycle", status.m_firstCycle);
+            data.insert("first_frame", status.m_firstFrame);
+        }
+    }
+    else if (record.m_protocol == "pocsag")
+    {
+        if (status.m_batch >= 0)
+        {
+            data.insert("batch", status.m_batch);
+            data.insert("last_batch", status.m_lastBatch);
+            data.insert("frame", status.m_frame);
+            data.insert("codewords", status.m_codewords);
+        }
+    }
+    else if (record.m_protocol == "gsc")
+    {
+        if (status.m_preamble >= 0) {
+            data.insert("preamble", status.m_preamble);
+        }
+        if (status.m_slot >= 0)
+        {
+            data.insert("batch_mode", status.m_batch == 1);
+            data.insert("slot", status.m_slot);
+            data.insert("blocks", status.m_blocks);
+        }
+    }
 }
 
 } // namespace
@@ -144,7 +196,6 @@ const RadioPagingCharset::Codepage *RadioPagingMod::requestCodepage(const TxRequ
 
 const char* const RadioPagingMod::m_channelIdURI = "sdrangel.channeltx.modradiopaging";
 const char* const RadioPagingMod::m_channelId = "RadioPagingMod";
-const int RadioPagingMod::m_maxQueued;
 const int RadioPagingMod::m_maxTextLength;
 
 RadioPagingMod::RadioPagingMod(DeviceAPI *deviceAPI) :
@@ -520,8 +571,8 @@ QString RadioPagingMod::checkRequest(const TxRequest& request, RadioPagingModSou
                 return QString::fromStdString(error);
             }
 
-            if (outstanding() + m_inputMessageQueue.size() >= m_maxQueued) {
-                return QString("Queue full (%1 messages not sent yet)").arg(m_maxQueued);
+            if (outstanding() + m_inputMessageQueue.size() >= m_settings.m_maxQueued) {
+                return QString("Queue full (%1 messages not sent yet)").arg(m_settings.m_maxQueued);
             }
 
             return QString();
@@ -563,8 +614,9 @@ QString RadioPagingMod::checkRequest(const TxRequest& request, RadioPagingModSou
         return QString("%1 transmission is not implemented").arg(RadioPagingModSettings::protocolName(m_settings.m_protocol));
     }
 
-    if (outstanding() + m_inputMessageQueue.size() >= m_maxQueued) {
-        return QString("Queue full (%1 messages not sent yet)").arg(m_maxQueued);
+    // Lowered below the messages queued: they stay, new ones are refused until the queue is down
+    if (outstanding() + m_inputMessageQueue.size() >= m_settings.m_maxQueued) {
+        return QString("Queue full (%1 messages not sent yet)").arg(m_settings.m_maxQueued);
     }
 
     return QString();
@@ -583,6 +635,7 @@ quint64 RadioPagingMod::transmit(const TxRequest& request, QString& error, QStri
             if (entry.second.m_pageId == request.m_pageId)
             {
                 error = QString("Page %1 is already queued").arg(request.m_pageId);
+                refused(error);
                 return 0;
             }
         }
@@ -590,7 +643,9 @@ quint64 RadioPagingMod::transmit(const TxRequest& request, QString& error, QStri
 
     error = checkRequest(request, sourceRequest, warning);
 
-    if (!error.isEmpty()) {
+    if (!error.isEmpty())
+    {
+        refused(error);
         return 0;
     }
 
@@ -605,6 +660,7 @@ quint64 RadioPagingMod::transmit(const TxRequest& request, QString& error, QStri
     pending.m_copySpanMs = m_copySlackMs + ((sourceRequest.m_protocol == RadioPagingModSettings::Pocsag)
         ? sourceRequest.m_pocsagSchedule.m_intervalMs
         : (qint64) sourceRequest.m_flex.m_retransmitInterval * RadioPagingFlex::m_frameMs);
+    addEvent(pending.m_record, "queued");
     m_pending[sourceRequest.m_id] = pending;
 
     if (getMessageQueueToGUI()) {
@@ -650,6 +706,8 @@ void RadioPagingMod::fillRecord(const TxRequest& request, const RadioPagingModSo
         record.m_address = QString::fromStdString(RadioPagingPocsag::addressText(m.m_address, m.m_function));
         record.m_protocolData.insert("ric", (qulonglong) m.m_address);
         record.m_protocolData.insert("function", m.m_function);
+        // The frame of the batch its address goes in: known when it is queued (M.584-2 1.2)
+        record.m_protocolData.insert("frame", (int) (m.m_address & 7));
         record.m_msgType = (m.m_type == RadioPagingPocsag::Tone) ? "tone"
             : (m.m_type == RadioPagingPocsag::Numeric) ? "numeric" : "alphanumeric";
         // The text as asked; the message bits as the decoder stores them
@@ -817,6 +875,15 @@ void RadioPagingMod::txEvent(quint64 id, MsgTxEvent::Event event)
             publishPageEvent(it->second.m_pageId, "transmitted");
         }
 
+        if (!it->second.m_transmitted)
+        {
+            addEvent(it->second.m_record, "on air");
+
+            if (getMessageQueueToGUI()) {
+                getMessageQueueToGUI()->push(MsgTxLog::create(it->second.m_record, "on air"));
+            }
+        }
+
         it->second.m_transmitted = true;
         return;
     }
@@ -824,6 +891,7 @@ void RadioPagingMod::txEvent(quint64 id, MsgTxEvent::Event event)
     bool sent = (event == MsgTxEvent::Sent);
     PendingTx pending = it->second;
     m_pending.erase(it);
+    addEvent(pending.m_record, sent ? "sent" : (event == MsgTxEvent::Failed) ? "failed" : "dropped");
 
     // A page of the message center: sent; rejected if it can not be transmitted at all; aborted if it
     // was on air; else released (nothing went out)
@@ -878,10 +946,12 @@ void RadioPagingMod::repeated(quint64 id)
     }
 
     RepeatingTx& repeating = it->second;
-    MessageRecord record = repeating.m_record;
 
     repeating.m_sent++;
     repeating.m_copies--;
+    // The history of the message goes on with its copies: each copy carries all of it
+    addEvent(repeating.m_record, QString("copy %1 sent").arg(repeating.m_sent));
+    MessageRecord record = repeating.m_record;
     repeating.m_expiresMs = QDateTime::currentMSecsSinceEpoch() + repeating.m_copySpanMs;
     record.m_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     record.m_timestamp = QDateTime::currentMSecsSinceEpoch();
@@ -1023,7 +1093,7 @@ MessageRecord RadioPagingMod::endpointRecord(const QString& event)
 
     endpoint.m_polarities = {(int) MessageRecord::PolarityNormal, (int) MessageRecord::PolarityInverted};
     endpoint.m_queueDepth = outstandingCount;
-    endpoint.m_capacity = m_maxQueued;
+    endpoint.m_capacity = m_settings.m_maxQueued;
     endpoint.m_capabilities.insert("maxText", m_maxTextLength);
     endpoint.m_capabilities.insert("voice", m_settings.m_protocol == RadioPagingModSettings::Gsc);
     return MessageEndpoint::toRecord(endpoint, event);
@@ -1124,7 +1194,7 @@ bool RadioPagingMod::handleMessage(const Message& cmd)
     }
     else if (MsgTxStatus::match(cmd))
     {
-        // FLEX: the message number, fragments and R of the record of the message, or of its next copy
+        // Where the message went (setStatus), in its record, or of its next copy
         const MsgTxStatus& msg = (const MsgTxStatus&) cmd;
 
         if (!msg.getRepeat())
@@ -1556,6 +1626,9 @@ void RadioPagingMod::webapiUpdateChannelSettings(
     if (channelSettingsKeys.contains("flexTimeExtendedSeconds")) {
         settings.m_flexTimeExtendedSeconds = swg->getFlexTimeExtendedSeconds();
     }
+    if (channelSettingsKeys.contains("maxQueued")) {
+        settings.m_maxQueued = swg->getMaxQueued();
+    }
     if (channelSettingsKeys.contains("flexNumbering")) {
         settings.m_flexNumbering = swg->getFlexNumbering() != 0;
     }
@@ -1733,6 +1806,7 @@ int RadioPagingMod::webapiActionsPost(
         if (!pageError.isEmpty())
         {
             errorMessage = pageError;
+            refused(pageError);
             return 400;
         }
 
@@ -1747,6 +1821,7 @@ int RadioPagingMod::webapiActionsPost(
         if (!error.isEmpty())
         {
             errorMessage = error;
+            refused(error);
             return 400;
         }
 
@@ -1784,6 +1859,7 @@ void RadioPagingMod::webapiFormatChannelSettings(SWGSDRangel::SWGChannelSettings
     swg->setFlexTimeOffsetSeconds(settings.m_flexTimeOffsetSeconds);
     swg->setFlexTimeEquivalentYear(settings.m_flexTimeEquivalentYear ? 1 : 0);
     swg->setFlexTimeExtendedSeconds(settings.m_flexTimeExtendedSeconds);
+    swg->setMaxQueued(settings.m_maxQueued);
     swg->setFlexNumbering(settings.m_flexNumbering ? 1 : 0);
     swg->setFlexMaxMessageNumber(settings.m_flexMaxMessageNumber);
     swg->setPocsagCharset(RadioPagingPage::charsetSwg(settings.m_pocsagCharset));
@@ -1870,6 +1946,7 @@ void RadioPagingMod::webapiFormatChannelReport(SWGSDRangel::SWGChannelReport& re
     swg->setLastSentId((qint64) status.m_lastSentId);
     swg->setSent((qint64) status.m_sent);
     swg->setDropped((qint64) status.m_dropped);
+    swg->setRefused((qint64) getRefused());
     swg->setErs(status.m_ers ? 1 : 0);
     swg->setErsMs(status.m_ersMs);
     swg->setErsCount((qint64) status.m_ersCount);
@@ -2022,6 +2099,9 @@ void RadioPagingMod::webapiFormatChannelSettings(
     }
     if (channelSettingsKeys.contains("flexTimeExtendedSeconds") || force) {
         swg->setFlexTimeExtendedSeconds(settings.m_flexTimeExtendedSeconds);
+    }
+    if (channelSettingsKeys.contains("maxQueued") || force) {
+        swg->setMaxQueued(settings.m_maxQueued);
     }
     if (channelSettingsKeys.contains("flexNumbering") || force) {
         swg->setFlexNumbering(settings.m_flexNumbering ? 1 : 0);

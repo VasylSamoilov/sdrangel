@@ -1065,7 +1065,9 @@ void RadioPagingDemodSink::updatePolarityStatus(Status& status, const RadioPagin
         {
             RadioPagingPocsagReceiver::Status s = m_pocsag[i].getStatus();
             const RadioPagingPocsagDecoder::Status& d = (pol == 1) ? s.m_inverted : s.m_normal;
-            bool speedSync = d.m_state != RadioPagingPocsagDecoder::Hunting;
+            // A real signal only: a sync codeword alone is found in noise and in the other protocols, it counts once
+            // it is confirmed or a batch was decoded after it
+            bool speedSync = (d.m_state != RadioPagingPocsagDecoder::Hunting) && (d.m_confirmed || (d.m_batches > 0));
             status.m_pocsagSpeedSync[pol][i] = speedSync;
 
             if (speedSync)
@@ -1080,7 +1082,9 @@ void RadioPagingDemodSink::updatePolarityStatus(Status& status, const RadioPagin
         }
 
         const RadioPagingGscDecoder::Status& g = (pol == 1) ? gsc.m_inverted : gsc.m_normal;
-        sync[2][pol] = g.m_state != RadioPagingGscDecoder::Hunting;
+        // A real signal only: a preamble lock alone is found in noise and in the other protocols, it counts once the
+        // start code or an address follows
+        sync[2][pol] = (g.m_state == RadioPagingGscDecoder::InTransmission) || (g.m_state == RadioPagingGscDecoder::Voice);
         status.m_gscVoicePol[pol] = g.m_state == RadioPagingGscDecoder::Voice;
 
         if (sync[2][pol])

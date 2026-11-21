@@ -1487,9 +1487,14 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
                 if (!more)
                 {
                     const uint32_t id = m_groups[key].m_id;
+                    // Where the group message went: no message number (temporary address)
+                    SentStatus status;
+                    status.m_cycle = (int) frame.m_cycle;
+                    status.m_frame = (int) frame.m_frame;
+                    status.m_phase = s.m_phase;
                     frame.m_sentIds.push_back(id);
                     frame.m_sentNumbers.push_back(0);
-                    frame.m_sentStatus.push_back(SentStatus());
+                    frame.m_sentStatus.push_back(status);
                     frame.m_doneIds.push_back(id);
                     endGroup(key);
                 }
@@ -1503,8 +1508,15 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
         {
             for (Item& other : m_queue)
             {
-                if ((other.m_id == it->m_id) && (other.m_fragment > it->m_fragment)) {
+                if ((other.m_id == it->m_id) && (other.m_fragment > it->m_fragment))
+                {
                     other.m_phase = s.m_phase;
+
+                    if (it->m_fragment == 0)
+                    {
+                        other.m_firstCycle = (int) frame.m_cycle;
+                        other.m_firstFrame = (int) frame.m_frame;
+                    }
                 }
             }
         }
@@ -1517,6 +1529,15 @@ RadioPagingFlexEncoder::Frame RadioPagingFlexEncoder::buildFrame(uint64_t frameI
             status.m_number = it->m_number;
             status.m_fragments = it->m_fragments;
             status.m_retrieval = it->m_retrieval;
+            status.m_cycle = (int) frame.m_cycle;
+            status.m_frame = (int) frame.m_frame;
+            status.m_phase = s.m_phase;
+
+            if (it->m_fragments > 1)
+            {
+                status.m_firstCycle = it->m_firstCycle;
+                status.m_firstFrame = it->m_firstFrame;
+            }
 
             if (it->m_retransmission)
             {

@@ -2659,7 +2659,9 @@ void MessageCenterGUI::editFile(bool sink, int index)
     });
     connect(markIcon, &QWidget::customContextMenuRequested, &dialog, [&]() { iconValue.clear(); showMark(); });
 
-    for (auto pair : {qMakePair(markText, &textValue), qMakePair(markBackground, &backgroundValue)})
+    const QPair<QToolButton*, quint32*> colourButtons[] = {qMakePair(markText, &textValue), qMakePair(markBackground, &backgroundValue)};
+
+    for (const auto& pair : colourButtons)
     {
         QToolButton *button = pair.first;
         quint32 *value = pair.second;
