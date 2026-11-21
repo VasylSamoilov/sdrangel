@@ -836,6 +836,86 @@ void testCommand()
     check(!empty.accept(r, error), "an empty command is refused");
 }
 
+// A relay: a page rule to a contact makes a page of the message with the send to of the contact (POCSAG heard,
+// paged as FLEX), to the contact of the rule or the contact of the message
+void testRelay()
+{
+    QString error;
+    const QString contactsJson = "[{\"name\":\"Alice\",\"rules\":[[{\"field\":\"ric\",\"is\":\"1234567\"}]],\"sendTo\":["
+        "{\"page\":{\"transmitter\":\"flextx\",\"protocol\":\"flex\",\"address\":\"1100001\"}}]},"
+        "{\"name\":\"Nobody\",\"rules\":[[{\"field\":\"ric\",\"is\":\"7654321\"}]]}]";
+    MessageCenterEngine engine;
+    engine.setContacts(MessageCenterContact::listFromJson(contactsJson.toUtf8(), &error));
+    typedef MessageCenterEngine::Route Route;
+    Route log = MessageCenterEngine::defaultRoutes()[0];
+    Route relay;
+    relay.m_name = "relay";
+    relay.m_action = Route::ActionPage;
+    relay.m_pageTo = Route::PageContact;
+    relay.m_target = "Alice";
+    relay.m_filter.m_protocols = QStringList({"pocsag"});
+    relay.m_filter.m_direction = MessageRecord::DirectionRX;
+    engine.setRoutes({log, relay});
+
+    auto pagesTo = [&engine](const QString& transmitter) {
+        QList<MessageRecord> pages;
+
+        for (const MessageRecord& r : engine.log())
+        {
+            if ((r.m_direction == MessageRecord::DirectionTX) && (r.m_protocolData.value("transmitter").toString() == transmitter)) {
+                pages.append(r);
+            }
+        }
+
+        return pages;
+    };
+
+    MessageRecord heard = rx("p1", "pocsag", "1234567A", "MEET AT 5", "rx");
+    heard.m_protocolData.insert("ric", 1234567);
+    engine.ingest(heard, "channels", 1000);
+    QList<MessageRecord> pages = pagesTo("flextx");
+    check((pages.size() == 1) && (pages[0].m_protocol == "flex") && (pages[0].m_text == "MEET AT 5")
+        && (pages[0].m_protocolData.value("relay_of").toString() == "p1") && engine.find("p1"),
+        "relay: a POCSAG message paged as FLEX by the send to of the contact, the message logged");
+
+    // FLEX heard back (our own page): not POCSAG, not paged again
+    engine.ingest(rx("f1", "flex", "0001100001", "MEET AT 5", "rx"), "channels", 2000);
+    check(pagesTo("flextx").size() == 1, "relay: the FLEX page heard back is not relayed again");
+
+    // To the contact of the message: Alice's message is paged, a message of nobody is not
+    relay.m_pageTo = Route::PageMessageContact;
+    relay.m_target.clear();
+    engine.setRoutes({log, relay});
+    MessageRecord again = heard;
+    again.m_id = "p2";
+    engine.ingest(again, "channels", 3000);
+    MessageRecord stranger = rx("p3", "pocsag", "0000099A", "HELLO", "rx");
+    stranger.m_protocolData.insert("ric", 99);
+    engine.ingest(stranger, "channels", 4000);
+    check(pagesTo("flextx").size() == 2, "relay: to the contact of the message; a message without a contact is not paged");
+
+    // A contact with no send to: not paged, counted and said
+    MessageRecord nobody = rx("p4", "pocsag", "7654321A", "X", "rx");
+    nobody.m_protocolData.insert("ric", 7654321);
+    engine.takeSinkErrors();
+    engine.ingest(nobody, "channels", 5000);
+    const QStringList errors = engine.takeSinkErrors();
+    check((pagesTo("flextx").size() == 2) && (errors.size() == 1) && errors[0].contains("Nobody") && errors[0].contains("no send to"),
+        "relay: a contact without a send to is said");
+
+    // In JSON: pageTo and the contact; a page of before has neither
+    relay.m_pageTo = Route::PageContact;
+    relay.m_target = "Alice";
+    std::vector<Route> back = MessageCenterSettings::routesFromJson(MessageCenterSettings::routesToJson({relay}));
+    check((back.size() == 1) && (back[0].m_pageTo == Route::PageContact) && (back[0].m_target == "Alice"), "relay: through JSON");
+    Route plain;
+    plain.m_action = Route::ActionPage;
+    back = MessageCenterSettings::routesFromJson(MessageCenterSettings::routesToJson({plain}));
+    check((back.size() == 1) && (back[0].m_pageTo == Route::PageTransmitter) && back[0].m_target.isEmpty(), "relay: a page of before");
+    relay.m_target.clear();
+    check(!relay.check().isEmpty(), "relay: a page to a contact needs the contact");
+}
+
 // The limits of the sinks: drop, or hold (in order, as the limit allows; the oldest dropped over the most held)
 void testRateLimits()
 {
@@ -1714,6 +1794,7 @@ int main(int argc, char **argv)
     testFilterTime();
     testCommand();
     testRateLimits();
+    testRelay();
     testActionSink();
     testRoutesWithActions();
     testRouteOrderAndSources();

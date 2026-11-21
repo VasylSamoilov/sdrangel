@@ -80,6 +80,15 @@ QByteArray MessageCenterSettings::routesToJson(const std::vector<MessageCenterEn
         case Route::ActionSend:
             o["target"] = route.m_target;
             break;
+        case Route::ActionPage:
+            // Only what is not the page of before (to the transmitter of the message)
+            if (route.m_pageTo != Route::PageTransmitter) {
+                o["pageTo"] = Route::pageToName(route.m_pageTo);
+            }
+            if (route.m_pageTo == Route::PageContact) {
+                o["target"] = route.m_target;
+            }
+            break;
         case Route::ActionMark:
             o["mark"] = QJsonObject::fromVariantMap(route.m_mark);
             break;
@@ -128,6 +137,7 @@ std::vector<MessageCenterEngine::Route> MessageCenterSettings::routesFromJson(co
         {
             route.m_action = Route::actionOf(o["action"].toString());
             route.m_target = o["target"].toString();
+            route.m_pageTo = Route::pageToOf(o["pageTo"].toString());
             route.m_mark = o["mark"].toObject().toVariantMap();
             route.m_decodeCharset = RadioPagingPage::charsetKey(o["decodeCharset"].toObject().toVariantMap());
             route.m_decodeType = o["decodeType"].toString();

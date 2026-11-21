@@ -2052,6 +2052,68 @@ void MessageCenterEngine::releaseHeld(qint64 now)
     }
 }
 
+bool MessageCenterEngine::pageToContact(const MessageRecord& record, const QString& name, MessageRecord& pageRecord,
+    QString& error) const
+{
+    const auto contact = std::find_if(m_contacts.begin(), m_contacts.end(),
+        [&name](const MessageCenterContact& c) { return c.m_name == name; });
+
+    if (contact == m_contacts.end())
+    {
+        error = QString("no contact %1").arg(name);
+        return false;
+    }
+
+    const QVariantMap& d = record.m_protocolData;
+    RadioPagingPage paging;
+    paging.m_type = record.m_msgType.isEmpty() ? QString("alphanumeric") : record.m_msgType;
+    paging.m_text = record.m_text;
+
+    if (paging.m_type == "voice") {
+        paging.m_voiceFile = d.value("voice_file").toString();
+    }
+
+    // The fields the conditions of its send to look at, as for a page sent to it (Send, the API)
+    QJsonObject message;
+    message["contact"] = name;
+    message["protocol"] = record.m_protocol;
+    message["type"] = paging.m_type;
+    message["text"] = paging.m_text;
+    QJsonObject sent;
+
+    if (!contact->pageFor(message, sent, &error)) {
+        return false;
+    }
+
+    paging.m_transmitter = sent.value("transmitter").toString();
+    paging.m_protocol = sent.value("protocol").toString(record.m_protocol).toLower();
+    paging.m_address = sent.value("address").toVariant().toString();
+    paging.m_function = sent.value("function").toInt(paging.m_function);
+    paging.m_speed = sent.value("speed").toInt(paging.m_speed);
+
+    if (sent.contains("polarity"))
+    {
+        const QString polarity = sent.value("polarity").toString().toLower();
+        paging.m_polarity = (polarity == "normal") ? 0 : (polarity == "inverted") ? 1 : -1;
+    }
+
+    if (paging.m_transmitter.isEmpty())
+    {
+        error = QString("the send to of %1 has no transmitter").arg(name);
+        return false;
+    }
+
+    error = paging.check();
+
+    if (!error.isEmpty()) {
+        return false;
+    }
+
+    pageRecord = paging.toRecord();
+    pageRecord.m_protocolData.insert("relay_of", record.m_id);     // The message it was made from
+    return true;
+}
+
 void MessageCenterEngine::importRecord(const MessageRecord& record)
 {
     store(record);
@@ -2136,11 +2198,36 @@ void MessageCenterEngine::ingest(const MessageRecord& record, const QString& sou
 
     for (const Delivery& delivery : deliveries)
     {
-        // A sink takes a message once, whatever the number of rules that send it there
-        if (!delivered.contains(delivery.m_sink))
+        // A sink takes a message once, whatever the number of rules that send it there (a contact is paged once)
+        const QString key = delivery.m_sink + '\n' + delivery.m_contact;
+
+        if (delivered.contains(key)) {
+            continue;
+        }
+
+        delivered.insert(key);
+
+        if (delivery.m_contact.isEmpty())
         {
-            delivered.insert(delivery.m_sink);
             deliver(changed, delivery.m_sink, delivery.m_captures, now);
+            continue;
+        }
+
+        // A page to a contact: a new page of its own, queued (not walked through the rules again)
+        MessageRecord made;
+        QString error;
+
+        if (pageToContact(changed, delivery.m_contact, made, error) && !addPage(made, now).isEmpty())
+        {
+            m_sinkStats["queue"].m_accepted++;
+        }
+        else
+        {
+            m_sinkStats["queue"].m_failed++;
+
+            if (m_sinkErrors.size() < m_maxSinkErrors) {
+                m_sinkErrors.append(QString("Page to %1: %2").arg(delivery.m_contact, error.isEmpty() ? QString("not queued") : error));
+            }
         }
     }
 
@@ -2178,6 +2265,16 @@ MessageCenterEngine::Route::Action MessageCenterEngine::Route::actionOf(const QS
     return ActionLog;
 }
 
+QString MessageCenterEngine::Route::pageToName(PageTo to)
+{
+    return (to == PageContact) ? QString("contact") : (to == PageMessageContact) ? QString("messageContact") : QString("transmitter");
+}
+
+MessageCenterEngine::Route::PageTo MessageCenterEngine::Route::pageToOf(const QString& name)
+{
+    return (name == "contact") ? PageContact : (name == "messageContact") ? PageMessageContact : PageTransmitter;
+}
+
 QString MessageCenterEngine::Route::check() const
 {
     const QString error = m_filter.errors();
@@ -2187,6 +2284,9 @@ QString MessageCenterEngine::Route::check() const
     }
     if ((m_action == ActionSend) && m_target.trimmed().isEmpty()) {
         return QString("Rule %1: send to where").arg(m_name);
+    }
+    if ((m_action == ActionPage) && (m_pageTo == PageContact) && m_target.trimmed().isEmpty()) {
+        return QString("Rule %1: page which contact").arg(m_name);
     }
     if ((m_action == ActionMark) && m_mark.value("icon").toString().isEmpty() && (m_mark.value("color").toUInt() == 0)
         && (m_mark.value("background").toUInt() == 0)) {
@@ -2341,13 +2441,22 @@ MessageRecord MessageCenterEngine::applyRules(const MessageRecord& record, const
         switch (route.m_action)
         {
         case Route::ActionLog:
-            deliveries.push_back(Delivery{QString("log"), route.m_filter.captures(working)});
+            deliveries.push_back(Delivery{QString("log"), route.m_filter.captures(working), QString()});
             break;
         case Route::ActionPage:
-            deliveries.push_back(Delivery{QString("queue"), route.m_filter.captures(working)});
+        {
+            // To a contact: the one of the rule, or the one of the message (none: nothing to page)
+            const QString contact = (route.m_pageTo == Route::PageContact) ? route.m_target
+                : (route.m_pageTo == Route::PageMessageContact) ? working.m_protocolData.value("contact").toString() : QString();
+
+            if ((route.m_pageTo == Route::PageTransmitter) || !contact.isEmpty()) {
+                deliveries.push_back(Delivery{QString("queue"), route.m_filter.captures(working), contact});
+            }
+
             break;
+        }
         case Route::ActionSend:
-            deliveries.push_back(Delivery{route.m_target, route.m_filter.captures(working)});
+            deliveries.push_back(Delivery{route.m_target, route.m_filter.captures(working), QString()});
             break;
         case Route::ActionDrop:
             return working;

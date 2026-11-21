@@ -97,7 +97,9 @@ A rule is a filter (when) and one action (then), shown as a sentence with the nu
 
 * Log: keep the message in Messages and in the history.
 * Send: to a destination of Connections (a file, UDP, a command, speech, the Map).
-* Page: a message for a transmitter becomes a page of the queue (the Send tab).
+* Page: to the transmitter of the message, a message for a transmitter becomes a page of the queue (the Send tab). To a contact, or to the contact of the message: the message is paged by the send to of the contact (its transmitter, protocol and address), a relay. For example, POCSAG received from a pager paged again as FLEX: a contact with a rule on the address of the POCSAG pager and a send to of a FLEX transmitter and capcode, and a rule "when a message is POCSAG, RX: page the contact". Select the received messages (RX), or a page heard back by a receiver is paged again. The page is made from the type and the text of the message; the transmitter refuses what it cannot send (the reason is in the Send tab). A contact renamed keeps its page rules; a contact removed removes them.
+
+Pages at given times (a test page every hour, a page sent later) are for cron or a script: they post a page through the WebAPI (the post action of the Message Center, to a contact or to a transmitter and address) or the MCP.
 * Mark: an icon before the message, the colour of its text and of its row (each optional). A message several rules mark has their icons side by side.
 * Decode as: the message decoded again with another codepage, or as another type.
 * Transform: when a regular expression is found in the text, the text becomes a template: ${1} or ${name} for the groups of the expression, ${address}, ${channel}, ${time}, ${text}, ${checksum}... for the fields of the message. E.g. Find Unit:(?<unit>\w+) Job #(?<job>\S+), Into Unit ${unit}: job ${job}.

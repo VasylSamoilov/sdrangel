@@ -1681,15 +1681,41 @@ void MessageCenterGUI::editContact(int index, const MessageCenterContact *preset
         return;
     }
 
-    if (existing) {
+    QStringList keys("contacts");
+
+    if (existing)
+    {
+        // A contact renamed is still the one its page rules page
+        const QString oldName = m_settings.m_contacts[index].m_name;
         m_settings.m_contacts[index] = dialog.contact();
-    } else {
+        const QString newName = m_settings.m_contacts[index].m_name;
+
+        for (MessageCenterEngine::Route& rule : m_settings.m_routes)
+        {
+            if ((oldName != newName) && (rule.m_action == MessageCenterEngine::Route::ActionPage)
+                && (rule.m_pageTo == MessageCenterEngine::Route::PageContact) && (rule.m_target == oldName))
+            {
+                rule.m_target = newName;
+
+                if (!keys.contains("routes")) {
+                    keys.append("routes");
+                }
+            }
+        }
+    }
+    else
+    {
         m_settings.m_contacts.append(dialog.contact());
     }
 
     refreshContacts();
     m_contactsTable->selectRow(existing ? index : m_settings.m_contacts.size() - 1);
-    applySettings(QStringList("contacts"));
+
+    if (keys.contains("routes")) {
+        refreshRoutes();
+    }
+
+    applySettings(keys);
 }
 
 void MessageCenterGUI::removeContact()
@@ -1700,9 +1726,27 @@ void MessageCenterGUI::removeContact()
         return;
     }
 
+    const QString name = m_settings.m_contacts[row].m_name;
     m_settings.m_contacts.removeAt(row);
+
+    // The rules that paged a contact that is gone go too, as those of a sink removed: they would do nothing
+    auto& rules = m_settings.m_routes;
+    const size_t before = rules.size();
+    rules.erase(std::remove_if(rules.begin(), rules.end(), [&name](const MessageCenterEngine::Route& rule) {
+        return (rule.m_action == MessageCenterEngine::Route::ActionPage) && (rule.m_pageTo == MessageCenterEngine::Route::PageContact)
+            && (rule.m_target == name);
+    }), rules.end());
     refreshContacts();
-    applySettings(QStringList("contacts"));
+
+    if (rules.size() != before)
+    {
+        refreshRoutes();
+        applySettings({"contacts", "routes"});
+    }
+    else
+    {
+        applySettings(QStringList("contacts"));
+    }
 }
 
 void MessageCenterGUI::exportContacts()
@@ -2829,7 +2873,9 @@ QString MessageCenterGUI::ruleSentence(const MessageCenterEngine::Route& route) 
         then = QString("%1 %2").arg(key.arg("send to"), pill.arg(route.m_target.toHtmlEscaped()));
         break;
     case Rule::ActionPage:
-        then = QString("%1 it (queue it for its transmitter)").arg(key.arg("page"));
+        then = (route.m_pageTo == Rule::PageContact) ? QString("%1 %2").arg(key.arg("page"), pill.arg(route.m_target.toHtmlEscaped()))
+            : (route.m_pageTo == Rule::PageMessageContact) ? QString("%1 its contact").arg(key.arg("page"))
+            : QString("%1 it (queue it for its transmitter)").arg(key.arg("page"));
         break;
     case Rule::ActionMark:
     {
@@ -3203,8 +3249,38 @@ void MessageCenterGUI::editRoute(int index, const MessageCenterEngine::Route *pr
 
     // Log, page, drop: what they do
     QWidget *logPage = note("Every message the rule selects is kept in Messages and in the history (when it is kept).");
-    QWidget *pagePage = note("A message for a transmitter (sent through the API, or by a rule) becomes a page in the queue of "
-        "the Send tab; the others are left alone.");
+    // Page: to the transmitter the message names, to a contact (a relay: the message paged by the send to of the
+    // contact, e.g. POCSAG heard, paged as FLEX), or to the contact of the message
+    auto pageForm = form();
+    QWidget *pagePage = pageForm.first;
+    QComboBox *pageTo = new QComboBox(pagePage);
+    pageTo->addItem("The transmitter of the message", QStringList({"transmitter"}));
+    pageTo->addItem("The contact of the message", QStringList({"messageContact"}));
+
+    for (const MessageCenterContact& contact : m_settings.m_contacts) {
+        pageTo->addItem(contact.m_name, QStringList({"contact", contact.m_name}));
+    }
+
+    const QStringList pageToNow = (route.m_pageTo == Rule::PageContact) ? QStringList({"contact", route.m_target})
+        : QStringList({Rule::pageToName(route.m_pageTo)});
+    pageTo->setCurrentIndex(std::max(0, pageTo->findData(pageToNow)));
+    pageTo->setToolTip("Who the page goes to. A contact: the message is paged by the send to of the contact (its transmitter,\n"
+        "protocol and address), e.g. a POCSAG message heard paged again as FLEX");
+    pageForm.second->addRow("To", pageTo);
+    QLabel *pageNote = qobject_cast<QLabel*>(note(QString()));
+    pageForm.second->addRow(pageNote);
+    auto showPageTo = [pageTo, pageNote]() {
+        const QString to = pageTo->currentData().toStringList().value(0);
+        pageNote->setText((to == "transmitter")
+            ? "A message for a transmitter (sent through the API, or by a rule) becomes a page in the queue of the Send tab; "
+              "the others are left alone."
+            : (to == "messageContact")
+            ? "The message is paged to its contact, by the send to of the contact; a message without a contact is not paged."
+            : "The message is paged to this contact, by its send to (its transmitter, protocol and address). Select received "
+              "messages only, or the page heard back is paged again.");
+    };
+    showPageTo();
+    connect(pageTo, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, showPageTo);
     QWidget *dropPage = note("The rules after this one do not see the messages it selects. What the rules before it did stays "
         "(their log, sends and pages are made).");
 
@@ -3470,6 +3546,14 @@ void MessageCenterGUI::editRoute(int index, const MessageCenterEngine::Route *pr
         r.m_action = (Rule::Action) action->currentData().toInt();
         // "New destination..." is never a target: none chosen
         r.m_target = ((r.m_action == Rule::ActionSend) && (target->currentData() != newTarget)) ? target->currentData().toString() : QString();
+        r.m_pageTo = Rule::PageTransmitter;
+
+        if (r.m_action == Rule::ActionPage)
+        {
+            const QStringList to = pageTo->currentData().toStringList();
+            r.m_pageTo = Rule::pageToOf(to.value(0));
+            r.m_target = (r.m_pageTo == Rule::PageContact) ? to.value(1) : QString();
+        }
         r.m_mark.clear();
 
         if (r.m_action == Rule::ActionMark)

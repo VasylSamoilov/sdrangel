@@ -890,6 +890,14 @@ QString MessageCenter::checkRouting(const MessageCenterSettings& settings)
             return QString("Rule %1: there is no sink %2").arg(route.m_name).arg(route.m_target);
         }
 
+        // A page to a contact of the address book
+        if ((route.m_action == MessageCenterEngine::Route::ActionPage) && (route.m_pageTo == MessageCenterEngine::Route::PageContact)
+            && !route.m_target.isEmpty()
+            && std::none_of(settings.m_contacts.begin(), settings.m_contacts.end(),
+                [&route](const MessageCenterContact& c) { return c.m_name == route.m_target; })) {
+            return QString("Rule %1: there is no contact %2").arg(route.m_name).arg(route.m_target);
+        }
+
         QString error = route.check();
 
         if (!error.isEmpty()) {

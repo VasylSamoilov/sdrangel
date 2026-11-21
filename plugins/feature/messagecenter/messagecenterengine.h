@@ -483,7 +483,11 @@ public:
         MessageCenterFilter m_filter;
         bool m_enabled = true;
         Action m_action = ActionLog;
-        QString m_target;               //!< Send: the name of a sink of Connections
+        //! Page: to the transmitter the message names (a page sent through the API), to the contact m_target, or to
+        //! the contact of the message (a relay: the message paged by the send to of the contact, e.g. as FLEX)
+        enum PageTo { PageTransmitter, PageContact, PageMessageContact };
+        QString m_target;               //!< Send: the name of a sink of Connections. Page to a contact: its name
+        PageTo m_pageTo = PageTransmitter;
         //! Mark: icon (a built-in icon :name, or an image path), color (of the text) and background (of the row), ARGB
         QVariantMap m_mark;
         //! Decode: the message decoded again with this codepage (none: its own) as this type (empty: its own). A
@@ -502,6 +506,8 @@ public:
         bool decodes() const { return (m_action == ActionDecode) && (!m_decodeCharset.empty() || !m_decodeType.isEmpty()); }
         static QString actionName(Action action);       //!< log, send, page, mark, decode, transform, replace, drop
         static Action actionOf(const QString& name);    //!< log for a name that is none
+        static QString pageToName(PageTo to);           //!< transmitter, contact, messageContact
+        static PageTo pageToOf(const QString& name);    //!< transmitter for a name that is none
         //!< Empty if the rule can work, else why not (a regular expression, a mark of nothing, a send to nowhere)
         QString check() const;
         //!< The message changed by the rule (mark, decode, transform, replace): false if it is not a change
@@ -526,7 +532,12 @@ public:
     {
         QString m_sink;
         QStringList m_captures;
+        QString m_contact;      //!< queue: a page to this contact (its send to), empty for the transmitter of the message
     };
+    //! A page of a message to a contact: the type and text of the message, the transmitter, protocol, address...
+    //! of the send to of the contact for it. False and why if there is no such contact or send to, or the page
+    //! cannot be sent (RadioPagingPage::check)
+    bool pageToContact(const MessageRecord& record, const QString& contact, MessageRecord& page, QString& error) const;
     MessageRecord applyRules(const MessageRecord& record, const QString& source, std::vector<Delivery>& deliveries) const;
 
     //!< A record from a source: events update the endpoints and the pages, the others are routed
