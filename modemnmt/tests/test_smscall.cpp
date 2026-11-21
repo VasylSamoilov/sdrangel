@@ -344,6 +344,31 @@ static void testPhoneFetches()
     CHECK(s.calls.cleared == 0);
 }
 
+// A phone whose own SMS centre is known reaches the centre on that number, while the network has
+// another one (or none); another phone that dials the same number reaches the exchange.
+static void testCentreOfThePhone()
+{
+    {
+        Station s;
+        s.system.setSmscNumber("767");
+        s.system.setSmsCentreOf([&s](const NmtSubscriber& subscriber) {
+            return subscriber.number == s.phone.number ? std::string("000501") : std::string();
+        });
+        s.dialCentre("000501");
+        CHECK(s.tc->state() == State::Sms);
+        CHECK(s.calls.dialled.empty());
+        s.system.setSmsCentreOf(nullptr);
+    }
+    {
+        Station s;
+        s.system.setSmsCentreOf([](const NmtSubscriber&) { return std::string("4321"); });   // another phone's
+        s.dialCentre("000501");
+        CHECK(s.tc->state() != State::Sms);
+        CHECK(!s.calls.dialled.empty());
+        s.system.setSmsCentreOf(nullptr);
+    }
+}
+
 // The handler refuses the message, or there is no handler: the phone gets an RP-ERROR.
 static void testRefused()
 {
@@ -488,6 +513,7 @@ int main()
     testFromPhone();
     testPhoneAsks();
     testPhoneFetches();
+    testCentreOfThePhone();
     testRefused();
     testNumbersAndSilence();
     testToPhone();

@@ -1865,7 +1865,7 @@ void NmtChannel::completeDialling()
     }
 
     // the number of the service centre: a short message call, the exchange is not called
-    if (m_host->isSmsCenter(dialled))
+    if (m_host->isSmsCenter(*transaction, dialled))
     {
         transaction->smsCall = true;
         m_timer->start(kStateWatchdog);

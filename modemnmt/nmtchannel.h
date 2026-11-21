@@ -134,9 +134,9 @@ public:
     virtual void callCleared(NmtTransaction& transaction) = 0;
     // The phone finished dialling, any number (also the one of the SMS centre). Only told.
     virtual void numberDialled(NmtTransaction& transaction, const std::string& dialled) = 0;
-    // Short messages. The phone dialled the number of the service centre: the call is a short
-    // message call, the exchange is not called.
-    virtual bool isSmsCenter(const std::string& dialled) = 0;
+    // Short messages. The phone dialled the number of the service centre (the network's, or one
+    // known for this phone): the call is a short message call, the exchange is not called.
+    virtual bool isSmsCenter(const NmtTransaction& transaction, const std::string& dialled) = 0;
     // A short message from the phone (SMS-SUBMIT). The RP cause to answer with, 0 to accept.
     virtual uint8_t smsSubmitted(NmtTransaction& transaction, const SmsSubmit& message) = 0;
     // The phone asks for its waiting messages (READY-TO-RECEIVE) or tells it has memory again

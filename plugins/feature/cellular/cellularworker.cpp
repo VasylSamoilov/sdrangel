@@ -36,6 +36,7 @@
 #include "cellularworker.h"
 
 MESSAGE_CLASS_DEFINITION(CellularWorker::MsgAddNetwork, Message)
+MESSAGE_CLASS_DEFINITION(CellularWorker::MsgSmsCentres, Message)
 
 using modemnmt::ChannelType;
 using modemnmt::NmtChannel;
@@ -146,6 +147,8 @@ void CellularWorker::handleInputMessages()
             addNetwork(static_cast<const MsgAddNetwork&>(*message));
         } else if (Cellular::MsgAction::match(*message)) {
             action(static_cast<const Cellular::MsgAction&>(*message));
+        } else if (MsgSmsCentres::match(*message)) {
+            m_smsCentres = static_cast<const MsgSmsCentres&>(*message).m_centres;
         }
         delete message;
     }
@@ -258,12 +261,21 @@ void CellularWorker::setHandlers(Network& n)
         int y1, area;
         trafficArea(n, y1, area);
         const std::string number = numberText(subscriber).toStdString();
-        known(number).noteSmsCentre(n.config.smscNumber, y1, area);
+        // the number of this call: the dial observer noted it just before the call became a
+        // short message call (the network's centre or the phone's own)
+        modemnmt::NmtPhoneInfo& info = known(number);
+        const std::string centre = info.dialled().empty() ? n.config.smscNumber : info.dialled().front().number;
+        info.noteSmsCentre(centre, y1, area);
         if (m_reports) {
             m_reports->push(Cellular::MsgBookLearn::create(Cellular::MsgBookLearn::SmsCentre, n.config.system, number,
-                n.config.smscNumber, y1, area));
+                centre, y1, area));
         }
     };
+    // a phone's own SMS centre (learned or picked in its record) reaches the centre too
+    system.setSmsCentreOf([this, &n](const modemnmt::NmtSubscriber& subscriber) {
+        const auto it = m_smsCentres.find(std::make_pair(static_cast<int>(n.config.system), numberText(subscriber).toStdString()));
+        return it != m_smsCentres.end() ? it->second : std::string();
+    });
     system.setDialObserver([this, &n](const modemnmt::NmtSubscriber& subscriber, const std::string& dialled) {
         int y1, area;
         trafficArea(n, y1, area);
