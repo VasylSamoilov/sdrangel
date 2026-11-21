@@ -230,6 +230,8 @@ private:
     void showSendError(const QString& error);
     void refreshRoutes();
     QString ruleSentence(const MessageCenterEngine::Route& route) const;
+    //! The messages of the log a filter selects, in a window: newest first, a page at a time
+    void showMatches(const MessageCenterFilter& filter, const QString& title, QWidget *parent = nullptr);
     void refreshContacts();
     //!< -1: a new one, preset (if given) to start with
     void editContact(int index, const MessageCenterContact *preset = nullptr);

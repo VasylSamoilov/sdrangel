@@ -99,7 +99,7 @@ A rule says what happens to messages, as a sentence: when (the messages its filt
 
 ![A route: the messages whose text has brand, fire or smoke, to the mark Fire](../../../doc/img/MessageCenter_plugin_route.png)
 
-A filter on several contacts (set through the WebAPI) is one item of the contact list. Editing a rule keeps what its dialog does not show of its filter. The dialog of a rule is in the order of its sentence: its name, when (the filters, with the number of messages of the log they find as they are changed), change, send to, stop and enabled.
+A filter on several contacts (set through the WebAPI) is one item of the contact list. Editing a rule keeps what its dialog does not show of its filter. The dialog of a rule is in the order of its sentence: its name, when (the filters, with the number of messages of the log they find as they are changed), change, send to, stop and enabled. Show... (in the dialog, and below the table for the rule selected) opens a window with the messages of the log the rule finds: the columns of Messages, newest first, 100 a page with Newer and Older.
 
 The tool tip of the table of the rules recalls how they work.
 

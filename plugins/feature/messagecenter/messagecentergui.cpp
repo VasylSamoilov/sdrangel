@@ -16,6 +16,8 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include <QApplication>
+#include <memory>
+
 #include <QDateTime>
 #include <QStyledItemDelegate>
 #include <QTextDocument>
@@ -1223,11 +1225,21 @@ void MessageCenterGUI::buildRoutes(QWidget *container)
     QToolButton *down = iconButton(container, ":/arrow_down.png", "Move the rule down: it is checked later");
     QToolButton *exportRouting = iconButton(container, ":/save.png", "Save the rules, the sinks and the sources to a JSON file");
     QToolButton *importRouting = iconButton(container, ":/load.png", "Replace the rules, the sinks and the sources with those of a JSON file");
+    QPushButton *show = new QPushButton("Show...", container);
+    show->setToolTip("The messages of the log the rule selected finds, in a window: newest first, 100 a page");
+    connect(show, &QPushButton::clicked, this, [this]() {
+        const int row = m_routesTable->currentRow();
+
+        if ((row >= 0) && (row < (int) m_settings.m_routes.size())) {
+            showMatches(m_settings.m_routes[row].m_filter, m_settings.m_routes[row].m_name);
+        }
+    });
     buttons->addWidget(add);
     buttons->addWidget(edit);
     buttons->addWidget(remove);
     buttons->addWidget(up);
     buttons->addWidget(down);
+    buttons->addWidget(show);
     buttons->addStretch();
 
     // The presets: the routes and the sinks of each, in place of those set (after a question)
@@ -2545,6 +2557,85 @@ void MessageCenterGUI::refreshRoutes()
     }
 }
 
+// The messages of the log a filter selects, in a window of their own: the table of Messages, newest first, 100 a page
+// with Newer and Older. The log as it is when the window opens. A child of parent: usable over a dialog being shown
+void MessageCenterGUI::showMatches(const MessageCenterFilter& filter, const QString& title, QWidget *parent)
+{
+    // The messages found, oldest first, kept by the window
+    std::shared_ptr<std::vector<MessageRecord>> found = std::make_shared<std::vector<MessageRecord>>(m_center->engine().select(filter));
+    QDialog *window = new QDialog(parent ? parent : this);
+    window->setAttribute(Qt::WA_DeleteOnClose);
+    window->setWindowTitle(title.isEmpty() ? QString("Messages found") : QString("Messages found: %1").arg(title));
+    QVBoxLayout *layout = new QVBoxLayout(window);
+    QLabel *summary = new QLabel(QString("When a message is %1").arg(filter.isEmpty() ? QString("anything") : filterSummary(filter)), window);
+    summary->setWordWrap(true);
+    PagingMessageTable *table = new PagingMessageTable(window);
+    table->setDefaultColumns({PagingMessageTable::ColDate, PagingMessageTable::ColTime, PagingMessageTable::ColDirection,
+        PagingMessageTable::ColProtocol, PagingMessageTable::ColPolarity, PagingMessageTable::ColAddress, PagingMessageTable::ColType,
+        PagingMessageTable::ColMessage});
+    table->setContactInAddress(true);
+    table->setSingleLineMessages(true);
+    table->setMaxRows(m_pageRows);
+    QHBoxLayout *bar = new QHBoxLayout();
+    QLabel *status = new QLabel(window);
+    QToolButton *newer = new QToolButton(window);
+    newer->setText("Newer");
+    QToolButton *older = new QToolButton(window);
+    older->setText("Older");
+    bar->addWidget(status);
+    bar->addStretch(1);
+    bar->addWidget(newer);
+    bar->addWidget(older);
+    layout->addWidget(summary);
+    layout->addWidget(table);
+    layout->addLayout(bar);
+
+    // A page: offset messages from the newest; shown oldest at the top, as the log
+    std::shared_ptr<int> offset = std::make_shared<int>(0);
+    auto showPage = [table, status, newer, older, offset, found]() {
+        const int total = (int) found->size();
+        const int last = total - *offset;                       // One past the newest of the page
+        const int first = std::max(0, last - m_pageRows);
+        table->setUpdatesEnabled(false);
+        table->setRowCount(0);
+
+        for (int i = first; i < last; i++) {
+            table->addRecord((*found)[i]);
+        }
+
+        table->setUpdatesEnabled(true);
+        table->scrollToBottom();
+        status->setText(total == 0 ? QString("None in the log")
+            : QString("%1 to %2 of %3, newest first").arg(*offset + 1).arg(*offset + (last - first)).arg(total));
+        newer->setEnabled(*offset > 0);
+        older->setEnabled(first > 0);
+    };
+    connect(newer, &QToolButton::clicked, window, [offset, showPage]() {
+        *offset = std::max(0, *offset - m_pageRows);
+        showPage();
+    });
+    connect(older, &QToolButton::clicked, window, [offset, found, showPage]() {
+        if (*offset + m_pageRows < (int) found->size())
+        {
+            *offset += m_pageRows;
+            showPage();
+        }
+    });
+    window->resize(640, 420);
+    window->show();
+    // The widths of the columns of Messages (its sizes fit the chips), the others to their contents
+    table->sizeColumns();
+
+    for (int c = 0; c < PagingMessageTable::ColumnCount; c++)
+    {
+        if ((c != PagingMessageTable::ColMessage) && (m_logTable->columnWidth(c) > 0)) {
+            table->setColumnWidth(c, m_logTable->columnWidth(c));
+        }
+    }
+
+    showPage();
+}
+
 // A rule as a sentence, on three lines: its name and when (the filter, how many messages of the log it finds), the
 // changes (marks, decoding), where it sends (and stop). Off: grey
 QString MessageCenterGUI::ruleSentence(const MessageCenterEngine::Route& route) const
@@ -2884,7 +2975,16 @@ void MessageCenterGUI::editRoute(int index, const MessageCenterEngine::Route *pr
     };
     count();
     connect(filter, &MessageCenterFilterWidget::changed, &dialog, count);
-    layout->addWidget(finds);
+    QPushButton *showFound = new QPushButton("Show...", &dialog);
+    showFound->setToolTip("The messages of the log the filter selects now, in a window: newest first, 100 a page");
+    connect(showFound, &QPushButton::clicked, &dialog, [this, filter, name, &dialog]() {
+        showMatches(filter->filter(), name->text().trimmed(), &dialog);
+    });
+    QHBoxLayout *findsLine = new QHBoxLayout();
+    findsLine->addWidget(finds);
+    findsLine->addWidget(showFound);
+    findsLine->addStretch(1);
+    layout->addLayout(findsLine);
     QList<QCheckBox*> sinkChecks;
 
     QStringList sinks = {"log", "queue"};
