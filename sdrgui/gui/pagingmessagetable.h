@@ -18,6 +18,8 @@
 #ifndef SDRGUI_GUI_PAGINGMESSAGETABLE_H_
 #define SDRGUI_GUI_PAGINGMESSAGETABLE_H_
 
+#include <functional>
+
 #include <QByteArray>
 #include <QHash>
 #include <QList>
@@ -77,6 +79,14 @@ public:
     bool setColumns(const QByteArray& state);
     //!< Rows kept, the oldest go first
     void setMaxRows(int rows) { m_maxRows = rows; }
+    //!< The messages on one line, cut at the edge of their column (the whole text in the tool tip and the details): rows
+    //!< of one height. Else they wrap to the width of their column
+    void setSingleLineMessages(bool single);
+    bool singleLineMessages() const { return m_singleLineMessages; }
+    //!< The address column shows the contact of the address book (its icon and name) when the message has one
+    void setContactInAddress(bool contact) { m_contactInAddress = contact; }
+    //!< Actions of the owner of the table added to the menu of a row, for its message
+    void setRowMenuExtender(const std::function<void(QMenu&, const MessageRecord&)>& extender) { m_rowMenuExtender = extender; }
     //!< The record is a row, or updates the row of its id. Newest at the bottom: the view follows while it is at the
     //!< bottom. While a row is selected or the view is not at the bottom, a new record waits (the rows shown do not
     //!< move) and a button says how many: they come when it is pressed, or the view is at the bottom again with no
@@ -153,6 +163,9 @@ protected:
 
 private:
     int m_maxRows = 1000;
+    bool m_contactInAddress = false;
+    bool m_singleLineMessages = false;
+    std::function<void(QMenu&, const MessageRecord&)> m_rowMenuExtender;
     //! New records that wait while the view does not follow (a row selected, or scrolled up), with their state
     std::vector<std::pair<MessageRecord, QString>> m_waiting;
     QToolButton *m_waitingButton;

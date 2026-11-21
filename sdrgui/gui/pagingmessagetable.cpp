@@ -73,6 +73,13 @@ const int chipTextsRole = Qt::UserRole + 5;     // On the info item: the label o
 const int chipTipsRole = Qt::UserRole + 6;      // On the info item: the tool tip of each chip
 const int marksIconRole = Qt::UserRole + 7;     // On the message item: the icons of its marks (a voice message: its play icon)
 
+// The messages wrap to the width of their column, unless the table shows them on one line
+bool messagesWrap(const QObject *view)
+{
+    const PagingMessageTable *table = qobject_cast<const PagingMessageTable*>(view);
+    return !table || !table->singleLineMessages();
+}
+
 class HtmlDelegate : public QStyledItemDelegate
 {
 public:
@@ -112,7 +119,7 @@ public:
         doc.setDocumentMargin(1);
         doc.setDefaultFont(opt.font);
         doc.setHtml(html);
-        if (index.column() == PagingMessageTable::ColMessage) {
+        if ((index.column() == PagingMessageTable::ColMessage) && messagesWrap(parent())) {
             doc.setTextWidth(textRect.width());
         }
         painter->save();
@@ -136,7 +143,7 @@ public:
         const QTableView *view = qobject_cast<const QTableView *>(parent());
         const QIcon icon = index.data(Qt::DecorationRole).value<QIcon>();
         const int iconWidth = icon.isNull() ? 0 : icon.availableSizes().value(0, QSize(16, 16)).width() + 4;
-        const int textWidth = (view && (index.column() == PagingMessageTable::ColMessage))
+        const int textWidth = (view && (index.column() == PagingMessageTable::ColMessage) && messagesWrap(parent()))
             ? std::max(20, view->columnWidth(index.column()) - 8 - iconWidth) : -1;
 
         // Laying out HTML is slow: the size of the same HTML at the same width and font is kept (the chips and the
@@ -334,7 +341,7 @@ PagingMessageTable::PagingMessageTable(QWidget *parent) :
     connect(horizontalHeader(), &QHeaderView::sectionResized, this, &PagingMessageTable::columnsChanged);
     // The messages wrap to the width of their column: the rows follow it
     connect(horizontalHeader(), &QHeaderView::sectionResized, this, [this](int logicalIndex, int, int) {
-        if (logicalIndex == ColMessage) {
+        if ((logicalIndex == ColMessage) && !m_singleLineMessages) {
             resizeRowsToContents();
         }
     });
@@ -384,8 +391,16 @@ void PagingMessageTable::showWaitingButton()
 
 void PagingMessageTable::resizeEvent(QResizeEvent *event)
 {
+    // A table following the newest messages (at the bottom, nothing selected) keeps following them when its size
+    // changes (the window laid out when it opens, made higher): else it would hold the new rows
+    const QScrollBar *sb = verticalScrollBar();
+    const bool following = !selectionModel()->hasSelection() && (sb->value() >= sb->maximum());
+
     QTableWidget::resizeEvent(event);
 
+    if (following) {
+        QTimer::singleShot(0, this, [this]() { scrollToBottom(); });
+    }
     if (!m_waiting.empty()) {
         showWaitingButton();
     }
@@ -1019,7 +1034,24 @@ void PagingMessageTable::fillRow(int row, const MessageRecord& record, const QSt
             inverted ? tr("Inverted polarity") : tr("Normal polarity"));
     }
 
-    cell(ColAddress, record.m_address);
+    // Who: the contact of the address book when there is one (in its colour), else the address
+    {
+        const QString name = d.value("contact").toString();
+
+        if (m_contactInAddress && !name.isEmpty())
+        {
+            const quint32 color = (quint32) d.value("contact_color").toULongLong();
+            const QString html = (color != 0)
+                ? QString("<span style=\"color:%1\">%2</span>").arg(QColor::fromRgba(color).name(), name.toHtmlEscaped())
+                : QString();
+            QTableWidgetItem *addressItem = cell(ColAddress, name, html, tr("%1, address %2").arg(name, record.m_address));
+            addressItem->setIcon(contactIcon(d.value("contact_icon").toString()));
+        }
+        else
+        {
+            cell(ColAddress, record.m_address);
+        }
+    }
     cell(ColType, record.m_msgType, typeChip(record.m_msgType), record.m_msgType);
 
     // Message, with the alternative decode in grey italics. With the status of each character: received in the
@@ -1059,6 +1091,19 @@ void PagingMessageTable::fillRow(int row, const MessageRecord& record, const QSt
 
     if (markText.isValid()) {
         messageHtml = QString("<span style=\"color:%1\">%2</span>").arg(markText.name(), messageHtml);
+    }
+
+    // A page of the Message Center that did not go: why, after its text, where there is room for it
+    if (d.contains("page_state") && record.m_channel.isEmpty())
+    {
+        const QString pageState = d.value("page_state").toString();
+        const QString reason = d.value("page_reason").toString();
+
+        if (((pageState == "dead") || (pageState == "cancelled")) && !reason.isEmpty())
+        {
+            messageHtml += QString(" <span style=\"color:#ff7777\">(%1)</span>").arg(reason.toHtmlEscaped());
+            messageTip += QString("\n%1").arg(tr("Not sent: %1").arg(reason));
+        }
     }
 
     QTableWidgetItem *messageItem = cell(ColMessage, text, messageHtml, messageTip);
@@ -1119,7 +1164,36 @@ void PagingMessageTable::fillRow(int row, const MessageRecord& record, const QSt
             tr("%1 bit errors corrected, %2 codewords uncorrectable").arg(record.m_errorsCorrected).arg(record.m_errorsUncorrectable));
     }
 
-    cell(ColState, state);
+    // The state: as given, else that of a page of the Message Center (waiting, failed with its reason...), else sent for
+    // a message a transmitter sent
+    if (!state.isEmpty())
+    {
+        cell(ColState, state);
+    }
+    else if (d.contains("page_state") && record.m_channel.isEmpty())
+    {
+        const QString pageState = d.value("page_state").toString();
+        const QString reason = d.value("page_reason").toString();
+        const QString shown = ((pageState == "pending") || (pageState == "queued")) ? tr("waiting")
+            : (pageState == "claimed") ? tr("claimed")
+            : (pageState == "transmitted") ? tr("on air")
+            : (pageState == "sent") ? tr("sent")
+            : (pageState == "cancelled") ? tr("cancelled")
+            : (pageState == "dead") ? tr("failed")
+            : tr("not sent");
+        // The reason in the tool tip, and after the text of the message
+        const QString tip = reason.isEmpty() ? shown : QString("%1: %2").arg(shown, reason);
+        const bool bad = (pageState == "dead") || (pageState == "cancelled") || (pageState.isEmpty());
+        cell(ColState, shown, bad ? QString("<span style=\"color:#ff7777\">%1</span>").arg(shown.toHtmlEscaped()) : QString(), tip);
+    }
+    else if (record.m_direction == MessageRecord::DirectionTX)
+    {
+        cell(ColState, tr("sent"));
+    }
+    else
+    {
+        cell(ColState, QString());
+    }
 
     // The colour of the row of its marks, on every cell (none: a row decoded again loses the one it had)
     if (markBackground.isValid() || d.contains("marks"))
@@ -1135,8 +1209,11 @@ void PagingMessageTable::fillRow(int row, const MessageRecord& record, const QSt
         }
     }
 
-    // The height of the row follows its cells (a message decoded again may need more or fewer lines)
-    resizeRowToContents(row);
+    // The height of the row follows its cells (a message decoded again may need more or fewer lines); one line each
+    // when the messages are on one line
+    if (!m_singleLineMessages) {
+        resizeRowToContents(row);
+    }
 }
 
 void PagingMessageTable::addRecord(const MessageRecord& record, const QString& state)
@@ -1601,6 +1678,24 @@ void PagingMessageTable::showGroupMembers(const MessageRecord& record)
     dialog->show();
 }
 
+void PagingMessageTable::setSingleLineMessages(bool single)
+{
+    m_singleLineMessages = single;
+
+    // Rows of one line of text, all of one height; the last column (the message) takes the width left
+    if (single)
+    {
+        verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
+        verticalHeader()->setDefaultSectionSize(fontMetrics().height() + 6);
+    }
+    else
+    {
+        verticalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    }
+
+    horizontalHeader()->setSectionResizeMode(ColMessage, single ? QHeaderView::Stretch : QHeaderView::Interactive);
+}
+
 QStyledItemDelegate *PagingMessageTable::createHtmlDelegate(QObject *parent)
 {
     return new HtmlDelegate(parent);
@@ -1851,6 +1946,14 @@ void PagingMessageTable::showRowMenu(const QPoint& pos)
     {
         connect(menu.addAction(tr("Group members (%1)...").arg(record.m_protocolData.value("group_capcodes").toList().size())),
             &QAction::triggered, this, [this, record]() { showGroupMembers(record); });
+    }
+
+    // The actions of the owner of the table on the message (the Message Center: page again, contact, filter)
+    if (parsed && m_rowMenuExtender)
+    {
+        menu.addSeparator();
+        m_rowMenuExtender(menu, record);
+        menu.addSeparator();
     }
 
     // A route of the Message Center filled from the message

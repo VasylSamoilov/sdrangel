@@ -163,6 +163,9 @@ QString filterSummary(const MessageCenterFilter& f)
     return parts.isEmpty() ? QString("everything") : parts.join(", ");
 }
 
+// The saved columns of the table of the Messages tab start with it
+const QByteArray logColumnsTag("MCM1:");
+
 // A button with an icon of the project and its tool tip, as the buttons of the log of the Pager demodulator
 QToolButton *iconButton(QWidget *parent, const char *icon, const QString& tip)
 {
@@ -722,10 +725,16 @@ void MessageCenterGUI::buildLog(QWidget *container)
     m_logTable->setMinimumHeight(80);
     m_logTable->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_logTable->setMaxRows(m_maxLogRows);
-    m_logTable->setDefaultColumns({PagingMessageTable::ColDate, PagingMessageTable::ColTime, PagingMessageTable::ColDirection, PagingMessageTable::ColChannel,
-        PagingMessageTable::ColProtocol, PagingMessageTable::ColRate, PagingMessageTable::ColPolarity, PagingMessageTable::ColContact,
-        PagingMessageTable::ColAddress, PagingMessageTable::ColType, PagingMessageTable::ColMessage, PagingMessageTable::ColInfo});
-    m_logTable->setToolTip("The messages the routes put in the log. Click the icon of a voice message to play it.\nDouble-click a message for all its fields. Right click the header to choose the columns");
+    // The message always in view: a few columns by default (who is the contact when there is one), the others in
+    // the menu of the header
+    m_logTable->setDefaultColumns({PagingMessageTable::ColTime, PagingMessageTable::ColProtocol, PagingMessageTable::ColAddress,
+        PagingMessageTable::ColType, PagingMessageTable::ColMessage, PagingMessageTable::ColState});
+    m_logTable->setContactInAddress(true);
+    m_logTable->setSingleLineMessages(true);
+    m_logTable->setRowMenuExtender([this](QMenu& menu, const MessageRecord& record) { messageMenu(menu, record); });
+    m_logTable->setToolTip("The messages received and sent. Click the icon of a voice message to play it.\n"
+        "Double-click a message for all its fields; right click it for what to do with it (page it again, add a contact,\n"
+        "only its pager). Right click the header to choose the columns");
     buildQueryBar(container);
     layout->addWidget(m_queryBar);
     layout->addWidget(m_logFilter);
@@ -785,7 +794,7 @@ void MessageCenterGUI::buildLog(QWidget *container)
         }
     });
     connect(m_logTable, &PagingMessageTable::columnsChanged, this, [this]() {
-        m_settings.m_logColumns = m_logTable->columns();
+        m_settings.m_logColumns = logColumnsTag + m_logTable->columns();
         applySettings(QStringList("logColumns"));
     });
     connect(m_logTable, &PagingMessageTable::audioDeviceChanged, this, [this](const QString& deviceName) {
@@ -1767,9 +1776,15 @@ void MessageCenterGUI::displaySettings()
     refreshFiles();
     m_doApplySettings = true;
 
-    // The columns the user chose; the first time the usual ones
-    if (!m_logTable->setColumns(m_settings.m_logColumns)) {
+    // The columns the user chose; the first time the usual ones. Saved with the tag of the columns of the Messages
+    // tab: those of the log of before (all the columns) give the usual ones once
+    if (!m_settings.m_logColumns.startsWith(logColumnsTag)
+        || !m_logTable->setColumns(m_settings.m_logColumns.mid(logColumnsTag.size())))
+    {
         m_logTable->sizeColumns();
+        // The state of a page before its message: the message takes the width left
+        QHeaderView *header = m_logTable->horizontalHeader();
+        header->moveSection(header->visualIndex(PagingMessageTable::ColState), header->visualIndex(PagingMessageTable::ColMessage));
     }
     m_logTable->setAudioDevice(m_settings.m_voicePlaybackDeviceName);
     getRollupContents()->restoreState(m_rollupState);
@@ -1893,7 +1908,27 @@ void MessageCenterGUI::buildQueryBar(QWidget *container)
     m_older->setToolTip(QString("The %1 older messages").arg(m_pageRows));
     m_queryStatus = new QLabel(m_queryBar);
     m_refreshTimer = new QTimer(this);
+    // The filters take room: shown when asked
+    m_filtersButton = new QToolButton(m_queryBar);
+    m_filtersButton->setText(tr("Filters"));
+    m_filtersButton->setCheckable(true);
+    m_filtersButton->setToolTip(tr("Show the filters of the messages: protocol, direction, polarity, type, channel, "
+        "address, text, a field"));
+    m_logFilter->setVisible(false);
+    connect(m_filtersButton, &QToolButton::toggled, m_logFilter, &QWidget::setVisible);
+    m_showFragments = new QCheckBox(tr("Fragments"), m_queryBar);
+    m_showFragments->setToolTip(tr("A FLEX message sent in fragments: each fragment as a row of its own as well (they "
+        "come before the whole message)"));
+    connect(m_showFragments, &QCheckBox::toggled, this, [this]() {
+        if (m_queryMode) {
+            runQuery(false);
+        } else {
+            m_shownLogged = -1;     // All the rows again
+            refreshLog();
+        }
+    });
 
+    bar->addWidget(m_filtersButton);
     bar->addWidget(m_liveButton);
     bar->addWidget(m_queryButton);
     bar->addWidget(m_range);
@@ -1903,6 +1938,7 @@ void MessageCenterGUI::buildQueryBar(QWidget *container)
     bar->addWidget(m_refresh);
     bar->addWidget(m_queryStatus);
     bar->addStretch(1);
+    bar->addWidget(m_showFragments);
     bar->addWidget(m_newer);
     bar->addWidget(m_older);
 
@@ -1951,7 +1987,8 @@ void MessageCenterGUI::setLogMode(bool query)
     m_queryButton->setChecked(query);
     const bool custom = m_range->currentData().toInt() < 0;
 
-    for (QWidget *w : std::initializer_list<QWidget*>{m_range, m_refresh, m_queryStatus, m_newer, m_older}) {
+    // The status says what is shown in both: live, or what the query found
+    for (QWidget *w : std::initializer_list<QWidget*>{m_range, m_refresh, m_newer, m_older}) {
         w->setVisible(query);
     }
     for (QWidget *w : m_queryBar->findChildren<QPushButton*>()) {
@@ -2040,8 +2077,11 @@ void MessageCenterGUI::showQueryResult(int number, const MessageCenterArchiveRes
     m_logTable->setUpdatesEnabled(false);
     m_logTable->setRowCount(0);
 
-    for (auto it = result.m_records.rbegin(); it != result.m_records.rend(); ++it) {
-        m_logTable->addRecord(*it);
+    for (auto it = result.m_records.rbegin(); it != result.m_records.rend(); ++it)
+    {
+        if (shownInLog(*it)) {
+            m_logTable->addRecord(*it);
+        }
     }
 
     m_logTable->selectId(selected);
@@ -2089,7 +2129,7 @@ void MessageCenterGUI::refreshLog()
             done.insert(id);
             const MessageRecord *record = engine.find(id);
 
-            if (record && filter.matches(*record)) {
+            if (record && filter.matches(*record) && shownInLog(*record)) {
                 m_logTable->addRecord(*record);
             }
             else
@@ -2103,11 +2143,22 @@ void MessageCenterGUI::refreshLog()
             }
         }
 
+        showLiveCount();
         return;
     }
 
     m_shownLogged = engine.logged();
-    std::vector<MessageRecord> records = engine.select(m_logFilter->filter());
+    std::vector<MessageRecord> selectedRecords = engine.select(m_logFilter->filter());
+    std::vector<MessageRecord> records;
+    records.reserve(selectedRecords.size());
+
+    for (MessageRecord& record : selectedRecords)
+    {
+        if (shownInLog(record)) {
+            records.push_back(std::move(record));
+        }
+    }
+
     size_t first = (records.size() > (size_t) m_maxLogRows) ? records.size() - m_maxLogRows : 0;
     QString selected = m_logTable->selectedId();
 
@@ -2121,6 +2172,104 @@ void MessageCenterGUI::refreshLog()
     m_logTable->selectId(selected);
     m_logTable->setUpdatesEnabled(true);
     m_logTable->scrollToBottom();
+    showLiveCount();
+}
+
+// A fragment of a FLEX message is a record of its own (the receiver reports each fragment, then the whole
+// message): shown only when asked, a message is one row
+bool MessageCenterGUI::shownInLog(const MessageRecord& record) const
+{
+    return m_showFragments->isChecked() || !record.m_protocolData.value("is_fragment").toBool();
+}
+
+// The menu of a message: page its address again (the Send tab filled), add its sender as a contact, show only the
+// messages of its pager; a page of the queue: requeue it (failed) or cancel it (waiting)
+void MessageCenterGUI::messageMenu(QMenu& menu, const MessageRecord& record)
+{
+    if ((record.m_kind != MessageRecord::KindMessage) || record.m_address.isEmpty()) {
+        return;
+    }
+
+    // The destination of the record as a page: the address digits, the function, the polarity
+    RadioPagingPage page;
+    const QVariantMap& d = record.m_protocolData;
+    QString digits;
+
+    for (const QChar c : record.m_address)
+    {
+        if (!c.isDigit()) {
+            break;
+        }
+        digits.append(c);
+    }
+
+    page.m_protocol = record.m_protocol;
+    page.m_transmitter = m_composer->transmitter();
+    page.m_address = (record.m_protocol == "pocsag") && d.contains("ric") ? d.value("ric").toString() : digits;
+    page.m_function = (record.m_protocol == "pocsag") ? d.value("function").toInt()
+        : (record.m_protocol == "gsc") ? std::max(0, d.value("address_number").toInt() - 1) : 0;
+    page.m_polarity = (record.m_polarity == MessageRecord::PolarityNormal) ? 0
+        : (record.m_polarity == MessageRecord::PolarityInverted) ? 1 : -1;
+
+    if (!page.m_address.isEmpty())
+    {
+        connect(menu.addAction(QIcon(":/tx.png"), tr("Page this address...")), &QAction::triggered, this, [this, page]() {
+            m_composer->setDestination(page.m_transmitter, page.m_protocol, page.m_address, page.m_function, page.m_polarity);
+
+            for (int i = 0; i < m_tabs->count(); i++)
+            {
+                if (m_tabs->tabToolTip(i).startsWith(tr("Send a page"))) {
+                    m_tabs->setCurrentIndex(i);
+                }
+            }
+        });
+        connect(menu.addAction(QIcon(":/star.png"), tr("Add as a contact...")), &QAction::triggered, this, [this, page]() {
+            const MessageCenterContact preset = contactOfPage(page);
+            editContact(-1, &preset);
+        });
+    }
+
+    connect(menu.addAction(QIcon(":/funnel.png"), tr("Only this pager")), &QAction::triggered, this, [this, record]() {
+        MessageCenterFilter f = m_logFilter->filter();
+        f.m_address = QString("^%1$").arg(QRegularExpression::escape(record.m_address));
+        m_logFilter->setFilter(f);
+        m_filtersButton->setChecked(true);      // The filter shown, to be cleared
+    });
+
+    // A page of the Message Center that did not go, or is still waiting
+    const QString pageState = d.value("page_state").toString();
+
+    if ((record.m_direction == MessageRecord::DirectionTX) && record.m_channel.isEmpty() && !pageState.isEmpty())
+    {
+        if ((pageState == "dead") || (pageState == "cancelled"))
+        {
+            connect(menu.addAction(tr("Send again (requeue)")), &QAction::triggered, this, [this, record]() {
+                m_center->getInputMessageQueue()->push(MessageCenter::MsgPageAction::create(record.m_id,
+                    MessageCenter::MsgPageAction::Requeue));
+            });
+        }
+        else if ((pageState == "pending") || (pageState == "queued"))
+        {
+            connect(menu.addAction(tr("Cancel the page")), &QAction::triggered, this, [this, record]() {
+                m_center->getInputMessageQueue()->push(MessageCenter::MsgPageAction::create(record.m_id,
+                    MessageCenter::MsgPageAction::Cancel));
+            });
+        }
+    }
+}
+
+// Live: how many messages are shown, of how many in the log
+void MessageCenterGUI::showLiveCount()
+{
+    if (m_queryMode) {
+        return;
+    }
+
+    const int shown = m_logTable->rowCount();
+    const int inLog = (int) m_center->engine().log().size();
+    m_queryStatus->setText(tr("Live: %1 of %2").arg(shown).arg(inLog));
+    m_queryStatus->setToolTip(tr("The newest %1 messages the filters select, as they come: %2 shown, %3 in the log.\n"
+        "Query searches the history").arg(m_maxLogRows).arg(shown).arg(inLog));
 }
 
 void MessageCenterGUI::refreshEndpoints()

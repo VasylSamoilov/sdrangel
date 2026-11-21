@@ -43,6 +43,7 @@
 class PluginAPI;
 class FeatureUISet;
 class QDateTimeEdit;
+class QMenu;
 class QLabel;
 class QTimer;
 class QToolButton;
@@ -131,6 +132,8 @@ private:
     QDateTimeEdit *m_to;
     QComboBox *m_refresh;
     QLabel *m_queryStatus;
+    QCheckBox *m_showFragments;         //!< The fragments of FLEX messages as rows of their own
+    QToolButton *m_filtersButton;       //!< Shows or hides the filters of the log
     QToolButton *m_newer;
     QToolButton *m_older;
     QTimer *m_refreshTimer;
@@ -197,6 +200,11 @@ private:
     bool handleMessage(const Message& message);
     void refresh();
     void refreshLog();
+    bool shownInLog(const MessageRecord& record) const;
+    void showLiveCount();
+    //! The actions of the menu of a message of the log: page it again, add its sender as a contact, only its pager,
+    //! requeue or cancel a page
+    void messageMenu(QMenu& menu, const MessageRecord& record);
     void refreshEndpoints();
     void refreshQueue();
     void refreshComposeTransmitters();
