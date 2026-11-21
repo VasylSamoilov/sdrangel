@@ -3216,13 +3216,38 @@ void MessageCenterGUI::editRoute(int index, const MessageCenterEngine::Route *pr
         target->addItem(QString("%1 (%2)").arg(f.m_name, f.typeOrDefault()), f.m_name);
     }
 
+    // The last item opens the editor of a new destination, selected when it is saved
+    const QString newTarget = "\n new";
+    target->addItem("New destination...", newTarget);
     target->setCurrentIndex(std::max(0, target->findData(route.m_target)));
-    target->setToolTip("A file, UDP, a command, speech or the Map: added in the Connections tab");
-    sendForm.second->addRow("To", target);
 
-    if (target->count() == 0) {
-        sendForm.second->addRow(note("There is no destination yet: add one in the Connections tab."));
+    if (target->currentData() == newTarget) {
+        target->setCurrentIndex(-1);    // No destination yet: none chosen
     }
+
+    target->setToolTip("A file, UDP, a command, speech or the Map, as in the Connections tab; New destination... adds one");
+    sendForm.second->addRow("To", target);
+    std::shared_ptr<int> lastTarget = std::make_shared<int>(target->currentData() == newTarget ? -1 : target->currentIndex());
+    connect(target, QOverload<int>::of(&QComboBox::activated), &dialog, [this, target, newTarget, lastTarget](int index) {
+        if (target->itemData(index) != newTarget)
+        {
+            *lastTarget = index;
+            return;
+        }
+
+        const QString name = editFile(true, -1, true);
+
+        if (name.isEmpty())
+        {
+            target->setCurrentIndex(*lastTarget);   // -1: none chosen yet
+            return;
+        }
+
+        const MessageCenterFileSetting& added = m_settings.m_sinks.back();
+        target->insertItem(index, QString("%1 (%2)").arg(name, added.typeOrDefault()), name);
+        target->setCurrentIndex(index);
+        *lastTarget = index;
+    });
 
     // Mark: an icon, the colour of the text, of the row
     auto markForm = form();
@@ -3443,7 +3468,8 @@ void MessageCenterGUI::editRoute(int index, const MessageCenterEngine::Route *pr
         r.m_filter = filter->filter();
         r.m_enabled = enabled->isChecked();
         r.m_action = (Rule::Action) action->currentData().toInt();
-        r.m_target = (r.m_action == Rule::ActionSend) ? target->currentData().toString() : QString();
+        // "New destination..." is never a target: none chosen
+        r.m_target = ((r.m_action == Rule::ActionSend) && (target->currentData() != newTarget)) ? target->currentData().toString() : QString();
         r.m_mark.clear();
 
         if (r.m_action == Rule::ActionMark)
@@ -3472,8 +3498,11 @@ void MessageCenterGUI::editRoute(int index, const MessageCenterEngine::Route *pr
 
     // A rule that cannot work says why, the dialog stays
     connect(ok, &QPushButton::clicked, &dialog, [&]() {
-        const QString why = ruleOfDialog().check();
-        error->setText(why);
+        const Rule rule = ruleOfDialog();
+        const QString why = rule.check();
+        // The dialog is of this rule: its name before the reason is left out ("Rule rule 2: send to where")
+        const QString prefix = QString("Rule %1: ").arg(rule.m_name);
+        error->setText(why.startsWith(prefix) ? why.mid(prefix.size()) : why);
 
         if (why.isEmpty()) {
             dialog.accept();
@@ -3566,7 +3595,7 @@ void MessageCenterGUI::removeRoute()
 }
 
 // A sink or a source: its type and what it works on
-void MessageCenterGUI::editFile(bool sink, int index)
+QString MessageCenterGUI::editFile(bool sink, int index, bool forRule)
 {
     QList<MessageCenterFileSetting>& list = sink ? m_settings.m_sinks : m_settings.m_sources;
     const bool isNew = (index < 0) || (index >= list.size());
@@ -3735,7 +3764,7 @@ void MessageCenterGUI::editFile(bool sink, int index)
     // A sink takes only what rules send to it: the rules that do, and a new rule that sends every message to it
     QCheckBox *newRoute = nullptr;
 
-    if (sink)
+    if (sink && !forRule)
     {
         QWidget *routesBox = new QWidget(&dialog);
         QVBoxLayout *routesLayout = new QVBoxLayout(routesBox);
@@ -3780,7 +3809,7 @@ void MessageCenterGUI::editFile(bool sink, int index)
     for (;;)
     {
         if (dialog.exec() != QDialog::Accepted) {
-            return;
+            return QString();
         }
 
         const QString t = type->currentText();
@@ -3855,6 +3884,7 @@ void MessageCenterGUI::editFile(bool sink, int index)
 
     refreshFiles();
     applySettings(keys);
+    return setting.m_name;
 }
 
 void MessageCenterGUI::addSink()

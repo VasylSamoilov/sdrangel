@@ -115,6 +115,22 @@ public:
 
         // The text beside the icon, if the cell has one. The message wraps to the width of its column
         QRect textRect = opt.widget->style()->subElementRect(QStyle::SE_ItemViewItemText, &opt, opt.widget);
+        // Selected: the text in the selected text colour of SDRangel (black on its orange), as its other tables; the
+        // marks of the errors in darker colours, underlined, that stay readable on the orange
+        const bool selected = opt.state.testFlag(QStyle::State_Selected);
+
+        if (selected)
+        {
+            html.replace("color:#ff5252;", "color:#8b0000;text-decoration:underline;");
+            html.replace("color:#ff5252\"", "color:#8b0000;text-decoration:underline\"");
+            html.replace("color:#ffca28\"", "color:#5c3a00;text-decoration:underline\"");
+            // The light text of the rule sentences: the keywords, the values, the counts
+            html.replace("color:#88aacc\"", "color:#0d2a55\"");
+            html.replace("color:#e0e0e0\"", "color:#000000\"");
+            html.replace("color:#888888\"", "color:#4a2a00\"");
+            html.replace("color:#777777\"", "color:#4a2a00\"");
+        }
+
         QTextDocument doc;
         doc.setDocumentMargin(1);
         doc.setDefaultFont(opt.font);
@@ -126,7 +142,15 @@ public:
         // Never over the next cells: a text higher than its row (until the row is sized again) is cut
         painter->setClipRect(opt.rect);
         painter->translate(textRect.left(), opt.rect.top() + (opt.rect.height() - doc.size().height()) / 2);
-        doc.drawContents(painter, QRectF(0, 0, textRect.width(), opt.rect.height()));
+        QAbstractTextDocumentLayout::PaintContext context;
+        context.palette = opt.palette;
+        // The colour group the style draws the plain cells of the row with (FastItemDelegate does the same)
+        const QPalette::ColorGroup group = opt.state.testFlag(QStyle::State_Enabled)
+            ? (opt.state.testFlag(QStyle::State_Active) ? QPalette::Active : QPalette::Inactive) : QPalette::Disabled;
+        context.palette.setColor(QPalette::Text, opt.palette.color(group, selected ? QPalette::HighlightedText : QPalette::Text));
+        context.clip = QRectF(0, 0, textRect.width(), opt.rect.height());
+        painter->setClipRect(context.clip, Qt::IntersectClip);
+        doc.documentLayout()->draw(painter, context);
         painter->restore();
     }
 

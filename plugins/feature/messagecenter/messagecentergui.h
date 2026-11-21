@@ -264,7 +264,9 @@ private:
     //! A route: index -1 for a new one, filled from preset when it is given
     void editRoute(int index, const MessageCenterEngine::Route *preset = nullptr);
     //! A sink or a source: index -1 for a new one
-    void editFile(bool sink, int index);
+    //! The name of the sink or source saved, empty if cancelled. forRule: a new sink for the rule being edited (no
+    //! rule of its own offered)
+    QString editFile(bool sink, int index, bool forRule = false);
     void speak(const QString& text);
     void importFile();
     //! The messages the log filters select to a CSV file (columns of MessageRecord), as a CSV sink writes them
