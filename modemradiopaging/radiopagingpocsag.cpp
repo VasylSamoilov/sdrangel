@@ -318,6 +318,7 @@ int RadioPagingPocsag::scoreAlphanumeric(const std::string& text)
 
     int printable = 0;
     int bad = 0;
+    int quotes = 0;
 
     for (char c : text)
     {
@@ -327,9 +328,14 @@ int RadioPagingPocsag::scoreAlphanumeric(const std::string& text)
         } else {
             bad++;
         }
+        if (u == '"') {
+            quotes++;
+        }
     }
 
-    int score = (100 * (printable - 2 * bad)) / (int) text.size();
+    // A double quote takes half a character off: rare in a message, frequent in the 7-bit reading of a short numeric
+    // one (0612 4455 reads "B0"U, a tie with the numeric reading that an alphanumeric message won)
+    int score = (200 * (printable - 2 * bad) - 100 * quotes) / (2 * (int) text.size());
     return std::max(0, std::min(100, score));
 }
 

@@ -599,6 +599,25 @@ void testPocsagLongNumeric()
     check((in.m_type == "numeric") && (in.m_text == n.m_text), "POCSAG: a 15 digit numeric message is numeric");
     std::printf("      long alpha: %s %d / %s %d, 15 digits: %s %d / %s %d\n", ia.m_type.c_str(), ia.m_score, ia.m_altType.c_str(),
         ia.m_altScore, in.m_type.c_str(), in.m_score, in.m_altType.c_str(), in.m_altScore);
+
+    // A short numeric message whose 7-bit reading is printable: "0612 4455" reads "B0"U. The double quotes take a
+    // little off the alphanumeric reading (was a tie, which an alphanumeric message wins); a short alphanumeric
+    // message with quotes stays alphanumeric
+    RadioPagingPocsag::TxMessage shortNumeric = n;
+    shortNumeric.m_text = "0612 4455";
+    RadioPagingPocsag::TxMessage quoted = a;
+    quoted.m_text = "Say \"OK\"";
+    messages = decodeBits(RadioPagingPocsag::encode({ shortNumeric }).m_bits);
+    RadioPagingPocsag::Interpretation is = messages.empty() ? RadioPagingPocsag::Interpretation()
+        : RadioPagingPocsag::interpret(messages[0].m_rawData, messages[0].m_rawBits);
+    messages = decodeBits(RadioPagingPocsag::encode({ quoted }).m_bits);
+    RadioPagingPocsag::Interpretation iq = messages.empty() ? RadioPagingPocsag::Interpretation()
+        : RadioPagingPocsag::interpret(messages[0].m_rawData, messages[0].m_rawBits);
+    check((is.m_type == "numeric") && (is.m_text.rfind("0612 4455", 0) == 0),
+        "POCSAG: a short numeric message whose 7-bit reading has double quotes is numeric");
+    check((iq.m_type == "alphanumeric") && (iq.m_text == quoted.m_text), "POCSAG: a short alphanumeric message with double quotes is alphanumeric");
+    std::printf("      0612 4455: %s %d / %s %d (%s), Say \"OK\": %s %d / %s %d\n", is.m_type.c_str(), is.m_score, is.m_altType.c_str(),
+        is.m_altScore, is.m_altText.c_str(), iq.m_type.c_str(), iq.m_score, iq.m_altType.c_str(), iq.m_altScore);
 }
 
 void testPocsagSyncLoss()
