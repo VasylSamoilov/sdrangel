@@ -6382,10 +6382,11 @@ void MCPTools::registerMessageCenterTools()
         "and one of is, isNot, matches (regular expression on the whole value), lt, le, gt, ge: value; or present, absent: "
         "true}] on any field of the record or of its protocol data, e.g. capcode, ric, function, checksum, signature; all met), "
         "hideFragments, hideDuplicates, voiceOnly}}.\n"
-        "Sink (a destination of send): {name, type, ...}: file {path, format 0 JSON lines or 1 CSV}; udp {address, port, "
-        "format 0 Pager demodulator or 1 JSON}; command {text: the command, the message goes into its arguments: ${address} "
-        "${message} ${protocol} ${type} ${channel} ${mode} ${id} ${frequency} ${time} ${1}... ${field}}; speech {text}; map (the "
-        "position in the message on the Map).\n"
+        "Sink (a destination of send): {name, type, ..., rateCount, ratePeriod (1, 60 or 3600 s), rateMode (hold or drop)}: "
+        "file {path, format 0 JSON lines or 1 CSV}; udp {address, port, format 0 Pager demodulator or 1 JSON}; command {text: "
+        "the command, no shell, the message goes into its arguments: ${address} ${message} ${protocol} ${type} ${channel} ${mode} "
+        "${id} ${frequency} ${time} ${1}... ${field}, ${name:base64|json|url} encoded; env: MC_... variables; stdin: the record "
+        "as JSON}; speech {text}; map (the position in the message on the Map).\n"
         "Source: {name, type, ...}: file {path: JSON lines}; csv {path: a log of a message center or of the Pager "
         "demodulator}; udp {address (default 127.0.0.1), port}.",
         schema({

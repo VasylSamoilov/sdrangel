@@ -234,6 +234,9 @@ QString MessageCenterFileSetting::check(bool sink) const
     if (!(sink ? sinkTypes() : sourceTypes()).contains(type)) {
         return QString("%1: %2 is not a type of %3").arg(m_name).arg(type).arg(sink ? "sink" : "source");
     }
+    if (sink && (m_rateCount > 0) && (m_ratePeriod != 1) && (m_ratePeriod != 60) && (m_ratePeriod != 3600)) {
+        return QString("%1: the period of the limit is 1, 60 or 3600 s").arg(m_name);
+    }
     if (((type == "file") || (type == "csv")) && m_path.isEmpty()) {
         return QString("%1: a file needs a path").arg(m_name);
     }
@@ -341,6 +344,18 @@ QByteArray MessageCenterSettings::filesToJson(const QList<MessageCenterFileSetti
         if (file.m_background != 0) {
             o["background"] = (double) file.m_background;
         }
+        if (file.m_rateCount > 0)
+        {
+            o["rateCount"] = file.m_rateCount;
+            o["ratePeriod"] = file.m_ratePeriod;
+            o["rateMode"] = file.m_rateHold ? "hold" : "drop";
+        }
+        if (file.m_commandEnv) {
+            o["env"] = true;
+        }
+        if (file.m_commandStdin) {
+            o["stdin"] = true;
+        }
 
         array.append(o);
     }
@@ -366,6 +381,13 @@ QList<MessageCenterFileSetting> MessageCenterSettings::filesFromJson(const QByte
         file.m_icon = o["icon"].toString();
         file.m_color = (quint32) o["color"].toDouble(0);
         file.m_background = (quint32) o["background"].toDouble(0);
+        // A command of before (no limit set): at most 5 runs a second, as it was
+        const bool commandOfBefore = (file.m_type == "command") && !o.contains("rateCount");
+        file.m_rateCount = commandOfBefore ? 5 : std::max(0, o["rateCount"].toInt(0));
+        file.m_ratePeriod = std::max(1, o["ratePeriod"].toInt(1));
+        file.m_rateHold = o["rateMode"].toString("hold") != "drop";
+        file.m_commandEnv = o["env"].toBool(false);
+        file.m_commandStdin = o["stdin"].toBool(false);
         files.append(file);
     }
 

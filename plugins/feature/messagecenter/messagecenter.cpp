@@ -338,6 +338,7 @@ void MessageCenter::tick()
     }
 
     m_errors.append(errors);
+    m_engine.releaseHeld(now);      // The messages the limits of the sinks held that may go now
     m_engine.expireClaims(now, (qint64) m_settings.m_claimTimeoutSec * 1000);
     m_engine.sweep(now, (qint64) m_settings.m_silentSec * 1000);
 
@@ -555,9 +556,17 @@ void MessageCenter::applyEngineSettings()
     {
         std::unique_ptr<MessageCenterSink> made = makeSink(sink);
 
-        if (made) {
+        if (made)
+        {
             m_engine.addSink(std::move(made));
-        } else if (!sink.m_name.isEmpty()) {
+            MessageCenterEngine::RateLimit limit;
+            limit.m_count = sink.m_rateCount;
+            limit.m_periodMs = (qint64) sink.m_ratePeriod * 1000;
+            limit.m_hold = sink.m_rateHold;
+            m_engine.setRateLimit(sink.m_name, limit);
+        }
+        else if (!sink.m_name.isEmpty())
+        {
             m_errors.append(sink.check(true));
         }
     }
@@ -596,7 +605,8 @@ std::unique_ptr<MessageCenterSink> MessageCenter::makeSink(const MessageCenterFi
             (setting.m_format == 1) ? MessageCenterUdpSink::Json : MessageCenterUdpSink::PagerDemod));
     }
     if (type == "command") {
-        return std::unique_ptr<MessageCenterSink>(new MessageCenterCommandSink(setting.m_name, setting.m_text));
+        return std::unique_ptr<MessageCenterSink>(new MessageCenterCommandSink(setting.m_name, setting.m_text,
+            setting.m_commandEnv, setting.m_commandStdin));
     }
 
     // speech and map: done by the feature, in the thread of the message center
@@ -1042,6 +1052,8 @@ int MessageCenter::webapiReportGet(SWGSDRangel::SWGFeatureReport& response, QStr
         o["name"] = it.key();
         o["accepted"] = it.value().m_accepted;
         o["failed"] = it.value().m_failed;
+        o["dropped"] = it.value().m_dropped;
+        o["waiting"] = it.value().m_waiting;
         sinks.append(o);
     }
 

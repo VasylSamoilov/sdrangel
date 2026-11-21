@@ -17,6 +17,7 @@
 
 #include <QFile>
 #include <QJsonArray>
+#include <QUrl>
 #include <QJsonDocument>
 #include <QProcess>
 #include <QRegularExpression>
@@ -239,6 +240,16 @@ QString messageCenterSubstitute(const QString& text, const MessageRecord& record
 
         out += text.mid(pos, start - pos);
         QString name = text.mid(start + 2, end - start - 2);
+        // An encoding after the name: ${text:base64}, ${text:json} (a JSON string, with its quotes), ${text:url}
+        QString encoding;
+        const int colon = name.lastIndexOf(':');
+
+        if ((colon > 0) && QStringList({"base64", "json", "url"}).contains(name.mid(colon + 1)))
+        {
+            encoding = name.mid(colon + 1);
+            name = name.left(colon);
+        }
+
         bool isIndex;
         int index = name.toInt(&isIndex);
         bool known = true;
@@ -277,6 +288,14 @@ QString messageCenterSubstitute(const QString& text, const MessageRecord& record
             } else if (!field.isNull()) {
                 value = field.toVariant().toString();
             }
+        }
+
+        if (known && (encoding == "base64")) {
+            value = QString::fromLatin1(value.toUtf8().toBase64());
+        } else if (known && (encoding == "json")) {
+            value = QString::fromUtf8(QJsonDocument(QJsonArray({value})).toJson(QJsonDocument::Compact)).mid(1).chopped(1);
+        } else if (known && (encoding == "url")) {
+            value = QString::fromLatin1(QUrl::toPercentEncoding(value));
         }
 
         out += known ? value : text.mid(start, end - start + 1);
@@ -1348,17 +1367,72 @@ bool MessageCenterUdpSink::accept(const MessageRecord& record, QString& error)
 // Actions
 // ---------------------------------------------------------------------------
 
-MessageCenterCommandSink::MessageCenterCommandSink(const QString& name, const QString& command, Launcher launcher) :
+MessageCenterCommandSink::MessageCenterCommandSink(const QString& name, const QString& command, bool env, bool standardInput,
+    Launcher launcher) :
     m_name(name),
     m_command(command),
+    m_env(env),
+    m_stdin(standardInput),
     m_launcher(launcher)
 {
     if (!m_launcher)
     {
-        m_launcher = [](const QString& program, const QStringList& arguments) {
-            return QProcess::startDetached(program, arguments);
+        m_launcher = [](const Run& run) {
+            // Its arguments only: detached. With an environment or a standard input: a process of its own, deleted
+            // when it ends (its standard input written and closed at its start)
+            if (run.m_environment.isEmpty() && run.m_stdin.isEmpty()) {
+                return QProcess::startDetached(run.m_program, run.m_arguments);
+            }
+
+            QProcess *process = new QProcess();
+            QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+
+            for (const QString& variable : run.m_environment) {
+                environment.insert(variable.section('=', 0, 0), variable.section('=', 1));
+            }
+
+            process->setProcessEnvironment(environment);
+            process->setStandardOutputFile(QProcess::nullDevice());
+            process->setStandardErrorFile(QProcess::nullDevice());
+            QObject::connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), process, &QObject::deleteLater);
+            QObject::connect(process, &QProcess::errorOccurred, process, [process](QProcess::ProcessError error) {
+                if (error == QProcess::FailedToStart) {
+                    process->deleteLater();
+                }
+            });
+            process->start(run.m_program, run.m_arguments);
+
+            if (!process->waitForStarted(1000)) {
+                return false;
+            }
+
+            if (!run.m_stdin.isEmpty()) {
+                process->write(run.m_stdin);
+            }
+
+            process->closeWriteChannel();
+            return true;
         };
     }
+}
+
+QStringList MessageCenterCommandSink::environment(const MessageRecord& record)
+{
+    const QVariantMap& d = record.m_protocolData;
+    return {
+        "MC_ID=" + record.m_id,
+        "MC_TIME=" + QDateTime::fromMSecsSinceEpoch(record.m_timestamp, Qt::UTC).toString(Qt::ISODate),
+        "MC_PROTOCOL=" + record.m_protocol,
+        "MC_ADDRESS=" + record.m_address,
+        "MC_TYPE=" + record.m_msgType,
+        "MC_TEXT=" + record.m_text,
+        "MC_CHANNEL=" + record.m_channel,
+        "MC_FREQUENCY=" + QString::number(record.m_frequency),
+        "MC_POLARITY=" + MessageRecord::polarityToString(record.m_polarity),
+        "MC_QUALITY=" + MessageRecord::qualityToString(RadioPagingPage::quality(record)),
+        "MC_CONTACT=" + d.value("contact").toString(),
+        "MC_RECORD=" + QString::fromUtf8(QJsonDocument(record.toJson()).toJson(QJsonDocument::Compact))
+    };
 }
 
 bool MessageCenterCommandSink::accept(const MessageRecord& record, const QStringList& captures, QString& error)
@@ -1376,30 +1450,26 @@ bool MessageCenterCommandSink::accept(const MessageRecord& record, const QString
         return false;
     }
 
-    qint64 now = QDateTime::currentMSecsSinceEpoch();
-
-    while (!m_started.empty() && (m_started.front() <= now - 1000)) {
-        m_started.pop_front();
-    }
-
-    if ((int) m_started.size() >= m_maxPerSecond)
-    {
-        error = QString("%1: more than %2 commands in a second, this one was not run").arg(m_name).arg(m_maxPerSecond);
-        return false;
-    }
-
-    // The program is the one set; the text of the message is only ever an argument
-    QString program = arguments.takeFirst();
+    // The program is the one set; the text of the message is only ever an argument (no shell)
+    Run run;
+    run.m_program = arguments.takeFirst();
 
     for (QString& argument : arguments) {
         argument = messageCenterSubstitute(argument, record, captures);
     }
 
-    m_started.push_back(now);
+    run.m_arguments = arguments;
 
-    if (!m_launcher(program, arguments))
+    if (m_env) {
+        run.m_environment = environment(record);
+    }
+    if (m_stdin) {
+        run.m_stdin = record.toJsonLine();
+    }
+
+    if (!m_launcher(run))
     {
-        error = QString("%1: cannot run %2").arg(m_name).arg(program);
+        error = QString("%1: cannot run %2").arg(m_name).arg(run.m_program);
         return false;
     }
 
@@ -1857,6 +1927,60 @@ void MessageCenterEngine::deliver(const MessageRecord& record, const QString& si
         return;
     }
 
+    // The limit of the sink: over it the message waits (behind those waiting already) or is dropped
+    auto it = m_rates.find(sinkName);
+
+    if ((it != m_rates.end()) && (it->m_limit.m_count > 0))
+    {
+        RateState& rate = it.value();
+
+        while (!rate.m_sent.empty() && (rate.m_sent.front() <= now - rate.m_limit.m_periodMs)) {
+            rate.m_sent.pop_front();
+        }
+
+        if (!rate.m_held.empty() || ((int) rate.m_sent.size() >= rate.m_limit.m_count))
+        {
+            SinkStat& stat = m_sinkStats[sinkName];
+
+            // Said once each time the limit is reached
+            if (!rate.m_reported && (m_sinkErrors.size() < m_maxSinkErrors))
+            {
+                m_sinkErrors.append(QString("%1: over its limit of %2 in %3 s, the messages %4").arg(sinkName)
+                    .arg(rate.m_limit.m_count).arg(rate.m_limit.m_periodMs / 1000).arg(rate.m_limit.m_hold ? "wait" : "are dropped"));
+            }
+
+            rate.m_reported = true;
+
+            if (rate.m_limit.m_hold)
+            {
+                rate.m_held.emplace_back(record, captures);
+
+                if ((int) rate.m_held.size() > m_maxHeld)
+                {
+                    rate.m_held.pop_front();    // The oldest one waiting goes
+                    stat.m_dropped++;
+                    stat.m_failed++;
+                }
+            }
+            else
+            {
+                stat.m_dropped++;
+                stat.m_failed++;
+            }
+
+            stat.m_waiting = (int) rate.m_held.size();
+            return;
+        }
+
+        rate.m_sent.push_back(now);
+        rate.m_reported = false;
+    }
+
+    send(record, sinkName, captures);
+}
+
+void MessageCenterEngine::send(const MessageRecord& record, const QString& sinkName, const QStringList& captures)
+{
     for (const auto& sink : m_sinks)
     {
         if (sink->name() == sinkName)
@@ -1878,6 +2002,53 @@ void MessageCenterEngine::deliver(const MessageRecord& record, const QString& si
 
             return;
         }
+    }
+}
+
+void MessageCenterEngine::setRateLimit(const QString& sink, const RateLimit& limit)
+{
+    if (limit.m_count <= 0)
+    {
+        // No limit: those waiting go now
+        if (m_rates.contains(sink))
+        {
+            for (const auto& held : m_rates[sink].m_held) {
+                send(held.first, sink, held.second);
+            }
+
+            m_rates.remove(sink);
+            m_sinkStats[sink].m_waiting = 0;
+        }
+
+        return;
+    }
+
+    m_rates[sink].m_limit = limit;
+}
+
+void MessageCenterEngine::releaseHeld(qint64 now)
+{
+    for (auto it = m_rates.begin(); it != m_rates.end(); ++it)
+    {
+        RateState& rate = it.value();
+
+        while (!rate.m_sent.empty() && (rate.m_sent.front() <= now - rate.m_limit.m_periodMs)) {
+            rate.m_sent.pop_front();
+        }
+
+        while (!rate.m_held.empty() && ((int) rate.m_sent.size() < rate.m_limit.m_count))
+        {
+            const std::pair<MessageRecord, QStringList> held = rate.m_held.front();
+            rate.m_held.pop_front();
+            rate.m_sent.push_back(now);
+            send(held.first, it.key(), held.second);
+        }
+
+        if (rate.m_held.empty()) {
+            rate.m_reported = false;
+        }
+
+        m_sinkStats[it.key()].m_waiting = (int) rate.m_held.size();
     }
 }
 

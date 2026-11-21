@@ -24,6 +24,7 @@
 #include <QFileInfo>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QJsonDocument>
 #include <QTextStream>
 #include <QUdpSocket>
 
@@ -775,9 +776,11 @@ void testFilterTime()
 void testCommand()
 {
     QList<QStringList> launched;
-    MessageCenterCommandSink sink("cmd", "notify --to ops --text \"${message} from ${address}\" ${1}",
-        [&](const QString& program, const QStringList& arguments) {
-            launched.append(QStringList(program) + arguments);
+    QList<MessageCenterCommandSink::Run> runs;
+    MessageCenterCommandSink sink("cmd", "notify --to ops --text \"${message} from ${address}\" ${1}", false, false,
+        [&](const MessageCenterCommandSink::Run& run) {
+            launched.append(QStringList(run.m_program) + run.m_arguments);
+            runs.append(run);
             return true;
         });
     MessageRecord r = rx("a", "pocsag", "0001234A", "x\" -rf / ; echo $(id) ${0}", "ch1");
@@ -797,15 +800,110 @@ void testCommand()
     event.m_kind = MessageRecord::KindEvent;
     check(sink.accept(event, error) && launched.size() == 1, "an event is not given to the command");
 
-    for (int i = 0; i < 10; i++) {
-        sink.accept(r, QStringList({"a", "b"}), error);
+    check(runs.size() == 1 && runs[0].m_environment.isEmpty() && runs[0].m_stdin.isEmpty(), "arguments only: no environment, no input");
+
+    // The fields in the environment, the record as JSON on the standard input
+    MessageCenterCommandSink both("both", "handler", true, true, [&](const MessageCenterCommandSink::Run& run) {
+        runs.append(run);
+        return true;
+    });
+    check(both.accept(r, error) && (runs.size() == 2), "a command with an environment and an input is run");
+
+    if (runs.size() == 2)
+    {
+        const MessageCenterCommandSink::Run& run = runs[1];
+        check(run.m_environment.contains("MC_ADDRESS=0001234A") && run.m_environment.contains("MC_TEXT=" + r.m_text)
+            && run.m_environment.contains("MC_PROTOCOL=pocsag"), "the fields in the environment, as they are");
+        MessageRecord back;
+        check(MessageRecord::fromJson(QJsonDocument::fromJson(run.m_stdin).object(), back) && (back.m_text == r.m_text)
+            && run.m_stdin.endsWith('\n'), "the record as one line of JSON on the input");
     }
 
-    check(launched.size() == MessageCenterCommandSink::m_maxPerSecond, "commands per second are limited");
-    check(!sink.accept(r, QStringList(), error) && error.contains("commands in a second"), "a command over the limit is refused");
+    // Encodings in a template: base64, JSON, URL
+    MessageRecord enc = rx("e", "pocsag", "1", "a \"b\" & c", "ch1");
+    check(messageCenterSubstitute("${text:base64}", enc, QStringList()) == QString::fromLatin1(QByteArray("a \"b\" & c").toBase64()),
+        "${field:base64}");
+    check(messageCenterSubstitute("${text:json}", enc, QStringList()) == "\"a \\\"b\\\" & c\"", "${field:json}: a JSON string");
+    check(messageCenterSubstitute("${text:url}", enc, QStringList()) == "a%20%22b%22%20%26%20c", "${field:url}");
+    check(messageCenterSubstitute("${nothing:base64}", enc, QStringList()) == "${nothing:base64}", "an unknown name with an encoding stays");
 
     MessageCenterCommandSink empty("none", "   ");
     check(!empty.accept(r, error), "an empty command is refused");
+}
+
+// The limits of the sinks: drop, or hold (in order, as the limit allows; the oldest dropped over the most held)
+void testRateLimits()
+{
+    MessageCenterEngine engine;
+    QStringList sent;
+    auto recorder = [&sent](const QString& name) {
+        return std::unique_ptr<MessageCenterSink>(new MessageCenterActionSink(name, "speech", "${message}", 0,
+            [&sent](const QString&, const MessageRecord&, const QString& text, quint32) { sent.append(text); }));
+    };
+    engine.addSink(recorder("dropping"));
+    engine.addSink(recorder("holding"));
+    MessageCenterEngine::RateLimit drop;
+    drop.m_count = 2;
+    drop.m_periodMs = 1000;
+    drop.m_hold = false;
+    MessageCenterEngine::RateLimit hold = drop;
+    hold.m_hold = true;
+    engine.setRateLimit("dropping", drop);
+    engine.setRateLimit("holding", hold);
+    MessageCenterFilter any;
+
+    engine.setRoutes(rules("d", any, {"dropping"}));
+    for (int i = 0; i < 4; i++) {
+        engine.ingest(rx(QString("d%1").arg(i), "pocsag", "1", QString("d%1").arg(i), "c"), "channels", 10000);
+    }
+    check((sent == QStringList({"d0", "d1"})) && (engine.sinkStats().value("dropping").m_dropped == 2)
+        && (engine.takeSinkErrors().size() == 1), "drop: 2 in a second, the others dropped and counted, said once");
+
+    sent.clear();
+    engine.setRoutes(rules("h", any, {"holding"}));
+    for (int i = 0; i < 5; i++) {
+        engine.ingest(rx(QString("h%1").arg(i), "pocsag", "1", QString("h%1").arg(i), "c"), "channels", 20000);
+    }
+    check((sent == QStringList({"h0", "h1"})) && (engine.sinkStats().value("holding").m_waiting == 3), "hold: 2 go, 3 wait");
+    engine.releaseHeld(20500);
+    check(sent.size() == 2, "hold: none more before the period is over");
+    engine.releaseHeld(21001);
+    check((sent == QStringList({"h0", "h1", "h2", "h3"})) && (engine.sinkStats().value("holding").m_waiting == 1),
+        "hold: as the limit allows, in order");
+    engine.ingest(rx("h5", "pocsag", "1", "h5", "c"), "channels", 21002);
+    engine.releaseHeld(22002);
+    check((sent == QStringList({"h0", "h1", "h2", "h3", "h4", "h5"})), "hold: a new one waits behind those waiting");
+
+    // More than the most held: the oldest waiting go
+    sent.clear();
+    for (int i = 0; i < MessageCenterEngine::m_maxHeld + 10; i++) {
+        engine.ingest(rx(QString("m%1").arg(i), "pocsag", "1", QString("m%1").arg(i), "c"), "channels", 30000);
+    }
+    check((engine.sinkStats().value("holding").m_waiting == MessageCenterEngine::m_maxHeld)
+        && (engine.sinkStats().value("holding").m_dropped == 8), "hold: at most the most held, the oldest dropped");
+
+    // No limit: those waiting go
+    sent.clear();
+    engine.setRateLimit("holding", MessageCenterEngine::RateLimit());
+    check((sent.size() == MessageCenterEngine::m_maxHeld) && (engine.sinkStats().value("holding").m_waiting == 0),
+        "the limit removed: those waiting go");
+
+    // The limit in the settings of a sink, through JSON; a command of before has 5 a second
+    MessageCenterFileSetting command;
+    command.m_name = "c";
+    command.m_type = "command";
+    command.m_text = "x";
+    command.m_rateCount = 30;
+    command.m_ratePeriod = 60;
+    command.m_rateHold = false;
+    command.m_commandEnv = true;
+    QList<MessageCenterFileSetting> back = MessageCenterSettings::filesFromJson(MessageCenterSettings::filesToJson({command}));
+    check((back.size() == 1) && (back[0].m_rateCount == 30) && (back[0].m_ratePeriod == 60) && !back[0].m_rateHold
+        && back[0].m_commandEnv && !back[0].m_commandStdin, "the limit and the command options through JSON");
+    back = MessageCenterSettings::filesFromJson("[{\"name\":\"c\",\"type\":\"command\",\"text\":\"x\"}]");
+    check((back.size() == 1) && (back[0].m_rateCount == 5) && (back[0].m_ratePeriod == 1), "a command of before: 5 a second");
+    command.m_ratePeriod = 7;
+    check(!command.check(true).isEmpty(), "a period that is not a second, a minute or an hour is refused");
 }
 
 void testActionSink()
@@ -1610,6 +1708,7 @@ int main(int argc, char **argv)
     testConditionsAndQuality();
     testFilterTime();
     testCommand();
+    testRateLimits();
     testActionSink();
     testRoutesWithActions();
     testRouteOrderAndSources();

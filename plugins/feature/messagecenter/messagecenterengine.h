@@ -367,26 +367,40 @@ private:
 };
 
 // Runs a command for each message: the command is split into the program and its arguments first, then the text
-// of the message is put into each argument, so that a message cannot add arguments or change the program. At
-// most m_maxPerSecond are started in a second, the others are refused
+// of the message is put into each argument, so that a message cannot add arguments or change the program (no
+// shell). The limit of the runs is that of the sink (MessageCenterEngine::RateLimit)
 class MessageCenterCommandSink : public MessageCenterSink
 {
 public:
-    typedef std::function<bool(const QString& program, const QStringList& arguments)> Launcher;
+    //! What is run: the program, its arguments, the environment variables added (NAME=value) and what is written on
+    //! its standard input (empty: nothing)
+    struct Run
+    {
+        QString m_program;
+        QStringList m_arguments;
+        QStringList m_environment;
+        QByteArray m_stdin;
+    };
+    typedef std::function<bool(const Run& run)> Launcher;
 
-    static const int m_maxPerSecond = 5;
-
-    MessageCenterCommandSink(const QString& name, const QString& command, Launcher launcher = Launcher());
+    //! env: the fields of the message in environment variables MC_ID, MC_TIME, MC_PROTOCOL, MC_ADDRESS, MC_TYPE,
+    //! MC_TEXT, MC_CHANNEL, MC_FREQUENCY, MC_POLARITY, MC_QUALITY, MC_CONTACT and MC_RECORD (the record as JSON).
+    //! standardInput: the record as one line of JSON on its standard input. The limit of the runs is that of the sink
+    MessageCenterCommandSink(const QString& name, const QString& command, bool env = false, bool standardInput = false,
+        Launcher launcher = Launcher());
     QString name() const override { return m_name; }
     using MessageCenterSink::accept;
     bool accept(const MessageRecord& record, QString& error) override { return accept(record, QStringList(), error); }
     bool accept(const MessageRecord& record, const QStringList& captures, QString& error) override;
+    //!< The environment variables of a record (NAME=value)
+    static QStringList environment(const MessageRecord& record);
 
 private:
     QString m_name;
     QString m_command;
+    bool m_env;
+    bool m_stdin;
     Launcher m_launcher;
-    std::deque<qint64> m_started;       //!< When the last ones started, ms since the epoch
 };
 
 // What the feature does with a message: speech, a highlight in the log, a position on the map
@@ -579,8 +593,22 @@ public:
     struct SinkStat
     {
         int m_accepted = 0;
-        int m_failed = 0;
+        int m_failed = 0;               //!< The dropped ones too
+        int m_dropped = 0;              //!< Over the limit (dropped, or the oldest of those waiting when too many)
+        int m_waiting = 0;              //!< Held by the limit, now
     };
+    //! The limit of a sink (a destination): at most m_count messages in m_periodMs; over it they wait (in order, at
+    //! most m_maxHeld, the oldest dropped when there are more) or are dropped. Count 0: no limit
+    struct RateLimit
+    {
+        int m_count = 0;
+        qint64 m_periodMs = 1000;
+        bool m_hold = true;
+    };
+    static const int m_maxHeld = 100;
+    void setRateLimit(const QString& sink, const RateLimit& limit);
+    //!< The messages waiting that the limits let go now (called every tick)
+    void releaseHeld(qint64 now);
     const QMap<QString, SinkStat>& sinkStats() const { return m_sinkStats; }
     static QString endpointKey(MessageEndpoint::Role role, const QString& alias);
     static const int m_maxSinkErrors = 100;
@@ -624,6 +652,16 @@ private:
 
     void store(const MessageRecord& record);
     void deliver(const MessageRecord& record, const QString& sinkName, const QStringList& captures, qint64 now);
+    //! To the sink now, whatever its limit
+    void send(const MessageRecord& record, const QString& sinkName, const QStringList& captures);
+    struct RateState
+    {
+        RateLimit m_limit;
+        std::deque<qint64> m_sent;                                      //!< When, in the period
+        std::deque<std::pair<MessageRecord, QStringList>> m_held;       //!< Waiting, with the captures of their rule
+        bool m_reported = false;                                        //!< The limit reached was said
+    };
+    QMap<QString, RateState> m_rates;
     MessageCenterPage *findPage(const QString& id);
     void endpointGone(const QString& alias, qint64 now);
     bool markLogged(const QString& id, const QString& state, const QString& reason);

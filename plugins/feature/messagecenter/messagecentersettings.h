@@ -45,11 +45,18 @@ struct MessageCenterFileSetting
     QString m_address;          //!< udp
     int m_port = 0;             //!< udp
     QString m_text;             //!< command, speech
-    QString m_icon;             //!< mark: a built-in icon (:name) or the path of an image, empty for none
-    quint32 m_color = 0;        //!< mark: colour of the text, ARGB, 0 for none
-    quint32 m_background = 0;   //!< mark: colour of the row, ARGB, 0 for none
+    QString m_icon;             //!< mark of before: a built-in icon (:name) or the path of an image, empty for none
+    quint32 m_color = 0;        //!< mark of before: colour of the text, ARGB, 0 for none
+    quint32 m_background = 0;   //!< mark of before: colour of the row, ARGB, 0 for none
+    //! Sink: at most m_rateCount messages (commands: runs) in m_ratePeriod seconds (1, 60, 3600), 0 for no limit. Over
+    //! it: hold (they wait, at most MessageCenterEngine::m_maxHeld, and go as the limit allows) or drop
+    int m_rateCount = 0;
+    int m_ratePeriod = 1;
+    bool m_rateHold = true;
+    bool m_commandEnv = false;      //!< command: the fields of the message in environment variables MC_...
+    bool m_commandStdin = false;    //!< command: the record as one line of JSON on its standard input
 
-    static const QStringList& sinkTypes();      //!< file, udp, command, speech, mark, map
+    static const QStringList& sinkTypes();      //!< file, udp, command, speech, map
     static const QStringList& sourceTypes();    //!< file, csv, udp
     QString typeOrDefault() const { return m_type.isEmpty() ? QString("file") : m_type; }
     //!< What is wrong with the setting as a sink or source, empty if nothing

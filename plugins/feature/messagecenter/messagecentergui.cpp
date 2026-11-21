@@ -1853,9 +1853,10 @@ void MessageCenterGUI::buildFiles(QWidget *container)
 {
     QVBoxLayout *layout = new QVBoxLayout(container);
     layout->setContentsMargins(2, 2, 2, 2);
-    m_sinksTable = makeTable({"Sink", "Type", "Target", "Format", "Taken", "Failed", "Rules"}, container);
-    m_sinksTable->setToolTip("The sinks the rules send messages to: files, UDP, and actions on the message (command,\n"
-        "speech, marks in the log, position on the Map). Double-click to edit");
+    m_sinksTable = makeTable({"Sink", "Type", "Target", "Format", "Limit", "Taken", "Failed", "Waiting", "Rules"}, container);
+    m_sinksTable->setToolTip("The destinations the rules send messages to: files, UDP, a command, speech, the Map; the log and\n"
+        "the queue built in. Limit: at most so many a second, minute or hour, over it held (Waiting) or dropped (Failed).\n"
+        "Double-click to edit");
     m_sourcesTable = makeTable({"Source", "Type", "Target"}, container);
     m_sourcesTable->setToolTip("The sources messages are read from, as if they came from the channels: files (read as they\n"
         "grow) and UDP. Double-click to edit");
@@ -2946,30 +2947,44 @@ void MessageCenterGUI::refreshFiles()
 
         return routes;
     };
+    const int rulesColumn = 8;
     auto setSinkRow = [&](int row, const QStringList& cells, const QStringList& routes, bool builtIn) {
         setRow(m_sinksTable, row, cells + QStringList(routes.isEmpty() ? QString("none: takes nothing") : routes.join(", ")));
-        m_sinksTable->item(row, 6)->setForeground(routes.isEmpty() ? QBrush(QColor(255, 120, 80)) : QBrush());
+        m_sinksTable->item(row, rulesColumn)->setForeground(routes.isEmpty() ? QBrush(QColor(255, 120, 80)) : QBrush());
 
         for (int c = 0; c < m_sinksTable->columnCount(); c++) {
-            m_sinksTable->item(row, c)->setForeground(builtIn && (c != 6) ? QBrush(QColor(150, 150, 150)) : m_sinksTable->item(row, c)->foreground());
+            m_sinksTable->item(row, c)->setForeground(builtIn && (c != rulesColumn) ? QBrush(QColor(150, 150, 150)) : m_sinksTable->item(row, c)->foreground());
         }
+    };
+    // The limit: N/s, N/min, N/h and what is done over it; the failed with the dropped among them
+    auto limitText = [](const MessageCenterFileSetting& f) {
+        if (f.m_rateCount <= 0) {
+            return QString();
+        }
+
+        const QString per = (f.m_ratePeriod >= 3600) ? "h" : (f.m_ratePeriod >= 60) ? "min" : "s";
+        return QString("%1/%2 %3").arg(f.m_rateCount).arg(per, f.m_rateHold ? "hold" : "drop");
+    };
+    auto failedText = [](const MessageCenterEngine::SinkStat& stat) {
+        return (stat.m_dropped > 0) ? QString("%1 (%2 dropped)").arg(stat.m_failed).arg(stat.m_dropped) : QString::number(stat.m_failed);
     };
 
     m_sinksTable->setRowCount(m_builtInSinks + m_settings.m_sinks.size());
     MessageCenterEngine::SinkStat logStat = stats.value("log");
     MessageCenterEngine::SinkStat queueStat = stats.value("queue");
-    setSinkRow(0, {"log", "log", "built in: Messages and the history (the rules that log)", "", QString::number(logStat.m_accepted),
-        QString::number(logStat.m_failed)}, routesTo("log"), true);
-    setSinkRow(1, {"queue", "queue", "built in: the pages to transmit (the rules that page)", "", QString::number(queueStat.m_accepted),
-        QString::number(queueStat.m_failed)}, routesTo("queue"), true);
+    setSinkRow(0, {"log", "log", "built in: Messages and the history (the rules that log)", "", "", QString::number(logStat.m_accepted),
+        QString::number(logStat.m_failed), ""}, routesTo("log"), true);
+    setSinkRow(1, {"queue", "queue", "built in: the pages to transmit (the rules that page)", "", "", QString::number(queueStat.m_accepted),
+        QString::number(queueStat.m_failed), ""}, routesTo("queue"), true);
 
     for (int i = 0; i < m_settings.m_sinks.size(); i++)
     {
         const MessageCenterFileSetting& f = m_settings.m_sinks[i];
         MessageCenterEngine::SinkStat stat = stats.value(f.m_name);
         int row = m_builtInSinks + i;
-        setSinkRow(row, {f.m_name, f.typeOrDefault(), fileTarget(f), fileFormat(f),
-            QString::number(stat.m_accepted), QString::number(stat.m_failed)}, routesTo(f.m_name), false);
+        setSinkRow(row, {f.m_name, f.typeOrDefault(), fileTarget(f), fileFormat(f), limitText(f),
+            QString::number(stat.m_accepted), failedText(stat), (stat.m_waiting > 0) ? QString::number(stat.m_waiting) : QString()},
+            routesTo(f.m_name), false);
     }
 
     m_sourcesTable->setRowCount(m_builtInSources + m_settings.m_sources.size());
@@ -3587,9 +3602,10 @@ void MessageCenterGUI::editFile(bool sink, int index)
     port->setRange(1, 65535);
     port->setValue(setting.m_port > 0 ? setting.m_port : 9999);
     QLineEdit *text = new QLineEdit(setting.m_text, &dialog);
-    text->setToolTip("${address}, ${message}, ${protocol}, ${type}, ${channel}, ${mode}, ${id}, ${frequency}, ${time} and\n"
-        "${0}, ${1}... (the captures of the text expression of the rule) are replaced.\n"
-        "A command is split into the program and its arguments first: the message goes into the arguments only");
+    text->setToolTip("${address}, ${message}, ${protocol}, ${type}, ${channel}, ${mode}, ${id}, ${frequency}, ${time},\n"
+        "${0}, ${1}... (the captures of the text expression of the rule) and ${field} (any field of the message) are replaced;\n"
+        "${text:base64}, ${text:json} (a JSON string), ${text:url}: encoded. A command is split into the program and its\n"
+        "arguments first (no shell): the message goes into the arguments only, each one as it is");
     layout->addRow("Name", name);
     layout->addRow("Type", type);
     layout->addRow("File", pathRow);
@@ -3597,6 +3613,67 @@ void MessageCenterGUI::editFile(bool sink, int index)
     layout->addRow("Address", address);
     layout->addRow("Port", port);
     layout->addRow("Text", text);
+
+    // Command: how the message is given to it besides its arguments
+    QWidget *passRow = new QWidget(&dialog);
+    QHBoxLayout *passLayout = new QHBoxLayout(passRow);
+    passLayout->setContentsMargins(0, 0, 0, 0);
+    QCheckBox *passEnv = new QCheckBox("Environment", passRow);
+    passEnv->setChecked(setting.m_commandEnv);
+    passEnv->setToolTip("The fields of the message in environment variables: MC_ID, MC_TIME, MC_PROTOCOL, MC_ADDRESS,\n"
+        "MC_TYPE, MC_TEXT, MC_CHANNEL, MC_FREQUENCY, MC_POLARITY, MC_QUALITY, MC_CONTACT and MC_RECORD (the record as JSON)");
+    QCheckBox *passStdin = new QCheckBox("JSON on its input", passRow);
+    passStdin->setChecked(setting.m_commandStdin);
+    passStdin->setToolTip("The record as one line of JSON on the standard input of the command");
+    passLayout->addWidget(passEnv);
+    passLayout->addWidget(passStdin);
+    passLayout->addStretch();
+
+    // The limit: at most so many in a second, a minute or an hour; over it held or dropped
+    QWidget *limitRow = new QWidget(&dialog);
+    QHBoxLayout *limitLayout = new QHBoxLayout(limitRow);
+    limitLayout->setContentsMargins(0, 0, 0, 0);
+    QSpinBox *limitCount = new QSpinBox(limitRow);
+    limitCount->setRange(0, 100000);
+    limitCount->setSpecialValueText("No limit");
+    limitCount->setValue(isNew ? 0 : setting.m_rateCount);
+    QComboBox *limitPeriod = new QComboBox(limitRow);
+    limitPeriod->addItem("a second", 1);
+    limitPeriod->addItem("a minute", 60);
+    limitPeriod->addItem("an hour", 3600);
+    limitPeriod->setCurrentIndex(std::max(0, limitPeriod->findData(setting.m_ratePeriod)));
+    QComboBox *limitMode = new QComboBox(limitRow);
+    limitMode->addItem("then hold", true);
+    limitMode->addItem("then drop", false);
+    limitMode->setCurrentIndex(setting.m_rateHold ? 0 : 1);
+    limitMode->setToolTip(QString("Hold: the messages over the limit wait and go as it allows (at most %1 wait, the oldest dropped "
+        "over that).\nDrop: they are dropped (and counted)").arg(MessageCenterEngine::m_maxHeld));
+    limitLayout->addWidget(limitCount);
+    limitLayout->addWidget(limitPeriod);
+    limitLayout->addWidget(limitMode);
+    limitLayout->addStretch();
+    auto showLimit = [limitCount, limitPeriod, limitMode]() {
+        limitPeriod->setEnabled(limitCount->value() > 0);
+        limitMode->setEnabled(limitCount->value() > 0);
+    };
+    showLimit();
+    connect(limitCount, QOverload<int>::of(&QSpinBox::valueChanged), &dialog, showLimit);
+
+    if (sink)
+    {
+        layout->addRow("Pass", passRow);
+        layout->addRow("Limit", limitRow);
+    }
+
+    // A new command: at most 5 runs a second
+    if (isNew)
+    {
+        connect(type, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, [type, limitCount]() {
+            if ((type->currentText() == "command") && (limitCount->value() == 0)) {
+                limitCount->setValue(5);
+            }
+        });
+    }
 
     // The fields of the type. A row is shown or hidden with its label (QFormLayout::setRowVisible is Qt 6 only)
     auto setRowVisible = [layout](QWidget *field, bool visible) {
@@ -3616,6 +3693,10 @@ void MessageCenterGUI::editFile(bool sink, int index)
         setRowVisible(address, udp);
         setRowVisible(port, udp);
         setRowVisible(text, hasText);
+
+        if (sink) {
+            setRowVisible(passRow, t == "command");
+        }
         int current = format->currentIndex();
         format->blockSignals(true);
         format->clear();
@@ -3710,6 +3791,11 @@ void MessageCenterGUI::editFile(bool sink, int index)
         setting.m_address = (t == "udp") ? address->text().trimmed() : QString();
         setting.m_port = (t == "udp") ? port->value() : 0;
         setting.m_text = ((t == "command") || (t == "speech")) ? text->text() : QString();
+        setting.m_rateCount = sink ? limitCount->value() : 0;
+        setting.m_ratePeriod = limitPeriod->currentData().toInt();
+        setting.m_rateHold = limitMode->currentData().toBool();
+        setting.m_commandEnv = (t == "command") && passEnv->isChecked();
+        setting.m_commandStdin = (t == "command") && passStdin->isChecked();
 
         QString error = setting.check(sink);
 
