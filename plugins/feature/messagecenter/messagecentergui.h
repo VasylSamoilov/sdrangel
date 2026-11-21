@@ -60,13 +60,20 @@ public:
     void showSources(const QStringList& sources);
     //!< The contacts of the address book to choose from (with their icons); hidden when there is none
     void setContacts(const QList<MessageCenterContact>& contacts);
+    //!< The fields offered to the conditions: those of the messages of the log
+    void setFields(const QStringList& fields) { m_fieldNames = fields; }
 
 signals:
     void changed();
+    //!< Conditions... was pressed: the owner sets the fields of the log before the dialog opens
+    void fieldsWanted();
 
 private:
     //! The message types of a protocol (lower case, empty for any) in the type list, the current one kept if it has it
     void fillTypes(const QString& protocol);
+    //! The conditions on any field in a dialog: a row each (field, operator, value), all of them met
+    void editConditions();
+    void showConditions();
 
     QComboBox *m_contact;
     QComboBox *m_protocol;
@@ -78,8 +85,10 @@ private:
     QLineEdit *m_text;
     QCheckBox *m_hideDuplicates;
     QCheckBox *m_voiceOnly;
-    QComboBox *m_field;                 //!< Any field of a record (editable): the condition of m_value
-    QLineEdit *m_value;
+    QComboBox *m_quality;               //!< Any, not damaged, clean, corrected, damaged
+    QToolButton *m_conditionsButton;    //!< Conditions on any field: their number
+    QList<MessageCenterContact::Condition> m_conditions;
+    QStringList m_fieldNames;
     QComboBox *m_source;
     bool m_sourcesShown = false;
     //! The filter set: what the widgets do not show of it (more than one contact, protocol, channel or source, the
@@ -208,7 +217,7 @@ private:
     bool handleMessage(const Message& message);
     void refresh();
     void refreshLog();
-    bool shownInLog(const MessageRecord& record) const;
+    MessageCenterFilter logFilter() const;
     void showLiveCount();
     //! The actions of the menu of a message of the log: page it again, add its sender as a contact, only its pager,
     //! requeue or cancel a page
@@ -223,6 +232,7 @@ private:
     void refreshContacts();
     //!< -1: a new one, preset (if given) to start with
     void editContact(int index, const MessageCenterContact *preset = nullptr);
+    QStringList logFieldNames(std::vector<QJsonObject> *sample = nullptr) const;
     //!< A new contact of the page composed: a rule for the messages of its address, a send to of its transmitter
     MessageCenterContact contactOfPage(const RadioPagingPage& page) const;
     //!< The first contact one of whose send to is the destination of the page composed; empty if none

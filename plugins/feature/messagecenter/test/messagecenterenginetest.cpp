@@ -24,11 +24,13 @@
 #include <QFileInfo>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QTextStream>
 #include <QUdpSocket>
 
 #include <cstdio>
 
 #include "radiopagingpagerformat.h"
+#include "util/csv.h"
 #include "messagecenterengine.h"
 #include "messagecenterarchive.h"
 #include "messagecentersettings.h"
@@ -433,32 +435,167 @@ void testRegExp()
     check(!f.matches(r) && !f.errors().isEmpty(), "a text expression that is not valid matches nothing and says why");
     f.m_text.clear();
 
-    // One more field: any field of the record or of its protocol data, its whole value
-    f.m_field = "ric";
-    f.m_value = "12..";
+    // A condition: any field of the record or of its protocol data, its whole value matching an expression
+    auto fieldMatches = [](MessageCenterFilter& filter, const QString& field, const QString& value) {
+        MessageCenterContact::Condition c;
+        c.m_field = field;
+        c.m_operator = MessageCenterContact::Condition::Matches;
+        c.m_value = value;
+        filter.m_conditions = {c};
+    };
+    fieldMatches(f, "ric", "12..");
     check(f.matches(r), "a field of the protocol data, its whole value");
-    f.m_value = "123";
+    fieldMatches(f, "ric", "123");
     check(!f.matches(r), "the whole value: a part does not match");
-    f.m_field = "channel";
-    f.m_value = "ch\\d";
+    fieldMatches(f, "channel", "ch\\d");
     check(f.matches(r), "a field of the record");
-    f.m_field = "capcode";
-    f.m_value = ".*";
+    fieldMatches(f, "capcode", ".*");
     check(!f.matches(r), "a field the record does not have: no match");
-    f.m_field = "ric";
-    f.m_value = "([";
+    fieldMatches(f, "ric", "([");
     check(!f.matches(r) && !f.errors().isEmpty(), "a field expression that is not valid matches nothing and says why");
 
-    f.m_value = "1234";
+    fieldMatches(f, "ric", "1234");
     f.m_text = "fire";
     MessageCenterFilter g = MessageCenterFilter::fromJson(f.toJson());
-    check((g.m_field == "ric") && (g.m_value == "1234") && (g.m_text == "fire") && g.matches(r), "text and field in the JSON of the filter");
+    check((g.m_conditions.size() == 1) && (g.m_conditions[0].m_field == "ric") && (g.m_conditions[0].m_value == "1234")
+        && (g.m_conditions[0].m_operator == MessageCenterContact::Condition::Matches) && (g.m_text == "fire") && g.matches(r),
+        "text and condition in the JSON of the filter");
     check(!MessageCenterFilter().isEmpty() || MessageCenterFilter().toJson().isEmpty(), "nothing set, empty filter");
+
+    // The one field and value of the filters saved before: one condition, the whole value matching the expression
+    MessageCenterFilter old = MessageCenterFilter::fromJson(QJsonObject({{"field", "ric"}, {"value", "12.."}}));
+    check((old.m_conditions.size() == 1) && (old.m_conditions[0].m_operator == MessageCenterContact::Condition::Matches)
+        && old.matches(r), "the field and value of before: a matches condition");
+    old = MessageCenterFilter::fromJson(QJsonObject({{"field", "ric"}, {"value", "123"}}));
+    check(!old.matches(r), "the field and value of before: the whole value still");
+    f.m_conditions.clear();
+    f.m_text.clear();
 
     MessageRecord q = rx("b", "flex", "000999", "${0} text", "c");
     check(messageCenterSubstitute("${address}: ${message} (${protocol}/${type}/${channel}) ${1} ${2}", q, QStringList({"x", "y"}))
         == "000999: ${0} text (flex/alphanumeric/c) y ", "substitutions in one pass");
     check(messageCenterSubstitute("${unknown} ${", q, QStringList()) == "${unknown} ${", "an unknown name stays as it is");
+}
+
+// The operators of a condition, quality and fragments in a filter
+void testConditionsAndQuality()
+{
+    typedef MessageCenterContact::Condition Condition;
+    auto condition = [](const QString& field, Condition::Operator op, const QString& value) {
+        Condition c;
+        c.m_field = field;
+        c.m_operator = op;
+        c.m_value = value;
+        return c;
+    };
+
+    MessageRecord r = rx("q", "flex", "0001234567", "text", "ch1");
+    r.m_errorsCorrected = 2;
+    r.m_errorsUncorrectable = 0;
+    r.m_protocolData.insert("capcode", "0001234567");
+    r.m_protocolData.insert("checksum", "ok");
+    r.m_protocolData.insert("blocking", 4);
+    r.m_protocolData.insert("group_capcodes", QVariantList({"100", "200"}));
+    const QJsonObject fields = MessageCenterContact::recordFields(r);
+
+    check(condition("capcode", Condition::Is, "1234567").matches(fields), "is: numbers as numbers (leading zeros)");
+    check(condition("checksum", Condition::Is, "ok").matches(fields), "is: a text");
+    check(!condition("checksum", Condition::IsNot, "ok").matches(fields), "is not: the value");
+    check(condition("checksum", Condition::IsNot, "failed").matches(fields), "is not: another value");
+    check(condition("signature", Condition::IsNot, "failed").matches(fields), "is not: a field the record does not have");
+    check(!condition("signature", Condition::Is, "failed").matches(fields), "is: a field the record does not have");
+    check(condition("signature", Condition::Absent, QString()).matches(fields), "absent: no such field");
+    check(!condition("checksum", Condition::Absent, QString()).matches(fields), "absent: the field has a value");
+    check(condition("checksum", Condition::Present, QString()).matches(fields), "present");
+    check(condition("blocking", Condition::Greater, "3").matches(fields), "greater");
+    check(!condition("blocking", Condition::Less, "4").matches(fields), "less: not equal");
+    check(condition("blocking", Condition::LessOrEqual, "4").matches(fields), "less or equal");
+    check(condition("errorsCorrected", Condition::GreaterOrEqual, "2").matches(fields), "a common field compared");
+    check(!condition("checksum", Condition::Greater, "1").matches(fields), "a text is not compared as a number");
+    check(!condition("blocking", Condition::Greater, "x").check().isEmpty(), "a number to compare is checked");
+    check(condition("group_capcodes", Condition::Is, "200").matches(fields), "a list: one of its values");
+    check(!condition("group_capcodes", Condition::IsNot, "200").matches(fields), "a list, is not: none of its values");
+    check(condition("group_capcodes", Condition::IsNot, "300").matches(fields), "a list, is not: none is the value");
+
+    // FLEX capcode forms are not numbers: 3E005237593 is not 3 times 10 to the 5237593
+    QJsonObject forms;
+    forms.insert("capcode", "3E005237593");
+    check(!condition("capcode", Condition::Is, "3E005237594").matches(forms), "capcode forms compared as text");
+    check(condition("capcode", Condition::Is, "3E005237593").matches(forms), "the same capcode form");
+
+    // Each operator through JSON; is and matches as saved before
+    for (int op = 0; op < Condition::OperatorCount; op++)
+    {
+        const Condition c = condition("blocking", (Condition::Operator) op, Condition::takesValue((Condition::Operator) op) ? "4" : "");
+        const Condition back = Condition::fromJson(c.toJson());
+        check((back.m_operator == c.m_operator) && (back.m_value == c.m_value) && (back.m_field == "blocking"),
+            QString("operator %1 through JSON").arg(Condition::operatorKey((Condition::Operator) op)).toStdString().c_str());
+    }
+
+    check(Condition::fromJson(QJsonObject({{"field", "ric"}, {"is", "1234"}})).m_operator == Condition::Is, "is of before");
+    check(Condition::fromJson(QJsonObject({{"field", "ric"}, {"matches", "12.."}})).m_operator == Condition::Matches, "matches of before");
+
+    // Quality: as the producer set it; a record of before from its errors and checks; sent: clean
+    MessageCenterFilter f;
+    f.m_quality = "corrected";
+    check(f.matches(r), "corrected: corrected errors, checksum ok");
+    f.m_quality = "notDamaged";
+    check(f.matches(r), "not damaged: corrected");
+    r.m_protocolData.insert("checksum", "failed");
+    f.m_quality = "damaged";
+    check(f.matches(r), "a failed checksum: damaged");
+    r.m_quality = MessageRecord::QualityClean;
+    check(!f.matches(r), "the quality the producer set wins");
+    r.m_quality = MessageRecord::QualityUnknown;
+    r.m_protocolData.insert("checksum", "ok");
+    r.m_protocolData.insert("signature", "incomplete");
+    r.m_protocolData.insert("is_fragment", true);
+    check(!f.matches(r), "an incomplete signature of a fragment does not damage it");
+    r.m_protocolData.remove("is_fragment");
+    check(f.matches(r), "an incomplete signature of a whole message damages it");
+    r.m_protocolData.remove("signature");
+
+    MessageRecord tone = rx("t", "pocsag", "1234567", QString(), "ch1");
+    tone.m_msgType = "tone";
+    check(MessageCenterFilter::quality(tone) == MessageRecord::QualityNone, "nothing to check: none");
+    f.m_quality = "notDamaged";
+    check(f.matches(tone), "not damaged: nothing to check counts");
+    MessageRecord sent = tone;
+    sent.m_direction = MessageRecord::DirectionTX;
+    check(MessageCenterFilter::quality(sent) == MessageRecord::QualityClean, "sent: clean");
+    r.m_errorsCorrected = 0;
+    check(MessageCenterFilter::quality(r) == MessageRecord::QualityClean, "no errors, checks passed: clean");
+    r.m_charStatus = "oob";
+    check(MessageCenterFilter::quality(r) == MessageRecord::QualityDamaged, "a lost character: damaged");
+    r.m_charStatus.clear();
+
+    // Quality through JSON and CSV
+    r.m_quality = MessageRecord::QualityCorrected;
+    MessageRecord back;
+    check(MessageRecord::fromJson(r.toJson(), back) && (back.m_quality == MessageRecord::QualityCorrected), "quality through JSON");
+    QHash<QString, int> columns;
+    const QStringList header = MessageRecord::csvHeader();
+    for (int i = 0; i < header.size(); i++) {
+        columns.insert(header[i], i);
+    }
+    QStringList row;
+    QString csvLine = r.toCSV();
+    QTextStream csvStream(&csvLine);
+    CSV::readRow(csvStream, &row);
+    check(MessageRecord::fromCSV(columns, row, back) && (back.m_quality == MessageRecord::QualityCorrected), "quality through CSV");
+
+    // The filter: quality, conditions and fragments through JSON
+    f.m_quality = "damaged";
+    f.m_hideFragments = true;
+    f.m_conditions = {condition("checksum", Condition::Is, "failed")};
+    MessageCenterFilter g = MessageCenterFilter::fromJson(f.toJson());
+    check((g.m_quality == "damaged") && g.m_hideFragments && (g.m_conditions.size() == 1), "quality, fragments, conditions in JSON");
+
+    MessageCenterFilter fragments;
+    fragments.m_hideFragments = true;
+    MessageRecord fragment = rx("fr", "flex", "0001234567", "part", "ch1");
+    fragment.m_protocolData.insert("is_fragment", true);
+    check(!fragments.matches(fragment) && fragments.matches(rx("w", "flex", "0001234567", "whole", "ch1")), "fragments hidden");
 }
 
 void testCommand()
@@ -708,8 +845,11 @@ void testGroupMembers()
     f.m_address = "0002101249";
     check(f.matches(group) && !f.matches(rx("o", "flex", "0002029570", "other", "c")), "an address filter selects a group message to a member");
     MessageCenterFilter r;
-    r.m_field = "group_capcodes";
-    r.m_value = "0*2020";
+    MessageCenterContact::Condition members;
+    members.m_field = "group_capcodes";
+    members.m_operator = MessageCenterContact::Condition::Matches;
+    members.m_value = "0*2020";
+    r.m_conditions = {members};
     check(f.matches(group) && r.matches(group), "a field that is a list: one of its values (the members of a group)");
 }
 
@@ -1210,6 +1350,7 @@ int main(int argc, char **argv)
     testPages();
     testGuards();
     testRegExp();
+    testConditionsAndQuality();
     testCommand();
     testActionSink();
     testRoutesWithActions();

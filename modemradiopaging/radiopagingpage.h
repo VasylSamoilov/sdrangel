@@ -84,6 +84,10 @@ struct MODEMRADIOPAGING_API RadioPagingPage
     //!< What an address is: POCSAG its frame and function, FLEX what the capcode form tells, GSC the digits of the
     //!< cap code; empty for another protocol
     static QString addressDescription(const QString& protocol, const QString& address, int function);
+    //!< Clean, corrected or damaged, as the paging receiver judges a record it decoded: its errors, then the checks of
+    //!< its protocol (a failed FLEX checksum K or signature S, a GSC block with a wrong checksum: damaged; incomplete:
+    //!< damaged unless it is a fragment or a part, whose rest is still to come). Checks passed and no error count: clean
+    static MessageRecord::Quality receivedQuality(const MessageRecord& record);
     //!< The capcodes of m_groupMembers (digits or the capcode forms of STD-43A Appendix A: their addresses)
     QList<qulonglong> groupMembers(bool *ok = nullptr) const;
     //!< FLEX: the address of the capcode in m_address, digits or a capcode form of STD-43A Appendix A (only the

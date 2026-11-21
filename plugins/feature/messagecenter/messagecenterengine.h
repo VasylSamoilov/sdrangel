@@ -60,22 +60,37 @@ class QUdpSocket;
 struct MessageCenterContact
 {
     //! A condition on a field of a record: the field is a field of the record as JSON (protocol, address, msgType,
-    //! channel, frequency, mode...) or of its protocol data (ric, function, capcode, group_capcodes...). It is the
-    //! value (numbers compared as numbers), or matches the regular expression (the whole value); a list (the members
-    //! of a group message) when one of its values does
+    //! channel, frequency, mode, quality...) or of its protocol data (ric, function, capcode, checksum, signature...).
+    //! Is: the value (numbers compared as numbers); matches: the regular expression (the whole value); is not: not
+    //! the value, or the field is absent; less, greater...: numbers only; present, absent: the field has a value or
+    //! not (an empty text is absent). A list (the members of a group message): one of its values (is not: none)
     struct Condition
     {
+        enum Operator { Is, IsNot, Matches, Less, LessOrEqual, Greater, GreaterOrEqual, Present, Absent, OperatorCount };
+
         QString m_field;
         QString m_value;
-        bool m_regExp = false;
+        Operator m_operator = Is;
         mutable QRegularExpression m_compiled;      //!< Of m_value, made the first time
 
         //!< The value of the field in a record (record JSON and protocol data together, see recordFields)
         bool matches(const QJsonObject& fields) const;
-        //!< Empty if it can match, else why not: a field, a valid regular expression
+        //!< Empty if it can match, else why not: a field, a valid regular expression, a number to compare
         QString check() const;
+        //!< {"field": f, "<operator key>": value}: is and matches as saved before the other operators
         QJsonObject toJson() const;
         static Condition fromJson(const QJsonObject& json);
+        //!< The key of the operator in JSON (is, isNot, matches, lt, le, gt, ge, present, absent), and as shown
+        static QString operatorKey(Operator op);
+        static QString operatorText(Operator op);
+        //!< The operator takes no value (present, absent); compares numbers (less, greater...)
+        static bool takesValue(Operator op) { return (op != Present) && (op != Absent); }
+        static bool numeric(Operator op) { return (op >= Less) && (op <= GreaterOrEqual); }
+        //!< As text, e.g. "checksum is failed", "errorsUncorrectable > 0"
+        QString text() const;
+
+    private:
+        bool matchesValue(const QJsonValue& value) const;
     };
     //! A rule: all its conditions
     typedef QList<Condition> Rule;
@@ -137,10 +152,13 @@ struct MessageCenterFilter
     //! Regular expression found anywhere in the text, not case sensitive, . matches line ends too; its captures are
     //! those of the actions. Empty for all
     QString m_text;
-    //! One more condition, on any field of the record or of its protocol data (capcode, ric, function, mode...): its
-    //! whole value matches the regular expression m_value (a list: one of its values). Empty field: none
-    QString m_field;
-    QString m_value;
+    //! Conditions on any field of the record or of its protocol data (capcode, checksum, signature, mode...), all of
+    //! them met. The one field and value of before (the whole value matches the expression) load as one condition
+    QList<MessageCenterContact::Condition> m_conditions;
+    //! The quality of the message: empty for any, notDamaged (clean, corrected, or nothing to check), clean,
+    //! corrected, damaged, none (nothing to check)
+    QString m_quality;
+    bool m_hideFragments = false;       //!< The fragments of a FLEX message (the receiver reports the whole message too)
     QStringList m_sources;              //!< Where the record comes from: channels, api or the name of a source; empty for all
     QString m_msgType;                  //!< Message type (alphanumeric, numeric, tone, voice, short_message, binary, secure), empty for all
     qint64 m_frequencyMin = -1;         //!< Hz, -1: no lower limit
@@ -159,8 +177,11 @@ struct MessageCenterFilter
     bool isEmpty() const;
     QJsonObject toJson() const;
     static MessageCenterFilter fromJson(const QJsonObject& json);
-    //!< The errors of the regular expressions of the address, the text and the field, empty if they are all valid
+    //!< The errors of the regular expressions of the address and the text, and of the conditions; empty if none
     QString errors() const;
+    //!< The quality of a record: as its producer set it; a record of before without one: from its errors and the
+    //!< checks of its protocol data; a message sent (TX) clean
+    static MessageRecord::Quality quality(const MessageRecord& record);
 
 private:
     // The expressions, compiled when they are first used after a change (a filter is copied around: they are
@@ -173,7 +194,6 @@ private:
     };
     mutable Compiled m_compiledAddress;     //!< m_address, the whole address
     mutable Compiled m_compiledText;        //!< m_text, anywhere in the text
-    mutable Compiled m_compiledValue;       //!< m_value, the whole value of the field
     static const QRegularExpression& compile(Compiled& compiled, const QString& pattern, bool anchored,
         QRegularExpression::PatternOptions options = QRegularExpression::NoPatternOption);
 };

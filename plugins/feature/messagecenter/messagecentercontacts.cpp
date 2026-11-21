@@ -421,9 +421,7 @@ void MessageCenterContactDialog::addConditionRow(int rule, const MessageCenterCo
     field->setCurrentText(condition.m_field);
     field->setToolTip(tr("Field of the message: those of the messages in the log, or another one typed in"));
     QComboBox *op = new QComboBox(m_conditions);
-    op->addItems({tr("is"), tr("matches")});
-    op->setCurrentIndex(condition.m_regExp ? 1 : 0);
-    op->setToolTip(tr("is: the value (numbers as numbers); matches: a regular expression of the whole value"));
+    MessageCenterContactDialog::fillOperators(op, condition.m_operator);
     QLineEdit *value = new QLineEdit(condition.m_value, m_conditions);
     value->setFrame(false);
     QLabel *finds = new QLabel(m_conditions);
@@ -471,8 +469,7 @@ void MessageCenterContactDialog::addSendToRow(const MessageCenterContact::SendTo
     }
 
     QComboBox *op = new QComboBox(m_sendTo);
-    op->addItems({tr("is"), tr("matches")});
-    op->setCurrentIndex(when.m_regExp ? 1 : 0);
+    MessageCenterContactDialog::fillOperators(op, when.m_operator);
     QLineEdit *value = new QLineEdit(when.m_value, m_sendTo);
     value->setFrame(false);
     value->setPlaceholderText(tr("e.g. voice"));
@@ -558,8 +555,8 @@ MessageCenterContact::SendTo MessageCenterContactDialog::rowSendTo(int row) cons
     {
         MessageCenterContact::Condition condition;
         condition.m_field = field->currentText().trimmed();
-        condition.m_regExp = (op->currentIndex() == 1);
-        condition.m_value = condition.m_regExp ? value->text() : value->text().trimmed();
+        condition.m_operator = (MessageCenterContact::Condition::Operator) op->currentData().toInt();
+        condition.m_value = (condition.m_operator == MessageCenterContact::Condition::Matches) ? value->text() : value->text().trimmed();
         sendTo.m_when.append(condition);
     }
     for (const QJsonValue& v : QJsonDocument::fromJson(field->property("extra").toByteArray()).array()) {
@@ -623,11 +620,26 @@ MessageCenterContact::Condition MessageCenterContactDialog::rowCondition(int row
     if (field && op && value)
     {
         condition.m_field = field->currentText().trimmed();
-        condition.m_regExp = (op->currentIndex() == 1);
-        condition.m_value = condition.m_regExp ? value->text() : value->text().trimmed();
+        condition.m_operator = (MessageCenterContact::Condition::Operator) op->currentData().toInt();
+        condition.m_value = (condition.m_operator == MessageCenterContact::Condition::Matches) ? value->text() : value->text().trimmed();
     }
 
     return condition;
+}
+
+void MessageCenterContactDialog::fillOperators(QComboBox *combo, MessageCenterContact::Condition::Operator current)
+{
+    for (int op = 0; op < MessageCenterContact::Condition::OperatorCount; op++)
+    {
+        combo->addItem(MessageCenterContact::Condition::operatorText((MessageCenterContact::Condition::Operator) op), op);
+
+        if (op == current) {
+            combo->setCurrentIndex(combo->count() - 1);
+        }
+    }
+
+    combo->setToolTip(tr("is: the value (numbers as numbers); is not: another value, or none; matches: a regular expression "
+        "of the whole value;\n< <= > >=: numbers; is present, is absent: the field has a value or not"));
 }
 
 MessageCenterContact MessageCenterContactDialog::contact() const

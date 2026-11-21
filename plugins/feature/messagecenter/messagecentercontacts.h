@@ -27,6 +27,7 @@
 
 #include "messagecenterengine.h"
 
+class QComboBox;
 class QLabel;
 class QLineEdit;
 class QTableWidget;
@@ -62,6 +63,8 @@ public:
     MessageCenterContactDialog(const MessageCenterContact& contact, const QStringList& otherNames, const QStringList& fields,
         const std::vector<QJsonObject>& log, const QStringList& transmitters, QWidget *parent = nullptr);
     MessageCenterContact contact() const;
+    //!< The operators of a condition in a combo box (each with its operator as data), the current one selected
+    static void fillOperators(QComboBox *combo, MessageCenterContact::Condition::Operator current);
 
 private:
     MessageCenterContact m_contact;

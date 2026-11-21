@@ -161,6 +161,33 @@ QStringList RadioPagingPage::functions(const QString& protocol)
     return names;
 }
 
+MessageRecord::Quality RadioPagingPage::receivedQuality(const MessageRecord& record)
+{
+    const QVariantMap& d = record.m_protocolData;
+    const bool unfinished = record.m_partial || d.value("is_fragment").toBool();
+    bool checked = false;
+
+    for (const char *key : {"checksum", "signature"})
+    {
+        const QString result = d.value(key).toString();
+
+        if ((result == "failed") || ((result == "incomplete") && !unfinished)) {
+            return MessageRecord::QualityDamaged;
+        }
+
+        checked = checked || (result == "ok");
+    }
+
+    if (d.value("checksum_errors").toInt() > 0) {
+        return MessageRecord::QualityDamaged;
+    }
+
+    checked = checked || (d.value("checksum_passed").toInt() > 0);
+    const MessageRecord::Quality q = MessageRecord::qualityFromErrors(record.m_errorsCorrected, record.m_errorsUncorrectable,
+        record.m_charStatus);
+    return ((q == MessageRecord::QualityNone) && checked) ? MessageRecord::QualityClean : q;
+}
+
 QString RadioPagingPage::addressDescription(const QString& protocol, const QString& address, int function)
 {
     // GSC the digits of the cap code (a suffix digit sets the function), FLEX the capcode form, POCSAG the frame and

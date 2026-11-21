@@ -93,6 +93,7 @@ void MessageRecord::resetToDefaults()
     m_duplicate = DuplicateNone;
     m_partial = false;
     m_protocolData.clear();
+    m_quality = QualityUnknown;
 }
 
 // The key of the duplicate detection of the receiver of the message (RadioPagingDedup): the frequency, the protocol,
@@ -153,6 +154,7 @@ QJsonObject MessageRecord::toJson() const
     json.insert("dedupKey", dedupKey());
     json.insert("partial", m_partial);
     json.insert("protocolData", QJsonObject::fromVariantMap(m_protocolData));
+    json.insert("quality", stringOrNull(qualityToString(m_quality)));
 
     return json;
 }
@@ -196,6 +198,7 @@ bool MessageRecord::fromJson(const QJsonObject& json, MessageRecord& record)
     record.m_duplicate = duplicateFromString(readString(json, "duplicate"));
     record.m_partial = json.value("partial").toBool(false);
     record.m_protocolData = json.value("protocolData").toObject().toVariantMap();
+    record.m_quality = qualityFromString(readString(json, "quality"));
 
     return true;
 }
@@ -214,7 +217,7 @@ QStringList MessageRecord::csvHeader()
         "address", "polarity", "speed", "text", "rawData", "rawBits",
         "errorsCorrected", "errorsUncorrectable", "ber", "charStatus",
         "frequency", "channel", "deviceSetIndex", "channelIndex",
-        "centerFrequency", "channelOffset", "duplicate", "dedupKey", "partial", "protocolData"
+        "centerFrequency", "channelOffset", "duplicate", "dedupKey", "partial", "protocolData", "quality"
     };
 }
 
@@ -249,6 +252,7 @@ QString MessageRecord::toCSV() const
     fields.append(CSV::escape(dedupKey()));
     fields.append(m_partial ? "1" : "0");
     fields.append(CSV::escape(QString::fromUtf8(QJsonDocument(QJsonObject::fromVariantMap(m_protocolData)).toJson(QJsonDocument::Compact))));
+    fields.append(qualityToString(m_quality));
 
     return fields.join(',');
 }
@@ -310,6 +314,7 @@ bool MessageRecord::fromCSV(const QHash<QString, int>& columns, const QStringLis
     json.insert("partial", field("partial") == "1");
     json.insert("protocolData",
         QJsonDocument::fromJson(field("protocolData").toUtf8()).object());
+    json.insert("quality", stringValue("quality"));
 
     return fromJson(json, record);
 }
@@ -397,4 +402,52 @@ MessageRecord::Duplicate MessageRecord::duplicateFromString(const QString& strin
     } else {
         return DuplicateNone;
     }
+}
+
+QString MessageRecord::qualityToString(Quality quality)
+{
+    switch (quality)
+    {
+    case QualityNone:
+        return "none";
+    case QualityClean:
+        return "clean";
+    case QualityCorrected:
+        return "corrected";
+    case QualityDamaged:
+        return "damaged";
+    case QualityUnknown:
+    default:
+        return QString();
+    }
+}
+
+MessageRecord::Quality MessageRecord::qualityFromString(const QString& string)
+{
+    if (string == "none") {
+        return QualityNone;
+    } else if (string == "clean") {
+        return QualityClean;
+    } else if (string == "corrected") {
+        return QualityCorrected;
+    } else if (string == "damaged") {
+        return QualityDamaged;
+    } else {
+        return QualityUnknown;
+    }
+}
+
+MessageRecord::Quality MessageRecord::qualityFromErrors(int errorsCorrected, int errorsUncorrectable, const QString& charStatus)
+{
+    if ((errorsUncorrectable > 0) || charStatus.contains('b')) {
+        return QualityDamaged;
+    }
+    if ((errorsCorrected > 0) || charStatus.contains('c')) {
+        return QualityCorrected;
+    }
+    if ((errorsCorrected == 0) || (errorsUncorrectable == 0)) {
+        return QualityClean;
+    }
+
+    return QualityNone;
 }

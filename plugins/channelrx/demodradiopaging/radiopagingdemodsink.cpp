@@ -1173,6 +1173,7 @@ void RadioPagingDemodSink::sendRecord(MessageRecord& record, int protocol)
     }
     record.m_timestamp = QDateTime::currentMSecsSinceEpoch();
     record.m_protocolData.insert("interpretedBy", "decoder");
+    record.m_quality = RadioPagingPage::receivedQuality(record);
 
     {
         QMutexLocker mutexLocker(&m_statusMutex);

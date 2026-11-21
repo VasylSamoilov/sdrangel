@@ -153,8 +153,14 @@ QString filterSummary(const MessageCenterFilter& f)
     if (f.m_voiceOnly) {
         parts << "voice files";
     }
-    if (!f.m_field.isEmpty()) {
-        parts << QString("%1 /%2/").arg(f.m_field, f.m_value);
+    if (!f.m_quality.isEmpty()) {
+        parts << ((f.m_quality == "notDamaged") ? QString("not damaged") : f.m_quality);
+    }
+    if (f.m_hideFragments) {
+        parts << "no fragments";
+    }
+    for (const MessageCenterContact::Condition& c : f.m_conditions) {
+        parts << c.text();
     }
 
     return parts.isEmpty() ? QString("everything") : parts.join(", ");
@@ -212,16 +218,27 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     m_source->setVisible(false);
     m_hideDuplicates = new QCheckBox("Hide duplicates", this);
     m_voiceOnly = new QCheckBox("Voice files", this);
-    // One more field: those the other filters do not have, the record and its protocol data; any other can be typed
-    m_field = new QComboBox(this);
-    m_field->setEditable(true);
-    m_field->setInsertPolicy(QComboBox::NoInsert);
-    m_field->addItem(QString());
-    m_field->addItems({"capcode", "ric", "function", "group_capcodes", "mode", "speed", "frequency", "kind", "contact",
-        "priority", "cycle", "frame", "phase", "errorsUncorrectable", "errorsCorrected", "duplicate"});
-    m_field->lineEdit()->setPlaceholderText("field");
-    m_value = new QLineEdit(this);
-    m_value->setPlaceholderText("regular expression");
+    // How well the message came through: a field every message has
+    m_quality = new QComboBox(this);
+    m_quality->addItem("Any quality", QString());
+    m_quality->addItem("Not damaged", QString("notDamaged"));
+    m_quality->addItem("Clean", QString("clean"));
+    m_quality->addItem("Corrected", QString("corrected"));
+    m_quality->addItem("Damaged", QString("damaged"));
+    m_quality->setToolTip("How well the message came through:\n"
+        "Clean: no bit errors, every check passed (FLEX checksum and signature, GSC blocks)\n"
+        "Corrected: bit errors, all corrected; nothing lost\n"
+        "Damaged: something lost: uncorrectable errors, a failed check, an incomplete message\n"
+        "Not damaged: clean or corrected, or nothing to check (a tone)");
+    // Conditions on any field, those of a protocol too (checksum, signature, blocking length...)
+    m_conditionsButton = new QToolButton(this);
+    m_conditionsButton->setText("Conditions...");
+    m_conditionsButton->setToolTip("Conditions on any field of the messages, those of their protocol too (FLEX checksum "
+        "and signature, phase, frame, blocking length...): all of them met");
+    connect(m_conditionsButton, &QToolButton::clicked, this, [this]() {
+        emit fieldsWanted();
+        editConditions();
+    });
 
     m_protocol->setToolTip("Protocol of the messages: any, POCSAG, FLEX or GSC");
     m_direction->setToolTip("Received (RX), transmitted (TX) or both");
@@ -235,10 +252,6 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     m_source->setToolTip("Where the message comes from: the channels, the API (ingest), or a source of I/O");
     m_hideDuplicates->setToolTip("Hide the messages marked as duplicates (copies received again)");
     m_voiceOnly->setToolTip("Only the GSC voice pages that have a sound file");
-    m_field->setToolTip("One more field to filter on: a field of the message or of its protocol (the details of a message\n"
-        "in the log show them all), e.g. capcode, ric, function, mode. Empty: none");
-    m_value->setToolTip("Regular expression the whole value of the field must match, e.g. 4071410.. for a range of capcodes.\n"
-        "Numbers as they are in the details of the message. A list (the members of a group message): one of its values");
 
     // The text fields with their names (a placeholder alone is hard to see), at a width that fits an expression
     auto labelled = [this](const QString& name, QWidget *field, QLineEdit *edit, int chars) {
@@ -268,20 +281,18 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
     layout->addWidget(m_direction);
     layout->addWidget(m_polarity);
     layout->addWidget(m_type);
+    layout->addWidget(m_quality);
     layout->addWidget(m_hideDuplicates);
     layout->addWidget(m_voiceOnly);
     layout->addWidget(m_source);
     layout->addWidget(labelled("Channel", nullptr, m_channel, 14));
     layout->addWidget(labelled("Address", nullptr, m_address, 14));
     layout->addWidget(labelled("Text", nullptr, m_text, 16));
-    m_field->setFixedWidth(m_field->fontMetrics().averageCharWidth() * 16);
-    layout->addWidget(labelled(QString(), m_field, m_value, 14));
+    layout->addWidget(m_conditionsButton);
 
-    for (QComboBox *combo : {m_contact, m_protocol, m_direction, m_polarity, m_type, m_source}) {
+    for (QComboBox *combo : {m_contact, m_protocol, m_direction, m_polarity, m_type, m_source, m_quality}) {
         connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MessageCenterFilterWidget::changed);
     }
-    connect(m_field, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MessageCenterFilterWidget::changed);
-    connect(m_field->lineEdit(), &QLineEdit::editingFinished, this, &MessageCenterFilterWidget::changed);
     connect(m_protocol, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
         fillTypes(m_protocol->currentData().toString());
     });
@@ -294,14 +305,14 @@ MessageCenterFilterWidget::MessageCenterFilterWidget(QWidget *parent) :
         edit->setToolTip(valid ? help : expression.errorString());
     };
 
-    for (QLineEdit *edit : {m_address, m_text, m_value})
+    for (QLineEdit *edit : {m_address, m_text})
     {
         const QString help = edit->toolTip();
         const bool anchored = (edit != m_text);
         connect(edit, &QLineEdit::textChanged, this, [validate, edit, anchored, help]() { validate(edit, anchored, help); });
     }
 
-    for (QLineEdit *edit : {m_channel, m_address, m_text, m_value}) {
+    for (QLineEdit *edit : {m_channel, m_address, m_text}) {
         connect(edit, &QLineEdit::editingFinished, this, &MessageCenterFilterWidget::changed);
     }
     for (QCheckBox *check : {m_hideDuplicates, m_voiceOnly}) {
@@ -389,9 +400,143 @@ MessageCenterFilter MessageCenterFilterWidget::filter() const
     f.m_text = m_text->text();
     f.m_hideDuplicates = m_hideDuplicates->isChecked();
     f.m_voiceOnly = m_voiceOnly->isChecked();
-    f.m_field = m_field->currentText().trimmed();
-    f.m_value = f.m_field.isEmpty() ? QString() : m_value->text();
+    f.m_quality = m_quality->currentData().toString();
+    f.m_conditions = m_conditions;
     return f;
+}
+
+void MessageCenterFilterWidget::showConditions()
+{
+    QStringList texts;
+
+    for (const MessageCenterContact::Condition& c : m_conditions) {
+        texts.append(c.text());
+    }
+
+    m_conditionsButton->setText(m_conditions.isEmpty() ? QString("Conditions...") : QString("Conditions (%1)...").arg(m_conditions.size()));
+    m_conditionsButton->setStyleSheet(m_conditions.isEmpty() ? QString() : QString("QToolButton { color: #66bb6a; }"));
+    m_conditionsButton->setToolTip(m_conditions.isEmpty()
+        ? QString("Conditions on any field of the messages, those of their protocol too (FLEX checksum and signature, phase, "
+            "frame, blocking length...): all of them met")
+        : QString("All of them met:\n%1").arg(texts.join("\n")));
+}
+
+// A row a condition: the field (those of the log, or one typed), the operator, the value; Add and Remove
+void MessageCenterFilterWidget::editConditions()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle("Conditions");
+    QVBoxLayout *layout = new QVBoxLayout(&dialog);
+    QLabel *help = new QLabel("Conditions on any field of the messages, all of them met. The details of a message "
+        "(double-click it) show its fields.", &dialog);
+    help->setWordWrap(true);
+    layout->addWidget(help);
+    QTableWidget *table = new QTableWidget(0, 3, &dialog);
+    table->setHorizontalHeaderLabels({"Field", "Operator", "Value"});
+    table->setColumnWidth(0, table->fontMetrics().averageCharWidth() * 24);
+    table->setColumnWidth(1, table->fontMetrics().averageCharWidth() * 14);
+    table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    table->verticalHeader()->setVisible(false);
+    table->setSelectionBehavior(QAbstractItemView::SelectRows);
+    layout->addWidget(table);
+    QLabel *error = new QLabel(&dialog);
+    error->setStyleSheet("QLabel { color: #ff7777; }");
+    error->setWordWrap(true);
+    layout->addWidget(error);
+
+    auto addRow = [this, table](const MessageCenterContact::Condition& c) {
+        const int row = table->rowCount();
+        table->insertRow(row);
+        QComboBox *field = new QComboBox(table);
+        field->setEditable(true);
+        field->setInsertPolicy(QComboBox::NoInsert);
+        field->addItems(m_fieldNames);
+        field->setCurrentText(c.m_field);
+        field->setToolTip("Field of the message: those of the messages in the log, or another one typed in");
+        QComboBox *op = new QComboBox(table);
+        MessageCenterContactDialog::fillOperators(op, c.m_operator);
+        QLineEdit *value = new QLineEdit(c.m_value, table);
+        value->setFrame(false);
+        value->setEnabled(MessageCenterContact::Condition::takesValue(c.m_operator));
+        connect(op, QOverload<int>::of(&QComboBox::currentIndexChanged), value, [op, value]() {
+            value->setEnabled(MessageCenterContact::Condition::takesValue((MessageCenterContact::Condition::Operator) op->currentData().toInt()));
+        });
+        table->setCellWidget(row, 0, field);
+        table->setCellWidget(row, 1, op);
+        table->setCellWidget(row, 2, value);
+    };
+    auto rowCondition = [table](int row) {
+        MessageCenterContact::Condition c;
+        const QComboBox *field = qobject_cast<QComboBox*>(table->cellWidget(row, 0));
+        const QComboBox *op = qobject_cast<QComboBox*>(table->cellWidget(row, 1));
+        const QLineEdit *value = qobject_cast<QLineEdit*>(table->cellWidget(row, 2));
+        c.m_field = field ? field->currentText().trimmed() : QString();
+        c.m_operator = op ? (MessageCenterContact::Condition::Operator) op->currentData().toInt() : MessageCenterContact::Condition::Is;
+        c.m_value = !value || !MessageCenterContact::Condition::takesValue(c.m_operator) ? QString()
+            : (c.m_operator == MessageCenterContact::Condition::Matches) ? value->text() : value->text().trimmed();
+        return c;
+    };
+
+    for (const MessageCenterContact::Condition& c : m_conditions) {
+        addRow(c);
+    }
+
+    QHBoxLayout *buttons = new QHBoxLayout();
+    QPushButton *add = new QPushButton("Add", &dialog);
+    QPushButton *remove = new QPushButton("Remove", &dialog);
+    buttons->addWidget(add);
+    buttons->addWidget(remove);
+    buttons->addStretch(1);
+    QDialogButtonBox *box = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttons->addWidget(box);
+    layout->addLayout(buttons);
+    connect(add, &QPushButton::clicked, &dialog, [addRow]() { addRow(MessageCenterContact::Condition()); });
+    connect(remove, &QPushButton::clicked, &dialog, [table]() {
+        if (table->currentRow() >= 0) {
+            table->removeRow(table->currentRow());
+        }
+    });
+    connect(box, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    connect(box, &QDialogButtonBox::accepted, &dialog, [&dialog, table, error, rowCondition]() {
+        // A row without a field is dropped; a condition that cannot match says why, the dialog stays
+        for (int row = 0; row < table->rowCount(); row++)
+        {
+            const MessageCenterContact::Condition c = rowCondition(row);
+            const QString why = c.m_field.isEmpty() ? QString() : c.check();
+
+            if (!why.isEmpty())
+            {
+                error->setText(why);
+                return;
+            }
+        }
+
+        dialog.accept();
+    });
+
+    if (m_conditions.isEmpty()) {
+        addRow(MessageCenterContact::Condition());
+    }
+
+    dialog.resize(520, 260);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    m_conditions.clear();
+
+    for (int row = 0; row < table->rowCount(); row++)
+    {
+        const MessageCenterContact::Condition c = rowCondition(row);
+
+        if (!c.m_field.isEmpty()) {
+            m_conditions.append(c);
+        }
+    }
+
+    showConditions();
+    emit changed();
 }
 
 void MessageCenterFilterWidget::setFilter(const MessageCenterFilter& f)
@@ -435,8 +580,9 @@ void MessageCenterFilterWidget::setFilter(const MessageCenterFilter& f)
     m_text->setText(f.m_text);
     m_hideDuplicates->setChecked(f.m_hideDuplicates);
     m_voiceOnly->setChecked(f.m_voiceOnly);
-    m_field->setCurrentText(f.m_field);
-    m_value->setText(f.m_value);
+    m_quality->setCurrentIndex(std::max(0, m_quality->findData(f.m_quality)));
+    m_conditions = f.m_conditions;
+    showConditions();
 
     if (!f.m_sources.isEmpty() && (m_source->findText(f.m_sources.first()) < 0)) {
         m_source->addItem(f.m_sources.first());
@@ -632,6 +778,7 @@ void MessageCenterGUI::buildLog(QWidget *container)
     QVBoxLayout *layout = new QVBoxLayout(container);
     layout->setContentsMargins(2, 2, 2, 2);
     m_logFilter = new MessageCenterFilterWidget(container);
+    connect(m_logFilter, &MessageCenterFilterWidget::fieldsWanted, this, [this]() { m_logFilter->setFields(logFieldNames()); });
     m_logTable = new PagingMessageTable(container);
     m_logTable->setMinimumHeight(80);
     m_logTable->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -1291,6 +1438,47 @@ QString MessageCenterGUI::contactOfDestination(const RadioPagingPage& page) cons
     return QString();
 }
 
+// The fields of the last messages of the log, the usual ones first, then the others by name; their fields in sample,
+// if given
+QStringList MessageCenterGUI::logFieldNames(std::vector<QJsonObject> *sample) const
+{
+    QSet<QString> fieldSet;
+    const std::deque<MessageRecord>& log = m_center->engine().log();
+    const size_t count = std::min<size_t>(log.size(), 2000);
+
+    for (size_t i = log.size() - count; i < log.size(); i++)
+    {
+        QJsonObject fields = MessageCenterContact::recordFields(log[i]);
+
+        for (const QString& key : fields.keys())
+        {
+            const QJsonValue::Type type = fields.value(key).type();
+
+            if ((type != QJsonValue::Object) && (key != "protocolData") && !key.startsWith("contact")) {
+                fieldSet.insert(key);
+            }
+        }
+
+        if (sample) {
+            sample->push_back(fields);
+        }
+    }
+
+    QStringList fields = {"protocol", "address", "ric", "function", "capcode", "group_capcodes", "msgType", "channel",
+        "frequency", "mode", "quality", "checksum", "signature", "errorsCorrected", "errorsUncorrectable"};
+    QStringList seen = fieldSet.values();
+    std::sort(seen.begin(), seen.end());
+
+    for (const QString& field : seen)
+    {
+        if (!fields.contains(field)) {
+            fields.append(field);
+        }
+    }
+
+    return fields;
+}
+
 void MessageCenterGUI::editContact(int index, const MessageCenterContact *preset)
 {
     const bool existing = (index >= 0) && (index < m_settings.m_contacts.size());
@@ -1306,39 +1494,7 @@ void MessageCenterGUI::editContact(int index, const MessageCenterContact *preset
     // The fields of the messages of the log (the conditions are on them), and the last messages to show what each rule
     // finds
     std::vector<QJsonObject> sample;
-    QSet<QString> fieldSet;
-    {
-        const std::deque<MessageRecord>& log = m_center->engine().log();
-        const size_t count = std::min<size_t>(log.size(), 2000);
-
-        for (size_t i = log.size() - count; i < log.size(); i++)
-        {
-            QJsonObject fields = MessageCenterContact::recordFields(log[i]);
-
-            for (const QString& key : fields.keys())
-            {
-                const QJsonValue::Type type = fields.value(key).type();
-
-                if ((type != QJsonValue::Object) && (key != "protocolData") && !key.startsWith("contact")) {
-                    fieldSet.insert(key);
-                }
-            }
-
-            sample.push_back(fields);
-        }
-    }
-
-    // The usual ones first, then the others by name
-    QStringList fields = {"protocol", "address", "ric", "function", "capcode", "group_capcodes", "msgType", "channel", "frequency", "mode"};
-    QStringList seen = fieldSet.values();
-    std::sort(seen.begin(), seen.end());
-
-    for (const QString& field : seen)
-    {
-        if (!fields.contains(field)) {
-            fields.append(field);
-        }
-    }
+    const QStringList fields = logFieldNames(&sample);
 
     // The transmitters that announced themselves
     QStringList transmitters;
@@ -1965,7 +2121,7 @@ void MessageCenterGUI::runQuery(bool resolve)
 
     // The files are read in a thread of the pool; the result comes back here. A newer query drops the older result
     const int number = ++m_queryRunning;
-    const MessageCenterFilter filter = m_logFilter->filter();
+    const MessageCenterFilter filter = logFilter();
     const qint64 from = m_queryFrom;
     const qint64 to = m_queryTo;
     const int offset = m_queryOffset;
@@ -1999,11 +2155,8 @@ void MessageCenterGUI::showQueryResult(int number, const MessageCenterArchiveRes
     m_logTable->setUpdatesEnabled(false);
     m_logTable->setRowCount(0);
 
-    for (auto it = result.m_records.rbegin(); it != result.m_records.rend(); ++it)
-    {
-        if (shownInLog(*it)) {
-            m_logTable->addRecord(*it);
-        }
+    for (auto it = result.m_records.rbegin(); it != result.m_records.rend(); ++it) {
+        m_logTable->addRecord(*it);
     }
 
     m_logTable->selectId(selected);
@@ -2037,7 +2190,7 @@ void MessageCenterGUI::refreshLog()
 
     if ((m_shownLogged >= 0) && engine.changedSince(m_shownLogged, changed))
     {
-        const MessageCenterFilter filter = m_logFilter->filter();
+        const MessageCenterFilter filter = logFilter();
         QSet<QString> done;
 
         m_shownLogged = engine.logged();
@@ -2051,7 +2204,7 @@ void MessageCenterGUI::refreshLog()
             done.insert(id);
             const MessageRecord *record = engine.find(id);
 
-            if (record && filter.matches(*record) && shownInLog(*record)) {
+            if (record && filter.matches(*record)) {
                 m_logTable->addRecord(*record);
             }
             else
@@ -2070,17 +2223,7 @@ void MessageCenterGUI::refreshLog()
     }
 
     m_shownLogged = engine.logged();
-    std::vector<MessageRecord> selectedRecords = engine.select(m_logFilter->filter());
-    std::vector<MessageRecord> records;
-    records.reserve(selectedRecords.size());
-
-    for (MessageRecord& record : selectedRecords)
-    {
-        if (shownInLog(record)) {
-            records.push_back(std::move(record));
-        }
-    }
-
+    std::vector<MessageRecord> records = engine.select(logFilter());
     size_t first = (records.size() > (size_t) m_maxLogRows) ? records.size() - m_maxLogRows : 0;
     QString selected = m_logTable->selectedId();
 
@@ -2097,11 +2240,14 @@ void MessageCenterGUI::refreshLog()
     showLiveCount();
 }
 
-// A fragment of a FLEX message is a record of its own (the receiver reports each fragment, then the whole
-// message): shown only when asked, a message is one row
-bool MessageCenterGUI::shownInLog(const MessageRecord& record) const
+// The filters of the Messages tab. A fragment of a FLEX message is a record of its own (the receiver reports each
+// fragment, then the whole message): shown only when asked, a message is one row. In the filter, so that a page of a
+// query and its totals count the rows shown
+MessageCenterFilter MessageCenterGUI::logFilter() const
 {
-    return m_showFragments->isChecked() || !record.m_protocolData.value("is_fragment").toBool();
+    MessageCenterFilter f = m_logFilter->filter();
+    f.m_hideFragments = !m_showFragments->isChecked();
+    return f;
 }
 
 // The menu of a message: page its address again (the Send tab filled), add its sender as a contact, show only the
@@ -2659,6 +2805,7 @@ void MessageCenterGUI::editRoute(int index, const MessageCenterEngine::Route *pr
 
     filter->showSources(sources);
     filter->setFilter(route.m_filter);
+    connect(filter, &MessageCenterFilterWidget::fieldsWanted, &dialog, [this, filter]() { filter->setFields(logFieldNames()); });
     QFormLayout *nameForm = new QFormLayout();
     nameForm->addRow("Name", name);
     layout->addLayout(nameForm);
@@ -3236,7 +3383,7 @@ void MessageCenterGUI::exportLog()
         return;
     }
 
-    const std::vector<MessageRecord> records = m_center->engine().select(m_logFilter->filter());
+    const std::vector<MessageRecord> records = m_center->engine().select(logFilter());
     QFile file(path);
     bool written = file.open(QIODevice::WriteOnly | QIODevice::Truncate)
         && (file.write(MessageRecord::csvHeader().join(',').toUtf8() + "\n") >= 0);

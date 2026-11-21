@@ -62,6 +62,15 @@ struct SDRBASE_API MessageRecord
         DuplicateDupPlus    //!< Same message seen before, this copy has fewer errors
     };
 
+    //! How well the message came through, set by its producer (only it knows which of its checks matter)
+    enum Quality {
+        QualityUnknown,     //!< Not set by the producer (records of before, imported files)
+        QualityNone,        //!< Not applicable: nothing to check (a tone, a message without error counts or checks)
+        QualityClean,       //!< No bit errors, every check present passed
+        QualityCorrected,   //!< Bit errors, all corrected: nothing lost
+        QualityDamaged      //!< Something lost: uncorrectable errors, a failed check, an incomplete message
+    };
+
     static const int m_schemaVersion = 1;
     static const char * const m_pipeName;   //!< Name of the message pipe carrying records
 
@@ -91,6 +100,7 @@ struct SDRBASE_API MessageRecord
     Duplicate m_duplicate;
     bool m_partial;                 //!< Part of a message, an update with the same id follows
     QVariantMap m_protocolData;     //!< Protocol specific fields
+    Quality m_quality;              //!< QualityUnknown if the producer did not set it
 
     MessageRecord();
     void resetToDefaults();
@@ -123,6 +133,13 @@ struct SDRBASE_API MessageRecord
     static Polarity polarityFromString(const QString& string);
     static QString duplicateToString(Duplicate duplicate);
     static Duplicate duplicateFromString(const QString& string);
+    //!< none, clean, corrected, damaged; null for unknown
+    static QString qualityToString(Quality quality);
+    static Quality qualityFromString(const QString& string);
+    //!< From the common fields only: uncorrectable errors or a lost character damaged, corrected errors or a corrected
+    //!< character corrected, error counts of 0 clean, else none. A producer with checks of its own sets the quality
+    //!< itself
+    static Quality qualityFromErrors(int errorsCorrected, int errorsUncorrectable, const QString& charStatus);
 };
 
 #endif // INCLUDE_UTIL_MESSAGERECORD_H

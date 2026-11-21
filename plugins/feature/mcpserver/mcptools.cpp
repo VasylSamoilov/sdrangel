@@ -6372,8 +6372,10 @@ void MCPTools::registerMessageCenterTools()
         "Route: {name, enabled, stop, sinks: [names], filter: {protocols: [pocsag|flex|gsc], channels (channel names: their titles), sources (channels, "
         "api or source names), contacts, direction (0 rx, 1 tx), kind, polarity (1 normal, 2 inverted), speeds, address (regular "
         "expression on the whole address), text (regular expression found anywhere in the text, not case sensitive; its captures "
-        "are ${1}... in the sinks), msgType, field and value (one more field of the record or of its protocol data, e.g. capcode, "
-        "ric, function: the regular expression value on its whole value), hideDuplicates, voiceOnly}, decodeCharset: "
+        "are ${1}... in the sinks), msgType, quality (notDamaged, clean, corrected, damaged or none), conditions ([{field, "
+        "and one of is, isNot, matches (regular expression on the whole value), lt, le, gt, ge: value; or present, absent: "
+        "true}] on any field of the record or of its protocol data, e.g. capcode, ric, function, checksum, signature; all met), "
+        "hideFragments, hideDuplicates, voiceOnly}, decodeCharset: "
         "{vendor, model, codepage}, decodeType (alphanumeric or numeric)}: the decode fields, optional, decode the messages "
         "again before they go to the route's sinks.\n"
         "Sink: {name, type, ...}: file {path, format 0 JSON lines or 1 CSV}; udp {address, port, format 0 Pager demodulator "
@@ -6491,7 +6493,7 @@ void MCPTools::registerMessageCenterTools()
                 {"from", numProp("Start, ms since the epoch")},
                 {"to", numProp("End, ms since the epoch")},
                 {"filter", objProp("A filter as that of a route: protocols, contacts, channels, direction, msgType, address "
-                    "(regular expression of the whole address), text (found anywhere, not case sensitive), field and value...")},
+                    "(regular expression of the whole address), text (found anywhere, not case sensitive), quality, conditions...")},
                 {"offset", intProp("Of the messages selected, newest first (default 0)")},
                 {"limit", intProp("Messages of the page, 1 to 1000 (default 100)")}}, {}),
         [this, parsed](const QJsonObject& args)

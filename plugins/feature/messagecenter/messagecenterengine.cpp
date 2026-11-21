@@ -113,27 +113,26 @@ bool MessageCenterFilter::matches(const MessageRecord& record) const
             return false;
         }
     }
-    // Any field of the record or of its protocol data, its whole value; a list (the members of a group message): one
-    // of its values
-    if (!m_field.isEmpty())
+    if (m_hideFragments && record.m_protocolData.value("is_fragment").toBool()) {
+        return false;
+    }
+    if (!m_quality.isEmpty())
     {
-        const QRegularExpression& expression = compile(m_compiledValue, m_value, true);
-        const QJsonValue value = MessageCenterContact::recordFields(record).value(m_field);
-        QStringList values;
+        const MessageRecord::Quality q = quality(record);
+        const bool met = (m_quality == "notDamaged") ? (q != MessageRecord::QualityDamaged)
+            : (MessageRecord::qualityToString(q) == m_quality);
 
-        if (value.isArray())
-        {
-            for (const QJsonValue& v : value.toArray()) {
-                values.append(v.toVariant().toString());
-            }
+        if (!met) {
+            return false;
         }
-        else if (!value.isUndefined() && !value.isNull())
-        {
-            values.append(value.toVariant().toString());
-        }
+    }
+    // Any field of the record or of its protocol data; a list (the members of a group message): one of its values
+    if (!m_conditions.isEmpty())
+    {
+        const QJsonObject fields = MessageCenterContact::recordFields(record);
 
-        if (!expression.isValid() || std::none_of(values.begin(), values.end(),
-            [&expression](const QString& v) { return expression.match(v).hasMatch(); })) {
+        if (!std::all_of(m_conditions.begin(), m_conditions.end(),
+            [&fields](const MessageCenterContact::Condition& condition) { return condition.matches(fields); })) {
             return false;
         }
     }
@@ -195,11 +194,30 @@ QString MessageCenterFilter::errors() const
     if (!m_text.isEmpty() && !compile(m_compiledText, m_text, false, textOptions).isValid()) {
         errors.append(QString("text: %1").arg(compile(m_compiledText, m_text, false, textOptions).errorString()));
     }
-    if (!m_field.isEmpty() && !compile(m_compiledValue, m_value, true).isValid()) {
-        errors.append(QString("%1: %2").arg(m_field, compile(m_compiledValue, m_value, true).errorString()));
+    for (const MessageCenterContact::Condition& condition : m_conditions)
+    {
+        const QString error = condition.check();
+
+        if (!error.isEmpty()) {
+            errors.append(error);
+        }
     }
 
     return errors.join("; ");
+}
+
+MessageRecord::Quality MessageCenterFilter::quality(const MessageRecord& record)
+{
+    if (record.m_quality != MessageRecord::QualityUnknown) {
+        return record.m_quality;
+    }
+    if (record.m_direction == MessageRecord::DirectionTX) {
+        return MessageRecord::QualityClean;     // Nothing was received: nothing went wrong
+    }
+
+    // A record of before quality (the history, an imported file): as the paging receiver judges it now, its errors
+    // and the checks of its protocol
+    return RadioPagingPage::receivedQuality(record);
 }
 
 QStringList MessageCenterFilter::captures(const MessageRecord& record) const
@@ -310,10 +328,21 @@ QJsonObject MessageCenterFilter::toJson() const
     if (!m_msgType.isEmpty()) {
         json["msgType"] = m_msgType;
     }
-    if (!m_field.isEmpty())
+    if (!m_conditions.isEmpty())
     {
-        json["field"] = m_field;
-        json["value"] = m_value;
+        QJsonArray conditions;
+
+        for (const MessageCenterContact::Condition& condition : m_conditions) {
+            conditions.append(condition.toJson());
+        }
+
+        json["conditions"] = conditions;
+    }
+    if (!m_quality.isEmpty()) {
+        json["quality"] = m_quality;
+    }
+    if (m_hideFragments) {
+        json["hideFragments"] = true;
     }
     if (m_frequencyMin >= 0) {
         json["frequencyMin"] = (double) m_frequencyMin;
@@ -362,8 +391,22 @@ MessageCenterFilter MessageCenterFilter::fromJson(const QJsonObject& json)
     f.m_address = json["address"].toString();
     f.m_text = json["text"].toString();
     f.m_msgType = json["msgType"].toString();
-    f.m_field = json["field"].toString().trimmed();
-    f.m_value = json["value"].toVariant().toString();
+    for (const QJsonValue& v : json["conditions"].toArray()) {
+        f.m_conditions.append(MessageCenterContact::Condition::fromJson(v.toObject()));
+    }
+
+    // The one field of before: its whole value matched the expression
+    if (!json["field"].toString().trimmed().isEmpty())
+    {
+        MessageCenterContact::Condition condition;
+        condition.m_field = json["field"].toString().trimmed();
+        condition.m_operator = MessageCenterContact::Condition::Matches;
+        condition.m_value = json["value"].toVariant().toString();
+        f.m_conditions.append(condition);
+    }
+
+    f.m_quality = json["quality"].toString();
+    f.m_hideFragments = json["hideFragments"].toBool(false);
     f.m_frequencyMin = json.contains("frequencyMin") ? (qint64) json["frequencyMin"].toDouble(-1) : -1;
     f.m_frequencyMax = json.contains("frequencyMax") ? (qint64) json["frequencyMax"].toDouble(-1) : -1;
     f.m_timeFrom = json.contains("timeFrom") ? (qint64) json["timeFrom"].toDouble(-1) : -1;
@@ -377,11 +420,35 @@ MessageCenterFilter MessageCenterFilter::fromJson(const QJsonObject& json)
 // Contacts
 // ---------------------------------------------------------------------------
 
+QString MessageCenterContact::Condition::operatorKey(Operator op)
+{
+    static const char *keys[] = {"is", "isNot", "matches", "lt", "le", "gt", "ge", "present", "absent"};
+    return ((op >= 0) && (op < OperatorCount)) ? QString(keys[op]) : QString("is");
+}
+
+QString MessageCenterContact::Condition::operatorText(Operator op)
+{
+    static const char *texts[] = {"is", "is not", "matches", "<", "<=", ">", ">=", "is present", "is absent"};
+    return ((op >= 0) && (op < OperatorCount)) ? QString(texts[op]) : QString("is");
+}
+
+QString MessageCenterContact::Condition::text() const
+{
+    return takesValue(m_operator) ? QString("%1 %2 %3").arg(m_field, operatorText(m_operator), m_value)
+        : QString("%1 %2").arg(m_field, operatorText(m_operator));
+}
+
 QJsonObject MessageCenterContact::Condition::toJson() const
 {
     QJsonObject json;
     json["field"] = m_field;
-    json[m_regExp ? "matches" : "is"] = m_value;
+
+    if (takesValue(m_operator)) {
+        json[operatorKey(m_operator)] = m_value;
+    } else {
+        json[operatorKey(m_operator)] = true;
+    }
+
     return json;
 }
 
@@ -389,8 +456,21 @@ MessageCenterContact::Condition MessageCenterContact::Condition::fromJson(const 
 {
     Condition c;
     c.m_field = json["field"].toString().trimmed();
-    c.m_regExp = json.contains("matches");
-    c.m_value = c.m_regExp ? json["matches"].toString() : json["is"].toVariant().toString();
+
+    // The operator is the key present (is when none)
+    for (int op = 0; op < OperatorCount; op++)
+    {
+        if (json.contains(operatorKey((Operator) op)))
+        {
+            c.m_operator = (Operator) op;
+            break;
+        }
+    }
+
+    if (takesValue(c.m_operator)) {
+        c.m_value = json[operatorKey(c.m_operator)].toVariant().toString();
+    }
+
     return c;
 }
 
@@ -399,13 +479,16 @@ QString MessageCenterContact::Condition::check() const
     if (m_field.isEmpty()) {
         return "a condition has no field";
     }
-    if (m_regExp)
+    if (m_operator == Matches)
     {
         QRegularExpression expression(QRegularExpression::anchoredPattern(m_value));
 
         if (!expression.isValid()) {
             return QString("%1 matches %2: %3").arg(m_field, m_value, expression.errorString());
         }
+    }
+    if (numeric(m_operator) && !QRegularExpression("^\\s*[+-]?[0-9]+(\\.[0-9]+)?\\s*$").match(m_value).hasMatch()) {
+        return QString("%1 %2 %3: not a number").arg(m_field, operatorText(m_operator), m_value);
     }
 
     return QString();
@@ -414,44 +497,74 @@ QString MessageCenterContact::Condition::check() const
 bool MessageCenterContact::Condition::matches(const QJsonObject& fields) const
 {
     const QJsonValue value = fields.value(m_field);
+    const bool absent = value.isUndefined() || value.isNull() || (value.isString() && value.toString().isEmpty())
+        || (value.isArray() && value.toArray().isEmpty());
 
-    if (value.isUndefined() || value.isNull()) {
-        return false;
+    if (m_operator == Absent) {
+        return absent;
+    }
+    if (m_operator == Present) {
+        return !absent;
+    }
+    if (absent) {
+        return m_operator == IsNot;     // Not the value: there is none
     }
 
-    // A list: one of its values
+    // A list: one of its values; is not: none of them is the value
     if (value.isArray())
     {
-        for (const QJsonValue& element : value.toArray())
-        {
-            QJsonObject one;
-            one.insert(m_field, element);
+        const QJsonArray array = value.toArray();
 
-            if (matches(one)) {
-                return true;
-            }
+        if (m_operator == IsNot)
+        {
+            Condition is = *this;
+            is.m_operator = Is;
+            return std::none_of(array.begin(), array.end(), [&is](const QJsonValue& v) { return is.matchesValue(v); });
         }
 
-        return false;
+        return std::any_of(array.begin(), array.end(), [this](const QJsonValue& v) { return matchesValue(v); });
     }
 
-    const QString text = value.isString() ? value.toString() : value.toVariant().toString();
+    return matchesValue(value);
+}
 
-    if (m_regExp)
+bool MessageCenterContact::Condition::matchesValue(const QJsonValue& value) const
+{
+    const QString valueText = value.isString() ? value.toString() : value.toVariant().toString();
+
+    if (m_operator == Matches)
     {
         if (m_compiled.pattern().isEmpty() && !m_value.isEmpty()) {
             m_compiled = QRegularExpression(QRegularExpression::anchoredPattern(m_value));
         }
 
-        return m_compiled.isValid() && m_compiled.match(text).hasMatch();
+        return m_compiled.isValid() && m_compiled.match(valueText).hasMatch();
     }
 
-    // Numbers as numbers: the capcode 0001234567 is 1234567
-    bool ok1, ok2;
-    const qlonglong a = text.toLongLong(&ok1);
-    const qlonglong b = m_value.trimmed().toLongLong(&ok2);
+    // Numbers as numbers: the capcode 0001234567 is 1234567, a bit error rate 0.01 is less than 0.1. Plain decimals
+    // only: the capcode 3E005237593 is not 3 times 10 to the 5237593
+    static const QRegularExpression decimal("^\\s*[+-]?[0-9]+(\\.[0-9]+)?\\s*$");
+    const bool numbers = decimal.match(valueText).hasMatch() && decimal.match(m_value).hasMatch();
+    const double a = numbers ? valueText.trimmed().toDouble() : 0.0;
+    const double b = numbers ? m_value.trimmed().toDouble() : 0.0;
 
-    return (ok1 && ok2) ? (a == b) : (text == m_value);
+    switch (m_operator)
+    {
+    case Is:
+        return numbers ? (a == b) : (valueText == m_value);
+    case IsNot:
+        return numbers ? (a != b) : (valueText != m_value);
+    case Less:
+        return numbers && (a < b);
+    case LessOrEqual:
+        return numbers && (a <= b);
+    case Greater:
+        return numbers && (a > b);
+    case GreaterOrEqual:
+        return numbers && (a >= b);
+    default:
+        return false;
+    }
 }
 
 bool MessageCenterContact::matches(const QJsonObject& fields) const
@@ -601,7 +714,7 @@ QString MessageCenterContact::ruleText(const Rule& rule)
     QStringList parts;
 
     for (const Condition& c : rule) {
-        parts.append(QString("%1 %2 %3").arg(c.m_field, c.m_regExp ? "matches" : "is", c.m_value));
+        parts.append(c.text());
     }
 
     return parts.join(" and ");
