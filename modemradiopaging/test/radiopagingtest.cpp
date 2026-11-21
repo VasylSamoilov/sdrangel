@@ -635,13 +635,88 @@ void testPocsagSyncLoss()
     std::vector<uint8_t> bits = r.m_bits;
     flipBits(bits, batchWords, 4);
     std::vector<RadioPagingPocsagDecoder::Message> messages = decodeBits(bits);
-    check((messages.size() == 1) && !messages[0].m_truncated && hasAddressText(messages, 1234567, m.m_text),
+    check((messages.size() == 1) && (messages[0].m_end != RadioPagingPocsagDecoder::EndCut) && hasAddressText(messages, 1234567, m.m_text),
         "POCSAG: one sync codeword missed, the message is received whole");
 
     // Two sync codewords missed in a row: sync loss, the message ends there
     flipBits(bits, 2 * batchWords, 4);
     messages = decodeBits(bits);
-    check((messages.size() == 1) && messages[0].m_truncated, "POCSAG: two sync codewords missed in a row, sync loss");
+    check((messages.size() == 1) && (messages[0].m_end == RadioPagingPocsagDecoder::EndCut), "POCSAG: two sync codewords missed in a row, sync loss");
+
+    // A message whose last codeword is the last of the last batch: the transmission ends with the batch (M.584-2 1),
+    // nothing follows the message (no idle codeword: the encoder sends a batch of idle codewords then, transmitters
+    // on the air do not), then noise. It is whole. A message cut in the middle of a batch by the end of the signal is
+    // still cut. The address of RIC 1234567 is in frame 7 (codeword 14)
+    const size_t batchBits = batchWords * 32;
+    auto decodeThenNoise = [](const std::vector<uint8_t>& transmission) {
+        RadioPagingPocsagDecoder decoder(RadioPagingPocsagDecoder::Normal);
+        std::vector<RadioPagingPocsagDecoder::Message> out;
+        uint32_t noise = 12345;
+
+        for (size_t i = 0; i < transmission.size() + 3 * 17 * 32; i++)
+        {
+            noise = noise * 1103515245u + 12345u;
+            decoder.feed((i < transmission.size()) ? (transmission[i] ? 0 : 1) : (int) ((noise >> 16) & 1));
+
+            while (decoder.hasMessage()) {
+                out.push_back(decoder.takeMessage());
+            }
+        }
+
+        decoder.flush();
+
+        while (decoder.hasMessage()) {
+            out.push_back(decoder.takeMessage());
+        }
+
+        return out;
+    };
+    int filling = 0;
+    int fillingWhole = 0;
+
+    for (int length = 1; length <= 120; length++)
+    {
+        RadioPagingPocsag::TxMessage f = m;
+        f.m_text = std::string(length, 'B');
+        std::vector<uint8_t> transmission = RadioPagingPocsag::encode({ f }).m_bits;
+        const uint32_t idle = RadioPagingPocsag::m_idleWord;
+        bool idleBatch = transmission.size() > batchBits;
+
+        // The last batch all idle codewords: the message filled the one before
+        for (size_t w = 1; idleBatch && (w < batchWords); w++)
+        {
+            uint32_t word = 0;
+
+            for (int b = 0; b < 32; b++) {
+                word = (word << 1) | transmission[transmission.size() - batchBits + w * 32 + b];
+            }
+
+            idleBatch = (word == idle);
+        }
+
+        if (!idleBatch) {
+            continue;
+        }
+
+        transmission.resize(transmission.size() - batchBits);
+        messages = decodeThenNoise(transmission);
+        filling++;
+        fillingWhole += ((messages.size() == 1) && (messages[0].m_end == RadioPagingPocsagDecoder::EndBatch)
+            && hasAddressText(messages, 1234567, f.m_text)) ? 1 : 0;
+    }
+
+    check((filling > 0) && (fillingWhole == filling), "POCSAG: a message that fills its last batch ends with the transmission, whole");
+    std::printf("      messages filling their last batch: %d, whole: %d\n", filling, fillingWhole);
+
+    // The signal ends in the middle of a batch, in the message: cut. The 120 characters are 42 codewords, from codeword
+    // 15 of batch 1 to codeword 9 of batch 4: the signal ends after codeword 8 of batch 3
+    std::vector<uint8_t> partial = r.m_bits;
+    partial.resize(partial.size() - 2 * batchBits + 9 * 32);
+    // (The noise here is hard bits, as clean as a signal: what it decodes to after the cut is not looked at)
+    messages = decodeThenNoise(partial);
+    check(!messages.empty() && (messages[0].m_address == 1234567) && (messages[0].m_end == RadioPagingPocsagDecoder::EndCut)
+        && (messages[0].m_wordStatus.size() < 42),
+        "POCSAG: the signal ends in the middle of a message: cut");
 
     // The end of a transmission followed by noise: the batch after the last one is not confirmed, no message
     RadioPagingPocsag::TxMessage tone;
@@ -1152,7 +1227,7 @@ void testPocsagStandardRules()
     for (const auto& msg : twoMessages)
     {
         if (msg.m_address == 1000) {
-            cut = msg.m_truncated && (msg.m_errorsUncorrectable == 2) && (msg.m_rawBits == 2 * 20 + 20);
+            cut = (msg.m_end == RadioPagingPocsagDecoder::EndCut) && (msg.m_errorsUncorrectable == 2) && (msg.m_rawBits == 2 * 20 + 20);
         }
     }
     check(cut, "POCSAG decoder: two successive undecodable codewords end the message");
@@ -1165,7 +1240,7 @@ void testPocsagStandardRules()
     for (const auto& msg : decodeBits(oneBad))
     {
         if (msg.m_address == 1000) {
-            kept = !msg.m_truncated && (msg.m_errorsUncorrectable == 1);
+            kept = (msg.m_end != RadioPagingPocsagDecoder::EndCut) && (msg.m_errorsUncorrectable == 1);
         }
     }
     check(kept, "POCSAG decoder: one undecodable codeword is kept in the message");

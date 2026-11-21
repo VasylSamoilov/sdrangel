@@ -161,24 +161,43 @@ QStringList RadioPagingPage::functions(const QString& protocol)
     return names;
 }
 
+// A FLEX check that damages the message. The checksum K is of the words of a fragment (a reassembled message has the
+// worst of its fragments): ok or not (incomplete in records of before: not ok). The signature S is of the characters
+// of the whole message: failed, or incomplete (characters lost); incomplete in a fragment or a part, whose rest is
+// still to come, is no damage
+bool RadioPagingPage::checkDamages(const MessageRecord& record, const char *check)
+{
+    const QString result = record.m_protocolData.value(check).toString();
+
+    if (result == "failed") {
+        return true;
+    }
+    if (result != "incomplete") {
+        return false;
+    }
+
+    const bool unfinished = record.m_partial || record.m_protocolData.value("is_fragment").toBool();
+    return (QString(check) == "checksum") || !unfinished;
+}
+
 MessageRecord::Quality RadioPagingPage::receivedQuality(const MessageRecord& record)
 {
     const QVariantMap& d = record.m_protocolData;
-    const bool unfinished = record.m_partial || d.value("is_fragment").toBool();
     bool checked = false;
 
     for (const char *key : {"checksum", "signature"})
     {
-        const QString result = d.value(key).toString();
-
-        if ((result == "failed") || ((result == "incomplete") && !unfinished)) {
+        if (checkDamages(record, key)) {
             return MessageRecord::QualityDamaged;
         }
 
-        checked = checked || (result == "ok");
+        checked = checked || (d.value(key).toString() == "ok");
     }
 
-    if (d.value("checksum_errors").toInt() > 0) {
+    // A message of fragments one of which is missing is incomplete; so is a message cut (POCSAG, GSC: the signal ended
+    // before the message did, its rest may be missing)
+    if ((d.value("checksum_errors").toInt() > 0) || (d.value("fragmented").toBool() && !d.value("complete", true).toBool())
+        || (d.value("end").toString() == "cut")) {
         return MessageRecord::QualityDamaged;
     }
 
@@ -203,7 +222,6 @@ MessageRecord::Quality RadioPagingPage::quality(const MessageRecord& record)
 QString RadioPagingPage::qualityReason(const MessageRecord& record)
 {
     const QVariantMap& d = record.m_protocolData;
-    const bool unfinished = record.m_partial || d.value("is_fragment").toBool();
     QStringList reasons;
 
     if (record.m_errorsUncorrectable > 0) {
@@ -215,14 +233,20 @@ QString RadioPagingPage::qualityReason(const MessageRecord& record)
 
     const QList<QPair<const char*, const char*>> checks = {{"checksum", "checksum K"}, {"signature", "signature S"}};
 
+    if (d.value("fragmented").toBool() && !d.value("complete", true).toBool()) {
+        reasons.append("incomplete: fragments missing");
+    }
+    if (d.value("end").toString() == "cut") {
+        reasons.append("cut: the signal ended before the message did");
+    }
+
     for (const auto& field : checks)
     {
-        const QString result = d.value(field.first).toString();
-
-        if (result == "failed") {
-            reasons.append(QString("%1 failed").arg(field.second));
-        } else if ((result == "incomplete") && !unfinished) {
-            reasons.append(QString("%1 incomplete").arg(field.second));
+        if (checkDamages(record, field.first))
+        {
+            // K is ok or not
+            const QString result = (QString(field.first) == "checksum") ? QString("failed") : d.value(field.first).toString();
+            reasons.append(QString("%1 %2").arg(field.second, result));
         }
     }
 

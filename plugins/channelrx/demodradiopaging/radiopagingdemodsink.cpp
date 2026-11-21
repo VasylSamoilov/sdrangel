@@ -1227,7 +1227,8 @@ void RadioPagingDemodSink::sendPocsag(const RadioPagingPocsagDecoder::Message& m
     record.m_protocolData.insert("ric", (qulonglong) message.m_address);
     record.m_protocolData.insert("function", message.m_function);
     record.m_protocolData.insert("batch", message.m_batch);
-    record.m_protocolData.insert("truncated", message.m_truncated);
+    // How it ended: idle, address, batch (filled the last batch, no idle codeword after it) or cut
+    record.m_protocolData.insert("end", RadioPagingPocsagDecoder::endName(message.m_end));
     record.m_protocolData.insert("score", interpretation.m_score);
     insertAlternative(record, interpretation.m_altType, interpretation.m_altText, interpretation.m_altScore);
     // The codepage of the alphanumeric text (the type or the other candidate) and its fill codes, to decode it again
@@ -1510,7 +1511,8 @@ void RadioPagingDemodSink::sendGsc(const RadioPagingGscDecoder::Message& message
     record.m_protocolData.insert("batch_mode", message.m_batch);
     record.m_protocolData.insert("slot", message.m_slot);
     record.m_protocolData.insert("non_battery_saver", message.m_nonBatterySaver);
-    record.m_protocolData.insert("truncated", message.m_truncated);
+    // How it ended: complete, or cut (the transmission ended before the message did)
+    record.m_protocolData.insert("end", message.m_truncated ? "cut" : "complete");
 
     m_lastGscPreamble = message.m_preamble;
     m_lastGscBatch = message.m_batch;

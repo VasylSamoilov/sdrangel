@@ -1494,6 +1494,12 @@ void RadioPagingFlexDecoder::emitMessage(Message& msg)
         m_status.m_incomplete++;
     }
 
+    // A message of fragments one of which is missing: the checksum K of the missing fragment is not ok, and a
+    // reassembled message has the worst K of its fragments
+    if (msg.m_fragmented && !msg.m_isFragment && !msg.m_complete) {
+        msg.m_checksum = CheckFailed;
+    }
+
     if (m_out) {
         m_out->push_back(msg);
     }

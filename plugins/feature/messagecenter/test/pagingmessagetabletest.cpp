@@ -104,9 +104,9 @@ int main(int argc, char **argv)
         quality.addRecord(failed);
         check(cell(quality, 0, PagingMessageTable::ColErrors) == "~3", "corrected bits: ~n");
         check(cell(quality, 1, PagingMessageTable::ColErrors) == "X2", "lost codewords: Xn");
-        check((cell(quality, 2, PagingMessageTable::ColErrors) == "bad")
+        check((cell(quality, 2, PagingMessageTable::ColErrors) == "damaged")
             && quality.item(2, PagingMessageTable::ColErrors)->toolTip().contains("checksum K failed"),
-            "a failed check of a message whose bits were corrected: bad, and why");
+            "a failed check of a message whose bits were corrected: damaged, and why");
     }
 
     // A page of the Message Center not sent yet: QU in the queue, NS not sent; TX once its channel sent it
@@ -325,10 +325,19 @@ int main(int argc, char **argv)
 
     MessageRecord pocsagRx = record("p", "pocsag", "1234567D", "X");
     pocsagRx.m_protocolData.insert("batch", 1);
-    pocsagRx.m_protocolData.insert("truncated", true);
+    pocsagRx.m_protocolData.insert("end", "cut");
     chipTexts.clear(); chipHtml.clear(); chipTips.clear();
     PagingMessageTable::recordChips(pocsagRx, chipTexts, chipHtml, chipTips);
-    check((chipTexts == QStringList({"B:2", "END:cut"})) && chipTips[0].contains("Batch 2"), "POCSAG: batch counted from 1, truncated");
+    check((chipTexts == QStringList({"B:2", "END:cut"})) && chipTips[0].contains("Batch 2"), "POCSAG: batch counted from 1, cut");
+    pocsagRx.m_protocolData.insert("end", "batch");
+    chipTexts.clear(); chipHtml.clear(); chipTips.clear();
+    PagingMessageTable::recordChips(pocsagRx, chipTexts, chipHtml, chipTips);
+    check((chipTexts == QStringList({"B:2", "END:batch"})) && chipTips[1].contains("whole"),
+        "POCSAG: a message that filled the last batch, no idle codeword after it: END:batch, whole");
+    pocsagRx.m_protocolData.insert("end", "idle");
+    chipTexts.clear(); chipHtml.clear(); chipTips.clear();
+    PagingMessageTable::recordChips(pocsagRx, chipTexts, chipHtml, chipTips);
+    check(chipTexts == QStringList({"B:2"}), "POCSAG: a message ended by an idle codeword: no END chip");
 
     MessageRecord gscRx = record("q", "gsc", "123456", "X");
     gscRx.m_protocolData.insert("slot", 0);

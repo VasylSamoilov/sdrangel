@@ -726,9 +726,19 @@ void PagingMessageTable::recordChips(const MessageRecord& record, QStringList& t
             add(QString("B:%1").arg(batch), tr("Batch %1: the address codeword was in batch %1 of the transmission "
                 "(a batch is a sync codeword and 16 codewords; the first batch after the preamble is 1)").arg(batch));
         }
-        if (d.value("truncated").toBool()) {
-            add("END:cut", tr("End cut: the message has no end codeword (idle or address); the signal was lost or two "
-                "codewords in a row could not be decoded, so its end may be missing"), ToneWarn);
+        // How the message ended: by an idle or address codeword (M.584-2 1.2), nothing shown
+        const QString end = d.value("end").toString();
+
+        if (end == "cut")
+        {
+            add("END:cut", tr("End cut: the signal was lost in the middle of a batch, or two codewords in a row could not be "
+                "decoded (M.584-2 2.5.1): the rest of the message may be missing"), ToneWarn);
+        }
+        else if (end == "batch")
+        {
+            add("END:batch", tr("End batch: the message filled the last batch and the transmission ended with it, without an "
+                "idle codeword after it. M.584-2 1.2 says the last codeword of a transmission should be idle; the network does "
+                "not send it. The message is whole"));
         }
     }
     else if (record.m_protocol == "flex")
@@ -897,8 +907,11 @@ void PagingMessageTable::recordChips(const MessageRecord& record, QStringList& t
         }
 
         // Checks
-        check("K", tr("Checksum K of the message words"), d.value("checksum").toString());
-        check("S", tr("Signature S (sum of the characters of the whole message)"), d.value("signature").toString());
+        // K is ok or not (incomplete in records of before: not ok); S is incomplete when characters are lost
+        const QString k = d.value("checksum").toString();
+        check("K", tr("Checksum K of the words of the fragment (a reassembled message: the worst of its fragments): ok or failed"),
+            (k == "incomplete") ? QString("failed") : k);
+        check("S", tr("Signature S (sum of the characters of the whole message); incomplete: characters lost"), d.value("signature").toString());
 
         // State
         if (d.value("nul_error").toBool()) {
@@ -924,8 +937,8 @@ void PagingMessageTable::recordChips(const MessageRecord& record, QStringList& t
         if (d.contains("checksum_passed")) {
             check("CK", tr("Checksum of the data blocks"), d.value("checksum_passed").toBool() ? "ok" : "failed");
         }
-        if (d.value("truncated").toBool()) {
-            add("END:cut", tr("End cut: the transmission ended before the message did"), ToneWarn);
+        if (d.value("end").toString() == "cut") {
+            add("END:cut", tr("End cut: the transmission ended before the message did; the rest of it may be missing"), ToneWarn);
         }
     }
 
@@ -1135,8 +1148,8 @@ void PagingMessageTable::fillRow(int row, const MessageRecord& record, const QSt
     infoItem->setData(chipTextsRole, chipTexts);
     infoItem->setData(chipTipsRole, chipTips);
 
-    // Errors: the quality of a received message. X uncorrectable codewords, ~ corrected bits, ok clean; a failed check
-    // (FLEX checksum K, signature S) damages a message whose bits were all corrected: bad. None for a message sent
+    // Quality of a received message: Xn uncorrectable codewords, ~n corrected bits, ok clean; damaged when its bits were
+    // all corrected but a check failed (the corrections were wrong: FLEX checksum K, signature S). None for a message sent
     const MessageRecord::Quality quality = RadioPagingPage::quality(record);
 
     if ((record.m_direction == MessageRecord::DirectionTX) || (quality == MessageRecord::QualityNone))
@@ -1150,7 +1163,7 @@ void PagingMessageTable::fillRow(int row, const MessageRecord& record, const QSt
 
         if (quality == MessageRecord::QualityDamaged)
         {
-            errors = (record.m_errorsUncorrectable > 0) ? QString("X%1").arg(record.m_errorsUncorrectable) : QString("bad");
+            errors = (record.m_errorsUncorrectable > 0) ? QString("X%1").arg(record.m_errorsUncorrectable) : QString("damaged");
             color = "#ff5252";
         }
         else if (quality == MessageRecord::QualityCorrected)

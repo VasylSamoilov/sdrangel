@@ -82,7 +82,7 @@ public:
         CheckNone,              //!< Not applicable or not evaluated
         CheckOk,
         CheckFailed,
-        CheckIncomplete         //!< Words of the message are lost
+        CheckIncomplete         //!< Signature S: characters of the message lost (a fragment missing); never the checksum K, ok or failed
     };
 
     enum FragmentKind {

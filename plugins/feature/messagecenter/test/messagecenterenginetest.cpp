@@ -29,6 +29,7 @@
 
 #include <cstdio>
 
+#include "radiopagingpage.h"
 #include "radiopagingpagerformat.h"
 #include "util/csv.h"
 #include "messagecenterengine.h"
@@ -550,7 +551,10 @@ void testConditionsAndQuality()
     r.m_protocolData.insert("checksum", "ok");
     r.m_protocolData.insert("signature", "incomplete");
     r.m_protocolData.insert("is_fragment", true);
-    check(!f.matches(r), "an incomplete signature of a fragment does not damage it");
+    check(!f.matches(r), "an incomplete signature of a fragment does not damage it (the rest of the message is to come)");
+    r.m_protocolData.insert("checksum", "incomplete");
+    check(f.matches(r), "an incomplete checksum of a fragment damages it (K is of the words of the fragment)");
+    r.m_protocolData.insert("checksum", "ok");
     r.m_protocolData.remove("is_fragment");
     check(f.matches(r), "an incomplete signature of a whole message damages it");
     r.m_protocolData.remove("signature");
@@ -567,6 +571,25 @@ void testConditionsAndQuality()
     check(MessageCenterFilter::quality(r) == MessageRecord::QualityClean, "no errors, checks passed: clean");
     r.m_charStatus = "oob";
     check(MessageCenterFilter::quality(r) == MessageRecord::QualityDamaged, "a lost character: damaged");
+    r.m_charStatus.clear();
+
+    // How a message ended: cut damages it, the end of the transmission with a full batch does not
+    MessageRecord ended = rx("e", "pocsag", "1234567D", "TEXT", "ch1");
+    ended.m_errorsCorrected = 0;
+    ended.m_errorsUncorrectable = 0;
+    ended.m_protocolData.insert("end", "batch");
+    check(MessageCenterFilter::quality(ended) == MessageRecord::QualityClean, "end batch: whole, clean");
+    ended.m_protocolData.insert("end", "cut");
+    check((MessageCenterFilter::quality(ended) == MessageRecord::QualityDamaged)
+        && RadioPagingPage::qualityReason(ended).contains("cut"), "end cut: damaged, and why");
+    // The checksum K of a missing fragment is not ok: incomplete in records of before reads as failed
+    MessageRecord fragmented = rx("m", "flex", "0001234567", "TEXT", "ch1");
+    fragmented.m_errorsCorrected = 0;
+    fragmented.m_errorsUncorrectable = 0;
+    fragmented.m_protocolData.insert("fragmented", true);
+    fragmented.m_protocolData.insert("complete", false);
+    check((MessageCenterFilter::quality(fragmented) == MessageRecord::QualityDamaged)
+        && RadioPagingPage::qualityReason(fragmented).contains("fragments missing"), "a fragment missing: damaged, incomplete");
     r.m_charStatus.clear();
 
     // Quality through JSON and CSV

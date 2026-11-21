@@ -64,6 +64,7 @@ void RadioPagingPocsagDecoder::reset()
     m_word = 0;
     m_wordBits = 0;
     m_slot = 0;
+    m_messageEndsBatch = false;
     m_wordError2 = 0.0f;
     m_wordQualityKnown = false;
     m_softPos = 0;
@@ -312,7 +313,7 @@ bool RadioPagingPocsagDecoder::decipherable(int slot) const
 // codewords of the message, never addresses. After a confirmed sync codeword the batch is the last one of the
 // transmission, which ends at the end of a batch (M.584-2 1): it is decoded whole. Otherwise (after a missed sync
 // codeword, or a sync codeword found alone) the signal ends at its last decipherable codeword (noise has none). True
-// if the batch is cut there, or not all its codewords were received: the message in progress ends truncated and the
+// if the batch is cut there, or not all its codewords were received: the message in progress ends cut and the
 // transmission is over
 bool RadioPagingPocsagDecoder::decodeUnconfirmedBatch(int received)
 {
@@ -364,7 +365,9 @@ bool RadioPagingPocsagDecoder::decodeUnconfirmedBatch(int received)
         if (m_batch == 0) {
             m_candidatesDropped++;
         }
-        finishMessage(true);
+        // Nothing of the signal in this batch: the transmission ended with the batch before. A message that filled
+        // it ended with it
+        finishMessage(m_messageEndsBatch ? EndBatch : EndCut);
         return true;
     }
 
@@ -382,7 +385,7 @@ bool RadioPagingPocsagDecoder::decodeUnconfirmedBatch(int received)
 
     if (cut < RadioPagingPocsag::m_codewordsPerBatch)
     {
-        finishMessage(true);
+        finishMessage(EndCut);      // The signal ended in the middle of the batch
         return true;
     }
 
@@ -407,7 +410,10 @@ void RadioPagingPocsagDecoder::flush()
 
 void RadioPagingPocsagDecoder::endTransmission()
 {
-    finishMessage(true);
+    // A message in progress is cut (sync loss, the end of the input); one that filled the last batch before the signal
+    // ended was finished (end batch) when the batch after it was found empty
+    finishMessage(EndCut);
+    m_messageEndsBatch = false;
     m_state = Hunting;
     m_leadingConfirmed = false;
     m_syncMissedLast = false;
@@ -421,6 +427,7 @@ void RadioPagingPocsagDecoder::processCodeword(uint32_t word, bool lost)
 {
     RadioPagingBCH::Result result = RadioPagingBCH::decode(word);
     m_codewords++;
+    m_messageEndsBatch = false;
     m_ber.add((result.m_bitErrors > 0 ? result.m_bitErrors : 0) + (result.m_parityError ? 1 : 0), 32, result.m_bitErrors < 0);
 
     if ((result.m_bitErrors < 0) || lost)
@@ -433,7 +440,7 @@ void RadioPagingPocsagDecoder::processCodeword(uint32_t word, bool lost)
             m_current.m_errorsUncorrectable++;
 
             if (m_uncorrectableRun >= 2) {
-                finishMessage(true);
+                finishMessage(EndCut);      // Two codewords in a row that cannot be decoded (M.584-2 2.5.1)
             } else {
                 // Received but not corrected: kept as received, marked uncertain ('u'); a word taken for
                 // noise after the transmission is lost ('X')
@@ -461,12 +468,12 @@ void RadioPagingPocsagDecoder::processCodeword(uint32_t word, bool lost)
 
     if (corrected == RadioPagingPocsag::m_idleWord)
     {
-        finishMessage(false);
+        finishMessage(EndIdle);
     }
     else if ((corrected & 0x80000000u) == 0)
     {
         // Address
-        finishMessage(false);
+        finishMessage(EndAddress);
 
         uint32_t data = RadioPagingBCH::data(corrected);
 
@@ -483,6 +490,7 @@ void RadioPagingPocsagDecoder::processCodeword(uint32_t word, bool lost)
     {
         appendMessageBits(RadioPagingBCH::data(corrected) & 0xfffff, (corrections > 0) ? 'c' : '.');
         m_current.m_errorsCorrected += corrections;
+        m_messageEndsBatch = (m_slot == RadioPagingPocsag::m_codewordsPerBatch - 1);
     }
 }
 
@@ -499,14 +507,26 @@ void RadioPagingPocsagDecoder::appendMessageBits(uint32_t data, char status)
     m_current.m_wordStatus += status;
 }
 
-void RadioPagingPocsagDecoder::finishMessage(bool truncated)
+const char *RadioPagingPocsagDecoder::endName(End end)
+{
+    switch (end)
+    {
+    case EndIdle: return "idle";
+    case EndAddress: return "address";
+    case EndBatch: return "batch";
+    case EndCut:
+    default: return "cut";
+    }
+}
+
+void RadioPagingPocsagDecoder::finishMessage(End end)
 {
     if (!m_active) {
         return;
     }
 
     m_active = false;
-    m_current.m_truncated = truncated;
+    m_current.m_end = end;
     m_current.m_rawBits = (int) m_currentBits.size();
     m_current.m_rawData.assign((m_currentBits.size() + 7) / 8, 0);
 

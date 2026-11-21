@@ -52,7 +52,7 @@
 // decodes on symbols better than noise; noise has none), and corrected codewords just
 // before that end (the codeword the signal ended in, corrected to another one) are not
 // taken. Indecipherable codewords are lost codewords of the message, never addresses.
-// Nothing after the end is decoded, the message in progress ends truncated and so does
+// Nothing after the end is decoded, the message in progress ends cut and so does
 // the transmission. The quality of a codeword is the rms distance of its symbols from the
 // decided levels (feed() with the error); without it every codeword that decodes is
 // decipherable.
@@ -74,6 +74,19 @@ public:
         AwaitSync       //!< Receiving the sync codeword that should follow a batch
     };
 
+    //! How a message ended (M.584-2): an idle or the next address codeword (1.2), the end of the transmission with
+    //! the batch the message filled (no idle codeword after it: "should" in 1.2, the message is whole), or cut: the
+    //! signal lost in the middle of a batch, sync loss, or two codewords in a row that could not be decoded (2.5.1):
+    //! the rest of the message may be missing
+    enum End {
+        EndIdle,
+        EndAddress,
+        EndBatch,
+        EndCut
+    };
+
+    static const char *endName(End end);
+
     struct Message
     {
         uint32_t m_address = 0;             //!< 21-bit address, frame included
@@ -85,7 +98,7 @@ public:
         std::string m_wordStatus;
         int m_errorsCorrected = 0;          //!< Bits corrected in the message's codewords
         int m_errorsUncorrectable = 0;      //!< Codewords that could not be corrected
-        bool m_truncated = false;           //!< Ended by sync loss or two undecodable codewords
+        End m_end = EndCut;
         int m_batch = 0;                    //!< Batch of the transmission the address was in, from 0
         Polarity m_polarity = Normal;
         bool m_duplicate = false;           //!< Set by the receiver: the same message was received shortly before
@@ -122,7 +135,7 @@ public:
     //!< The sync codeword of the current candidate came after a preamble
     void setPreambleBefore() { m_preambleBefore = true; }
     //!< The input stopped: the codewords of the batch received so far are decoded as a batch no sync codeword
-    //!< follows, the message in progress ends truncated and the decoder hunts again
+    //!< follows, the message in progress ends cut and the decoder hunts again
     void flush();
 
     bool isSynced() const { return m_state != Hunting; }
@@ -170,6 +183,9 @@ private:
     int m_batch;                        //!< Batches decoded in the current transmission
 
     bool m_active;
+    //! The last codeword of the message in progress was the last codeword of its batch: a transmission ends at the end
+    //! of a batch (M.584-2 1), so a message that fills its last batch ends with the transmission, whole
+    bool m_messageEndsBatch = false;
     Message m_current;
     std::vector<uint8_t> m_currentBits;
     int m_uncorrectableRun;             //!< Successive undecodable codewords
@@ -196,7 +212,7 @@ private:
     void endTransmission();
     void processCodeword(uint32_t word, bool lost = false);
     void appendMessageBits(uint32_t data, char status);
-    void finishMessage(bool truncated);
+    void finishMessage(End end);
 };
 
 #endif // MODEMRADIOPAGING_RADIOPAGINGPOCSAGDECODER_H

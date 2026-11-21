@@ -957,8 +957,8 @@ void testErrors()
                 }
 
                 check((m.m_wordsUncorrectable == 1) && asReceived && (m.m_signature != Dec::CheckOk)
-                    && (m.m_checksum == Dec::CheckIncomplete) && (m.m_wordMap.find('X') != std::string::npos),
-                    "errors: uncorrectable word reported, its characters as received, marked uncertain");
+                    && (m.m_checksum == Dec::CheckFailed) && (m.m_wordMap.find('X') != std::string::npos),
+                    "errors: uncorrectable word reported, its characters as received, marked uncertain, checksum not ok");
             }
         }
 
@@ -2217,9 +2217,10 @@ void testHexBits()
         Flex::FrameBytes b2 = hexFrameBytes(2, 21, hexFragmentWords(0, lost ? 1 : 0, 9, 8, 0, false, frag2));
         std::vector<Dec::Message> last = dec.decodeFrame(toRxFrame(Flex::Mode1600_2, false, b2.m_sync, b2.m_data));
         bool ok = first.empty() && (last.size() == 1) && (last[0].m_fragmentCount == 2) && (last[0].m_dataBits == 240)
-            && (last[0].m_signature == (lost ? Dec::CheckIncomplete : Dec::CheckOk)) && (last[0].m_checksum == Dec::CheckOk)
+            && (last[0].m_signature == (lost ? Dec::CheckIncomplete : Dec::CheckOk))
+            && (last[0].m_checksum == (lost ? Dec::CheckFailed : Dec::CheckOk))
             && (last[0].m_fragmentGap == (lost != 0));
-        check(ok, lost ? "hex bits: fragments with a lost one: signature not checked"
+        check(ok, lost ? "hex bits: fragments with a lost one: signature not checked, the checksum of the lost one not ok"
                        : "hex bits: two fragments, signature over both");
     }
 }

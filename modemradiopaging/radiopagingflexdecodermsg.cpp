@@ -1362,11 +1362,12 @@ void RadioPagingFlexDecoder::decodeAlpha(Message& proto, const AddressContext& a
             kSum += groupSums(dw);
         }
 
-        msg.m_checksum = !allOk ? CheckIncomplete : (hdrK == ((~kSum) & 0x3ff)) ? CheckOk : CheckFailed;
+        // K is ok or not: words of the fragment lost, it is not ok
+        msg.m_checksum = (allOk && (hdrK == ((~kSum) & 0x3ff))) ? CheckOk : CheckFailed;
     }
     else
     {
-        msg.m_checksum = CheckIncomplete;
+        msg.m_checksum = CheckFailed;   // The header with K lost
     }
 
     // Registration acknowledgment: secure message with operation code "="
@@ -1615,7 +1616,7 @@ void RadioPagingFlexDecoder::decodeNumeric(Message& proto, const AddressContext&
     }
     else
     {
-        msg.m_checksum = CheckIncomplete;
+        msg.m_checksum = CheckFailed;   // K is ok or not: words of the fragment lost, it is not ok
     }
 
     if (vecType == 4) {
@@ -1809,8 +1810,8 @@ void RadioPagingFlexDecoder::decodeBinary(Message& proto, const AddressContext& 
 
     // K: 12-bit fragment checksum (STD-43A 3.10.1.2): 1's complement of the sum of all words of the fragment
     // (header word 1, at the second vector word of a long address, and the message field), 3 groups of
-    // bits per word, the K field counted as 0, fill and termination bits included
-    Check kCheck = CheckIncomplete;
+    // bits per word, the K field counted as 0, fill and termination bits included. Ok or not: words lost, not ok
+    Check kCheck = CheckFailed;
 
     if (hdrOk)
     {

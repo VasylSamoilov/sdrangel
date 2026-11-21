@@ -85,9 +85,12 @@ struct MODEMRADIOPAGING_API RadioPagingPage
     //!< cap code; empty for another protocol
     static QString addressDescription(const QString& protocol, const QString& address, int function);
     //!< Clean, corrected or damaged, as the paging receiver judges a record it decoded: its errors, then the checks of
-    //!< its protocol (a failed FLEX checksum K or signature S, a GSC block with a wrong checksum: damaged; incomplete:
-    //!< damaged unless it is a fragment or a part, whose rest is still to come). Checks passed and no error count: clean
+    //!< its protocol (a failed FLEX checksum K or signature S, a GSC block with a wrong checksum: damaged; K incomplete:
+    //!< damaged; S incomplete: damaged unless it is a fragment or a part, whose rest is still to come). Checks passed
+    //!< and no error count: clean. Bits corrected and the checks passed (or none to check): corrected
     static MessageRecord::Quality receivedQuality(const MessageRecord& record);
+    //!< A check of protocolData ("checksum" K of the words of a fragment, "signature" S of the whole message) damages it
+    static bool checkDamages(const MessageRecord& record, const char *check);
     //!< The quality of a record as its producer set it, else as receivedQuality judges it; sent: clean
     static MessageRecord::Quality quality(const MessageRecord& record);
     //!< Why: e.g. "checksum K failed", "1 codeword uncorrectable", "3 bit errors corrected"; empty when clean
