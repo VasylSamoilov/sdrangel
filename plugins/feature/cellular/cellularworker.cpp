@@ -1057,6 +1057,19 @@ void CellularWorker::tryBind(Network& n)
             [this, network, i](bool toPhone, const modemnmt::Frame& frame, double quality, double level) {
                 traceFrame(*network, i, toPhone, frame, quality, level);
             });
+        // the data link of short message calls: "ch 18 < DMS DT 2 data 01 18 ...", runs folded
+        n.station->system()->channel(i).setDmsTap([this, network, i](bool rx, const std::string& text) {
+            Network::Trace& trace = network->traces[i];
+            modemnmt::NmtTraceFold& fold = rx ? trace.in : trace.out;
+            (rx ? trace.inAt : trace.outAt) = QDateTime::currentMSecsSinceEpoch();
+            if (fold.repeat("DMS " + text)) {
+                return;
+            }
+            flushTrace(*network, i, !rx);
+            (rx ? trace.inType : trace.outType) = "DMS";
+            log(network->id, QString("ch %1 %2 DMS %3").arg(network->station->system()->channel(i).config().channel)
+                .arg(rx ? "<" : ">").arg(QString::fromStdString(text)));
+        });
     }
     n.batches = 0;
     n.gaps = 0;

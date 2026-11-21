@@ -363,6 +363,8 @@ public:
     void setTimeOfDay(TimeOfDay timeOfDay) { m_timeOfDay = std::move(timeOfDay); }
     void setFrameListener(FrameListener listener) { m_listener = std::move(listener); }
     void setFrameTap(FrameTap tap) { m_tap = std::move(tap); }
+    // the frames of the data link of a short message call (NmtDmsLink::FrameTap)
+    void setDmsTap(NmtDmsLink::FrameTap tap) { m_dmsTap = std::move(tap); }
 
     // Next idle frame of the channel, counts the idle frames sent. The additional information
     // alternates between channel band advertisement and battery saving if both are configured.
@@ -478,6 +480,7 @@ private:
     TimeOfDay m_timeOfDay;
     FrameListener m_listener;
     FrameTap m_tap;
+    NmtDmsLink::FrameTap m_dmsTap;
     NmtModem m_modem;
     uint64_t m_framesSent;
 

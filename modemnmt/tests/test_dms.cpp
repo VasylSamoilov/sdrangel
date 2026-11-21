@@ -18,6 +18,7 @@
 
 // The data link of the data and message service.
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -177,6 +178,9 @@ static void testHandshakeAndData()
     p.b.setDataHandler([&](const std::vector<uint8_t>& d) { received.push_back(d); });
     p.a.setEstablishedHandler([&] { established = true; });
     p.a.setAllSentHandler([&] { allSent = true; });
+    // the trace of the answering side: what it takes and what it sends
+    std::vector<std::string> bTaken, bSent;
+    p.b.setFrameTap([&](bool rx, const std::string& text) { (rx ? bTaken : bSent).push_back(text); });
 
     // 20 bytes with bytes above 127 and a zero inside
     std::vector<uint8_t> data;
@@ -209,6 +213,16 @@ static void testHandshakeAndData()
     CHECK(p.bBits.size() > 40 && p.bBits[26] == 1);
     CHECK(p.aBits[26] == 0);
     CHECK(p.a.framesRejected() == 0 && p.b.framesRejected() == 0);
+
+    // the trace: the caller's identity and random number (8-bit), then its data; the answers are RRs
+    const auto has = [](const std::vector<std::string>& list, const std::string& text) {
+        return std::find(list.begin(), list.end(), text) != list.end();
+    };
+    CHECK(has(bTaken, "DT 0 control id"));
+    CHECK(has(bTaken, "DT 1 control rand 8-bit"));
+    CHECK(std::any_of(bTaken.begin(), bTaken.end(), [](const std::string& t) { return t == "DT 2 data 7a 81 88 8f 96 00 a4"; }));
+    CHECK(has(bSent, "RR 1") && has(bSent, "RR 2"));
+    CHECK(bTaken.size() == static_cast<size_t>(p.b.framesReceived()));
 
     // the other way round: the answering side sends
     received.clear();

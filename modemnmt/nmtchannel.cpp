@@ -218,6 +218,11 @@ NmtChannel::NmtChannel(const ChannelConfig& config, double sampleRate, double de
         return (m_state == State::Sms && m_dms.pullBit(bit)) ? bit : -1;
     });
     m_dms.setDataHandler([this](const std::vector<uint8_t>& data) { smsData(data); });
+    m_dms.setFrameTap([this](bool rx, const std::string& text) {
+        if (m_dmsTap) {
+            m_dmsTap(rx, text);
+        }
+    });
     m_dms.setAllSentHandler([this]() { smsAllSent(); });
     m_modem.setFrameSource([this](FrameBits& bits) { return nextFrame(bits); });
     m_modem.setFrameSink([this](const RxFrame& rx) { receiveFrame(rx); });
