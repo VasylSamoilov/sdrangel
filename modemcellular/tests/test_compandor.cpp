@@ -136,11 +136,60 @@ static void testTiming()
     CHECK(bad[0] == 0.0f && bad[1] == 0.0f && std::isfinite(bad[2]));
 }
 
+// Lookahead (osmocom-analog's NMT, 4 ms at 8 kHz): the speech is delayed by the lookahead, and the
+// onset of a loud syllable after a quiet pause no longer goes out with the gain of the pause.
+static void testLookahead()
+{
+    // the delay: a click comes out 32 samples later
+    {
+        Compandor compandor;
+        compandor.setCompressorLookahead(4.0);
+        std::vector<float> s(100, 0.0f);
+        s[10] = 1.0f;
+        compandor.compress(s.data(), static_cast<int>(s.size()));
+        for (size_t i = 0; i < s.size(); i++) {
+            CHECK((i == 42) == (s[i] != 0.0f));
+        }
+    }
+
+    // the first 4 ms of the onset after 0.5 s of quiet: with the lookahead far lower
+    auto onsetPeak = [](double lookaheadMs) {
+        Compandor compandor;
+        compandor.setCompressorLookahead(lookaheadMs);
+        std::vector<float> quiet = sine(0.01, 4000);
+        std::vector<float> loud = sine(1.0, 800);
+        compandor.compress(quiet.data(), static_cast<int>(quiet.size()));
+        compandor.compress(loud.data(), static_cast<int>(loud.size()));
+        const size_t delay = static_cast<size_t>(lookaheadMs * 8.0 + 0.5);
+        double peak = 0.0;
+        for (size_t i = delay; i < delay + 32; i++) {
+            peak = std::fmax(peak, std::fabs(loud[i]));
+        }
+        return peak;
+    };
+    const double without = onsetPeak(0.0);
+    const double with = onsetPeak(4.0);
+    CHECK(without > 2.0);                   // the gain of the pause: several dB over the level
+    CHECK(with < 0.6 * without);
+    // reset empties the lookahead
+    Compandor compandor;
+    compandor.setCompressorLookahead(4.0);
+    std::vector<float> s = sine(1.0, 100);
+    compandor.compress(s.data(), static_cast<int>(s.size()));
+    compandor.reset();
+    std::vector<float> z(32, 0.0f);
+    compandor.compress(z.data(), static_cast<int>(z.size()));
+    for (float v : z) {
+        CHECK(v == 0.0f);
+    }
+}
+
 int main()
 {
     testCompress();
     testRoundTrip();
     testTiming();
+    testLookahead();
 
     if (g_failures == 0) {
         std::printf("all compandor tests passed\n");

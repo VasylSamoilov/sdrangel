@@ -18,6 +18,7 @@
 
 #include "compandor.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace modemcellular
@@ -41,11 +42,23 @@ const double kEnvelopeStep = 0.001;
 } // namespace
 
 Compandor::Compandor(double sampleRate, double attackMs, double recoveryMs) :
+    m_sampleRate(sampleRate),
     m_stepUp(std::pow(kAttackFactor, 1000.0 / attackMs / sampleRate)),
     m_stepDown(std::pow(kRecoveryFactor, 1000.0 / recoveryMs / sampleRate)),
-    m_expanderMax(kExpanderEnvelopeMax)
+    m_expanderMax(kExpanderEnvelopeMax),
+    m_lookahead(0),
+    m_laPos(0)
 {
     reset();
+}
+
+void Compandor::setCompressorLookahead(double ms)
+{
+    const int n = static_cast<int>(m_sampleRate * ms / 1000.0 + 0.5);
+
+    m_lookahead = std::max(0, std::min(kMaxLookahead, n));
+    m_laBuf.assign(static_cast<size_t>(m_lookahead), 0.0);
+    m_laPos = 0;
 }
 
 void Compandor::reset()
@@ -54,6 +67,8 @@ void Compandor::reset()
     m_compressor.envelope = 1.0;
     m_expander.peak = 1.0;
     m_expander.envelope = 1.0;
+    std::fill(m_laBuf.begin(), m_laBuf.end(), 0.0);
+    m_laPos = 0;
 }
 
 // The peak rises at once and falls with the recovery time; the envelope follows the peak with
@@ -90,7 +105,20 @@ void Compandor::compress(float* samples, int count)
 
         track(m_compressor, value, kEnvelopeMax);
         const double quantised = std::floor(m_compressor.envelope / kEnvelopeStep) * kEnvelopeStep;
-        samples[i] = static_cast<float>(value / std::sqrt(quantised));
+        const double gain = 1.0 / std::sqrt(quantised);
+
+        if (m_lookahead > 0)
+        {
+            // the envelope follows the new sample, the gain goes to the delayed one
+            const double delayed = m_laBuf[m_laPos];
+            m_laBuf[m_laPos] = value;
+            m_laPos = (m_laPos + 1) % static_cast<size_t>(m_lookahead);
+            samples[i] = static_cast<float>(delayed * gain);
+        }
+        else
+        {
+            samples[i] = static_cast<float>(value * gain);
+        }
     }
 }
 

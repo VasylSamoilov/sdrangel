@@ -221,6 +221,10 @@ NmtChannel::NmtChannel(const ChannelConfig& config, double sampleRate, double de
     // over the 3.0 kHz reference), and no more (osmocom-analog 37fe472; NMT Doc 900-4 5.25.1:
     // linear from +3 dB down)
     m_compandor.setExpanderMax(kMaxDeviation / kSpeechDeviationHz);
+    // The compressor looks 4 ms ahead, so the gain is ready at the onset of a word after a pause
+    // (osmocom-analog's NMT; on air there: limiter hits during speech 24 -> 0 in 14 s, the
+    // compressor's peaks at onsets 3.5 to 6 dB lower, the rms unchanged).
+    m_compandor.setCompressorLookahead(4.0);
     m_dms.setDataHandler([this](const std::vector<uint8_t>& data) { smsData(data); });
     m_dms.setFrameTap([this](bool rx, const std::string& text) {
         if (m_dmsTap) {

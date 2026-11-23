@@ -19,6 +19,9 @@
 #ifndef MODEMCELLULAR_COMPANDOR_H_
 #define MODEMCELLULAR_COMPANDOR_H_
 
+#include <cstddef>
+#include <vector>
+
 #include "export.h"
 
 namespace modemcellular
@@ -40,8 +43,15 @@ public:
     // The highest envelope of the expander (1.0 = the level that passes unchanged): what it may
     // restore above that level, e.g. up to the largest deviation the radio carries.
     void setExpanderMax(double envelope) { m_expanderMax = envelope; }
-    // Both back to a level of 1.0.
+    // Lets the compressor look ahead (0 = off): the speech is delayed by this time while the
+    // envelope follows the new samples, so at the onset of a syllable after a pause the gain is
+    // ready and the first waves do not go out with the gain of the pause (attack 3 ms, up to
+    // +15 dB). The characteristic stays the same, shifted in time. At most kMaxLookahead samples.
+    void setCompressorLookahead(double ms);
+    // Both back to a level of 1.0, the lookahead empty.
     void reset();
+
+    static constexpr int kMaxLookahead = 128;
 
 private:
     struct Tracker
@@ -52,11 +62,15 @@ private:
 
     void track(Tracker& t, double value, double maxEnvelope) const;
 
+    double m_sampleRate;
     double m_stepUp;
     double m_stepDown;
     double m_expanderMax;
     Tracker m_compressor;
     Tracker m_expander;
+    int m_lookahead;                    // samples the speech is delayed (0 = off)
+    size_t m_laPos;
+    std::vector<double> m_laBuf;
 };
 
 } // namespace modemcellular
