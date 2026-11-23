@@ -52,6 +52,10 @@ add_library(sdrbase_dsp STATIC ${SDRBASE_DSP_SOURCES})
 target_include_directories(sdrbase_dsp PUBLIC ${SDRANGEL_ROOT}/sdrbase ${SDRANGEL_ROOT}/exports)
 target_compile_definitions(sdrbase_dsp PUBLIC sdrangel_STATIC)
 target_link_libraries(sdrbase_dsp PUBLIC Qt5::Core)
+# the SIMD paths of the headers (Interpolator) as SDRangel's build has them on x86-64
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    target_compile_definitions(sdrbase_dsp PUBLIC USE_SSE2)
+endif()
 
 # Sanitizer: address (address and undefined behaviour) or off
 set(MODEMNMT_TEST_SANITIZER "off" CACHE STRING "off or address")
