@@ -27,6 +27,7 @@
 #include "dsp/firfilter.h"
 #include "dsp/goertzel.h"
 #include "dsp/interpolator.h"
+#include "dsp/nco.h"
 
 #include "biquad.h"
 #include "emphasis.h"
@@ -128,9 +129,8 @@ public:
 
 private:
     bool m_enabled;
-    double m_step;          // cycles per sample
+    NCO m_nco;              // SDRangel's oscillator
     double m_level;
-    double m_phase;
 };
 
 // Threshold of the noise gate of the audio from the phone (1.0 = the reference level): 0.10 =

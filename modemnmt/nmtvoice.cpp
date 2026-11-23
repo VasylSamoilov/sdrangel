@@ -150,10 +150,11 @@ void SupervisoryDetector::decode()
 
 SupervisoryTone::SupervisoryTone(double sampleRate, int number, double level) :
     m_enabled(validNumber(number)),
-    m_step(m_enabled ? kSupervisoryHz[number - 1] / sampleRate : 0.0),
-    m_level(m_enabled ? level * kSupervisoryDeviation / kSpeechDeviationHz / Emphasis::preGain(kSupervisoryHz[number - 1], sampleRate) : 0.0),
-    m_phase(0.0)
+    m_level(m_enabled ? level * kSupervisoryDeviation / kSpeechDeviationHz / Emphasis::preGain(kSupervisoryHz[number - 1], sampleRate) : 0.0)
 {
+    if (m_enabled) {
+        m_nco.setFreq(static_cast<Real>(kSupervisoryHz[number - 1]), static_cast<Real>(sampleRate));
+    }
 }
 
 void SupervisoryTone::add(float* samples, int length)
@@ -162,11 +163,8 @@ void SupervisoryTone::add(float* samples, int length)
         return;
     }
 
-    for (int i = 0; i < length; i++)
-    {
-        samples[i] += static_cast<float>(std::sin(2.0 * kPi * m_phase) * m_level);
-        m_phase += m_step;
-        m_phase -= std::floor(m_phase);
+    for (int i = 0; i < length; i++) {
+        samples[i] += static_cast<float>(m_nco.next() * m_level);
     }
 }
 
