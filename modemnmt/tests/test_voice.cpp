@@ -305,7 +305,7 @@ static void testRxChain()
 
         CHECK(blocks >= 99 && blocks <= 101);                   // 2 s of 20 ms blocks
         const size_t from = out.size() / 2;
-        CHECK(std::fabs(toneAmplitude(out, from, out.size(), 1000.0, kCallRate) - 0.4) < 0.03);
+        CHECK(std::fabs(toneAmplitude(out, from, out.size(), 1000.0, kCallRate) - gatedAmplitude(0.4)) < 0.03);
         if (fs >= 12000.0) {
             CHECK(toneAmplitude(out, from, out.size(), 4015.0, kCallRate) < 0.002);
         }
@@ -333,7 +333,16 @@ static void testRxChain()
     for (float v : got) {
         CHECK(std::isfinite(v));
     }
-    CHECK(std::fabs(toneAmplitude(got, 4000, 8000, 1000.0, kCallRate) - 0.4) < 0.02);
+    CHECK(std::fabs(toneAmplitude(got, 4000, 8000, 1000.0, kCallRate) - gatedAmplitude(0.4)) < 0.02);
+
+    // the noise gate (osmocom-analog's NMT and AMPS): the room below the threshold (0.05, -26 dB)
+    // does not reach the call; speech above it does, the threshold taken off and made up
+    const std::vector<float> room = sine(1000.0, 0.05, 48000.0, 48000);
+    got.clear();
+    chain.reset();
+    chain.process(room.data(), 48000, 0);
+    CHECK(toneAmplitude(got, 4000, 8000, 1000.0, kCallRate) < 1e-4);
+    CHECK(gatedAmplitude(0.4) > 0.3 && gatedAmplitude(0.4) < 0.4);
 
     // 100 ms are 800 samples, 5 blocks
     got.clear();
@@ -534,7 +543,7 @@ static void testSpeechBothWays()
         // from the phone: the speech, without the supervisory tone, in 8 kHz
         CHECK(call.fromPhone.size() >= 15000 && call.fromPhone.size() <= 16100);
         const size_t half = call.fromPhone.size() / 2;
-        CHECK(std::fabs(toneAmplitude(call.fromPhone, half, call.fromPhone.size(), 1000.0, kCallRate) - 0.4) < 0.03);
+        CHECK(std::fabs(toneAmplitude(call.fromPhone, half, call.fromPhone.size(), 1000.0, kCallRate) - gatedAmplitude(0.4)) < 0.03);
         CHECK(toneAmplitude(call.fromPhone, half, call.fromPhone.size(), 4015.0, kCallRate) < 0.003);
 
         // the tone of the phone was heard and the call is still up
@@ -637,7 +646,8 @@ static void testCompandor()
 {
     const double rate = 48000.0;
     const double toPhone = companded(800.0, 0.5, true);
-    const double fromPhone = companded(1000.0, 0.4, false);
+    // from the phone the noise gate comes before the expander
+    const double fromPhone = companded(1000.0, gatedAmplitude(0.4), false);
 
     // the compressor lifts the quiet tone, the expander lowers it
     CHECK(toPhone > 0.6);
@@ -860,7 +870,7 @@ static void testBadSamplesAndNextCall()
     for (float v : call.fromPhone) {
         CHECK(std::isfinite(v));
     }
-    CHECK(std::fabs(toneAmplitude(call.fromPhone, call.fromPhone.size() / 2, call.fromPhone.size(), 1000.0, kCallRate) - 0.4) < 0.02);
+    CHECK(std::fabs(toneAmplitude(call.fromPhone, call.fromPhone.size() / 2, call.fromPhone.size(), 1000.0, kCallRate) - gatedAmplitude(0.4)) < 0.02);
 
     // bad audio from the call
     call.system.setAudioHandlers(
@@ -926,11 +936,11 @@ static void testMuteDuringFrames()
         return toneAmplitude(heard, static_cast<size_t>(fromS * kCallRate), static_cast<size_t>(toS * kCallRate), 1000.0, kCallRate);
     };
 
-    CHECK(std::fabs(level(0.2, 0.55) - speechAmp) < 0.03);          // before the frame
+    CHECK(std::fabs(level(0.2, 0.55) - gatedAmplitude(speechAmp)) < 0.03);          // before the frame
     // Speech is back on the line at 0.74 s; the channel stays muted until 0.28 s after the
     // frame sync (about 0.62 s), that is until 0.90 s.
     CHECK(level(0.78, 0.88) < 0.01);
-    CHECK(std::fabs(level(1.1, 1.7) - speechAmp) < 0.03);           // speech is back
+    CHECK(std::fabs(level(1.1, 1.7) - gatedAmplitude(speechAmp)) < 0.03);           // speech is back
 }
 
 int main()

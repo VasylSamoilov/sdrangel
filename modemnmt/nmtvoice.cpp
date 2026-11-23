@@ -210,6 +210,12 @@ void RxAudioChain::process(const float* samples, int length, int muted)
         if (m_useNotch) {
             y = m_notch.process(y);
         }
+        // Noise gate, as osmocom-analog's NMT and AMPS (37fe472): what the phone's microphone
+        // picks up when nobody speaks (the room, its own earpiece), lifted by the phone's
+        // compressor, stays below the threshold and does not go to the network; above it the
+        // threshold is taken off and made up again.
+        const double a = std::fabs(y);
+        y = (a < kRxNoiseGate) ? 0.0 : ((y >= 0.0) ? 1.0 : -1.0) * (a - kRxNoiseGate) / (1.0 - kRxNoiseGate);
         y = m_lowpass.process(y);
 
         while (m_next <= 1.0)

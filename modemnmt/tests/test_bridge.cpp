@@ -225,7 +225,7 @@ static void testCallToEcho()
 
     CHECK(slot(0.0, 2.5, 1000.0) < 0.01);                  // nothing of the first burst, nothing of the second yet
     CHECK(slot(0.0, 2.5, 425.0) < 0.01);                   // no ringback for an endpoint
-    CHECK(std::fabs(slot(2.8, 3.4, 1000.0) - 0.4) < 0.02); // the second burst, one second late
+    CHECK(std::fabs(slot(2.8, 3.4, 1000.0) - gatedAmplitude(0.4)) < 0.02); // the second burst, one second late
     CHECK(slot(3.8, 8.0, 1000.0) < 0.01);
 
     // the phone clears: the call in the router ends
@@ -368,7 +368,7 @@ static void testRegistrationLifetime()
         CHECK(s.cellular.isRegistered("1123456"));
         s.callFrom(*s.b, phone, "5551234");
         const std::vector<float> sent = s.air(4.0, *s.b);
-        CHECK(std::fabs(toneAmplitude(sent, static_cast<size_t>(kRate * 2.5), sent.size(), 1000.0, kRate) - 0.4) < 0.02);
+        CHECK(std::fabs(toneAmplitude(sent, static_cast<size_t>(kRate * 2.5), sent.size(), 1000.0, kRate) - gatedAmplitude(0.4)) < 0.02);
     }
 
     // phones that roamed in before the bridge existed
@@ -431,9 +431,9 @@ static void testPhoneToPhone()
     };
 
     CHECK(slot(both.second, 0.0, 0.45, 1000.0) < 0.01);                        // not before the caller speaks
-    CHECK(std::fabs(slot(both.second, 0.7, 1.3, 1000.0) - 0.4) < 0.03);        // the callee hears the caller
+    CHECK(std::fabs(slot(both.second, 0.7, 1.3, 1000.0) - gatedAmplitude(0.4)) < 0.03);        // the callee hears the caller
     CHECK(slot(both.second, 0.7, 1.3, 700.0) < 0.01);
-    CHECK(std::fabs(slot(both.first, 1.7, 2.3, 700.0) - 0.4) < 0.03);          // the caller hears the callee
+    CHECK(std::fabs(slot(both.first, 1.7, 2.3, 700.0) - gatedAmplitude(0.4)) < 0.03);          // the caller hears the callee
     CHECK(slot(both.first, 1.7, 2.3, 1000.0) < 0.01);
     CHECK(slot(both.first, 0.0, 0.4, 700.0) < 0.01);                           // and not itself
     CHECK(s.a->supervisoryDetected() && s.b->supervisoryDetected());
@@ -520,7 +520,7 @@ static void testTwoCallsInARow()
             return toneAmplitude(sent, static_cast<size_t>(kRate * from), static_cast<size_t>(kRate * to), 1000.0, kRate);
         };
         CHECK(slot(0.0, 1.0) < 0.02);
-        CHECK(std::fabs(slot(1.3, 1.5) - 0.4) < 0.03);
+        CHECK(std::fabs(slot(1.3, 1.5) - gatedAmplitude(0.4)) < 0.03);
         CHECK(s.a->state() == NmtChannel::State::Active);
         phoneSends(*s.a, lineSignalFrame(*s.a, phone, 0x11111), 1);
         CHECK(s.cellular.callCount() == 0);
@@ -562,7 +562,7 @@ static void testMovedCall()
     };
 
     CHECK(slot(0.0, 1.4, 1000.0) < 0.01);                      // nothing before the speech comes back
-    CHECK(std::fabs(slot(1.7, 2.3, 1000.0) - 0.4) < 0.03);     // the echo
+    CHECK(std::fabs(slot(1.7, 2.3, 1000.0) - gatedAmplitude(0.4)) < 0.03);     // the echo
     CHECK(s.b->supervisoryDetected());
     CHECK(s.cellular.callCount() == 1);
 
@@ -650,7 +650,7 @@ static void testMftDigitsAsTones()
     CHECK(s.a->state() == NmtChannel::State::Active);
     const double start = static_cast<double>(s.m_samples) / kRate;
     const std::vector<float> speech = s.air(4.0, *s.a, microphone({{start + 0.2, start + 1.2}}));
-    CHECK(std::fabs(toneAmplitude(speech, static_cast<size_t>(kRate * 1.4), static_cast<size_t>(kRate * 2.0), 1000.0, kRate) - 0.4) < 0.05);
+    CHECK(std::fabs(toneAmplitude(speech, static_cast<size_t>(kRate * 1.4), static_cast<size_t>(kRate * 2.0), 1000.0, kRate) - gatedAmplitude(0.4)) < 0.05);
 }
 
 int main()

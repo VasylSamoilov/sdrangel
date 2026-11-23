@@ -129,8 +129,12 @@ private:
     double m_phase;
 };
 
-// Audio from the radio towards the call: high pass 300 Hz, notch at the supervisory tone,
-// low pass 3.4 kHz, then down to 8 kHz in blocks of 160 samples.
+// Threshold of the noise gate of the audio from the phone (1.0 = the reference level): 0.10 =
+// 300 Hz deviation, -20 dB (osmocom-analog's NMT and AMPS).
+constexpr double kRxNoiseGate = 0.10;
+
+// Audio from the radio towards the call: high pass 300 Hz, notch at the supervisory tone, the
+// noise gate, low pass 3.4 kHz, then down to 8 kHz in blocks of 160 samples.
 class MODEMNMT_API RxAudioChain
 {
 public:

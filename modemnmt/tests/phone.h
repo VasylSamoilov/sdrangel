@@ -20,6 +20,7 @@
 #ifndef MODEMNMT_TESTS_PHONE_H_
 #define MODEMNMT_TESTS_PHONE_H_
 
+#include <cmath>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -225,6 +226,24 @@ struct Calls
     CHECK(!tc.nextFrame(bits));                 // the third frame is replaced by the dial tone
     CHECK(tc.state() == State::MoDialling);
     CHECK(tc.dspMode() == DspMode::DialTone);
+}
+
+// The amplitude of the fundamental of a sine of amplitude a after the noise gate of the audio from
+// the phone (kRxNoiseGate): below the threshold nothing, above it the threshold off and made up.
+inline double gatedAmplitude(double a)
+{
+    const int n = 10000;
+    double sum = 0.0;
+
+    for (int i = 0; i < n; i++)
+    {
+        const double s = std::sin(2.0 * 3.14159265358979323846 * i / n);
+        const double x = a * s;
+        const double y = (std::fabs(x) < kRxNoiseGate) ? 0.0
+            : ((x >= 0.0) ? 1.0 : -1.0) * (std::fabs(x) - kRxNoiseGate) / (1.0 - kRxNoiseGate);
+        sum += y * s;
+    }
+    return 2.0 * sum / n;
 }
 
 #endif // MODEMNMT_TESTS_PHONE_H_
