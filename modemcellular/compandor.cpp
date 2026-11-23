@@ -42,7 +42,8 @@ const double kEnvelopeStep = 0.001;
 
 Compandor::Compandor(double sampleRate, double attackMs, double recoveryMs) :
     m_stepUp(std::pow(kAttackFactor, 1000.0 / attackMs / sampleRate)),
-    m_stepDown(std::pow(kRecoveryFactor, 1000.0 / recoveryMs / sampleRate))
+    m_stepDown(std::pow(kRecoveryFactor, 1000.0 / recoveryMs / sampleRate)),
+    m_expanderMax(kExpanderEnvelopeMax)
 {
     reset();
 }
@@ -99,7 +100,7 @@ void Compandor::expand(float* samples, int count)
     {
         const double value = std::isfinite(samples[i]) ? samples[i] : 0.0;
 
-        track(m_expander, value, kExpanderEnvelopeMax);
+        track(m_expander, value, m_expanderMax);
         samples[i] = static_cast<float>(value * m_expander.envelope);
     }
 }

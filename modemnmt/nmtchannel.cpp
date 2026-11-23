@@ -217,6 +217,10 @@ NmtChannel::NmtChannel(const ChannelConfig& config, double sampleRate, double de
         int bit = 0;
         return (m_state == State::Sms && m_dms.pullBit(bit)) ? bit : -1;
     });
+    // The expander restores up to what the radio carries, the largest deviation (4.7 kHz, +3.9 dB
+    // over the 3.0 kHz reference), and no more (osmocom-analog 37fe472; NMT Doc 900-4 5.25.1:
+    // linear from +3 dB down)
+    m_compandor.setExpanderMax(kMaxDeviation / kSpeechDeviationHz);
     m_dms.setDataHandler([this](const std::vector<uint8_t>& data) { smsData(data); });
     m_dms.setFrameTap([this](bool rx, const std::string& text) {
         if (m_dmsTap) {

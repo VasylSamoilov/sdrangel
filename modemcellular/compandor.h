@@ -28,8 +28,8 @@ namespace modemcellular
 // compressor (towards the radio) divides by the square root of the envelope, which halves the
 // range in dB; the expander (from the radio) multiplies by the envelope, which doubles it again.
 // A level of 1.0 passes unchanged. The envelope is held between
-// -30 dB and +20 dB; the expander does not go above 1.0, it only restores what the compressor
-// lifted. Compressor and expander have their own state. Not thread safe.
+// -30 dB and +20 dB; the expander does not go above its ceiling (1.0 unless set: it only restores
+// what the compressor lifted). Compressor and expander have their own state. Not thread safe.
 class MODEMCELLULAR_API Compandor
 {
 public:
@@ -37,6 +37,9 @@ public:
 
     void compress(float* samples, int count);
     void expand(float* samples, int count);
+    // The highest envelope of the expander (1.0 = the level that passes unchanged): what it may
+    // restore above that level, e.g. up to the largest deviation the radio carries.
+    void setExpanderMax(double envelope) { m_expanderMax = envelope; }
     // Both back to a level of 1.0.
     void reset();
 
@@ -51,6 +54,7 @@ private:
 
     double m_stepUp;
     double m_stepDown;
+    double m_expanderMax;
     Tracker m_compressor;
     Tracker m_expander;
 };

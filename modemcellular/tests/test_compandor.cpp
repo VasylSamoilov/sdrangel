@@ -95,6 +95,23 @@ static void testRoundTrip()
     std::vector<float> s = sine(2.0, 8000);
     rx.expand(s.data(), static_cast<int>(s.size()));
     CHECK(peakOfTail(s) <= 2.0 + 1e-6);
+
+    // with a ceiling above 1.0 the expander restores up to it (NMT: the largest deviation, 4.7
+    // over 3.0 kHz): 1.5 compressed and expanded comes back as 1.5, not 1.0
+    const double ceiling = 4700.0 / 3000.0;
+    Compandor tx2;
+    Compandor rx2;
+    rx2.setExpanderMax(ceiling);
+    std::vector<float> loud = sine(1.5, 8000);
+    tx2.compress(loud.data(), static_cast<int>(loud.size()));
+    rx2.expand(loud.data(), static_cast<int>(loud.size()));
+    CHECK(std::fabs(peakOfTail(loud) - 1.5) < 0.1);
+    // and no more than the ceiling: 2.0 in stays at 2.0 * ceiling at most
+    Compandor rx3;
+    rx3.setExpanderMax(ceiling);
+    std::vector<float> over = sine(2.0, 8000);
+    rx3.expand(over.data(), static_cast<int>(over.size()));
+    CHECK(peakOfTail(over) <= 2.0 * ceiling + 1e-6);
 }
 
 // Attack and recovery: after a step from 0.01 to 1.0 the gain follows within tens of ms.
