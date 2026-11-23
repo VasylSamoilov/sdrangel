@@ -272,23 +272,19 @@ void SpeechLimiter::process(float* samples, int length)
 }
 
 TxAudioSource::TxAudioSource(double sampleRate) :
-    m_step(kCallRate / sampleRate),
-    m_lowpass(ButterworthFilter::Type::Lowpass, 3600.0, sampleRate, 8),
+    m_step(static_cast<Real>(kCallRate / sampleRate)),
+    m_remain(0.0f),
     m_block(static_cast<size_t>(kCallBlock), 0.0f),
-    m_blockPos(static_cast<size_t>(kCallBlock)),
-    m_p{0.0, 0.0, 0.0, 0.0},
-    m_pos(0.0),
-    m_started(false)
+    m_blockPos(static_cast<size_t>(kCallBlock))
 {
+    m_interpolator.create(16, kCallRate, 3400.0);
 }
 
 void TxAudioSource::reset()
 {
     m_blockPos = static_cast<size_t>(kCallBlock);
-    m_p[0] = m_p[1] = m_p[2] = m_p[3] = 0.0;
-    m_pos = 0.0;
-    m_started = false;
-    m_lowpass.reset();
+    m_remain = 0.0f;
+    m_interpolator.create(16, kCallRate, 3400.0);       // clears the history
 }
 
 double TxAudioSource::nextCallSample()
@@ -313,39 +309,20 @@ double TxAudioSource::nextCallSample()
 
 void TxAudioSource::generate(float* samples, int length, bool add, double gain)
 {
-    if (!m_started)
-    {
-        m_p[0] = 0.0;
-        m_p[1] = 0.0;
-        m_p[2] = nextCallSample();
-        m_p[3] = nextCallSample();
-        m_pos = 0.0;
-        m_started = true;
-    }
-
     for (int i = 0; i < length; i++)
     {
-        // cubic interpolation (Catmull-Rom) between the two middle samples; a straight line
-        // would cut the upper part of the speech band by several dB
-        const double t = m_pos;
-        const double interpolated = m_p[1] + 0.5 * t * (m_p[2] - m_p[0]
-            + t * (2.0 * m_p[0] - 5.0 * m_p[1] + 4.0 * m_p[2] - m_p[3]
-            + t * (3.0 * (m_p[1] - m_p[2]) + m_p[3] - m_p[0])));
-        const double value = m_lowpass.process(interpolated) * gain;
+        // the interpolator takes the next call sample when the output has passed the last one
+        // (at most one per output, the channel rate being above 8 kHz)
+        const Complex in(m_remain >= 1.0f ? static_cast<Real>(nextCallSample()) : 0.0f, 0.0f);
+        Complex out;
+        m_interpolator.interpolate(&m_remain, in, &out);
+        m_remain += m_step;
+
+        const double value = out.real() * gain;
         if (add) {
             samples[i] += static_cast<float>(value);
         } else {
             samples[i] = static_cast<float>(value);
-        }
-
-        m_pos += m_step;
-        while (m_pos >= 1.0)
-        {
-            m_pos -= 1.0;
-            m_p[0] = m_p[1];
-            m_p[1] = m_p[2];
-            m_p[2] = m_p[3];
-            m_p[3] = nextCallSample();
         }
     }
 }

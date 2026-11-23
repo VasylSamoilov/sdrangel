@@ -60,34 +60,6 @@ public:
     BiquadHighpass(double cutoffHz, double sampleRate, int sections);
 };
 
-// Flat Butterworth filter of an even order, as biquad sections with the Q of each pole pair.
-// (A cascade of identical sections, as above, is 3 dB down at the cut-off but rings in the
-// pass band; this one is flat, which the speech path needs.)
-class MODEMNMT_API ButterworthFilter
-{
-public:
-    enum class Type
-    {
-        Lowpass,
-        Highpass
-    };
-
-    // order is rounded up to an even number, at least 2
-    ButterworthFilter(Type type, double cutoffHz, double sampleRate, int order);
-
-    double process(double in);
-    void reset();
-
-private:
-    struct Section
-    {
-        double a0, a1, a2, b1, b2;
-        double z1, z2;
-    };
-
-    std::vector<Section> m_sections;
-};
-
 } // namespace modemnmt
 
 #endif // MODEMNMT_BIQUAD_H_

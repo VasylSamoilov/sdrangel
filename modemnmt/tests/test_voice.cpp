@@ -94,27 +94,6 @@ static void testFilters()
     CHECK(std::fabs(db(gainAt(lp, 3400.0, fs)) + 3.01) < 0.3);
     CHECK(db(gainAt(lp, 1000.0, fs)) > -0.1);
     CHECK(db(gainAt(lp, 6000.0, fs)) < -40.0);
-
-    // The filters of the speech path are flat in the pass band (identical sections as above
-    // are not: they are 1.5 times too loud at 1 kHz in the low pass and ring near the cut-off).
-    for (double rate : {8000.0, 16000.0, 48000.0})
-    {
-        ButterworthFilter high(ButterworthFilter::Type::Highpass, 300.0, rate, 8);
-        ButterworthFilter low(ButterworthFilter::Type::Lowpass, 3400.0, rate, 16);
-
-        CHECK(std::fabs(db(gainAt(high, 300.0, rate)) + 3.01) < 0.3);
-        CHECK(std::fabs(db(gainAt(low, 3400.0, rate)) + 3.01) < 0.3);
-        for (double hz : {500.0, 1000.0, 2000.0})
-        {
-            CHECK(std::fabs(db(gainAt(high, hz, rate))) < 0.1);
-            CHECK(std::fabs(db(gainAt(low, hz, rate))) < 0.1);
-        }
-        CHECK(std::fabs(db(gainAt(low, 3000.0, rate))) < 0.5);         // droop towards the cut-off
-        CHECK(db(gainAt(high, 100.0, rate)) < -40.0);
-        if (rate > 12000.0) {
-            CHECK(db(gainAt(low, 5000.0, rate)) < -50.0);
-        }
-    }
 }
 
 // Feeds a tone to a detector for a number of seconds, returns the seconds until the first
@@ -412,9 +391,10 @@ static void testTxSource()
         CHECK(pulls >= 99 && pulls <= 102);                     // 16000 call samples in 160 blocks
 
         CHECK(std::fabs(toneAmplitude(a, a.size() / 2, a.size(), 1000.0, fs) - 0.6) < 0.03);
-        // no images of the interpolation near the old Nyquist frequency
+        // no images of the interpolation near the old Nyquist frequency: 60 dB below the tone
         if (fs >= 16000.0) {
-            CHECK(toneAmplitude(a, a.size() / 2, a.size(), 7000.0, fs) < 0.01);
+            CHECK(toneAmplitude(a, a.size() / 2, a.size(), 7000.0, fs) < 0.6e-3);
+            CHECK(toneAmplitude(a, a.size() / 2, a.size(), 9000.0, fs) < 0.6e-3);
         }
     }
 

@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "dsp/firfilter.h"
+#include "dsp/interpolator.h"
 
 #include "biquad.h"
 #include "emphasis.h"
@@ -167,13 +168,18 @@ private:
     std::vector<float> m_block;
 };
 
-// Audio from the call towards the radio: 8 kHz to the channel rate, pulled in blocks of 160.
+// Audio from the call towards the radio: 8 kHz to the channel rate, pulled in blocks of 160. The
+// resampler is SDRangel's polyphase Interpolator as its DSD demodulator uses it from 8 kHz (16
+// phases, 3.4 kHz): flat to 3 kHz, the images more than 63 dB down.
 class MODEMNMT_API TxAudioSource
 {
 public:
     using Pull = std::function<void(float* samples, int count)>;
 
     explicit TxAudioSource(double sampleRate);
+    // the Interpolator holds its taps by pointer and must not be copied
+    TxAudioSource(const TxAudioSource&) = delete;
+    TxAudioSource& operator=(const TxAudioSource&) = delete;
 
     void setPull(Pull pull) { m_pull = std::move(pull); }
     // Writes length samples (replace, or add), scaled by gain
@@ -183,14 +189,12 @@ public:
 private:
     double nextCallSample();
 
-    double m_step;                      // call samples per output sample
-    ButterworthFilter m_lowpass;        // removes the images of the interpolation
+    Real m_step;                        // call samples per output sample
+    Interpolator m_interpolator;
+    Real m_remain;                      // position of the output after the last call sample taken
     Pull m_pull;
     std::vector<float> m_block;
     size_t m_blockPos;
-    double m_p[4];                      // call samples around the output position
-    double m_pos;                       // 0..1 between m_p[1] and m_p[2]
-    bool m_started;
 };
 
 } // namespace modemnmt
