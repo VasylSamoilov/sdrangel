@@ -15,7 +15,6 @@ set(MODEMCELLULAR_LIB_SOURCES
     ../cellularsystem.cpp
     ../clock.cpp
     ../compandor.cpp
-    ../dtmfgenerator.cpp
     ../echoendpoint.cpp
     ../firfilter.cpp
     ../musicendpoint.cpp
@@ -28,6 +27,7 @@ find_package(Qt5 COMPONENTS Core REQUIRED)
 # SDRangel's radio primitives the module uses, built from sdrbase as they are (needing only the Qt
 # headers), without the warnings of our own code made errors
 set(SDRBASE_DSP_SOURCES
+    ${SDRANGEL_ROOT}/sdrbase/dsp/dv/dvdtmf.cpp
     ${SDRANGEL_ROOT}/sdrbase/dsp/firfilter.cpp
     ${SDRANGEL_ROOT}/sdrbase/dsp/goertzel.cpp
     ${SDRANGEL_ROOT}/sdrbase/dsp/interpolator.cpp
@@ -61,7 +61,6 @@ endfunction()
 modemcellular_add_test(modemcellular_timer_test test_timer.cpp)
 modemcellular_add_test(modemcellular_endpoint_test test_endpoints.cpp)
 modemcellular_add_test(modemcellular_tone_test test_tones.cpp)
-modemcellular_add_test(modemcellular_dtmf_test test_dtmf.cpp)
 modemcellular_add_test(modemcellular_compandor_test test_compandor.cpp)
 modemcellular_add_test(modemcellular_router_test test_router.cpp)
 modemcellular_add_test(modemcellular_system_test test_system.cpp)

@@ -32,7 +32,6 @@ set(MODEMNMT_LIB_SOURCES
     ../../modemcellular/cellularsystem.cpp
     ../../modemcellular/clock.cpp
     ../../modemcellular/compandor.cpp
-    ../../modemcellular/dtmfgenerator.cpp
     ../../modemcellular/echoendpoint.cpp
     ../../modemcellular/firfilter.cpp
     ../../modemcellular/musicendpoint.cpp
@@ -44,6 +43,7 @@ find_package(Qt5 COMPONENTS Core REQUIRED)
 # SDRangel's radio primitives the modules use, built from sdrbase as they are (needing only the Qt
 # headers), without the warnings of our own code made errors
 set(SDRBASE_DSP_SOURCES
+    ${SDRANGEL_ROOT}/sdrbase/dsp/dv/dvdtmf.cpp
     ${SDRANGEL_ROOT}/sdrbase/dsp/firfilter.cpp
     ${SDRANGEL_ROOT}/sdrbase/dsp/goertzel.cpp
     ${SDRANGEL_ROOT}/sdrbase/dsp/interpolator.cpp

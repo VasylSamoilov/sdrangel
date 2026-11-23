@@ -8,7 +8,6 @@ set(modemcellular_SOURCES
     cellularsystem.cpp
     clock.cpp
     compandor.cpp
-    dtmfgenerator.cpp
     echoendpoint.cpp
     firfilter.cpp
     musicendpoint.cpp
@@ -28,7 +27,6 @@ set(modemcellular_HEADERS
     cellularsystem.h
     clock.h
     compandor.h
-    dtmfgenerator.h
     echoendpoint.h
     firfilter.h
     mobileleg.h

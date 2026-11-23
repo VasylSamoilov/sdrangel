@@ -21,7 +21,7 @@
 #include <atomic>
 #include <vector>
 
-#include "dtmfgenerator.h"
+#include "dsp/dv/dvdtmf.h"
 
 namespace modemnmt
 {
@@ -36,6 +36,7 @@ public:
         m_subscriber(subscriber),
         m_callref(0)
     {
+        m_dtmf.setLevel(kDtmfLevel);
     }
 
     const std::string& number() const { return m_number; }
@@ -43,8 +44,9 @@ public:
     modemcellular::CallRef callref() const { return m_callref; }
     void setCallref(modemcellular::CallRef callref) { m_callref = callref; }
 
-    // The digits the phone sends in the MFT state go to the far end as push-button tones.
-    void digit(char digit) { m_dtmf.queue(digit); }
+    // The digits the phone sends in the MFT state go to the far end as push-button tones (ITU-T
+    // Q.23: 100 ms of tone, 50 ms of pause).
+    void digit(char digit) { m_dtmf.queue(digit, 100, 50); }
     // The speech of the phone with the tones of the digits added; it is the speech itself if there are none.
     const float* withTones(const float* samples, int count)
     {
@@ -52,7 +54,11 @@ public:
             return samples;
         }
         m_scratch.assign(samples, samples + count);
-        m_dtmf.mix(m_scratch.data(), count);
+        m_tones.resize(static_cast<size_t>(count));
+        const int made = m_dtmf.generate(m_tones.data(), count);
+        for (int i = 0; i < made; i++) {
+            m_scratch[static_cast<size_t>(i)] += m_tones[static_cast<size_t>(i)];
+        }
         return m_scratch.data();
     }
     void clearTones() { m_dtmf.reset(); }
@@ -92,8 +98,11 @@ private:
     NmtSubscriber m_subscriber;
     // set from the router (any thread), read by the audio handlers under the station lock
     std::atomic<modemcellular::CallRef> m_callref;
-    modemcellular::DtmfGenerator m_dtmf;
+    // 0.2 peak for each of the two tones (8 kHz, the call's rate)
+    static constexpr float kDtmfLevel = 0.2f;
+    DVDTMF::Generator m_dtmf;               // SDRangel's push-button tones
     std::vector<float> m_scratch;
+    std::vector<float> m_tones;
 };
 
 std::string NmtCellularBridge::numberOf(const NmtSubscriber& subscriber)
