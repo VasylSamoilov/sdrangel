@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "dsp/firfilter.h"
+#include "dsp/goertzel.h"
 #include "dsp/interpolator.h"
 
 #include "biquad.h"
@@ -107,8 +108,8 @@ private:
     Sink m_sink;
     std::vector<float> m_window;
     size_t m_filled;
-    double m_coeffTone;
-    double m_coeffNoise;
+    Goertzel m_tone;                    // SDRangel's Goertzel filters, at the tone and the noise
+    Goertzel m_noise;
     std::vector<double> m_hamming;      // 256 points as in the reference
     bool m_detected;
     int m_count;

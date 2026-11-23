@@ -42,20 +42,18 @@ bool validNumber(int number)
     return number >= 1 && number <= 4;
 }
 
-// Level of a frequency in the window, the peak value of the tone (Goertzel with a Hamming window).
-double goertzel(const std::vector<float>& samples, const std::vector<double>& hamming, double coeff)
+// Level of a frequency in the window (SDRangel's Goertzel filter over the window with a Hamming
+// window applied; the scale is the same for the tone and the noise).
+double level(Goertzel& goertzel, const std::vector<float>& samples, const std::vector<double>& hamming)
 {
     const size_t length = samples.size();
-    double sk = 0.0, sk1 = 0.0, sk2 = 0.0;
 
-    for (size_t n = 0; n < length; n++)
-    {
-        sk = coeff * sk1 - sk2 + samples[n] * hamming[n * kHammingPoints / length];
-        sk2 = sk1;
-        sk1 = sk;
+    goertzel.reset();
+    for (size_t n = 0; n + 1 < length; n++) {
+        goertzel.filter(samples[n] * hamming[n * kHammingPoints / length]);
     }
-
-    return std::sqrt(sk * sk - coeff * sk * sk2 + sk2 * sk2) / static_cast<double>(length) * 4.0 / 1.08;
+    goertzel.goertzel(samples[length - 1] * hamming[(length - 1) * kHammingPoints / length]);
+    return goertzel.mag();
 }
 
 } // namespace
@@ -63,8 +61,8 @@ double goertzel(const std::vector<float>& samples, const std::vector<double>& ha
 SupervisoryDetector::SupervisoryDetector(double sampleRate, int number) :
     m_enabled(validNumber(number)),
     m_filled(0),
-    m_coeffTone(0.0),
-    m_coeffNoise(0.0),
+    m_tone(validNumber(number) ? kSupervisoryHz[number - 1] : kSupervisoryHz[0], static_cast<int>(sampleRate)),
+    m_noise(kSupervisoryNoiseHz, static_cast<int>(sampleRate)),
     m_hamming(kHammingPoints),
     m_detected(false),
     m_count(0)
@@ -74,8 +72,6 @@ SupervisoryDetector::SupervisoryDetector(double sampleRate, int number) :
     }
 
     m_window.resize(static_cast<size_t>(sampleRate * kWindowSeconds + 0.5));
-    m_coeffTone = 2.0 * std::cos(2.0 * kPi * kSupervisoryHz[number - 1] / sampleRate);
-    m_coeffNoise = 2.0 * std::cos(2.0 * kPi * kSupervisoryNoiseHz / sampleRate);
     for (int i = 0; i < kHammingPoints; i++) {
         m_hamming[static_cast<size_t>(i)] = 0.54 - 0.46 * std::cos(2.0 * kPi * i / kHammingPoints);
     }
@@ -108,8 +104,8 @@ void SupervisoryDetector::process(const float* samples, int length)
 // Compares the tone with the noise just below the tones.
 void SupervisoryDetector::decode()
 {
-    const double tone = goertzel(m_window, m_hamming, m_coeffTone);
-    const double noise = goertzel(m_window, m_hamming, m_coeffNoise);
+    const double tone = level(m_tone, m_window, m_hamming);
+    const double noise = level(m_noise, m_window, m_hamming);
     double quality = (tone > 0.0) ? (tone - noise) / tone : 0.0;
 
     if (quality < 0.0) {
