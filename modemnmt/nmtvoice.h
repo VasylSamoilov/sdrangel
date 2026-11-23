@@ -133,15 +133,27 @@ private:
     double m_level;
 };
 
+// SDRangel's Interpolator in the speech path. It takes the nearest of its phases (no
+// interpolation between them), so the phases are a multiple of 6: from 8 to 48 kHz and from
+// 48 to 16 kHz every output falls on a phase; at other rates the timing error is 1/96 sample.
+// Interpolator::create() takes its "taps per phase" times the phases as the taps of each phase,
+// so 24 taps per phase are 24 / 96. Measured at 48 kHz with 24 taps: folding into the band 62 dB
+// down from 48 to 16 kHz, images 60 dB down from 8 to 48 kHz, 3 kHz -0.35 dB; 72 taps (the
+// default) are 3.6 times the work for a few dB more.
+constexpr int kInterpolatorPhases = 96;
+constexpr double kInterpolatorTapsPerPhase = 24.0 / kInterpolatorPhases;
+
 // Threshold of the noise gate of the audio from the phone (1.0 = the reference level): 0.10 =
 // 300 Hz deviation, -20 dB (osmocom-analog's NMT and AMPS).
 constexpr double kRxNoiseGate = 0.10;
 
-// Audio from the radio towards the call: band pass 300 Hz to 3.4 kHz (which takes the supervisory
-// tone out, more than 100 dB down), the noise gate, low pass 3.4 kHz (the products of the gate
-// and the band of the call), then down to 8 kHz in blocks of 160 samples. The filters are
-// SDRangel's FIR filters as its NFM demodulator uses them ((rate / 48) | 1 taps, about 260 Hz
-// wide edges, -6 dB at 300 Hz and 3.4 kHz, a delay of 10 ms each).
+// Audio from the radio towards the call, with SDRangel's resampler and FIR filters:
+// - the channel rate to 16 kHz (Interpolator, any ratio; only the kept samples are computed);
+// - at 16 kHz a band pass that keeps 300 Hz to 3.4 kHz flat and takes the supervisory tones
+//   (NMT Doc 450-4 5.15: at least 30 dB at 4 kHz +-55 Hz) and the hum out before the gate;
+// - the noise gate;
+// - a low pass for the products of the gate, then every second sample: 8 kHz, in blocks of 160.
+// The sharp edges are made at 16 kHz, where they cost a third of what they would at 48 kHz.
 class MODEMNMT_API RxAudioChain
 {
 public:
@@ -149,6 +161,9 @@ public:
     using Sink = std::function<void(float* samples, int count)>;
 
     explicit RxAudioChain(double sampleRate);
+    // the Interpolator holds its taps by pointer and must not be copied
+    RxAudioChain(const RxAudioChain&) = delete;
+    RxAudioChain& operator=(const RxAudioChain&) = delete;
 
     void setSink(Sink sink) { m_sink = std::move(sink); }
     // The first muted samples are taken as silence. Samples that are not finite are taken as
@@ -158,20 +173,23 @@ public:
     void reset();
 
 private:
+    void create();
+    void filtered(double sample);       // one sample at 16 kHz
+
     double m_sampleRate;
-    int m_taps;
-    double m_ratio;                     // input samples per output sample
-    Bandpass<Real> m_bandpass;
+    Interpolator m_resampler;           // the channel rate to 16 kHz
+    Real m_distance;                    // input samples per 16 kHz sample
+    Real m_remain;
+    Bandpass<Real> m_bandpass;          // at 16 kHz
     Lowpass<Real> m_lowpass;
+    bool m_keep;                        // every second 16 kHz sample is an 8 kHz sample
     Sink m_sink;
-    double m_next;                      // time of the next output, relative to the previous input
-    double m_previous;
     std::vector<float> m_block;
 };
 
 // Audio from the call towards the radio: 8 kHz to the channel rate, pulled in blocks of 160. The
-// resampler is SDRangel's polyphase Interpolator as its DSD demodulator uses it from 8 kHz (16
-// phases, 3.4 kHz): flat to 3 kHz, the images more than 63 dB down.
+// resampler is SDRangel's polyphase Interpolator as its DSD demodulator uses it from 8 kHz (3.4
+// kHz; phases and taps above): 3 kHz -0.35 dB, the images about 60 dB down.
 class MODEMNMT_API TxAudioSource
 {
 public:

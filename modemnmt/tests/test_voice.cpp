@@ -329,28 +329,33 @@ static void testRxChain()
     wide.process(l.data(), 96000, true);
     CHECK(toneAmplitude(low, low.size() / 2, low.size(), 50.0, kCallRate) < 0.005);
 
-    // Loud tones (far above the noise gate, so that the filters are measured, not the gate): the
-    // band passes, 200 Hz, 3.6 kHz and the four supervisory tones do not. Each tone alone, as
-    // the gate is not linear.
+    // NMT Doc 450-4 5.15: the band 300 Hz to 3.4 kHz passes (flat here, the de-emphasis is
+    // elsewhere); the supervisory tones (4 kHz +-55 Hz) at least 30 dB down, hum gone too. A
+    // stopped tone is fed 10 times the reference: nothing out of the gate (threshold 0.10) then
+    // means more than 40 dB, the filter and not the gate. Each tone alone, the gate is not linear.
     struct Case { double hz; bool passes; };
-    const Case cases[] = {{200.0, false}, {1000.0, true}, {3000.0, true}, {3600.0, false},
+    const Case cases[] = {{50.0, false}, {300.0, true}, {1000.0, true}, {3000.0, true}, {3400.0, true},
                           {kSupervisoryHz[0], false}, {kSupervisoryHz[1], false},
                           {kSupervisoryHz[2], false}, {kSupervisoryHz[3], false}};
-    for (const Case& c : cases)
+    for (double rate : {44100.0, 48000.0})
     {
-        RxAudioChain band(48000.0);
-        std::vector<float> out;
-        band.setSink([&](const float* s, int n) { out.insert(out.end(), s, s + n); });
-        const std::vector<float> in = sine(c.hz, 1.0, 48000.0, 48000);
-        band.process(in.data(), static_cast<int>(in.size()), 0);
-        double peak = 0.0;
-        for (size_t i = out.size() / 2; i < out.size(); i++) {
-            peak = std::fmax(peak, std::fabs(out[i]));
-        }
-        if (c.passes) {
-            CHECK(std::fabs(toneAmplitude(out, out.size() / 2, out.size(), c.hz, kCallRate) - gatedAmplitude(1.0)) < 0.03);
-        } else {
-            CHECK(peak < 0.001);
+        for (const Case& c : cases)
+        {
+            RxAudioChain band(rate);
+            std::vector<float> out;
+            band.setSink([&](const float* s, int n) { out.insert(out.end(), s, s + n); });
+            const std::vector<float> in = sine(c.hz, c.passes ? 1.0 : 10.0, rate, static_cast<size_t>(rate));
+            band.process(in.data(), static_cast<int>(in.size()), 0);
+            double peak = 0.0;
+            for (size_t i = out.size() / 2; i < out.size(); i++) {
+                peak = std::fmax(peak, std::fabs(out[i]));
+            }
+            if (c.passes) {     // flat within 0.5 dB (the standard allows -3 dB)
+                const double gain = toneAmplitude(out, out.size() / 2, out.size(), c.hz, kCallRate) / gatedAmplitude(1.0);
+                CHECK(std::fabs(20.0 * std::log10(gain)) < 0.5);
+            } else {
+                CHECK(peak < 0.001);
+            }
         }
     }
 }
@@ -391,10 +396,10 @@ static void testTxSource()
         CHECK(pulls >= 99 && pulls <= 102);                     // 16000 call samples in 160 blocks
 
         CHECK(std::fabs(toneAmplitude(a, a.size() / 2, a.size(), 1000.0, fs) - 0.6) < 0.03);
-        // no images of the interpolation near the old Nyquist frequency: 60 dB below the tone
+        // no images of the interpolation near the old Nyquist frequency: 55 dB below the tone
         if (fs >= 16000.0) {
-            CHECK(toneAmplitude(a, a.size() / 2, a.size(), 7000.0, fs) < 0.6e-3);
-            CHECK(toneAmplitude(a, a.size() / 2, a.size(), 9000.0, fs) < 0.6e-3);
+            CHECK(toneAmplitude(a, a.size() / 2, a.size(), 7000.0, fs) < 0.6 * 1.78e-3);
+            CHECK(toneAmplitude(a, a.size() / 2, a.size(), 9000.0, fs) < 0.6 * 1.78e-3);
         }
     }
 

@@ -168,63 +168,101 @@ void SupervisoryTone::add(float* samples, int length)
     }
 }
 
+namespace
+{
+
+// the rate of the filters, twice the call's
+const double kFilterRate = 2.0 * kCallRate;
+// The resampler to 16 kHz: only what would fold into the band has to go (from 12.6 kHz up, at
+// 16 kHz), the band edge is made after it.
+const double kResamplerCutoff = 6000.0;
+const double kResamplerTapsPerPhase = kInterpolatorTapsPerPhase;
+// The band pass at 16 kHz: edges 250 Hz wide (Blackman: 5.5 / width taps), -6 dB at 175 Hz and
+// 3650 Hz, so 300 Hz to 3.4 kHz is flat and the supervisory tones (from 3955 Hz) are gone.
+const double kBandLow = 175.0;
+const double kBandHigh = 3650.0;
+const int kBandTaps = static_cast<int>(5.5 * kFilterRate / 250.0) | 1;
+// The low pass after the gate: flat to 3.4 kHz, gone from 4.6 kHz, so nothing folds into the
+// band at 8 kHz.
+const double kLowCutoff = 4000.0;
+const int kLowTaps = static_cast<int>(5.5 * kFilterRate / 1200.0) | 1;
+
+} // namespace
+
 RxAudioChain::RxAudioChain(double sampleRate) :
     m_sampleRate(sampleRate),
-    m_taps(static_cast<int>(sampleRate / 48.0) | 1),     // odd, as the FIR filters want
-    m_ratio(sampleRate / kCallRate),
-    m_next(m_ratio),
-    m_previous(0.0)
+    m_distance(static_cast<Real>(sampleRate / kFilterRate)),
+    m_remain(0.0f),
+    m_keep(true)
 {
-    m_bandpass.create(m_taps, m_sampleRate, 300.0, 3400.0);
-    m_lowpass.create(m_taps, m_sampleRate, 3400.0);
+    create();
     m_block.reserve(kCallBlock);
 }
 
-// Linear interpolation between the filtered input samples; the low pass in front keeps the
-// band below the new Nyquist frequency.
+void RxAudioChain::create()
+{
+    // below 16 kHz the resampler goes up, its band is what the input has
+    const double cutoff = std::min(kResamplerCutoff, 0.45 * std::min(m_sampleRate, kFilterRate));
+
+    m_resampler.create(kInterpolatorPhases, m_sampleRate, cutoff, kResamplerTapsPerPhase);
+    m_bandpass.create(kBandTaps, kFilterRate, kBandLow, kBandHigh);
+    m_lowpass.create(kLowTaps, kFilterRate, kLowCutoff);
+}
+
 void RxAudioChain::reset()
 {
-    // creating the filters again clears their history
-    m_bandpass.create(m_taps, m_sampleRate, 300.0, 3400.0);
-    m_lowpass.create(m_taps, m_sampleRate, 3400.0);
-    m_next = m_ratio;
-    m_previous = 0.0;
+    create();                           // creating the filters again clears their history
+    m_remain = 0.0f;
+    m_keep = true;
     m_block.clear();
+}
+
+void RxAudioChain::filtered(double sample)
+{
+    double y = m_bandpass.filter(static_cast<Real>(sample));
+    // Noise gate, as osmocom-analog's NMT and AMPS (37fe472): what the phone's microphone
+    // picks up when nobody speaks (the room, its own earpiece), lifted by the phone's
+    // compressor, stays below the threshold and does not go to the network; above it the
+    // threshold is taken off and made up again.
+    const double a = std::fabs(y);
+    y = (a < kRxNoiseGate) ? 0.0 : ((y >= 0.0) ? 1.0 : -1.0) * (a - kRxNoiseGate) / (1.0 - kRxNoiseGate);
+    y = m_lowpass.filter(static_cast<Real>(y));
+
+    const bool keep = m_keep;
+    m_keep = !m_keep;
+    if (!keep || !m_sink) {
+        return;
+    }
+    m_block.push_back(static_cast<float>(y));
+    if (m_block.size() == static_cast<size_t>(kCallBlock))
+    {
+        m_sink(m_block.data(), kCallBlock);
+        m_block.clear();
+    }
 }
 
 void RxAudioChain::process(const float* samples, int length, int muted)
 {
-    const bool deliver = static_cast<bool>(m_sink);
-
     for (int i = 0; i < length; i++)
     {
-        const double x = (i < muted || !std::isfinite(samples[i])) ? 0.0 : samples[i];
-        double y = m_bandpass.filter(static_cast<Real>(x));
-        // Noise gate, as osmocom-analog's NMT and AMPS (37fe472): what the phone's microphone
-        // picks up when nobody speaks (the room, its own earpiece), lifted by the phone's
-        // compressor, stays below the threshold and does not go to the network; above it the
-        // threshold is taken off and made up again.
-        const double a = std::fabs(y);
-        y = (a < kRxNoiseGate) ? 0.0 : ((y >= 0.0) ? 1.0 : -1.0) * (a - kRxNoiseGate) / (1.0 - kRxNoiseGate);
-        y = m_lowpass.filter(static_cast<Real>(y));
+        const Real x = (i < muted || !std::isfinite(samples[i])) ? 0.0f : samples[i];
+        const Complex in(x, 0.0f);
+        Complex out;
 
-        while (m_next <= 1.0)
+        // as SDRangel's DSD demodulator drives the Interpolator
+        if (m_distance < 1.0f)
         {
-            if (deliver)
+            while (!m_resampler.interpolate(&m_remain, in, &out))
             {
-                m_block.push_back(static_cast<float>(m_previous + (y - m_previous) * m_next));
-                if (m_block.size() == static_cast<size_t>(kCallBlock))
-                {
-                    if (m_sink) {
-                        m_sink(m_block.data(), kCallBlock);
-                    }
-                    m_block.clear();
-                }
+                filtered(out.real());
+                m_remain += m_distance;
             }
-            m_next += m_ratio;
         }
-        m_next -= 1.0;
-        m_previous = y;
+        else if (m_resampler.decimate(&m_remain, in, &out))
+        {
+            filtered(out.real());
+            m_remain += m_distance;
+        }
     }
 }
 
@@ -271,14 +309,14 @@ TxAudioSource::TxAudioSource(double sampleRate) :
     m_block(static_cast<size_t>(kCallBlock), 0.0f),
     m_blockPos(static_cast<size_t>(kCallBlock))
 {
-    m_interpolator.create(16, kCallRate, 3400.0);
+    m_interpolator.create(kInterpolatorPhases, kCallRate, 3400.0, kInterpolatorTapsPerPhase);
 }
 
 void TxAudioSource::reset()
 {
     m_blockPos = static_cast<size_t>(kCallBlock);
     m_remain = 0.0f;
-    m_interpolator.create(16, kCallRate, 3400.0);       // clears the history
+    m_interpolator.create(kInterpolatorPhases, kCallRate, 3400.0, kInterpolatorTapsPerPhase);   // clears the history
 }
 
 double TxAudioSource::nextCallSample()
