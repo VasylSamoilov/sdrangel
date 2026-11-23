@@ -184,12 +184,75 @@ static void testLookahead()
     }
 }
 
+static std::vector<float> tone(double hz, double amplitude, int count)
+{
+    std::vector<float> s(static_cast<size_t>(count));
+
+    for (int i = 0; i < count; i++) {
+        s[static_cast<size_t>(i)] = static_cast<float>(amplitude * std::sin(2.0 * kPi * hz * i / 8000.0));
+    }
+    return s;
+}
+
+// Knee (osmocom-analog's NMT: -2 dB re the reference, emphasis 300 Hz, lookahead 4 ms): loud
+// speech, after the pre-emphasis, is held at the knee; below the knee nothing changes.
+static void testKnee()
+{
+    const double knee = std::pow(10.0, -2.0 / 20.0);
+    const double a = std::exp(-2.0 * kPi * 300.0 / 8000.0);
+    const double norm = 1.0 / std::sqrt(1.0 + a * a - 2.0 * a * std::cos(2.0 * kPi * 1000.0 / 8000.0));
+    auto emphasized = [&](const std::vector<float>& s) {
+        double last = 0.0, peak = 0.0;
+        for (size_t i = 0; i < s.size(); i++)
+        {
+            const double y = (s[i] - a * last) * norm;
+            last = s[i];
+            if (i >= s.size() / 2) {
+                peak = std::fmax(peak, std::fabs(y));
+            }
+        }
+        return peak;
+    };
+
+    // loud 2.5 kHz: without the knee far above it after the pre-emphasis, with it held there
+    for (bool on : {false, true})
+    {
+        Compandor compandor;
+        compandor.setCompressorLookahead(4.0);
+        if (on) {
+            compandor.setCompressorKnee(knee, 300.0);
+        }
+        std::vector<float> s = tone(2500.0, 2.0, 8000);
+        compandor.compress(s.data(), static_cast<int>(s.size()));
+        if (on) {
+            CHECK(std::fabs(emphasized(s) / knee - 1.0) < 0.1);
+        } else {
+            CHECK(emphasized(s) > 2.0 * knee);
+        }
+    }
+
+    // quiet speech: the same with and without the knee
+    Compandor plain;
+    Compandor kneed;
+    plain.setCompressorLookahead(4.0);
+    kneed.setCompressorLookahead(4.0);
+    kneed.setCompressorKnee(knee, 300.0);
+    std::vector<float> p = tone(1000.0, 0.1, 8000);
+    std::vector<float> k = p;
+    plain.compress(p.data(), static_cast<int>(p.size()));
+    kneed.compress(k.data(), static_cast<int>(k.size()));
+    for (size_t i = 0; i < p.size(); i++) {
+        CHECK(p[i] == k[i]);
+    }
+}
+
 int main()
 {
     testCompress();
     testRoundTrip();
     testTiming();
     testLookahead();
+    testKnee();
 
     if (g_failures == 0) {
         std::printf("all compandor tests passed\n");

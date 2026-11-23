@@ -48,6 +48,14 @@ public:
     // ready and the first waves do not go out with the gain of the pause (attack 3 ms, up to
     // +15 dB). The characteristic stays the same, shifted in time. At most kMaxLookahead samples.
     void setCompressorLookahead(double ms);
+    // Holds the level of the transmitted (pre-emphasized) speech at a knee (0 = off; 1.0 = the
+    // level that passes unchanged). The deviation limit applies after the pre-emphasis, where 2 to
+    // 3 kHz of speech is up to 7 dB above its level at 1 kHz: the knee watches the compressed
+    // speech after a first order pre-emphasis at emphasisHz (0 dB at 1 kHz), and where its
+    // envelope (the compressor's attack and recovery) is above the knee, it lowers the gain to
+    // hold it there, the lowest gain over the lookahead, so it is ready when a loud syllable
+    // arrives. Below the knee nothing changes. Needs the lookahead.
+    void setCompressorKnee(double knee, double emphasisHz);
     // Both back to a level of 1.0, the lookahead empty.
     void reset();
 
@@ -71,6 +79,13 @@ private:
     int m_lookahead;                    // samples the speech is delayed (0 = off)
     size_t m_laPos;
     std::vector<double> m_laBuf;
+    double m_knee;                      // 0 = off
+    double m_keA;                       // the pre-emphasis of the knee and its envelope
+    double m_keNorm;
+    double m_keXl;
+    double m_kePk;
+    double m_keEnv;
+    std::vector<double> m_kgBuf;        // the knee's gains over the lookahead
 };
 
 } // namespace modemcellular

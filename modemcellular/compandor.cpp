@@ -38,6 +38,7 @@ const double kEnvelopeMax = 9.990;
 const double kExpanderEnvelopeMax = 1.0;
 // the square root of the envelope is taken in steps of this size
 const double kEnvelopeStep = 0.001;
+const double kPi = 3.14159265358979323846;
 
 } // namespace
 
@@ -47,7 +48,13 @@ Compandor::Compandor(double sampleRate, double attackMs, double recoveryMs) :
     m_stepDown(std::pow(kRecoveryFactor, 1000.0 / recoveryMs / sampleRate)),
     m_expanderMax(kExpanderEnvelopeMax),
     m_lookahead(0),
-    m_laPos(0)
+    m_laPos(0),
+    m_knee(0.0),
+    m_keA(0.0),
+    m_keNorm(1.0),
+    m_keXl(0.0),
+    m_kePk(0.0),
+    m_keEnv(kEnvelopeMin)
 {
     reset();
 }
@@ -58,7 +65,20 @@ void Compandor::setCompressorLookahead(double ms)
 
     m_lookahead = std::max(0, std::min(kMaxLookahead, n));
     m_laBuf.assign(static_cast<size_t>(m_lookahead), 0.0);
+    m_kgBuf.assign(static_cast<size_t>(m_lookahead), 1.0);
     m_laPos = 0;
+}
+
+void Compandor::setCompressorKnee(double knee, double emphasisHz)
+{
+    m_knee = knee > 0.0 ? knee : 0.0;
+    m_keA = std::exp(-2.0 * kPi * emphasisHz / m_sampleRate);
+    // the first order pre-emphasis x - a x[-1], 0 dB at 1 kHz
+    m_keNorm = 1.0 / std::sqrt(1.0 + m_keA * m_keA - 2.0 * m_keA * std::cos(2.0 * kPi * 1000.0 / m_sampleRate));
+    m_keXl = 0.0;
+    m_kePk = 0.0;
+    m_keEnv = kEnvelopeMin;
+    std::fill(m_kgBuf.begin(), m_kgBuf.end(), 1.0);
 }
 
 void Compandor::reset()
@@ -68,7 +88,11 @@ void Compandor::reset()
     m_expander.peak = 1.0;
     m_expander.envelope = 1.0;
     std::fill(m_laBuf.begin(), m_laBuf.end(), 0.0);
+    std::fill(m_kgBuf.begin(), m_kgBuf.end(), 1.0);
     m_laPos = 0;
+    m_keXl = 0.0;
+    m_kePk = 0.0;
+    m_keEnv = kEnvelopeMin;
 }
 
 // The peak rises at once and falls with the recovery time; the envelope follows the peak with
@@ -105,12 +129,25 @@ void Compandor::compress(float* samples, int count)
 
         track(m_compressor, value, kEnvelopeMax);
         const double quantised = std::floor(m_compressor.envelope / kEnvelopeStep) * kEnvelopeStep;
-        const double gain = 1.0 / std::sqrt(quantised);
+        double gain = 1.0 / std::sqrt(quantised);
 
         if (m_lookahead > 0)
         {
             // the envelope follows the new sample, the gain goes to the delayed one
             const double delayed = m_laBuf[m_laPos];
+
+            if (m_knee > 0.0)
+            {
+                // the envelope of the new sample, compressed and pre-emphasized
+                const double x = value * gain;
+                const double e = std::fabs((x - m_keA * m_keXl) * m_keNorm);
+                m_keXl = x;
+                m_kePk = e > m_kePk ? e : m_kePk * m_stepDown;
+                m_keEnv *= m_kePk > m_keEnv ? m_stepUp : m_stepDown;
+                m_keEnv = std::max(m_keEnv, kEnvelopeMin);
+                m_kgBuf[m_laPos] = m_keEnv > m_knee ? m_knee / m_keEnv : 1.0;
+                gain *= *std::min_element(m_kgBuf.begin(), m_kgBuf.end());
+            }
             m_laBuf[m_laPos] = value;
             m_laPos = (m_laPos + 1) % static_cast<size_t>(m_lookahead);
             samples[i] = static_cast<float>(delayed * gain);
