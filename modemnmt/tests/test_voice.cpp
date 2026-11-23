@@ -250,7 +250,13 @@ static void testToneGenerator()
         std::vector<float> x(static_cast<size_t>(fs), 0.0f);
         tone.add(x.data(), 1000);
         tone.add(x.data() + 1000, static_cast<int>(x.size()) - 1000);       // continuous over calls
-        CHECK(std::fabs(toneAmplitude(x, 0, x.size(), kSupervisoryHz[number - 1], fs) - kTxPeakSupervisory) < 0.0005);
+        const double f = kSupervisoryHz[number - 1];
+        CHECK(std::fabs(toneAmplitude(x, 0, x.size(), f, fs) - kSupervisoryDeviation / kSpeechDeviationHz / Emphasis::preGain(f, fs)) < 0.0005);
+        // on air, after the pre-emphasis of the transmitter: 0.3 kHz deviation (NMT Doc 450-4 4.8)
+        std::vector<float> air = x;
+        Emphasis emphasis(fs);
+        emphasis.pre(air.data(), static_cast<int>(air.size()));
+        CHECK(std::fabs(toneAmplitude(air, air.size() / 2, air.size(), f, fs) * 3000.0 - 300.0) < 3.0);
         for (int other = 1; other <= 4; other++)
         {
             if (other != number) {
@@ -268,7 +274,8 @@ static void testToneGenerator()
     SupervisoryTone half(fs, 1, 0.5);
     std::vector<float> y(4800, 0.0f);
     half.add(y.data(), 4800);
-    CHECK(std::fabs(toneAmplitude(y, 0, y.size(), kSupervisoryHz[0], fs) - kTxPeakSupervisory * 0.5) < 0.0005);
+    CHECK(std::fabs(toneAmplitude(y, 0, y.size(), kSupervisoryHz[0], fs)
+        - kSupervisoryDeviation / kSpeechDeviationHz / Emphasis::preGain(kSupervisoryHz[0], fs) * 0.5) < 0.0005);
 }
 
 static void testRxChain()
@@ -519,7 +526,8 @@ static void testSpeechBothWays()
         // factor) and the supervisory tone of the channel
         const size_t from = sent.size() / 2;
         CHECK(std::fabs(toneAmplitude(sent, from, sent.size(), 800.0, rate) - 0.5 * 0.8) < 0.01);
-        CHECK(std::fabs(toneAmplitude(sent, from, sent.size(), kSupervisoryHz[2], rate) - kTxPeakSupervisory * 0.8) < 0.0007);
+        CHECK(std::fabs(toneAmplitude(sent, from, sent.size(), kSupervisoryHz[2], rate)
+            - kSupervisoryDeviation / kSpeechDeviationHz / Emphasis::preGain(kSupervisoryHz[2], rate) * 0.8) < 0.0007);
         CHECK(toneAmplitude(sent, from, sent.size(), kSupervisoryHz[1], rate) < 0.001);       // not the neighbour
         CHECK(call.pulls > 90);
 
@@ -641,7 +649,8 @@ static void testCompandor()
 
     // towards the phone compressed, times the deviation factor; the supervisory tone is not
     CHECK(std::fabs(toneAmplitude(sent, from, sent.size(), 800.0, rate) - toPhone * 0.8) < 0.02);
-    CHECK(std::fabs(toneAmplitude(sent, from, sent.size(), kSupervisoryHz[2], rate) - kTxPeakSupervisory * 0.8) < 0.0007);
+    CHECK(std::fabs(toneAmplitude(sent, from, sent.size(), kSupervisoryHz[2], rate)
+        - kSupervisoryDeviation / kSpeechDeviationHz / Emphasis::preGain(kSupervisoryHz[2], rate) * 0.8) < 0.0007);
 
     // from the phone expanded
     const size_t half = call.fromPhone.size() / 2;

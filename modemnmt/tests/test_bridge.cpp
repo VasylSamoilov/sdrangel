@@ -302,7 +302,9 @@ static void testCallToRegisteredPhone()
     };
     // the tone starts in the first block
     CHECK(std::fabs(level(0.05, 0.22) - 0.25) < 0.03);              // on
-    CHECK(level(0.30, 0.47) < 0.05);                                // off
+    // off: only the supervisory tone is left (0.3 kHz on air, before the pre-emphasis this level)
+    const double supervisory = kSupervisoryDeviation / kSpeechDeviationHz / Emphasis::preGain(kSupervisoryHz[1], kRate);
+    CHECK(level(0.30, 0.47) < supervisory * 1.2);
     CHECK(std::fabs(level(0.55, 0.72) - 0.25) < 0.03);              // on again
 
     s.air(0.2, *s.a);                                               // 2.1 s: tone timeout of 2 s

@@ -39,6 +39,8 @@ public:
     explicit Emphasis(double sampleRate);
 
     void pre(float* samples, int count);
+    // the gain of pre() at a frequency (1.0 at 1 kHz), measured with a tone
+    static double preGain(double frequency, double sampleRate);
     // the high pass and the de-emphasis
     void de(float* samples, int count);
 

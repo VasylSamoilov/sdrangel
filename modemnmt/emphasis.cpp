@@ -30,14 +30,14 @@ namespace
 
 const double kPi = 3.14159265358979323846;
 
-// 100 ms of a 1 kHz cosine (at least 1000 samples)
-std::vector<float> testTone(double sampleRate)
+// 100 ms of a cosine (1 kHz unless given; at least 1000 samples)
+std::vector<float> testTone(double sampleRate, double frequency = 1000.0)
 {
     const int count = std::max(1000, std::min(100000, static_cast<int>(sampleRate / 10.0)));
     std::vector<float> tone(static_cast<size_t>(count));
 
     for (int i = 0; i < count; i++) {
-        tone[static_cast<size_t>(i)] = static_cast<float>(std::cos(2.0 * kPi * 1000.0 / sampleRate * i));
+        tone[static_cast<size_t>(i)] = static_cast<float>(std::cos(2.0 * kPi * frequency / sampleRate * i));
     }
     return tone;
 }
@@ -104,6 +104,15 @@ void Emphasis::deRaw(float* samples, int count)
 void Emphasis::pre(float* samples, int count)
 {
     preRaw(samples, count);
+}
+
+double Emphasis::preGain(double frequency, double sampleRate)
+{
+    Emphasis emphasis(sampleRate);
+    std::vector<float> tone = testTone(sampleRate, frequency);
+
+    emphasis.pre(tone.data(), static_cast<int>(tone.size()));
+    return level(tone);
 }
 
 void Emphasis::de(float* samples, int count)

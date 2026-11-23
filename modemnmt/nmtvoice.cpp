@@ -155,7 +155,7 @@ void SupervisoryDetector::decode()
 SupervisoryTone::SupervisoryTone(double sampleRate, int number, double level) :
     m_enabled(validNumber(number)),
     m_step(m_enabled ? kSupervisoryHz[number - 1] / sampleRate : 0.0),
-    m_level(level * kTxPeakSupervisory),
+    m_level(m_enabled ? level * kSupervisoryDeviation / kSpeechDeviationHz / Emphasis::preGain(kSupervisoryHz[number - 1], sampleRate) : 0.0),
     m_phase(0.0)
 {
 }

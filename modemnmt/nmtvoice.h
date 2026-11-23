@@ -45,7 +45,10 @@ constexpr double kSupervisoryNoiseHz = 3895.0;
 // fraction of the speech deviation (3 kHz at 1 kHz).
 constexpr double kTxPeakSupervisory = 300.0 / 4015.0 * 1000.0 / 3000.0;
 // The largest deviation of the transmitter (4.7 kHz), the speech deviation (3 kHz at 1 kHz) and
-// the deviation of the supervisory tone on air
+// the deviation of the supervisory tone on air (NMT Doc 450-4: "the supervisory signal (4000 Hz +
+// 0,3 kHz deviation)"). The tone towards the phone is set so that it has this deviation after the
+// pre-emphasis of the transmitter, whose low pass at 3.4 kHz gives far less than 6 dB/octave there
+// (SupervisoryTone).
 constexpr double kMaxDeviation = 4700.0;
 constexpr double kSpeechDeviationHz = 3000.0;
 constexpr double kSupervisoryDeviation = 300.0;
