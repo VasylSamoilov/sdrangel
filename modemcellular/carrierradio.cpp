@@ -20,6 +20,9 @@
 #include <algorithm>
 #include <cmath>
 
+#include "dsp/nco.h"
+#include "dsp/phasediscri.h"
+
 namespace modemcellular
 {
 
@@ -58,26 +61,6 @@ std::vector<float> channelTaps(const CarrierTuning& t)
     return designLowpass((t.passband + stop) / 2.0, kMidRate, lowpassTaps(stop - t.passband, kMidRate));
 }
 
-// A complex oscillator; renormalised now and then against the rounding of the recursion.
-struct Oscillator
-{
-    std::complex<double> phasor{1.0, 0.0};
-    std::complex<double> step{1.0, 0.0};
-
-    void set(double frequency, double rate)
-    {
-        phasor = {1.0, 0.0};
-        step = std::polar(1.0, 2.0 * kPi * frequency / rate);
-    }
-    std::complex<float> next()
-    {
-        const std::complex<float> out(static_cast<float>(phasor.real()), static_cast<float>(phasor.imag()));
-        phasor *= step;
-        return out;
-    }
-    void normalise() { phasor /= std::abs(phasor); }
-};
-
 // a carrier that stays as it was: same id, same place, same filters
 bool sameTuning(const CarrierTuning& a, const CarrierTuning& b)
 {
@@ -110,13 +93,15 @@ struct CarrierReceiver::Carrier
         stage1(factor / 2, streamTaps(t, rate, factor / 2)),
         stage2(2, channelTaps(t))
     {
-        nco.set(-t.offset, rate);
+        nco.setFreq(static_cast<Real>(-t.offset), static_cast<Real>(rate));
+        // the phase step between two samples, in Hz
+        discriminator.setFMScaling(static_cast<Real>(CarrierRadio::kAudioRate / 2.0));
     }
 
-    Oscillator nco;
+    NCO nco;                                    // SDRangel's oscillator and discriminator
+    PhaseDiscriminators discriminator;
     FirDecimator stage1;
     FirDecimator stage2;
-    std::complex<float> last{0.0f, 0.0f};
     std::vector<std::complex<float>> mid;
     std::vector<std::complex<float>> base;
     std::vector<float> audio;
@@ -217,25 +202,19 @@ void CarrierReceiver::feed(const std::complex<float>* samples, size_t count)
     }
 
     m_mixed.resize(count);
-    const double toHz = CarrierRadio::kAudioRate / (2.0 * kPi);
 
     for (const std::unique_ptr<Carrier>& c : m_carriers)
     {
         for (size_t i = 0; i < count; i++) {
-            m_mixed[i] = samples[i] * c->nco.next();
+            m_mixed[i] = samples[i] * c->nco.nextIQ();
         }
-        c->nco.normalise();
         c->mid.clear();
         c->stage1.process(m_mixed.data(), count, c->mid);
         c->base.clear();
         c->stage2.process(c->mid.data(), c->mid.size(), c->base);
         c->audio.resize(c->base.size());
-        for (size_t i = 0; i < c->base.size(); i++)
-        {
-            // the phase step from the last sample is the frequency
-            const std::complex<float> d = c->base[i] * std::conj(c->last);
-            c->audio[i] = static_cast<float>(std::atan2(d.imag(), d.real()) * toHz);
-            c->last = c->base[i];
+        for (size_t i = 0; i < c->base.size(); i++) {
+            c->audio[i] = c->discriminator.phaseDiscriminator(c->base[i]);
         }
     }
 
@@ -275,10 +254,10 @@ struct CarrierTransmitter::Carrier
         stage1(2, channelTaps(t)),
         stage2(factor / 2, streamTaps(t, rate, factor / 2))
     {
-        nco.set(t.offset, rate);
+        nco.setFreq(static_cast<Real>(t.offset), static_cast<Real>(rate));
     }
 
-    Oscillator nco;
+    NCO nco;                                    // SDRangel's oscillator
     FirInterpolator stage1;
     FirInterpolator stage2;
     double phase = 0.0;
@@ -387,9 +366,8 @@ void CarrierTransmitter::renderBlock()
             const double weights = static_cast<double>(on) + static_cast<double>(up) * rise + static_cast<double>(down) * (1.0 - rise);
             const double weight = c.ramp == Carrier::Ramp::On ? 1.0 : (c.ramp == Carrier::Ramp::Up ? rise : 1.0 - rise);
             const float level = weights > 0.0 ? static_cast<float>(CarrierRadio::kTxLevel * weight / weights) : 0.0f;
-            m_pending[start + i] += m_up[i] * c.nco.next() * level;
+            m_pending[start + i] += m_up[i] * c.nco.nextIQ() * level;
         }
-        c.nco.normalise();
         if (c.ramp == Carrier::Ramp::Up) {
             c.ramp = Carrier::Ramp::On;
         }
