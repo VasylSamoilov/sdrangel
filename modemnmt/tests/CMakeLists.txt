@@ -39,6 +39,19 @@ set(MODEMNMT_LIB_SOURCES
     ../../modemcellular/timer.cpp
     ../../modemcellular/tonegenerator.cpp)
 find_package(Threads REQUIRED)
+find_package(Qt5 COMPONENTS Core REQUIRED)
+
+# SDRangel's radio primitives the modules use, built from sdrbase as they are (needing only the Qt
+# headers), without the warnings of our own code made errors
+set(SDRBASE_DSP_SOURCES
+    ${SDRANGEL_ROOT}/sdrbase/dsp/firfilter.cpp
+    ${SDRANGEL_ROOT}/sdrbase/dsp/goertzel.cpp
+    ${SDRANGEL_ROOT}/sdrbase/dsp/interpolator.cpp
+    ${SDRANGEL_ROOT}/sdrbase/dsp/nco.cpp)
+add_library(sdrbase_dsp STATIC ${SDRBASE_DSP_SOURCES})
+target_include_directories(sdrbase_dsp PUBLIC ${SDRANGEL_ROOT}/sdrbase ${SDRANGEL_ROOT}/exports)
+target_compile_definitions(sdrbase_dsp PUBLIC sdrangel_STATIC)
+target_link_libraries(sdrbase_dsp PUBLIC Qt5::Core)
 
 # Sanitizer: address (address and undefined behaviour) or off
 set(MODEMNMT_TEST_SANITIZER "off" CACHE STRING "off or address")
@@ -57,7 +70,7 @@ endfunction()
 # the code under test, built once
 add_library(modemnmt_under_test STATIC ${MODEMNMT_LIB_SOURCES})
 modemnmt_configure(modemnmt_under_test)
-target_link_libraries(modemnmt_under_test PUBLIC Threads::Threads)
+target_link_libraries(modemnmt_under_test PUBLIC sdrbase_dsp Threads::Threads)
 
 function(modemnmt_add_test name source)
     add_executable(${name} ${source})

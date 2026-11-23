@@ -45,6 +45,7 @@ set(modemnmt_HEADERS
 
 include_directories(
     ${CMAKE_SOURCE_DIR}/exports
+    ${CMAKE_SOURCE_DIR}/sdrbase
 )
 
 add_library(modemnmt
@@ -54,6 +55,10 @@ add_library(modemnmt
 # the headers include the timer and clock of modemcellular
 target_include_directories(modemnmt PUBLIC ${CMAKE_SOURCE_DIR}/modemcellular)
 
-target_link_libraries(modemnmt modemcellular)
+target_link_libraries(modemnmt
+    Qt::Core
+    sdrbase
+    modemcellular
+)
 
 install(TARGETS modemnmt DESTINATION ${INSTALL_LIB_DIR})

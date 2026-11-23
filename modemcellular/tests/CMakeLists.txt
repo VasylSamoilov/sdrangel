@@ -23,6 +23,20 @@ set(MODEMCELLULAR_LIB_SOURCES
     ../timer.cpp
     ../tonegenerator.cpp)
 
+find_package(Qt5 COMPONENTS Core REQUIRED)
+
+# SDRangel's radio primitives the module uses, built from sdrbase as they are (needing only the Qt
+# headers), without the warnings of our own code made errors
+set(SDRBASE_DSP_SOURCES
+    ${SDRANGEL_ROOT}/sdrbase/dsp/firfilter.cpp
+    ${SDRANGEL_ROOT}/sdrbase/dsp/goertzel.cpp
+    ${SDRANGEL_ROOT}/sdrbase/dsp/interpolator.cpp
+    ${SDRANGEL_ROOT}/sdrbase/dsp/nco.cpp)
+add_library(sdrbase_dsp STATIC ${SDRBASE_DSP_SOURCES})
+target_include_directories(sdrbase_dsp PUBLIC ${SDRANGEL_ROOT}/sdrbase ${SDRANGEL_ROOT}/exports)
+target_compile_definitions(sdrbase_dsp PUBLIC sdrangel_STATIC)
+target_link_libraries(sdrbase_dsp PUBLIC Qt5::Core)
+
 # Sanitizer: address (address and undefined behaviour), thread, or off
 set(MODEMCELLULAR_TEST_SANITIZER "off" CACHE STRING "off, address or thread")
 
@@ -31,7 +45,7 @@ function(modemcellular_add_test name source)
     target_include_directories(${name} PRIVATE .. ${SDRANGEL_ROOT}/exports)
     target_compile_definitions(${name} PRIVATE sdrangel_STATIC)
     target_compile_options(${name} PRIVATE -Wall -Wextra -Werror)
-    target_link_libraries(${name} PRIVATE Threads::Threads)
+    target_link_libraries(${name} PRIVATE sdrbase_dsp Threads::Threads)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         if(MODEMCELLULAR_TEST_SANITIZER STREQUAL "address")
             target_compile_options(${name} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)

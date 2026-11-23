@@ -40,13 +40,19 @@ set(modemcellular_HEADERS
 
 include_directories(
     ${CMAKE_SOURCE_DIR}/exports
+    ${CMAKE_SOURCE_DIR}/sdrbase
 )
 
 add_library(modemcellular
     ${modemcellular_SOURCES}
 )
 
+# the radio primitives (filters, resampling, NCO, tone detection) are SDRangel's own
 find_package(Threads REQUIRED)
-target_link_libraries(modemcellular Threads::Threads)
+target_link_libraries(modemcellular
+    Qt::Core
+    sdrbase
+    Threads::Threads
+)
 
 install(TARGETS modemcellular DESTINATION ${INSTALL_LIB_DIR})
