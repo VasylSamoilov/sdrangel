@@ -20,37 +20,25 @@
 #include <algorithm>
 #include <cmath>
 
+#include "dsp/firfilter.h"
+
 namespace modemcellular
 {
 
-namespace
-{
-
-const double kPi = 3.14159265358979323846;
-
-} // namespace
-
 std::vector<float> designLowpass(double cutoff, double sampleRate, int taps)
 {
+    // SDRangel's Blackman windowed sinc gives the first half of the symmetric taps, the middle
+    // one last
     taps = std::max(1, taps | 1);
-    std::vector<double> h(static_cast<size_t>(taps));
-    const double fc = cutoff / sampleRate;
-    const int mid = taps / 2;
-    double sum = 0.0;
+    std::vector<Real> half;
+    FirFilterGenerators::generateLowPassFilter(taps, sampleRate, cutoff, half);
 
-    for (int i = 0; i < taps; i++)
+    std::vector<float> out(static_cast<size_t>(taps));
+    const size_t mid = static_cast<size_t>(taps / 2);
+    for (size_t i = 0; i <= mid; i++)
     {
-        const int n = i - mid;
-        const double sinc = n == 0 ? 2.0 * fc : std::sin(2.0 * kPi * fc * n) / (kPi * n);
-        const double w = taps == 1 ? 1.0
-            : 0.42 - 0.5 * std::cos(2.0 * kPi * i / (taps - 1)) + 0.08 * std::cos(4.0 * kPi * i / (taps - 1));
-        h[static_cast<size_t>(i)] = sinc * w;
-        sum += sinc * w;
-    }
-
-    std::vector<float> out(h.size());
-    for (size_t i = 0; i < h.size(); i++) {
-        out[i] = static_cast<float>(h[i] / sum);
+        out[i] = static_cast<float>(half[i]);
+        out[static_cast<size_t>(taps) - 1 - i] = static_cast<float>(half[i]);
     }
     return out;
 }
