@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numeric>
 
 namespace modemnmt
 {
@@ -266,11 +267,32 @@ void RxAudioChain::process(const float* samples, int length, int muted)
     }
 }
 
-SpeechLimiter::SpeechLimiter(double sampleRate, bool supervisory) :
+SpeechLimiter::SpeechLimiter(double sampleRate, bool supervisory, double gain) :
+    m_sampleRate(sampleRate),
     m_emphasis(sampleRate),
-    m_limit((kMaxDeviation - (supervisory ? kSupervisoryDeviation : 0.0)) / kSpeechDeviationHz),
+    m_limit((kMaxDeviation - (supervisory ? kSupervisoryDeviation : 0.0)) / kSpeechDeviationHz
+        / (gain > 0.0 ? gain : 1.0) * kMargin),
+    m_release(std::pow(10.0, kReleaseDbPerMs / 20.0 * 1000.0 / sampleRate)),
+    m_delay(std::max(1, static_cast<int>(sampleRate * kLookaheadMs / 1000.0 + 0.5))),
+    m_x(static_cast<size_t>(m_delay + 1)),
+    m_r(static_cast<size_t>(m_delay + 1)),
+    m_m(static_cast<size_t>(m_delay + 1)),
+    m_dq(static_cast<size_t>(m_delay + 2)),
     m_limited(0)
 {
+    reset();
+}
+
+void SpeechLimiter::reset()
+{
+    std::fill(m_x.begin(), m_x.end(), 0.0f);
+    std::fill(m_r.begin(), m_r.end(), 1.0);
+    std::fill(m_m.begin(), m_m.end(), 1.0);
+    m_dqHead = m_dqTail = 0;
+    m_pos = 0;
+    m_mSum = static_cast<double>(m_delay + 1);
+    m_gain = 1.0;
+    m_emphasis = Emphasis(m_sampleRate);
 }
 
 void SpeechLimiter::process(float* samples, int length)
@@ -279,28 +301,62 @@ void SpeechLimiter::process(float* samples, int length)
         return;
     }
 
-    // the peak after the pre-emphasis, with the state of the filter as it is
-    m_probe.assign(samples, samples + length);
-    Emphasis probe = m_emphasis;
-    probe.pre(m_probe.data(), length);
-    double peak = 0.0;
-    for (float v : m_probe) {
-        peak = std::max(peak, static_cast<double>(std::fabs(v)));
-    }
+    const int n = m_delay + 1;
+    const int dqn = m_delay + 2;
+    double lowest = 1.0;
 
-    if (peak > m_limit)
-    {
-        const float scale = static_cast<float>(m_limit / peak);
-
-        for (int i = 0; i < length; i++) {
-            samples[i] *= scale;
-        }
-        m_limited++;
-    }
-
-    // the filter goes on with what is sent
+    // the needed gains come from the pre-emphasized input
     m_probe.assign(samples, samples + length);
     m_emphasis.pre(m_probe.data(), length);
+
+    for (int i = 0; i < length; i++)
+    {
+        const float in = samples[i];
+        const double e = std::fabs(m_probe[static_cast<size_t>(i)]);
+        const int64_t p = m_pos;
+        const int slot = static_cast<int>(p % n);
+        const double r = e > m_limit ? m_limit / e : 1.0;
+
+        // the new sample enters, the one of position p - delay leaves
+        m_x[static_cast<size_t>(slot)] = in;
+        m_r[static_cast<size_t>(slot)] = r;
+        const float out = m_x[static_cast<size_t>((slot + 1) % n)];
+
+        // running minimum of r over the positions p - delay .. p (a monotonic deque)
+        while (m_dqTail != m_dqHead)
+        {
+            const int last = (m_dqTail + dqn - 1) % dqn;
+            if (m_r[static_cast<size_t>(m_dq[static_cast<size_t>(last)] % n)] < r) {
+                break;
+            }
+            m_dqTail = last;
+        }
+        m_dq[static_cast<size_t>(m_dqTail)] = p;
+        m_dqTail = (m_dqTail + 1) % dqn;
+        while (m_dq[static_cast<size_t>(m_dqHead)] < p - m_delay) {
+            m_dqHead = (m_dqHead + 1) % dqn;
+        }
+        const double m = m_r[static_cast<size_t>(m_dq[static_cast<size_t>(m_dqHead)] % n)];
+
+        // smoothed over the lookahead (the sum is recomputed once per round against drift)
+        m_mSum += m - m_m[static_cast<size_t>(slot)];
+        m_m[static_cast<size_t>(slot)] = m;
+        if (slot == n - 1) {
+            m_mSum = std::accumulate(m_m.begin(), m_m.end(), 0.0);
+        }
+        double g = m_mSum / static_cast<double>(n);
+        g = std::min(g, m_gain * m_release);
+        g = std::min(g, 1.0);
+        m_gain = g;
+        lowest = std::min(lowest, g);
+        samples[i] = static_cast<float>(out * g);
+        m_pos++;
+    }
+
+    // a call counts as limited from -0.01 dB on
+    if (lowest < 0.999) {
+        m_limited++;
+    }
 }
 
 TxAudioSource::TxAudioSource(double sampleRate) :

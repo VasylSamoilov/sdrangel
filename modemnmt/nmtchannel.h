@@ -504,6 +504,7 @@ private:
     RxAudioChain m_rxAudio;
     TxAudioSource m_txAudio;
     SpeechLimiter m_limiter;
+    bool m_limiterActive;           // speech is going out; false: the next speech starts afresh
     std::vector<float> m_speech;
     int m_rxMute;                   // samples of received audio still to be muted
     bool m_alarmRunning;            // the supervisory tone was lost and the alarm timer runs

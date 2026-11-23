@@ -58,26 +58,49 @@ constexpr double kMaxDeviation = 4700.0;
 constexpr double kSpeechDeviationHz = 3000.0;
 constexpr double kSupervisoryDeviation = 300.0;
 
-// Deviation limiter of the speech towards the radio, as the AMPS transmitter of the reference
-// does it (TIA/EIA-553 2.1.3.1.3): the peak of each block after the pre-emphasis of the
-// transmitter is measured, and a block that would go beyond the largest deviation, less the room
-// of the supervisory tone, is scaled down as a whole (no clipping). The samples are at the speech
-// level (1.0 = 3 kHz deviation at 1 kHz) before the pre-emphasis.
+// Speech limiter of the transmitter, osmocom-analog's NMT lookahead limiter (NMT Doc 900-4 4.8.1
+// and 4.10: largest deviation 4.7 kHz; 4.9: the supervisory tone does not pass through it). The
+// limit applies after the pre-emphasis: each input sample is pre-emphasized to find the gain it
+// needs; the speech is delayed by the lookahead (2 ms), the gain is the running minimum of the
+// needed gains over the lookahead, smoothed over it, and comes back by 1 dB per 10 ms. No
+// clipping. The limit is the largest deviation less the supervisory tone's, divided by the gain
+// the transmitter applies after the limiter, with a margin of 5% for what the smoothing does to
+// the pre-emphasis. The samples are at the speech level (1.0 = 3 kHz deviation at 1 kHz) before
+// the pre-emphasis.
 class MODEMNMT_API SpeechLimiter
 {
 public:
-    // supervisory: the tone is sent with the speech and needs its room
-    SpeechLimiter(double sampleRate, bool supervisory);
+    // supervisory: the tone is sent with the speech and needs its room; gain: what the
+    // transmitter multiplies the speech by after the limiter
+    SpeechLimiter(double sampleRate, bool supervisory, double gain = 1.0);
 
     void process(float* samples, int length);
+    // a new stretch of speech starts without the old one in the lookahead
+    void reset();
     // the largest peak after the pre-emphasis, in speech level
     double limit() const { return m_limit; }
-    // blocks that were scaled down so far
+    // calls of process() in which the gain went below 1 (-0.01 dB) so far
     uint64_t limited() const { return m_limited; }
 
+    static constexpr double kMargin = 0.95;
+    static constexpr double kLookaheadMs = 2.0;
+    static constexpr double kReleaseDbPerMs = 1.0 / 10.0;
+
 private:
-    Emphasis m_emphasis;            // the pre-emphasis of the transmitter, to measure the peak
+    double m_sampleRate;
+    Emphasis m_emphasis;                // the pre-emphasis of the transmitter, to find the peaks
     double m_limit;
+    double m_release;                   // factor per sample the gain may rise
+    int m_delay;                        // the lookahead in samples
+    std::vector<float> m_x;             // ring of the delayed input, delay + 1
+    std::vector<double> m_r;            // ring of the gain each input sample needs
+    std::vector<double> m_m;            // ring of the running minimum of m_r
+    std::vector<int64_t> m_dq;          // monotonic deque of positions for the running minimum
+    int m_dqHead;
+    int m_dqTail;
+    int64_t m_pos;
+    double m_mSum;
+    double m_gain;
     uint64_t m_limited;
     std::vector<float> m_probe;
 };

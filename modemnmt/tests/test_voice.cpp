@@ -559,9 +559,12 @@ static void testSpeechBothWays()
 static void testLimiter()
 {
     // the limiter itself: a loud 2.5 kHz tone (pre-emphasis lifts it about 2.5 times)
+    // (osmocom-analog's NMT: 4.7 kHz less the supervisory tone, with a margin of 5%, divided by the
+    // transmitter's gain after the limiter)
     SpeechLimiter limiter(kRate, true);
-    CHECK(std::fabs(limiter.limit() - (4700.0 - 300.0) / 3000.0) < 1e-9);
-    CHECK(std::fabs(SpeechLimiter(kRate, false).limit() - 4700.0 / 3000.0) < 1e-9);
+    CHECK(std::fabs(limiter.limit() - (4700.0 - 300.0) / 3000.0 * 0.95) < 1e-9);
+    CHECK(std::fabs(SpeechLimiter(kRate, false).limit() - 4700.0 / 3000.0 * 0.95) < 1e-9);
+    CHECK(std::fabs(SpeechLimiter(kRate, true, 0.8).limit() - (4700.0 - 300.0) / 3000.0 / 0.8 * 0.95) < 1e-9);
     Emphasis check(kRate);
     std::vector<float> block(480);
     double peak = 0.0;
@@ -586,15 +589,42 @@ static void testLimiter()
     CHECK(peak <= limiter.limit() * 1.01 && peak > limiter.limit() * 0.9);
     CHECK(limiter.limited() >= 90);
 
-    // a quiet block passes as it is
+    // a quiet block passes as it is, delayed by the lookahead of 2 ms
     SpeechLimiter quiet(kRate, true);
+    const size_t delay = static_cast<size_t>(kRate * SpeechLimiter::kLookaheadMs / 1000.0);
     std::vector<float> soft(480), copy;
     for (int i = 0; i < 480; i++) {
         soft[static_cast<size_t>(i)] = static_cast<float>(0.5 * std::sin(2.0 * 3.14159265358979323846 * 1000.0 * i / kRate));
     }
     copy = soft;
     quiet.process(soft.data(), 480);
-    CHECK(soft == copy && quiet.limited() == 0);
+    for (size_t i = 0; i < 480; i++) {
+        CHECK(soft[i] == (i < delay ? 0.0f : copy[i - delay]));
+    }
+    CHECK(quiet.limited() == 0);
+
+    // the gain comes back by 1 dB per 10 ms after a loud burst
+    SpeechLimiter release(kRate, true);
+    std::vector<float> burst(static_cast<size_t>(kRate * 0.2), 0.0f);
+    for (size_t i = 0; i < 4800; i++) {
+        burst[i] = static_cast<float>(3.0 * std::sin(2.0 * 3.14159265358979323846 * 1000.0 * static_cast<double>(i) / kRate));
+    }
+    for (size_t i = 4800; i < burst.size(); i++) {
+        burst[i] = static_cast<float>(0.5 * std::sin(2.0 * 3.14159265358979323846 * 1000.0 * static_cast<double>(i) / kRate));
+    }
+    release.process(burst.data(), static_cast<int>(burst.size()));
+    auto peakAt = [&](double fromS) {
+        double p = 0.0;
+        for (size_t i = static_cast<size_t>(fromS * kRate); i < static_cast<size_t>((fromS + 0.002) * kRate); i++) {
+            p = std::max(p, static_cast<double>(std::fabs(burst[i])));
+        }
+        return p;
+    };
+    // The burst needed 1.393 / 3.0 = -6.7 dB (the pre-emphasis is 0 dB at 1 kHz). About 13 ms
+    // after it (the lookahead is 2 ms) the gain has come back by only about 1.3 dB: the quiet
+    // tone is near 0.27 (an instant release would give 0.5); 90 ms later it is through again.
+    CHECK(peakAt(0.115) > 0.22 && peakAt(0.115) < 0.32);
+    CHECK(std::fabs(peakAt(0.19) - 0.5) < 0.01);
 
     // in a call: what goes to the radio stays within 4.7 kHz after the pre-emphasis, tone included
     VoiceCall call(3);

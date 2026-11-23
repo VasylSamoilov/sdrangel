@@ -186,7 +186,8 @@ NmtChannel::NmtChannel(const ChannelConfig& config, double sampleRate, double de
     m_superTone(m_valid ? sampleRate : 48000.0, config.supervisory, deviationFactor),
     m_rxAudio(m_valid ? sampleRate : 48000.0),
     m_txAudio(m_valid ? sampleRate : 48000.0),
-    m_limiter(m_valid ? sampleRate : 48000.0, config.supervisory != 0),
+    m_limiter(m_valid ? sampleRate : 48000.0, config.supervisory != 0, deviationFactor),
+    m_limiterActive(false),
     m_rxMute(0),
     m_alarmRunning(false),
     m_callerIdCount(0),
@@ -525,6 +526,11 @@ int NmtChannel::render(float* samples, int length, bool add)
 
     while (pos < length)
     {
+        // anything but speech ends the stretch of speech for the limiter
+        if (m_dspMode != DspMode::Audio || m_state == State::Sms || !callAudioUp()) {
+            m_limiterActive = false;
+        }
+
         switch (m_dspMode)
         {
         case DspMode::Frame:
@@ -587,6 +593,12 @@ int NmtChannel::render(float* samples, int length, bool add)
                 const int count = length - pos;
                 m_speech.resize(static_cast<size_t>(count));
                 m_txAudio.generate(m_speech.data(), count, false, 1.0);
+                // a new stretch of speech starts without the old speech in the lookahead
+                if (!m_limiterActive)
+                {
+                    m_limiter.reset();
+                    m_limiterActive = true;
+                }
                 m_limiter.process(m_speech.data(), count);
                 for (int i = 0; i < count; i++)
                 {
