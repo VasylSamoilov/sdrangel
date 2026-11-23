@@ -131,6 +131,7 @@ private:
     std::vector<std::complex<float>> m_base;
     std::vector<std::complex<float>> m_mid;
     std::vector<std::complex<float>> m_up;
+    std::vector<double> m_rise;                     // the keying ramp over one block, 0 to 1
     AudioSource m_source;
 };
 

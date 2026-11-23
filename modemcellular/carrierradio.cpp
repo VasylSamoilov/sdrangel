@@ -271,6 +271,12 @@ CarrierTransmitter::CarrierTransmitter(double streamRate) :
     m_decimation(CarrierRadio::decimation(streamRate)),
     m_taken(0)
 {
+    // a raised cosine over the stream samples of one block, the same for every block
+    const size_t out = static_cast<size_t>(CarrierRadio::kBlock) * static_cast<size_t>(std::max(m_decimation, 0));
+    m_rise.resize(out);
+    for (size_t i = 0; i < out; i++) {
+        m_rise[i] = 0.5 - 0.5 * std::cos(kPi * static_cast<double>(i) / static_cast<double>(out));
+    }
 }
 
 CarrierTransmitter::~CarrierTransmitter() = default;
@@ -361,8 +367,7 @@ void CarrierTransmitter::renderBlock()
         c.stage2.process(m_mid.data(), m_mid.size(), m_up);
         for (size_t i = 0; i < out && i < m_up.size(); i++)
         {
-            const double t = static_cast<double>(i) / static_cast<double>(out);
-            const double rise = 0.5 - 0.5 * std::cos(kPi * t);
+            const double rise = m_rise[i];
             const double weights = static_cast<double>(on) + static_cast<double>(up) * rise + static_cast<double>(down) * (1.0 - rise);
             const double weight = c.ramp == Carrier::Ramp::On ? 1.0 : (c.ramp == Carrier::Ramp::Up ? rise : 1.0 - rise);
             const float level = weights > 0.0 ? static_cast<float>(CarrierRadio::kTxLevel * weight / weights) : 0.0f;
