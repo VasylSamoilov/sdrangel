@@ -88,13 +88,6 @@ private:
     std::vector<Section> m_sections;
 };
 
-// Notch with the given Q in every section.
-class MODEMNMT_API BiquadNotch : public BiquadCascade
-{
-public:
-    BiquadNotch(double frequencyHz, double sampleRate, int sections, double q);
-};
-
 } // namespace modemnmt
 
 #endif // MODEMNMT_BIQUAD_H_

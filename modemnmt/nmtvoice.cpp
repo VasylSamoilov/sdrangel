@@ -174,16 +174,15 @@ void SupervisoryTone::add(float* samples, int length)
     }
 }
 
-RxAudioChain::RxAudioChain(double sampleRate, int supervisory) :
+RxAudioChain::RxAudioChain(double sampleRate) :
+    m_sampleRate(sampleRate),
+    m_taps(static_cast<int>(sampleRate / 48.0) | 1),     // odd, as the FIR filters want
     m_ratio(sampleRate / kCallRate),
-    m_highpass(ButterworthFilter::Type::Highpass, 300.0, sampleRate, 8),
-    m_notch(validNumber(supervisory) ? kSupervisoryHz[supervisory - 1] : 1000.0, sampleRate, 2, 20.0),
-    // a notch at or above the Nyquist frequency would be unstable
-    m_useNotch(validNumber(supervisory) && kSupervisoryHz[supervisory - 1] < 0.45 * sampleRate),
-    m_lowpass(ButterworthFilter::Type::Lowpass, 3400.0, sampleRate, 16),
     m_next(m_ratio),
     m_previous(0.0)
 {
+    m_bandpass.create(m_taps, m_sampleRate, 300.0, 3400.0);
+    m_lowpass.create(m_taps, m_sampleRate, 3400.0);
     m_block.reserve(kCallBlock);
 }
 
@@ -191,9 +190,9 @@ RxAudioChain::RxAudioChain(double sampleRate, int supervisory) :
 // band below the new Nyquist frequency.
 void RxAudioChain::reset()
 {
-    m_highpass.reset();
-    m_notch.reset();
-    m_lowpass.reset();
+    // creating the filters again clears their history
+    m_bandpass.create(m_taps, m_sampleRate, 300.0, 3400.0);
+    m_lowpass.create(m_taps, m_sampleRate, 3400.0);
     m_next = m_ratio;
     m_previous = 0.0;
     m_block.clear();
@@ -206,17 +205,14 @@ void RxAudioChain::process(const float* samples, int length, int muted)
     for (int i = 0; i < length; i++)
     {
         const double x = (i < muted || !std::isfinite(samples[i])) ? 0.0 : samples[i];
-        double y = m_highpass.process(x);
-        if (m_useNotch) {
-            y = m_notch.process(y);
-        }
+        double y = m_bandpass.filter(static_cast<Real>(x));
         // Noise gate, as osmocom-analog's NMT and AMPS (37fe472): what the phone's microphone
         // picks up when nobody speaks (the room, its own earpiece), lifted by the phone's
         // compressor, stays below the threshold and does not go to the network; above it the
         // threshold is taken off and made up again.
         const double a = std::fabs(y);
         y = (a < kRxNoiseGate) ? 0.0 : ((y >= 0.0) ? 1.0 : -1.0) * (a - kRxNoiseGate) / (1.0 - kRxNoiseGate);
-        y = m_lowpass.process(y);
+        y = m_lowpass.filter(static_cast<Real>(y));
 
         while (m_next <= 1.0)
         {

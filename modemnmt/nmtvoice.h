@@ -24,6 +24,8 @@
 #include <utility>
 #include <vector>
 
+#include "dsp/firfilter.h"
+
 #include "biquad.h"
 #include "emphasis.h"
 #include "export.h"
@@ -133,17 +135,18 @@ private:
 // 300 Hz deviation, -20 dB (osmocom-analog's NMT and AMPS).
 constexpr double kRxNoiseGate = 0.10;
 
-// Audio from the radio towards the call: high pass 300 Hz, notch at the supervisory tone, the
-// noise gate, low pass 3.4 kHz, then down to 8 kHz in blocks of 160 samples.
+// Audio from the radio towards the call: band pass 300 Hz to 3.4 kHz (which takes the supervisory
+// tone out, more than 100 dB down), the noise gate, low pass 3.4 kHz (the products of the gate
+// and the band of the call), then down to 8 kHz in blocks of 160 samples. The filters are
+// SDRangel's FIR filters as its NFM demodulator uses them ((rate / 48) | 1 taps, about 260 Hz
+// wide edges, -6 dB at 300 Hz and 3.4 kHz, a delay of 10 ms each).
 class MODEMNMT_API RxAudioChain
 {
 public:
     // The samples are valid during the call only; the sink may change them in place.
     using Sink = std::function<void(float* samples, int count)>;
 
-    // supervisory 1..4 puts the notch on that tone (if it is below 0.45 of the sample rate),
-    // other values leave it out
-    RxAudioChain(double sampleRate, int supervisory);
+    explicit RxAudioChain(double sampleRate);
 
     void setSink(Sink sink) { m_sink = std::move(sink); }
     // The first muted samples are taken as silence. Samples that are not finite are taken as
@@ -153,11 +156,11 @@ public:
     void reset();
 
 private:
+    double m_sampleRate;
+    int m_taps;
     double m_ratio;                     // input samples per output sample
-    ButterworthFilter m_highpass;
-    BiquadNotch m_notch;
-    bool m_useNotch;
-    ButterworthFilter m_lowpass;
+    Bandpass<Real> m_bandpass;
+    Lowpass<Real> m_lowpass;
     Sink m_sink;
     double m_next;                      // time of the next output, relative to the previous input
     double m_previous;

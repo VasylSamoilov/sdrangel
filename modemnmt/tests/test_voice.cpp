@@ -90,14 +90,6 @@ static void testFilters()
     CHECK(db(gainAt(hp, 3000.0, fs)) > -0.1);
     CHECK(db(gainAt(hp, 30.0, fs)) < -60.0);
 
-    for (double hz : {3955.0, 3985.0, 4015.0, 4045.0})
-    {
-        BiquadNotch notch(hz, fs, 2, 20.0);
-        CHECK(db(gainAt(notch, hz, fs)) < -40.0);
-        CHECK(db(gainAt(notch, 1000.0, fs)) > -0.1);
-        CHECK(db(gainAt(notch, 2000.0, fs)) > -0.2);
-    }
-
     BiquadLowpass lp(3400.0, fs, 8);
     CHECK(std::fabs(db(gainAt(lp, 3400.0, fs)) + 3.01) < 0.3);
     CHECK(db(gainAt(lp, 1000.0, fs)) > -0.1);
@@ -285,7 +277,7 @@ static void testRxChain()
     for (double fs : rates)
     {
         // speech comes through, the supervisory tone does not
-        RxAudioChain chain(fs, 3);
+        RxAudioChain chain(fs);
         std::vector<float> out;
         int blocks = 0;
         chain.setSink([&](const float* s, int n) {
@@ -312,7 +304,7 @@ static void testRxChain()
     }
 
     // muted: the first samples of the buffer are silence
-    RxAudioChain chain(48000.0, 0);
+    RxAudioChain chain(48000.0);
     std::vector<float> got;
     chain.setSink([&](const float* s, int n) { got.insert(got.end(), s, s + n); });
     const std::vector<float> x = sine(1000.0, 0.4, 48000.0, 48000);
@@ -351,12 +343,37 @@ static void testRxChain()
     CHECK(got.size() == 800);
 
     // below 300 Hz and above 3.4 kHz is cut
-    RxAudioChain wide(48000.0, 0);
+    RxAudioChain wide(48000.0);
     std::vector<float> low, high;
     wide.setSink([&](const float* s, int n) { low.insert(low.end(), s, s + n); });
     const std::vector<float> l = sine(50.0, 0.5, 48000.0, 96000);
     wide.process(l.data(), 96000, true);
     CHECK(toneAmplitude(low, low.size() / 2, low.size(), 50.0, kCallRate) < 0.005);
+
+    // Loud tones (far above the noise gate, so that the filters are measured, not the gate): the
+    // band passes, 200 Hz, 3.6 kHz and the four supervisory tones do not. Each tone alone, as
+    // the gate is not linear.
+    struct Case { double hz; bool passes; };
+    const Case cases[] = {{200.0, false}, {1000.0, true}, {3000.0, true}, {3600.0, false},
+                          {kSupervisoryHz[0], false}, {kSupervisoryHz[1], false},
+                          {kSupervisoryHz[2], false}, {kSupervisoryHz[3], false}};
+    for (const Case& c : cases)
+    {
+        RxAudioChain band(48000.0);
+        std::vector<float> out;
+        band.setSink([&](const float* s, int n) { out.insert(out.end(), s, s + n); });
+        const std::vector<float> in = sine(c.hz, 1.0, 48000.0, 48000);
+        band.process(in.data(), static_cast<int>(in.size()), 0);
+        double peak = 0.0;
+        for (size_t i = out.size() / 2; i < out.size(); i++) {
+            peak = std::fmax(peak, std::fabs(out[i]));
+        }
+        if (c.passes) {
+            CHECK(std::fabs(toneAmplitude(out, out.size() / 2, out.size(), c.hz, kCallRate) - gatedAmplitude(1.0)) < 0.03);
+        } else {
+            CHECK(peak < 0.001);
+        }
+    }
 }
 
 static void testTxSource()
@@ -766,8 +783,8 @@ static void testConfigLimits()
     CHECK(valid(ChannelType::CcTc, 2, 48000.0));
     CHECK(valid(ChannelType::Cc, 0, 48000.0));
 
-    // a notch at the Nyquist frequency or above does not blow up
-    RxAudioChain chain(8000.0, 3);
+    // at the lowest rate (no room for the supervisory tone) the chain is stable
+    RxAudioChain chain(8000.0);
     std::vector<float> got;
     chain.setSink([&](const float* s, int n) { got.insert(got.end(), s, s + n); });
     const std::vector<float> x = sine(1000.0, 0.4, 8000.0, 8000 * 60);

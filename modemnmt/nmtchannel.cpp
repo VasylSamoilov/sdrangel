@@ -184,7 +184,7 @@ NmtChannel::NmtChannel(const ChannelConfig& config, double sampleRate, double de
     // an unusable configuration never reaches the audio path, but the objects are built anyway
     m_superDetector(m_valid ? sampleRate : 48000.0, config.supervisory),
     m_superTone(m_valid ? sampleRate : 48000.0, config.supervisory, deviationFactor),
-    m_rxAudio(m_valid ? sampleRate : 48000.0, config.supervisory),
+    m_rxAudio(m_valid ? sampleRate : 48000.0),
     m_txAudio(m_valid ? sampleRate : 48000.0),
     m_limiter(m_valid ? sampleRate : 48000.0, config.supervisory != 0),
     m_rxMute(0),
