@@ -235,6 +235,15 @@ static void testDeliverExample()
     CHECK(out == expected);
     CHECK(out[3] == out.size() - 4);
 
+    // an 8-bit text goes with the DCS of its NMT Character Set: 0x30 + set (Annex 24 4.3); a GSM text keeps 0x00
+    m.text = "A<0x85>";
+    CHECK(smsBuildDeliver(m, 1, out) && out[14] == 0x30);
+    m.set = 2;
+    CHECK(smsBuildDeliver(m, 1, out) && out[14] == 0x32 && out[out.size() - 2] == 0x41 && out.back() == 0x85);
+    m.text = "HELLO";
+    CHECK(smsBuildDeliver(m, 1, out) && out[14] == 0x00);
+    m.set = 0;
+
     // more messages waiting: bit 2 is 0
     m.moreWaiting = true;
     CHECK(smsBuildDeliver(m, 1, out) && out[4] == 0x00);
@@ -325,6 +334,8 @@ static void testSubmitExample()
     CHECK(m.submit.messageRef == 1);
     CHECK(m.submit.text == "HELLO");
     CHECK(m.submit.dcs == 0 && m.submit.hasValidity && m.submit.validity == 0x8f);
+    // the codes as received, for a codepage of the receiver
+    CHECK(m.submit.codes == Bytes({0x48, 0x45, 0x4c, 0x4c, 0x4f}));
 
     // more octets after it are not taken
     Bytes more = kSubmit;

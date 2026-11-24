@@ -33,9 +33,10 @@ namespace modemnmt
 // transfer layer (TP) of GSM 03.40 / 04.11 in the octets that go over the data link. Pure functions,
 // no state. Text is UTF-8 at the interface, an escape <0xNN> stands for the character code NN.
 // Text is sent in the GSM default alphabet (DCS 0), characters outside it as '?'; a code of 80h or
-// above sends the message in the NMT 8-bit set 0 (DCS 0x30), one octet per character. Received
-// 8-bit sets (DCS 0x30..0x3F) have their first 128 characters decoded as GSM characters, the
-// octets above come as escapes <0xNN>.
+// above sends the message in an NMT 8-bit set (DCS 0x30 + SmsDeliver::set), one octet per
+// character. Received 8-bit sets (DCS 0x30..0x3F) have their first 128 characters decoded as GSM
+// characters, the octets above come as escapes <0xNN>; SmsSubmit::codes keeps the codes for the
+// codepage of the set (the feature's).
 
 // The time a message was received at the service centre.
 struct SmsTime
@@ -58,6 +59,7 @@ struct SmsDeliver
     std::string text;           // UTF-8
     SmsTime time;
     bool moreWaiting = false;   // more messages wait for the phone in the service centre
+    int set = 0;                // NMT Character Set (0..15) of a text with codes of 80h or above: DCS 0x30 + set
 };
 
 // A message from the phone to the service centre (SMS-SUBMIT) with the relay layer around it.
@@ -68,6 +70,7 @@ struct SmsSubmit
     uint8_t messageRef = 0;
     std::string destination;
     std::string text;           // UTF-8
+    std::vector<uint8_t> codes; // the character codes of the text as received (septets or octets), for a codepage
     uint8_t dcs = 0;
     bool hasValidity = false;
     uint8_t validity = 0;       // relative validity period, if there is one

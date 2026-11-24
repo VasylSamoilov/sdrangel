@@ -504,7 +504,7 @@ bool smsBuildDeliver(const SmsDeliver& message, uint8_t rpRef, std::vector<uint8
         return false;
     }
     tpdu.push_back(0x00);                           // protocol identifier
-    tpdu.push_back(eightBit ? 0x30 : 0x00);         // data coding scheme
+    tpdu.push_back(eightBit ? static_cast<uint8_t>(0x30 | (message.set & 0x0f)) : 0x00);  // data coding scheme
     const std::vector<uint8_t> time = smsEncodeTime(message.time);
     tpdu.insert(tpdu.end(), time.begin(), time.end());
     tpdu.push_back(static_cast<uint8_t>(codes.size()));
@@ -602,11 +602,14 @@ SmsParse parseSubmitTpdu(const uint8_t* data, size_t length, SmsSubmit& out, siz
     if (length < pos + udOctets) {
         return SmsParse::NeedMore;
     }
-    if (out.dcs == 0x00) {
-        out.text = smsGsmDecode(smsUnpackSeptets(data + pos, udOctets, udl));
+    if (out.dcs == 0x00)
+    {
+        out.codes = smsUnpackSeptets(data + pos, udOctets, udl);
+        out.text = smsGsmDecode(out.codes);
     }
     else
     {
+        out.codes.assign(data + pos, data + pos + udl);
         // 8-bit set: the first 128 characters are those of the GSM alphabet (with the escape), the
         // national ones are passed on as escapes <0xNN>
         std::string text;
