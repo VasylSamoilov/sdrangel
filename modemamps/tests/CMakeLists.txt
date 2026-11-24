@@ -18,24 +18,37 @@ set(MODEMAMPS_LIB_SOURCES
     ../ampsfvc.cpp
     ../ampsvoice.cpp
     ../ampsrecc.cpp
-    ../ampsplan.cpp)
+    ../ampsplan.cpp
+    ../ampsspeech.cpp
+    ../../modemcellular/biquad.cpp
+    ../../modemcellular/compandor.cpp
+    ../../modemcellular/emphasis.cpp
+    ../../modemcellular/txaudiosource.cpp)
 find_package(Qt5 COMPONENTS Core REQUIRED)
 
 # SDRangel's radio primitives the modules use, built from sdrbase as they are (needing only the Qt
 # headers), without the warnings of our own code made errors
 set(SDRBASE_DSP_SOURCES
+    ${SDRANGEL_ROOT}/sdrbase/dsp/fmpreemphasis.cpp
     ${SDRANGEL_ROOT}/sdrbase/dsp/goertzel.cpp
+    ${SDRANGEL_ROOT}/sdrbase/dsp/interpolator.cpp
     ${SDRANGEL_ROOT}/sdrbase/dsp/nco.cpp)
 add_library(sdrbase_dsp STATIC ${SDRBASE_DSP_SOURCES})
 target_include_directories(sdrbase_dsp PUBLIC ${SDRANGEL_ROOT}/sdrbase ${SDRANGEL_ROOT}/exports)
 target_compile_definitions(sdrbase_dsp PUBLIC sdrangel_STATIC)
 target_link_libraries(sdrbase_dsp PUBLIC Qt5::Core)
+# the SIMD paths of the headers (Interpolator) as SDRangel's build has them on x86-64; off for a
+# suite of the plain C++ paths (ARM: the Pi, Android)
+option(MODEMAMPS_TEST_SSE2 "Build the SSE2 paths of sdrbase as SDRangel does on x86-64" ON)
+if(MODEMAMPS_TEST_SSE2 AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    target_compile_definitions(sdrbase_dsp PUBLIC USE_SSE2)
+endif()
 
 # Sanitizer: address (address and undefined behaviour) or off
 set(MODEMAMPS_TEST_SANITIZER "off" CACHE STRING "off or address")
 
 function(modemamps_configure target)
-    target_include_directories(${target} PRIVATE .. ${SDRANGEL_ROOT}/exports)
+    target_include_directories(${target} PRIVATE .. ${SDRANGEL_ROOT}/exports ${SDRANGEL_ROOT}/modemcellular)
     target_compile_definitions(${target} PRIVATE sdrangel_STATIC)
     target_compile_options(${target} PRIVATE -Wall -Wextra -Wshadow -Werror)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND MODEMAMPS_TEST_SANITIZER STREQUAL "address")
@@ -69,3 +82,4 @@ modemamps_add_test(modemamps_fvc_test test_fvc.cpp)
 modemamps_add_test(modemamps_voice_test test_voice.cpp)
 modemamps_add_test(modemamps_recc_test test_recc.cpp)
 modemamps_add_test(modemamps_plan_test test_plan.cpp)
+modemamps_add_test(modemamps_speech_test test_speech.cpp)
