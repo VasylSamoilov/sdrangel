@@ -15,133 +15,8 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.          //
 ///////////////////////////////////////////////////////////////////////////////////
 
-#include <cmath>
-#include <cstdio>
-#include <deque>
-#include <string>
-#include <vector>
-
-#include "ampsbch.h"
 #include "ampschannel.h"
-#include "ampsmessages.h"
-#include "ampsstream.h"
-
-using namespace modemamps;
-
-static int g_failures = 0;
-
-#define CHECK(cond) \
-    do { \
-        if (!(cond)) { \
-            std::fprintf(stderr, "%s:%d: CHECK failed: %s\n", __FILE__, __LINE__, #cond); \
-            g_failures++; \
-        } \
-    } while (0)
-
-static const double kPi = 3.14159265358979323846;
-static const double kRate = 48000.0;
-static const int kBlock = 480;
-
-// The forward control channel as a phone reads it: after the sync, 5 repeats of words A and B,
-// 44 bits each with a busy-idle bit after every 10 (osmocom's amps_decode_bits_focc); word A by
-// the vote of its repeats.
-class FoccReader
-{
-public:
-    FoccReader() :
-        m_demod(kRate, kFskBitRate, kFskDeviation)
-    {
-        m_demod.setBitSink([this](int bit, double, double) { this->bit(bit); });
-    }
-    void process(const float* s, int n) { m_demod.process(s, n); }
-    std::vector<uint64_t> words;
-
-private:
-    void bit(int b)
-    {
-        if (!m_inFrame)
-        {
-            m_sync = ((m_sync << 1) | static_cast<uint32_t>(b)) & 0x7ff;
-            if (m_sync == kWordSync)
-            {
-                m_inFrame = true;
-                m_bits.clear();
-                m_sync = 0x555;
-                m_demod.startFrame();
-            }
-            return;
-        }
-        m_bits.push_back(static_cast<uint8_t>(b));
-        if (m_bits.size() < 441) {
-            return;
-        }
-        // the B/I bit after the sync, then 10 words of 44
-        uint64_t a[5];
-        for (int w = 0; w < 10; w++)
-        {
-            uint64_t word = 0;
-            for (int j = 0; j < 44; j++)
-            {
-                if (j % 11 == 10) {
-                    continue;
-                }
-                word = (word << 1) | m_bits[1 + w * 44 + j];
-            }
-            if ((w & 1) == 0) {
-                a[w / 2] = word;
-            }
-        }
-        uint64_t voted = 0;
-        for (int b2 = 0; b2 < 40; b2++)
-        {
-            int ones = 0;
-            for (int r = 0; r < 5; r++) {
-                ones += static_cast<int>((a[r] >> b2) & 1);
-            }
-            if (ones >= 3) {
-                voted |= 1ull << b2;
-            }
-        }
-        if (bchCheck(voted, kForwardMessageBits)) {
-            words.push_back(voted);
-        }
-        m_inFrame = false;
-        m_demod.endFrame();
-    }
-
-    ManchesterDemodulator m_demod;
-    uint32_t m_sync = 0x555;
-    bool m_inFrame = false;
-    std::vector<uint8_t> m_bits;
-};
-
-// A phone sending bits on the reverse control channel
-class PhoneTx
-{
-public:
-    PhoneTx() :
-        m_mod(kRate, kFskBitRate, kFskDeviation)
-    {
-        m_mod.setBitSource([this]() {
-            if (m_bits.empty()) {
-                return -1;
-            }
-            const int b = m_bits.front();
-            m_bits.pop_front();
-            return b;
-        });
-    }
-    void send(const std::vector<uint8_t>& bits) { m_bits.insert(m_bits.end(), bits.begin(), bits.end()); }
-    void render(float* s, int n)
-    {
-        const int done = m_mod.render(s, n, false);
-        std::fill(s + done, s + n, 0.0f);
-    }
-
-private:
-    ManchesterModulator m_mod;
-    std::deque<uint8_t> m_bits;
-};
+#include "phone.h"
 
 static const uint32_t kMin1 = ReccAssembler::min1Of("2177526");
 static const uint16_t kMin2 = ReccAssembler::min2Of("216");
@@ -249,17 +124,6 @@ struct Bench
 
     uint64_t m_callSamples = 0;
 };
-
-static bool heardWord(const std::vector<uint64_t>& w, const std::function<bool(uint64_t)>& match)
-{
-    for (uint64_t x : w)
-    {
-        if (match(x)) {
-            return true;
-        }
-    }
-    return false;
-}
 
 // The whole of a phone's call through the channels: the overhead train, a registration and its
 // acknowledgement, an origination, the designation, the voice channel with SAT, speech, the

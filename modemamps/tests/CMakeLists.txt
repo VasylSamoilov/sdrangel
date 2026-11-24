@@ -22,6 +22,7 @@ set(MODEMAMPS_LIB_SOURCES
     ../ampsspeech.cpp
     ../ampssystem.cpp
     ../ampschannel.cpp
+    ../ampsbasestation.cpp
     ../../modemcellular/clock.cpp
     ../../modemcellular/timer.cpp
     ../../modemcellular/biquad.cpp
@@ -89,3 +90,4 @@ modemamps_add_test(modemamps_plan_test test_plan.cpp)
 modemamps_add_test(modemamps_speech_test test_speech.cpp)
 modemamps_add_test(modemamps_system_test test_system.cpp)
 modemamps_add_test(modemamps_channel_test test_channel.cpp)
+modemamps_add_test(modemamps_basestation_test test_basestation.cpp)
