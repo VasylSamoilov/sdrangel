@@ -889,6 +889,8 @@ QWidget *CellularGUI::buildCarriers()
     QVBoxLayout *layout = new QVBoxLayout(page);
     layout->setContentsMargins(0, 0, 0, 0);
 
+    m_strip = new CellularBandStrip(page);
+    layout->addWidget(m_strip);
     m_carriers = makeTable(page, {"Network", "Ch", "Type", "Down MHz", "Up MHz", "State", "Rx dB", "Tx ms", "Empty", "Phone"});
     m_carriers->horizontalHeaderItem(CarTxFill)->setToolTip("Milliseconds of audio in the transmit queue");
     m_carriers->horizontalHeaderItem(CarUnderruns)->setToolTip("Times the transmit queue ran empty: the transmit lead is too small");
@@ -1371,6 +1373,8 @@ void CellularGUI::showStatus(const Cellular::MsgReportStatus& report)
 void CellularGUI::showCarriers()
 {
     int row = 0;
+    QList<QPair<double, double>> spans;
+    QList<CellularBandStrip::Carrier> bars;
 
     for (const CellularNetworkSettings& n : m_settings.m_networks)
     {
@@ -1378,8 +1382,28 @@ void CellularGUI::showCarriers()
         if (it == m_status.constEnd()) {
             continue;
         }
+        double low, high, centre;
+        int rate;
+        if (CellularNetworkDialog::deviceSpan(n.m_rxDeviceSetIndex, false, low, high, centre, rate)
+            && !spans.contains(qMakePair(low, high)))
+        {
+            spans.append(qMakePair(low, high));
+        }
         for (const Cellular::MsgReportStatus::Carrier& c : it->carriers)
         {
+            CellularBandStrip::Carrier bar;
+            bar.key = n.m_id * 10000 + c.channel;
+            bar.network = n.m_name;
+            bar.channel = c.channel;
+            bar.type = c.type;
+            bar.colour = CellularChannelGrid::typeColourOf(c.type);
+            bar.uplink = c.uplink;
+            bar.state = c.state;
+            bar.rxLevel = c.rxLevel;
+            bar.phone = c.phone;
+            bar.framesReceived = c.framesReceived;
+            bars.append(bar);
+
             if (row >= m_carriers->rowCount()) {
                 m_carriers->insertRow(row);
             }
@@ -1401,6 +1425,7 @@ void CellularGUI::showCarriers()
         }
     }
     m_carriers->setRowCount(row);
+    m_strip->setData(spans, bars);
 }
 
 void CellularGUI::showSummary()

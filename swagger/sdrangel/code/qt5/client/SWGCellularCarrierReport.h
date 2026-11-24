@@ -66,6 +66,9 @@ public:
     QString* getPhone();
     void setPhone(QString* phone);
 
+    qint64 getFramesReceived();
+    void setFramesReceived(qint64 frames_received);
+
 
     virtual bool isSet() override;
 
@@ -93,6 +96,9 @@ private:
 
     QString* phone;
     bool m_phone_isSet;
+
+    qint64 frames_received;
+    bool m_frames_received_isSet;
 
 };
 

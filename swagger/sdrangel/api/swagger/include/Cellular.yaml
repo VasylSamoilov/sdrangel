@@ -262,3 +262,7 @@ CellularCarrierReport:
     phone:
       type: string
       description: "Number of the phone the channel serves, empty for none."
+    framesReceived:
+      type: integer
+      format: int64
+      description: "Frames received on the channel since the network started (any phone, any type)."

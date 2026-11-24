@@ -1234,6 +1234,7 @@ void CellularWorker::reportStatus(const Network& n)
         if (c.onAir && system && onAir < system->channelCount())
         {
             row.state = stateName(system->channel(onAir).state());
+            row.framesReceived = system->channel(onAir).framesReceived();
             if (const modemnmt::NmtTransaction *t = system->channel(onAir).currentTransaction()) {
                 row.phone = numberText(t->subscriber);
             }

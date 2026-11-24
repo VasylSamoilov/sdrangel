@@ -783,6 +783,7 @@ int Cellular::webapiReportGet(SWGSDRangel::SWGFeatureReport& response, QString& 
             carrier->setTxFillMs(static_cast<float>(c.txFillMs));
             carrier->setUnderruns(static_cast<qint32>(c.underruns));
             *carrier->getPhone() = c.phone;
+            carrier->setFramesReceived(static_cast<qint64>(c.framesReceived));
             network->getCarriers()->append(carrier);
         }
         for (const MsgReportStatus::Phone& p : status.m_phones)

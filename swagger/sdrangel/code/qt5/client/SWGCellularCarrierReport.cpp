@@ -44,6 +44,8 @@ SWGCellularCarrierReport::SWGCellularCarrierReport() {
     m_underruns_isSet = false;
     phone = nullptr;
     m_phone_isSet = false;
+    frames_received = 0L;
+    m_frames_received_isSet = false;
 }
 
 SWGCellularCarrierReport::~SWGCellularCarrierReport() {
@@ -68,6 +70,8 @@ SWGCellularCarrierReport::init() {
     m_underruns_isSet = false;
     phone = new QString("");
     m_phone_isSet = false;
+    frames_received = 0L;
+    m_frames_received_isSet = false;
 }
 
 void
@@ -84,6 +88,7 @@ SWGCellularCarrierReport::cleanup() {
     if(phone != nullptr) { 
         delete phone;
     }
+
 }
 
 SWGCellularCarrierReport*
@@ -112,6 +117,8 @@ SWGCellularCarrierReport::fromJsonObject(QJsonObject &pJson) {
     ::SWGSDRangel::setValue(&underruns, pJson["underruns"], "qint32", "");
     
     ::SWGSDRangel::setValue(&phone, pJson["phone"], "QString", "QString");
+    
+    ::SWGSDRangel::setValue(&frames_received, pJson["framesReceived"], "qint64", "");
     
 }
 
@@ -152,6 +159,9 @@ SWGCellularCarrierReport::asJsonObject() {
     }
     if(phone != nullptr && *phone != QString("")){
         toJsonValue(QString("phone"), phone, obj, QString("QString"));
+    }
+    if(m_frames_received_isSet){
+        obj->insert("framesReceived", QJsonValue(frames_received));
     }
 
     return obj;
@@ -237,6 +247,16 @@ SWGCellularCarrierReport::setPhone(QString* phone) {
     this->m_phone_isSet = true;
 }
 
+qint64
+SWGCellularCarrierReport::getFramesReceived() {
+    return frames_received;
+}
+void
+SWGCellularCarrierReport::setFramesReceived(qint64 frames_received) {
+    this->frames_received = frames_received;
+    this->m_frames_received_isSet = true;
+}
+
 
 bool
 SWGCellularCarrierReport::isSet(){
@@ -264,6 +284,9 @@ SWGCellularCarrierReport::isSet(){
             isObjectUpdated = true; break;
         }
         if(phone && *phone != QString("")){
+            isObjectUpdated = true; break;
+        }
+        if(m_frames_received_isSet){
             isObjectUpdated = true; break;
         }
     }while(false);

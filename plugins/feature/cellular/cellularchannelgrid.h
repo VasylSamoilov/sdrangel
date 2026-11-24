@@ -47,6 +47,8 @@ public:
     const modemnmt::NmtCountry *country() const { return m_country; }
 
     static QString typeText(modemnmt::ChannelType type);
+    // the colour of a type by its text (typeText), as the grid shows it; invalid if unknown
+    static QColor typeColourOf(const QString& text);
 
 signals:
     void changed();

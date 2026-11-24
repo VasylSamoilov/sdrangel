@@ -241,6 +241,7 @@ public:
             double txFillMs = 0.0;
             quint64 underruns = 0;
             QString phone;              // number of the phone the channel serves, empty for none
+            quint64 framesReceived = 0; // frames received since the network started (any phone, any type)
         };
         // A phone the network has heard (its identity in a frame the channel took) or registered.
         struct Phone

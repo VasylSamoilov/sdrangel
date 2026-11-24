@@ -66,6 +66,18 @@ QString CellularChannelGrid::typeText(modemnmt::ChannelType type)
     return QString();
 }
 
+QColor CellularChannelGrid::typeColourOf(const QString& text)
+{
+    using T = modemnmt::ChannelType;
+    for (T type : {T::Cc, T::Cca, T::Ccb, T::Tc, T::AcTc, T::CcTc, T::Test})
+    {
+        if (typeText(type) == text) {
+            return typeColour(type);
+        }
+    }
+    return QColor();
+}
+
 CellularChannelGrid::CellularChannelGrid(QWidget *parent) :
     QTableWidget(parent),
     m_country(nullptr),

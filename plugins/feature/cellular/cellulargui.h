@@ -29,6 +29,7 @@
 #include "util/messagequeue.h"
 
 #include "cellular.h"
+#include "cellularbandstrip.h"
 #include "cellularsettings.h"
 #include "nmtphonebook.h"
 
@@ -58,6 +59,8 @@ public:
     void read(CellularNetworkSettings& settings) const;
     // "10:cc, 18:tc:1"
     static QString carriersText(const std::vector<modemnmt::NmtCarrierConfig>& carriers);
+    // span of a device set in Hz (where carriers go), false if it is not there or not of that direction
+    static bool deviceSpan(int index, bool tx, double& low, double& high, double& centre, int& rate);
 
 private:
     void fillCountries(const QString& selected);
@@ -65,8 +68,6 @@ private:
     void onGridChanged();
     void onTextChanged();
     void showBandwidth();
-    // span of a device set in Hz, false if it is not there or not of that direction
-    static bool deviceSpan(int index, bool tx, double& low, double& high, double& centre, int& rate);
 
     CellularChannelGrid *m_grid;
     QLabel *m_bandwidth;
@@ -184,6 +185,7 @@ private:
     // Networks
     QTableWidget *m_networks;
     // Carriers
+    CellularBandStrip *m_strip;
     QTableWidget *m_carriers;
 
     // the last report of each network

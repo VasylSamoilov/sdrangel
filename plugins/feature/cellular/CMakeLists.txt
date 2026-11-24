@@ -27,12 +27,14 @@ include_directories(
 if(NOT SERVER_MODE)
     set(cellular_SOURCES
         ${cellular_SOURCES}
+        cellularbandstrip.cpp
         cellularchannelgrid.cpp
         cellulargui.cpp
         cellularmobiles.cpp
     )
     set(cellular_HEADERS
         ${cellular_HEADERS}
+        cellularbandstrip.h
         cellularchannelgrid.h
         cellulargui.h
         cellularmobiles.h
