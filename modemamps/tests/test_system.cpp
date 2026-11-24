@@ -1,0 +1,253 @@
+///////////////////////////////////////////////////////////////////////////////////
+// Copyright (C) 2026 Vasyl Samoilov <vasyl.samoilov@gmail.com>                  //
+//                                                                               //
+// This program is free software; you can redistribute it and/or modify          //
+// it under the terms of the GNU General Public License as published by          //
+// the Free Software Foundation as version 3 of the License, or                  //
+// (at your option) any later version.                                           //
+//                                                                               //
+// This program is distributed in the hope that it will be useful,               //
+// but WITHOUT ANY WARRANTY; without even the implied warranty of                //
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the                  //
+// GNU General Public License V3 for more details.                               //
+//                                                                               //
+// You should have received a copy of the GNU General Public License             //
+// along with this program. If not, see <http://www.gnu.org/licenses/>.          //
+///////////////////////////////////////////////////////////////////////////////////
+
+#include <cstdio>
+#include <string>
+#include <vector>
+
+#include "ampsmessages.h"
+#include "ampssystem.h"
+
+using namespace modemamps;
+
+static int g_failures = 0;
+
+#define CHECK(cond) \
+    do { \
+        if (!(cond)) { \
+            std::fprintf(stderr, "%s:%d: CHECK failed: %s\n", __FILE__, __LINE__, #cond); \
+            g_failures++; \
+        } \
+    } while (0)
+
+// The user's network: 353 CC/PC, 356 and 359 VC, SID 54; the phone of the capture
+static const int kCc = 0;
+static const int kVc = 1;
+
+struct Network
+{
+    modemcellular::SampleClock clock;
+    AmpsSystem system;
+    std::vector<std::string> calls;
+    int clears = 0;
+    int registrations = 0;
+    bool accept = true;
+
+    static AmpsSystemConfig config()
+    {
+        AmpsSystemConfig c;
+        c.si.sid = 54;
+        c.channels = {{353, AmpsChannelType::ControlPaging, 0}, {356, AmpsChannelType::Voice, 0},
+            {359, AmpsChannelType::Voice, 0}};
+        return c;
+    }
+
+    Network() :
+        clock(48000.0),
+        system(clock, config())
+    {
+        system.setCallHandler([this](const AmpsSubscriber&, const std::string& d) {
+            calls.push_back(d);
+            return accept;
+        });
+        system.setClearHandler([this](const AmpsSubscriber&) { clears++; });
+        system.setRegistrationHandler([this](const AmpsSubscriber&, bool) { registrations++; });
+    }
+
+    void wait(double seconds)
+    {
+        const int64_t step = 480;
+        for (int64_t s = 0; s < static_cast<int64_t>(seconds * 48000.0); s += step)
+        {
+            clock.advance(step);
+            system.run();
+        }
+    }
+};
+
+static ReccMessage phone(uint8_t t, uint8_t order, uint8_t ordq, const std::string& dialled)
+{
+    ReccMessage m;
+    m.t = t;
+    m.order = order;
+    m.ordq = ordq;
+    m.min1 = ReccAssembler::min1Of("2177526");
+    m.min2 = ReccAssembler::min2Of("216");
+    m.esn = 0xe0ec3aac;
+    m.hasEsn = true;
+    m.dialled = dialled;
+    return m;
+}
+
+static uint64_t field(const WordDef& def, uint64_t word, const char *name)
+{
+    return wordField(def, word, name);
+}
+
+// The registration: acknowledged once on the FOCC with its order (osmocom echoes it), then gone
+static void testRegistration()
+{
+    Network n;
+    FoccMessage m;
+
+    n.system.receivedRecc(kCc, phone(1, kOrderRegistration, 3, ""));
+    CHECK(n.registrations == 1);
+    CHECK(n.system.nextFocc(kCc, m));
+    CHECK(field(words::kExtendedAddressOrder, m.word2, "ORDER") == kOrderRegistration);
+    CHECK(field(words::kExtendedAddressOrder, m.word2, "ORDQ") == 3);
+    CHECK(field(words::kAbbreviatedAddress, m.word1, "MIN1") == ReccAssembler::min1Of("2177526"));
+    CHECK(!n.system.nextFocc(kCc, m));
+    CHECK(n.system.transactions().empty());
+}
+
+// An origination to 555 as in the capture: the designation of 356 (SCC 0, VMAC 4), the SAT of the
+// phone, the call, the phone's tone of 1.67 s releases it
+static void testOrigination()
+{
+    Network n;
+    FoccMessage m;
+
+    n.system.receivedRecc(kCc, phone(1, kOrderPage, 0, "555"));
+    CHECK(n.calls.size() == 1 && n.calls[0] == "555");
+    CHECK(n.system.nextFocc(kCc, m));
+    CHECK(field(words::kExtendedAddressChannel, m.word2, "CHAN") == 356);
+    CHECK(field(words::kExtendedAddressChannel, m.word2, "SCC") == 0 && field(words::kExtendedAddressChannel, m.word2, "VMAC") == 4);
+    CHECK(n.system.mode(kVc) == AmpsMode::Silence);         // keyed while the designation goes out
+    CHECK(!n.system.nextFocc(kCc, m));                      // sent: the phone is moved
+    CHECK(n.system.transactions().size() == 1 && n.system.transactions()[0].state == AmpsSystem::State::MoAssignConfirm);
+
+    n.wait(0.5);
+    n.system.satChanged(kVc, 0);
+    CHECK(n.system.mode(kVc) == AmpsMode::Audio && n.system.transactions()[0].state == AmpsSystem::State::Call);
+
+    n.wait(5.0);
+    n.system.signallingTone(kVc, true);
+    n.wait(1.67);
+    n.system.signallingTone(kVc, false);
+    CHECK(n.clears == 1 && n.system.transactions().empty() && n.system.mode(kVc) == AmpsMode::Off);
+}
+
+// The network refuses the call: reorder on the FOCC (ORDER 4), then gone
+static void testRefused()
+{
+    Network n;
+    FoccMessage m;
+
+    n.accept = false;
+    n.system.receivedRecc(kCc, phone(1, kOrderPage, 0, "555"));
+    CHECK(n.system.nextFocc(kCc, m) && field(words::kExtendedAddressOrder, m.word2, "ORDER") == kOrderReorder);
+    CHECK(!n.system.nextFocc(kCc, m) && n.system.transactions().empty());
+    CHECK(n.system.mode(kVc) == AmpsMode::Off);
+}
+
+static void connect(Network& n)
+{
+    FoccMessage m;
+    n.system.receivedRecc(kCc, phone(1, kOrderPage, 0, "555"));
+    n.system.nextFocc(kCc, m);
+    n.system.nextFocc(kCc, m);
+    n.system.satChanged(kVc, 0);
+}
+
+// No SAT on the voice channel within 5 s: our release on the FVC, again and again, the network told;
+// the phone's tone of 1 s confirms it
+static void testNoSat()
+{
+    Network n;
+    FoccMessage m;
+    uint64_t w = 0;
+
+    n.system.receivedRecc(kCc, phone(1, kOrderPage, 0, "555"));
+    n.system.nextFocc(kCc, m);
+    n.system.nextFocc(kCc, m);
+    n.wait(4.9);
+    CHECK(n.system.mode(kVc) == AmpsMode::Silence);
+    n.wait(0.2);
+    CHECK(n.system.mode(kVc) == AmpsMode::Frame && n.clears == 1);
+    for (int i = 0; i < 3; i++)
+    {
+        CHECK(n.system.nextFvc(kVc, w));
+        CHECK(field(words::kFvcOrder, w, "ORDER") == kOrderRelease && field(words::kFvcOrder, w, "SCC") == 3);
+    }
+    n.system.signallingTone(kVc, true);
+    n.wait(1.0);
+    n.system.signallingTone(kVc, false);
+    CHECK(n.system.transactions().empty() && n.system.mode(kVc) == AmpsMode::Off);
+}
+
+// The network releases the call: the release on the FVC (the network is not told back); no
+// confirmation within 5 s: idle anyway
+static void testNetworkRelease()
+{
+    Network n;
+    uint64_t w = 0;
+
+    connect(n);
+    CHECK(n.system.releaseCall("2162177526"));
+    CHECK(n.system.mode(kVc) == AmpsMode::Frame && n.clears == 0);
+    CHECK(n.system.nextFvc(kVc, w) && field(words::kFvcOrder, w, "ORDER") == kOrderRelease);
+    n.wait(5.1);
+    CHECK(n.system.transactions().empty() && n.system.mode(kVc) == AmpsMode::Off);
+    CHECK(!n.system.releaseCall("2162177526"));
+}
+
+// The SAT lost: back within 5 s the call goes on, gone for 5 s our release
+static void testSatFade()
+{
+    Network n;
+
+    connect(n);
+    n.system.satChanged(kVc, -1);
+    n.wait(3.0);
+    n.system.satChanged(kVc, 0);
+    n.wait(5.0);
+    CHECK(n.system.mode(kVc) == AmpsMode::Audio && n.clears == 0);
+    n.system.satChanged(kVc, -1);
+    n.wait(5.1);
+    CHECK(n.system.mode(kVc) == AmpsMode::Frame && n.clears == 1);
+}
+
+// A tone of 0.5 s is a flash, the call goes on; a tone held 3 s releases
+static void testFlashAndHeldTone()
+{
+    Network n;
+
+    connect(n);
+    n.system.signallingTone(kVc, true);
+    n.wait(0.5);
+    n.system.signallingTone(kVc, false);
+    CHECK(n.system.mode(kVc) == AmpsMode::Audio && n.clears == 0);
+    n.system.signallingTone(kVc, true);
+    n.wait(3.1);
+    CHECK(n.clears == 1 && n.system.mode(kVc) == AmpsMode::Off);
+}
+
+int main()
+{
+    testRegistration();
+    testOrigination();
+    testRefused();
+    testNoSat();
+    testNetworkRelease();
+    testSatFade();
+    testFlashAndHeldTone();
+
+    if (g_failures == 0) {
+        std::printf("all system tests passed\n");
+    }
+    return g_failures == 0 ? 0 : 1;
+}

@@ -20,6 +20,9 @@ set(MODEMAMPS_LIB_SOURCES
     ../ampsrecc.cpp
     ../ampsplan.cpp
     ../ampsspeech.cpp
+    ../ampssystem.cpp
+    ../../modemcellular/clock.cpp
+    ../../modemcellular/timer.cpp
     ../../modemcellular/biquad.cpp
     ../../modemcellular/compandor.cpp
     ../../modemcellular/emphasis.cpp
@@ -83,3 +86,4 @@ modemamps_add_test(modemamps_voice_test test_voice.cpp)
 modemamps_add_test(modemamps_recc_test test_recc.cpp)
 modemamps_add_test(modemamps_plan_test test_plan.cpp)
 modemamps_add_test(modemamps_speech_test test_speech.cpp)
+modemamps_add_test(modemamps_system_test test_system.cpp)
