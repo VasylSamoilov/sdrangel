@@ -16,6 +16,7 @@ set(MODEMCELLULAR_LIB_SOURCES
     ../cellularsystem.cpp
     ../clock.cpp
     ../compandor.cpp
+    ../consoleleg.cpp
     ../echoendpoint.cpp
     ../echosuppressor.cpp
     ../firfilter.cpp
@@ -80,3 +81,4 @@ modemcellular_add_test(modemcellular_carrierwire_test test_carrierwire.cpp)
 modemcellular_add_test(modemcellular_testcaller_test test_testcaller.cpp)
 modemcellular_add_test(modemcellular_speechmeter_test test_speechmeter.cpp)
 modemcellular_add_test(modemcellular_calllistener_test test_calllistener.cpp)
+modemcellular_add_test(modemcellular_console_test test_console.cpp)

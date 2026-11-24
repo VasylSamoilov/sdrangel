@@ -9,6 +9,7 @@ set(modemcellular_SOURCES
     cellularsystem.cpp
     clock.cpp
     compandor.cpp
+    consoleleg.cpp
     echoendpoint.cpp
     echosuppressor.cpp
     firfilter.cpp
@@ -31,6 +32,7 @@ set(modemcellular_HEADERS
     cellularsystem.h
     clock.h
     compandor.h
+    consoleleg.h
     echoendpoint.h
     echosuppressor.h
     firfilter.h
