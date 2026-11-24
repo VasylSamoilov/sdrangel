@@ -88,6 +88,8 @@ private:
     void menu(const QPoint& pos);
     void fitColumns();
     void resizeEvent(QResizeEvent *event) override;
+    // a header is drawn from the left of what is visible: scrolling sideways repaints it all
+    void scrollContentsBy(int dx, int dy) override;
 
     const modemnmt::NmtCountry *m_country;
     int m_minColumn;                        // px: the widest channel number of the plan

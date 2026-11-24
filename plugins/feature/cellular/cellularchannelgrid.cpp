@@ -20,6 +20,7 @@
 
 #include <QFontMetricsF>
 #include <QHeaderView>
+#include <QStyledItemDelegate>
 #include <QMenu>
 
 #include "cellularchannelgrid.h"
@@ -49,6 +50,29 @@ bool isTraffic(modemnmt::ChannelType type)
 {
     return type == modemnmt::ChannelType::Tc || type == modemnmt::ChannelType::AcTc || type == modemnmt::ChannelType::CcTc;
 }
+
+// the role that marks the item of a section header
+const int kHeaderRole = Qt::UserRole + 1;
+
+// A header spans the ten columns; when the grid is scrolled sideways (a narrow dialog) its text
+// starts at the left of the visible part, not off screen with the start of the span.
+class HeaderDelegate : public QStyledItemDelegate
+{
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    void paint(QPainter *painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override
+    {
+        if (!index.data(kHeaderRole).toBool())
+        {
+            QStyledItemDelegate::paint(painter, option, index);
+            return;
+        }
+        QStyleOptionViewItem visible = option;
+        visible.rect.setLeft(std::max(option.rect.left(), 0));
+        QStyledItemDelegate::paint(painter, visible, index);
+    }
+};
 
 // what the standard says of a group, for the tooltip of its header
 QString groupTip(modemnmt::System system, modemnmt::NmtChannelGroup group, double spacingKHz)
@@ -125,6 +149,7 @@ CellularChannelGrid::CellularChannelGrid(QWidget *parent) :
     setEditTriggers(QAbstractItemView::NoEditTriggers);
     setSelectionMode(QAbstractItemView::NoSelection);
     setContextMenuPolicy(Qt::CustomContextMenu);
+    setItemDelegate(new HeaderDelegate(this));
     setMinimumHeight(120);
 
     connect(this, &QTableWidget::cellClicked, this, [this](int row, int col) {
@@ -263,6 +288,7 @@ void CellularChannelGrid::layOut()
             setSpan(r, 0, 1, kColumns);
             QTableWidgetItem *header = new QTableWidgetItem();
             header->setFlags(Qt::ItemIsEnabled);
+            header->setData(kHeaderRole, true);
             QFont bold = font();
             bold.setBold(true);
             header->setFont(bold);
@@ -332,6 +358,14 @@ void CellularChannelGrid::resizeEvent(QResizeEvent *event)
 {
     QTableWidget::resizeEvent(event);
     fitColumns();
+}
+
+void CellularChannelGrid::scrollContentsBy(int dx, int dy)
+{
+    QTableWidget::scrollContentsBy(dx, dy);
+    if (dx != 0) {
+        viewport()->update();
+    }
 }
 
 void CellularChannelGrid::setCarriers(const std::vector<modemnmt::NmtCarrierConfig>& carriers)
