@@ -8,6 +8,7 @@ set(modemamps_SOURCES
     ampsfsk.cpp
     ampsframe.cpp
     ampssysinfo.cpp
+    ampsfocc.cpp
 )
 
 set(modemamps_HEADERS
@@ -18,6 +19,7 @@ set(modemamps_HEADERS
     ampsfsk.h
     ampsframe.h
     ampssysinfo.h
+    ampsfocc.h
 )
 
 include_directories(
