@@ -10,6 +10,7 @@ set(modemamps_SOURCES
     ampssysinfo.cpp
     ampsfocc.cpp
     ampsfvc.cpp
+    ampsvoice.cpp
 )
 
 set(modemamps_HEADERS
@@ -22,6 +23,7 @@ set(modemamps_HEADERS
     ampssysinfo.h
     ampsfocc.h
     ampsfvc.h
+    ampsvoice.h
 )
 
 include_directories(

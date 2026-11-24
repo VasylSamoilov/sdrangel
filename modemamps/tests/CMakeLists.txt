@@ -15,7 +15,19 @@ set(MODEMAMPS_LIB_SOURCES
     ../ampsframe.cpp
     ../ampssysinfo.cpp
     ../ampsfocc.cpp
-    ../ampsfvc.cpp)
+    ../ampsfvc.cpp
+    ../ampsvoice.cpp)
+find_package(Qt5 COMPONENTS Core REQUIRED)
+
+# SDRangel's radio primitives the modules use, built from sdrbase as they are (needing only the Qt
+# headers), without the warnings of our own code made errors
+set(SDRBASE_DSP_SOURCES
+    ${SDRANGEL_ROOT}/sdrbase/dsp/goertzel.cpp
+    ${SDRANGEL_ROOT}/sdrbase/dsp/nco.cpp)
+add_library(sdrbase_dsp STATIC ${SDRBASE_DSP_SOURCES})
+target_include_directories(sdrbase_dsp PUBLIC ${SDRANGEL_ROOT}/sdrbase ${SDRANGEL_ROOT}/exports)
+target_compile_definitions(sdrbase_dsp PUBLIC sdrangel_STATIC)
+target_link_libraries(sdrbase_dsp PUBLIC Qt5::Core)
 
 # Sanitizer: address (address and undefined behaviour) or off
 set(MODEMAMPS_TEST_SANITIZER "off" CACHE STRING "off or address")
@@ -34,6 +46,7 @@ endfunction()
 # the code under test, built once
 add_library(modemamps_under_test STATIC ${MODEMAMPS_LIB_SOURCES})
 modemamps_configure(modemamps_under_test)
+target_link_libraries(modemamps_under_test PUBLIC sdrbase_dsp)
 
 function(modemamps_add_test name source)
     add_executable(${name} ${source})
@@ -51,3 +64,4 @@ modemamps_add_test(modemamps_frame_test test_frame.cpp)
 modemamps_add_test(modemamps_sysinfo_test test_sysinfo.cpp)
 modemamps_add_test(modemamps_focc_test test_focc.cpp)
 modemamps_add_test(modemamps_fvc_test test_fvc.cpp)
+modemamps_add_test(modemamps_voice_test test_voice.cpp)
