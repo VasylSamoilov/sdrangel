@@ -1117,10 +1117,13 @@ void NmtSystem::audioFromMobile(NmtTransaction& transaction, const float* sample
 
 void NmtSystem::audioToMobile(NmtTransaction& transaction, float* samples, int count)
 {
-    if (m_audioToMobile)
-    {
-        const NmtSubscriber subscriber = transaction.subscriber;
+    const NmtSubscriber subscriber = transaction.subscriber;
+
+    if (m_audioToMobile) {
         m_audioToMobile(subscriber, samples, count);
+    }
+    if (m_audioTapToMobile) {
+        m_audioTapToMobile(subscriber, samples, count);
     }
 }
 

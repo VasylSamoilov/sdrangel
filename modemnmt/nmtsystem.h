@@ -191,6 +191,9 @@ public:
     // The speech from the phones also to an observer (a tester listening for tones), before the
     // handler; it does not change the audio.
     void setAudioTap(AudioFromMobile tap) { m_audioTap = std::move(tap); }
+    // The speech to the phones also to an observer (the tester listening in), after the handler
+    // filled it; it does not change the audio.
+    void setAudioTapToMobile(AudioFromMobile tap) { m_audioTapToMobile = std::move(tap); }
     // Subscribers that roamed in, by country digit and number ("1123456").
     bool isRegistered(char country, const std::string& number) const;
     // The data of a registered subscriber, null if it is not registered.
@@ -282,6 +285,7 @@ private:
     ClearHandler m_clearHandler;
     AudioFromMobile m_audioFromMobile;
     AudioFromMobile m_audioTap;
+    AudioFromMobile m_audioTapToMobile;
     AudioToMobile m_audioToMobile;
     MwiHandler m_mwiHandler;
     std::string m_smscNumber;

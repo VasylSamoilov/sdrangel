@@ -1001,6 +1001,24 @@ static void testSpeechMeters()
     CHECK(s.call == 1 && !s.live && s.rxCall.speech > 0);
 }
 
+// The tap of the speech to the phone gets what the handler filled, for the phone of the call.
+static void testTapToMobile()
+{
+    VoiceCall call(2);
+    std::vector<float> tapped;
+    std::string who;
+
+    call.system.setAudioTapToMobile([&](const NmtSubscriber& s, const float *samples, int count) {
+        who = std::string(1, s.country) + s.number;
+        tapped.insert(tapped.end(), samples, samples + count);
+    });
+    call.air(1.0, phoneTones(1000.0, 0.4, 2, kRate));
+    CHECK(who == std::string(1, call.phone.country) + call.phone.number);
+    CHECK(tapped.size() >= 7000 && tapped.size() <= 8100);
+    const size_t half = tapped.size() / 2;
+    CHECK(std::fabs(toneAmplitude(tapped, half, tapped.size(), call.toneHz, kCallRate) - call.toneAmp) < 0.01);
+}
+
 // Frames from the phone mute the audio for a little more than two frame periods.
 static void testMuteDuringFrames()
 {
@@ -1069,6 +1087,7 @@ int main()
     testBadSamplesAndNextCall();
     testMuteDuringFrames();
     testSpeechMeters();
+    testTapToMobile();
 
     if (g_failures == 0) {
         std::printf("all voice tests passed\n");
