@@ -112,6 +112,17 @@ static void testRegistration()
     CHECK(field(words::kAbbreviatedAddress, m.word1, "MIN1") == ReccAssembler::min1Of("2177526"));
     CHECK(!n.system.nextFocc(kCc, m));
     CHECK(n.system.transactions().empty());
+    CHECK(n.system.registeredCount() == 1);
+    int seen = 0;
+    n.system.forEachRegistered([&seen](const AmpsSubscriber& s) { seen += s.number() == "2162177526"; });
+    CHECK(seen == 1);
+
+    // a power down (MSG_TYPE 1) is acknowledged the same way, and the phone is gone
+    ReccMessage down = phone(1, kOrderRegistration, 3, "");
+    down.msgType = 1;
+    n.system.receivedRecc(kCc, down);
+    CHECK(n.system.nextFocc(kCc, m) && field(words::kExtendedAddressOrder, m.word2, "LOCAL/MSG_TYPE") == 1);
+    CHECK(n.system.registeredCount() == 0 && n.registrations == 2);
 }
 
 // An origination to 555 as in the capture: the designation of 356 (SCC 0, VMAC 4), the SAT of the

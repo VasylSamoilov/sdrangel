@@ -222,6 +222,11 @@ void AmpsSystem::receivedRecc(int channel, const ReccMessage& m)
         t->msgType = m.msgType;
         t->ordq = m.ordq;
         t->order = m.order;
+        if (m.msgType == 1) {
+            m_registered.erase(subscriber.number());
+        } else {
+            m_registered[subscriber.number()] = subscriber;
+        }
         if (m_registrationHandler) {
             m_registrationHandler(subscriber, m.msgType == 1);
         }

@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <functional>
 #include <list>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -156,6 +157,14 @@ public:
     };
     std::vector<TransactionInfo> transactions() const;
     static const char *stateName(State state);
+    // the phones that registered (and did not power down since), by number
+    size_t registeredCount() const { return m_registered.size(); }
+    void forEachRegistered(const std::function<void(const AmpsSubscriber&)>& function) const
+    {
+        for (const auto& r : m_registered) {
+            function(r.second);
+        }
+    }
 
 private:
     struct Transaction;
@@ -187,6 +196,7 @@ private:
     modemcellular::TimerService m_timers;
     std::vector<Channel> m_channels;
     std::list<std::unique_ptr<Transaction>> m_transactions;
+    std::map<std::string, AmpsSubscriber> m_registered;
     CallHandler m_callHandler;
     ClearHandler m_clearHandler;
     RegistrationHandler m_registrationHandler;
