@@ -660,6 +660,22 @@ bool Cellular::handleMessage(const Message& cmd)
         }
         return true;
     }
+    else if (MainCore::MsgMessageRecord::match(cmd))
+    {
+        // a short message of the worker: on the "messages" pipe of this feature, to the Message Center
+        const MessageRecord& record = static_cast<const MainCore::MsgMessageRecord&>(cmd).getRecord();
+        QList<ObjectPipe*> pipes;
+        MainCore::instance()->getMessagePipes().getMessagePipes(this, MessageRecord::m_pipeName, pipes);
+
+        for (const auto& pipe : pipes)
+        {
+            MessageQueue *messageQueue = qobject_cast<MessageQueue*>(pipe->m_element);
+            if (messageQueue) {
+                messageQueue->push(MainCore::MsgMessageRecord::create(this, record));
+            }
+        }
+        return true;
+    }
     else if (MsgReportSpeech::match(cmd))
     {
         if (getMessageQueueToGUI()) {

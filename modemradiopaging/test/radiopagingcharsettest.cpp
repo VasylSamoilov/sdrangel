@@ -106,6 +106,19 @@ int main()
             && (decodeText(*gsm, "\x1B") == "<0x1B>"), "NMT: CR LF one-line symbols, the control characters taken; the escape no character");
         encode(gsm, "\xD0\x96", &ok);
         check(!ok, "NMT GSM: no Cyrillic");
+
+        // an NMT SMS record of the cellular tester recodes with another codepage (Message Center)
+        MessageRecord sms;
+        sms.m_direction = MessageRecord::DirectionRX;
+        sms.m_protocol = "nmt";
+        sms.m_msgType = "alphanumeric";
+        sms.m_protocolData.insert("alpha_codes", QString("4185"));
+        sms.m_protocolData.insert("charset", RadioPagingPage::charsetData(gsm->key()));
+        MessageRecord recoded;
+        QString error;
+        check((RadioPagingRecode::types(sms) == QStringList({"alphanumeric"}))
+            && RadioPagingRecode::redecode(sms, set0->key(), "alphanumeric", recoded, error) && (recoded.m_text == "A\xD0\x92"),
+            "NMT SMS record: recoded from GSM to set 0");
     }
     {
         QString text = "ab<0x03>c<...>", status = ".cXXXXXX.XXXXX";

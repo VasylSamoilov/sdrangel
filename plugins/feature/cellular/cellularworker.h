@@ -226,6 +226,10 @@ private:
     void sendTo(ChannelAPI *channel, const std::vector<uint8_t>& wire);
     void sendAudio(ChannelAPI *channel, const std::vector<uint8_t>& wire);
     void log(int network, const QString& text, Cellular::MsgReportLog::Kind kind = Cellular::MsgReportLog::Event);
+    // A short message as a record for the Message Center (protocol nmt, its codes and codepage for recoding):
+    // from the phone (RX) or to it (TX)
+    void smsRecord(const Network& n, bool fromPhone, const QString& phone, const QString& other, uint8_t dcs,
+        const std::vector<uint8_t>& codes);
     void sendPostponed(Network& network);
     // the frames of a carrier into the event log of its network
     void traceFrame(Network& n, size_t index, bool toPhone, const modemnmt::Frame& frame, double quality, double level);

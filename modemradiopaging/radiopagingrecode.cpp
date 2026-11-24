@@ -84,6 +84,10 @@ QStringList RadioPagingRecode::types(const MessageRecord& record)
     if ((record.m_protocol == "flex") && record.m_protocolData.contains("alpha_codes")) {
         return {"alphanumeric"};
     }
+    // NMT SMS (the codes of the text, in a codepage of protocol nmt)
+    if ((record.m_protocol == "nmt") && record.m_protocolData.contains("alpha_codes")) {
+        return {"alphanumeric"};
+    }
     if ((record.m_protocol == "flex") && (record.m_msgType == "binary") && record.m_protocolData.contains("hex")) {
         return {"binary"};
     }

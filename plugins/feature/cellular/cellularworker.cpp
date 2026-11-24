@@ -27,6 +27,10 @@
 #include "channel/channelapi.h"
 #include "dsp/dspengine.h"
 #include "maincore.h"
+#include "radiopagingpage.h"
+#include "util/messagerecord.h"
+
+#include <QUuid>
 #include "pipes/messagepipes.h"
 #include "pipes/objectpipe.h"
 
@@ -271,6 +275,47 @@ static QString numberText(const modemnmt::NmtSubscriber& subscriber)
     return QString::fromStdString(modemnmt::NmtCellularBridge::numberOf(subscriber));
 }
 
+// The DCS a message to a phone goes with (as smsBuildDeliver): 0x30 + set if a code is 80h or above
+static uint8_t sentDcs(const modemnmt::SmsDeliver& message)
+{
+    for (uint8_t c : CellularSmsText::codesOf(message.text))
+    {
+        if (c & 0x80) {
+            return static_cast<uint8_t>(0x30 | (message.set & 0x0f));
+        }
+    }
+    return 0x00;
+}
+
+void CellularWorker::smsRecord(const Network& n, bool fromPhone, const QString& phone, const QString& other, uint8_t dcs,
+    const std::vector<uint8_t>& codes)
+{
+    MessageRecord record;
+    const RadioPagingCharset::Codepage& codepage = CellularSmsText::forDcs(dcs);
+
+    record.m_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    record.m_timestamp = QDateTime::currentMSecsSinceEpoch();
+    record.m_direction = fromPhone ? MessageRecord::DirectionRX : MessageRecord::DirectionTX;
+    record.m_protocol = "nmt";
+    record.m_mode = "SMS";
+    record.m_kind = MessageRecord::KindMessage;
+    record.m_msgType = "alphanumeric";
+    record.m_address = phone;
+    record.m_text = CellularSmsText::decode(dcs, codes);
+    record.m_rawData = QByteArray(reinterpret_cast<const char*>(codes.data()), static_cast<int>(codes.size()));
+    record.m_rawBits = static_cast<int>(codes.size()) * ((dcs & 0xf0) == 0x30 ? 8 : 7);
+    record.m_channel = QString("Cellular %1").arg(n.name);
+    record.m_quality = MessageRecord::QualityClean;     // the data link delivered it whole (its check sums)
+    // the codes and their codepage, so the text can be shown with another one (recode)
+    record.m_protocolData.insert("alpha_codes", QString(record.m_rawData.toHex()));
+    record.m_protocolData.insert("charset", RadioPagingPage::charsetData(codepage.key()));
+    record.m_protocolData.insert("dcs", dcs);
+    record.m_protocolData.insert(fromPhone ? "destination" : "originator", other);
+    if (m_reports) {
+        m_reports->push(MainCore::MsgMessageRecord::create(nullptr, record));
+    }
+}
+
 // A short message of the tester to a phone: from the number of the centre, sent now, the text in the codes of
 // the codepage of the network (7-bit GSM, or 8-bit with the DCS of its NMT Character Set). A character
 // without a code there: bad is it (the message is not to be sent).
@@ -389,8 +434,9 @@ void CellularWorker::setHandlers(Network& n)
         }
     });
     system.setSmsHandlers(
-        [this, id, learnCentre](const modemnmt::NmtSubscriber& subscriber, const modemnmt::SmsSubmit& message) -> uint8_t {
+        [this, id, learnCentre, &n](const modemnmt::NmtSubscriber& subscriber, const modemnmt::SmsSubmit& message) -> uint8_t {
             learnCentre(subscriber);
+            smsRecord(n, true, numberText(subscriber), QString::fromStdString(message.destination), message.dcs, message.codes);
             // the text with the codepage of its DCS (GSM, or the NMT Character Set of an 8-bit message)
             log(id, QString("SMS from %1 to %2: %3").arg(numberText(subscriber))
                 .arg(QString::fromStdString(message.destination)).arg(CellularSmsText::decode(message.dcs, message.codes)),
@@ -522,6 +568,10 @@ void CellularWorker::action(const Cellular::MsgAction& msg)
             return;
         }
         ok = system.sendSms(country, digits, message);
+        if (ok) {
+            smsRecord(n, false, msg.getNumber(), QString::fromStdString(message.originator), sentDcs(message),
+                CellularSmsText::codesOf(message.text));
+        }
         refused = "the phone is busy, the calling channels have no room, or the text cannot be coded";
         break;
     }
@@ -914,6 +964,9 @@ void CellularWorker::consoleAction(const Cellular::MsgAction& msg)
             return;
         }
         const bool ok = n->station->system()->sendSms(number[0], number.substr(1), message);
+        if (ok) {
+            smsRecord(*n, false, msg.getNumber(), m_console.m_number, sentDcs(message), CellularSmsText::codesOf(message.text));
+        }
         log(n->id, QString("console SMS to %1 from %2: %3").arg(msg.getNumber()).arg(m_console.m_number)
             .arg(ok ? "\"" + msg.getText() + "\" on its way" : "refused (the phone is busy or unknown)"), Cellular::MsgReportLog::Sms);
         return;

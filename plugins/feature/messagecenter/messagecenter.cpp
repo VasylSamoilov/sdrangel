@@ -67,8 +67,8 @@ const char* const MessageCenter::m_featureId = "MessageCenter";
 
 namespace {
 
-// The channels that send messages: the paging demodulator and modulator
-const QStringList channelURIs = {"sdrangel.channel.radiopagingdemod", "sdrangel.channeltx.modradiopaging"};
+// The channels and features that send messages: the paging demodulator and modulator, the cellular tester (SMS)
+const QStringList channelURIs = {"sdrangel.channel.radiopagingdemod", "sdrangel.channeltx.modradiopaging", "sdrangel.feature.cellular"};
 
 const int tickMs = 500;
 
