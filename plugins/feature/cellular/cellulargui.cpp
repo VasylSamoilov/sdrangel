@@ -19,6 +19,7 @@
 #include <cmath>
 
 #include <QCheckBox>
+#include <QClipboard>
 #include <QComboBox>
 #include <QDateTime>
 #include <QDialogButtonBox>
@@ -115,6 +116,23 @@ QTableWidget *makeTable(QWidget *parent, const QStringList& headers)
     table->setMinimumHeight(60);
     table->setMinimumWidth(0);
     return table;
+}
+
+// right click on a cell: Copy its text, as SDRangel's tables do
+void copyMenu(QTableWidget *table)
+{
+    table->setContextMenuPolicy(Qt::CustomContextMenu);
+    QObject::connect(table, &QTableWidget::customContextMenuRequested, table, [table](const QPoint& pos) {
+        const QTableWidgetItem *item = table->itemAt(pos);
+        if (!item || item->text().isEmpty()) {
+            return;
+        }
+        QMenu *menu = new QMenu(table);
+        QObject::connect(menu, &QMenu::aboutToHide, menu, &QMenu::deleteLater);
+        const QString text = item->text();
+        menu->addAction("Copy", menu, [text]() { QGuiApplication::clipboard()->setText(text); });
+        menu->popup(table->viewport()->mapToGlobal(pos));
+    });
 }
 
 QToolButton *iconButton(QWidget *parent, const QString& icon, const QString& tip)
@@ -822,10 +840,11 @@ QWidget *CellularGUI::buildNetworks()
     m_networks = makeTable(page, {"On", "Name", "System", "Country", "Y1", "Area", "Carriers"});
     m_networks->horizontalHeaderItem(NetOn)->setToolTip("On the air while the tester runs: switch a network on or off "
         "without touching the others");
-    m_networks->setToolTip("The networks of the tester; double click to edit one. Right click on the "
-        "header: show or hide columns; drag a header to move a column");
+    m_networks->setToolTip("The networks of the tester; double click to edit one, right click to copy a cell. "
+        "Right click on the header: show or hide columns; drag a header to move a column");
     CellularColumns::setup(m_networks, &m_settings.m_networkColumnIndexes, &m_settings.m_networkColumnSizes,
         {"On", "Y1=8 test", "NMT-450", "FI - Finland", "8", "12", "10:cctc, 18:tc:1"});
+    copyMenu(m_networks);
     layout->addWidget(m_networks);
     QToolButton *add = iconButton(nullptr, ":/plus.png", "Add a network (off until switched on)");
     QToolButton *edit = iconButton(nullptr, ":/edit.png", "Edit the settings of the selected network");
@@ -899,9 +918,10 @@ QWidget *CellularGUI::buildCarriers()
     m_carriers->horizontalHeaderItem(CarTxFill)->setToolTip("Milliseconds of audio in the transmit queue");
     m_carriers->horizontalHeaderItem(CarUnderruns)->setToolTip("Times the transmit queue ran empty: the transmit lead is too small");
     m_carriers->setToolTip("The carriers of the networks on the air. Red: it cannot go on the air, with the reason. "
-        "Right click on the header: show or hide columns; drag a header to move a column");
+        "Right click to copy a cell. Right click on the header: show or hide columns; drag a header to move a column");
     CellularColumns::setup(m_carriers, &m_settings.m_carrierColumnIndexes, &m_settings.m_carrierColumnSizes,
         {"Y1=8 test", "123", "CC/TC", "463.4250", "453.4250", "roaming: confirm", "-100.0", "1000", "0", "1234567"});
+    copyMenu(m_carriers);
     layout->addWidget(m_carriers);
     return page;
 }
@@ -1008,6 +1028,7 @@ void CellularGUI::phoneMenu(const QPoint& pos)
     QMenu menu(this);
 
     menu.addAction("Record...", this, [this, system, number]() { editMobile(system, number); });
+    menu.addAction("Copy number", this, [number]() { QGuiApplication::clipboard()->setText(number); });
     menu.addSeparator();
     menu.addAction("Call", this, [=]() { requestAction(network, number, Cellular::MsgAction::Call, QString(), 0); });
     menu.addAction("Hang up", this, [=]() { requestAction(network, number, Cellular::MsgAction::HangUp, QString(), 0); });

@@ -22,11 +22,17 @@
 
 #include "cellularcolumns.h"
 
+namespace {
+// the menu on the header, among other menus of the table (a cell's)
+const char *const kMenuName = "cellularColumns";
+}
+
 void CellularColumns::setup(QTableWidget *table, QList<int> *indexes, QList<int> *sizes, const QStringList& sample)
 {
     QHeaderView *header = table->horizontalHeader();
     QMenu *menu = new QMenu(table);
 
+    menu->setObjectName(kMenuName);
     header->setSectionsMovable(true);
     header->setSectionResizeMode(QHeaderView::Interactive);
     // the widths of the columns from a sample row, as SDRangel's tables size themselves
@@ -69,7 +75,7 @@ void CellularColumns::setup(QTableWidget *table, QList<int> *indexes, QList<int>
 void CellularColumns::apply(QTableWidget *table, const QList<int>& indexes, const QList<int>& sizes)
 {
     QHeaderView *header = table->horizontalHeader();
-    QMenu *menu = table->findChild<QMenu*>();
+    QMenu *menu = table->findChild<QMenu*>(kMenuName, Qt::FindDirectChildrenOnly);
 
     // copies: moving and resizing the sections reports back into the settings
     const QList<int> order = indexes;
