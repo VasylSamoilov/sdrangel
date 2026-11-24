@@ -81,6 +81,7 @@ QColor CellularChannelGrid::typeColourOf(const QString& text)
 CellularChannelGrid::CellularChannelGrid(QWidget *parent) :
     QTableWidget(parent),
     m_country(nullptr),
+    m_minColumn(20),
     m_downLow(0.0),
     m_downHigh(0.0),
     m_upLow(0.0),
@@ -88,13 +89,15 @@ CellularChannelGrid::CellularChannelGrid(QWidget *parent) :
 {
     setColumnCount(kColumns);
     horizontalHeader()->setVisible(false);
-    horizontalHeader()->setMinimumSectionSize(20);
     horizontalHeader()->setDefaultSectionSize(27);
-    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     verticalHeader()->setDefaultSectionSize(17);
     QFont small = font();
     small.setPointSizeF(small.pointSizeF() * 0.8);
     setFont(small);
+    // the columns share the width there is (a small screen has no room for 27 px each), but not
+    // below the widest channel number of the plan: then the grid scrolls (fitColumns)
+    horizontalHeader()->setSectionResizeMode(QHeaderView::Fixed);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     verticalHeader()->setFont(small);
     setEditTriggers(QAbstractItemView::NoEditTriggers);
     setSelectionMode(QAbstractItemView::NoSelection);
@@ -134,10 +137,32 @@ void CellularChannelGrid::setPlan(modemnmt::System system, const QString& countr
             return a.frequency.downlink < b.frequency.downlink;
         });
     }
-    for (size_t i = 0; i < m_cells.size(); i++) {
+    int widest = 0;
+    for (size_t i = 0; i < m_cells.size(); i++)
+    {
         m_byChannel[m_cells[i].channel] = static_cast<int>(i);
+        widest = std::max(widest, fontMetrics().horizontalAdvance(QString::number(m_cells[i].channel)));
     }
+    // the margins the style puts around the text of an item, and the grid line
+    const int margins = 2 * (style()->pixelMetric(QStyle::PM_FocusFrameHMargin, nullptr, this) + 1) + 1;
+    m_minColumn = std::max(20, widest + margins);
+    fitColumns();
     setCarriers(kept);
+}
+
+void CellularChannelGrid::fitColumns()
+{
+    const int width = std::max(m_minColumn, viewport()->width() / kColumns);
+
+    for (int c = 0; c < kColumns; c++) {
+        setColumnWidth(c, width);
+    }
+}
+
+void CellularChannelGrid::resizeEvent(QResizeEvent *event)
+{
+    QTableWidget::resizeEvent(event);
+    fitColumns();
 }
 
 void CellularChannelGrid::setCarriers(const std::vector<modemnmt::NmtCarrierConfig>& carriers)

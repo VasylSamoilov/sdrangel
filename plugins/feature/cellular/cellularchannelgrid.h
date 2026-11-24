@@ -67,8 +67,11 @@ private:
     int cellIndex(int row, int col) const;
     void cycle(int index);
     void menu(const QPoint& pos);
+    void fitColumns();
+    void resizeEvent(QResizeEvent *event) override;
 
     const modemnmt::NmtCountry *m_country;
+    int m_minColumn;                        // px: the widest channel number of the plan
     std::vector<Cell> m_cells;              // in the order of the downlink frequency
     QMap<int, int> m_byChannel;             // channel -> index of its cell
     QMap<int, QString> m_others;
