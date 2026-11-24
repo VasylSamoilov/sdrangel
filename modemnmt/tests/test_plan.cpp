@@ -50,9 +50,11 @@ static void testFrequencies()
     CHECK(frequency(System::Nmt450, "DK", 181, 462.500, 452.500, 1.0));
     CHECK(frequency(System::Nmt450, "DK", 200, 462.975, 452.975, 1.0));
     CHECK(frequency(System::Nmt450, "DK", 201, 463.0125, 453.0125, 1.0));
+    CHECK(frequency(System::Nmt450, "DK", 381, 462.5125, 452.5125, 1.0));
     CHECK(frequency(System::Nmt450, "DK", 399, 462.9625, 452.9625, 1.0));
+    CHECK(frequency(System::Nmt450, "DK", 400, 462.9875, 452.9875, 1.0));
     CHECK(!exists(System::Nmt450, "DK", 0));
-    CHECK(!exists(System::Nmt450, "DK", 400));
+    CHECK(!exists(System::Nmt450, "DK", 401));
 
     // NMT-900
     CHECK(frequency(System::Nmt900, "DK", 1, 935.0125, 890.0125, 1.0));
@@ -126,7 +128,10 @@ static void testChecks()
     CHECK(hasIssue(nmtCheckCarrier(dk, 201, false), false));
     CHECK(hasIssue(nmtCheckCarrier(dk, 1, true), false));
 
-    const std::vector<NmtPlanIssue> none = nmtCheckCarrier(dk, 400, false);
+    CHECK(hasIssue(nmtCheckCarrier(dk, 400, false), false));
+    CHECK(!hasIssue(nmtCheckCarrier(dk, 400, false), true));
+
+    const std::vector<NmtPlanIssue> none = nmtCheckCarrier(dk, 401, false);
     CHECK(none.size() == 1 && none[0].error);
 
     // a plan that was never tried with a phone is a warning

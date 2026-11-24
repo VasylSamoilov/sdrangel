@@ -34,7 +34,10 @@ const Blocks k450Scandinavia = {
     {1, 180, 463.000, 0.025, 1.0, 10.0, true},
     {181, 200, 462.500, 0.025, 1.0, 10.0, true},
     {201, 380, 463.0125, 0.025, 1.0, 10.0, true},
-    {381, 399, 462.5125, 0.025, 1.0, 10.0, true}
+    // the interleaved extension band: 181..200 + 200, 12.5 kHz up. Up to 400 as in NMT Doc 450-1
+    // 1997-08-08 ("channel numbers 201-400 are reserved for interleaved channels", 400 coded '39A');
+    // osmocom stops at 399 as the 1995 edition did
+    {381, 400, 462.5125, 0.025, 1.0, 10.0, true}
 };
 const Blocks k900Scandinavia = {
     {1, 1000, 935.0125, 0.025, 1.0, 45.0, false},

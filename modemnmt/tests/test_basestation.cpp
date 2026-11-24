@@ -139,7 +139,7 @@ static void testCoverage()
 static void testPlanErrors()
 {
     // unknown channel and a channel given twice stay off the air, the rest goes on
-    NmtBaseStation bs(network({1, 400, 1, 5}));
+    NmtBaseStation bs(network({1, 401, 1, 5}));
     CHECK(bs.carriers()[0].planned);
     CHECK(!bs.carriers()[1].planned && hasIssue(bs.carriers()[1].issues, true));
     CHECK(!bs.carriers()[2].planned && hasIssue(bs.carriers()[2].issues, true));
