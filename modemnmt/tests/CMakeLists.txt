@@ -36,6 +36,7 @@ set(MODEMNMT_LIB_SOURCES
     ../../modemcellular/echosuppressor.cpp
     ../../modemcellular/firfilter.cpp
     ../../modemcellular/musicendpoint.cpp
+    ../../modemcellular/speechmeter.cpp
     ../../modemcellular/timer.cpp
     ../../modemcellular/tonegenerator.cpp)
 find_package(Threads REQUIRED)

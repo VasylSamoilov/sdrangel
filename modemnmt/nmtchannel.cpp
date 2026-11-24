@@ -209,6 +209,13 @@ NmtChannel::NmtChannel(const ChannelConfig& config, double sampleRate, double de
     m_mwiAcked(false),
     m_compandor(8000.0),
     m_compandorOn(false),
+    m_rxMeter(kRxNoiseGate, kMaxDeviation / kSpeechDeviationHz),
+    m_txMeter(kRxNoiseGate, kMaxDeviation / kSpeechDeviationHz),
+    m_meterTransaction(nullptr),
+    m_meterCall(0),
+    m_meterLive(false),
+    m_meterCountry(0),
+    m_meterLimitedStart(0),
     m_dms(true),
     m_smsSent(false),
     m_smsReleasing(false),
@@ -259,6 +266,8 @@ NmtChannel::NmtChannel(const ChannelConfig& config, double sampleRate, double de
         if (!callAudioUp()) {
             return;
         }
+        meterCall();
+        m_rxMeter.process(samples, count);
         if (m_compandorOn) {
             m_compandor.expand(samples, count);
         }
@@ -271,8 +280,42 @@ NmtChannel::NmtChannel(const ChannelConfig& config, double sampleRate, double de
             if (m_compandorOn) {
                 m_compandor.compress(samples, count);
             }
+            meterCall();
+            m_txMeter.process(samples, count);
         }
     });
+}
+
+// A new call on the channel: the meters start again; the last call's stay readable until then.
+void NmtChannel::meterCall()
+{
+    if (m_meterLive && m_meterTransaction == m_transaction) {
+        return;
+    }
+    m_rxMeter.reset();
+    m_txMeter.reset();
+    m_meterTransaction = m_transaction;
+    m_meterCall++;
+    m_meterLive = true;
+    m_meterCountry = m_transaction->subscriber.country;
+    m_meterNumber = m_transaction->subscriber.number;
+    m_meterLimitedStart = m_limiter.limited();
+}
+
+NmtChannel::Speech NmtChannel::speech() const
+{
+    Speech s;
+
+    s.call = m_meterCall;
+    s.live = m_meterLive;
+    s.country = m_meterCountry;
+    s.number = m_meterNumber;
+    s.rxRecent = m_rxMeter.recent();
+    s.txRecent = m_txMeter.recent();
+    s.rxCall = m_rxMeter.call();
+    s.txCall = m_txMeter.call();
+    s.limited = m_limiter.limited() - m_meterLimitedStart;
+    return s;
 }
 
 // The speech path is connected to the call.
@@ -2479,6 +2522,8 @@ void NmtChannel::goIdle()
         m_timer->stop();
     }
     m_transaction = nullptr;
+    m_meterLive = false;
+    m_meterTransaction = nullptr;
     m_state = State::Idle;
     m_compandorOn = false;
     m_txFrameCount = 0;

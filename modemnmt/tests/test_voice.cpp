@@ -949,6 +949,58 @@ static void testBadSamplesAndNextCall()
     CHECK(!call.tc->supervisoryDetected());
 }
 
+// The call meters: the speech from the phone as demodulated (before the expander), the speech
+// to the phone after the compressor, on the reference scale; the last call's stay after it ends
+// and start again with the next.
+static void testSpeechMeters()
+{
+    VoiceCall call(2);
+
+    call.toneHz = 1500.0;
+    call.air(3.0, phoneTones(1000.0, 0.4, 2, kRate));
+    NmtChannel::Speech s = call.tc->speech();
+    CHECK(s.call == 1 && s.live);
+    CHECK(s.country == call.phone.country && s.number == call.phone.number);
+    // from the phone: the 1 kHz tone as the receiver passes it, in the 800-1200 Hz band
+    const double rxDb = 20.0 * std::log10(gatedAmplitude(0.4) / std::sqrt(2.0));
+    CHECK(std::fabs(s.rxCall.levelDb() - rxDb) < 0.5);
+    CHECK(s.rxCall.bandsDb()[2] > -1.5);
+    CHECK(s.rxRecent.speech > 0 && s.rxRecent.speech <= s.rxCall.speech);
+    // to the phone: the 1.5 kHz tone of 0.5 from the call (-9.0 dB rms), in the 1.2-2 kHz band
+    CHECK(std::fabs(s.txCall.levelDb() - 20.0 * std::log10(0.5 / std::sqrt(2.0))) < 0.3);
+    CHECK(s.txCall.bandsDb()[3] > -1.5);
+    CHECK(s.rxCall.atLimit == 0 && s.txCall.atLimit == 0 && s.limited == 0);
+    std::printf("call meters: from the phone %.1f dB (expected %.1f), to the phone %.1f dB, pauses %.0f %% / %.0f %%\n",
+        s.rxCall.levelDb(), rxDb, s.txCall.levelDb(), 100.0 * s.rxCall.pauseShare(), 100.0 * s.txCall.pauseShare());
+
+    // with the compandor the receive side is measured before the expander (unchanged), the
+    // transmit side after the compressor (changed)
+    {
+        // a quiet tone (-23 dB) comes out of the 2:1 compressor near -11.5 dB
+        VoiceCall companded(2, kRate, 1.0, true);
+        companded.toneHz = 1000.0;
+        companded.toneAmp = 0.1;
+        companded.air(3.0, phoneTones(1000.0, 0.4, 2, kRate));
+        const NmtChannel::Speech c = companded.tc->speech();
+        std::printf("with the compandor: from the phone %.1f dB, to the phone %.1f dB (in -23.0)\n", c.rxCall.levelDb(), c.txCall.levelDb());
+        CHECK(std::fabs(c.rxCall.levelDb() - s.rxCall.levelDb()) < 0.3);
+        CHECK(c.txCall.levelDb() > -18.0);
+    }
+
+    // silence from the phone: pause in the recent window, the call keeps its speech
+    call.air(2.5, nullptr);
+    s = call.tc->speech();
+    CHECK(s.rxRecent.speech == 0 && s.rxRecent.pause > 0);
+    CHECK(s.rxCall.speech > 0);
+
+    // the call ends: the stats stay, not live
+    phoneSends(*call.tc, lineSignalFrame(*call.tc, call.phone, 0x11111), 1);
+    pullClearing(*call.tc);
+    CHECK(call.tc->state() == State::Idle);
+    s = call.tc->speech();
+    CHECK(s.call == 1 && !s.live && s.rxCall.speech > 0);
+}
+
 // Frames from the phone mute the audio for a little more than two frame periods.
 static void testMuteDuringFrames()
 {
@@ -1016,6 +1068,7 @@ int main()
     testAudioHandlerReentrancy();
     testBadSamplesAndNextCall();
     testMuteDuringFrames();
+    testSpeechMeters();
 
     if (g_failures == 0) {
         std::printf("all voice tests passed\n");

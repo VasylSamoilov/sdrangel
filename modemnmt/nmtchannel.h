@@ -34,6 +34,7 @@
 #include "nmtnumbers.h"
 #include "nmtsms.h"
 #include "nmtvoice.h"
+#include "speechmeter.h"
 #include "timer.h"
 #include "export.h"
 
@@ -384,6 +385,22 @@ public:
     // Blocks of speech the deviation limiter scaled down.
     uint64_t speechLimited() const { return m_limiter.limited(); }
 
+    // The speech of the call on this channel, or of the last one (until the next starts): from
+    // the phone as demodulated (before the expander), and to the phone as it goes to the
+    // modulator (after the compressor). Both on the scale of the speech reference (1.0 = 3 kHz
+    // deviation at 1 kHz), the limit the largest deviation (4.7 kHz).
+    struct Speech
+    {
+        uint64_t call = 0;                      // counts the calls of the channel; 0: none yet
+        bool live = false;                      // the call is still on
+        char country = 0;
+        std::string number;
+        modemcellular::SpeechStats rxRecent, txRecent;     // the last 2 s
+        modemcellular::SpeechStats rxCall, txCall;         // the whole call
+        uint64_t limited = 0;                   // blocks the transmitter's limiter scaled in the call
+    };
+    Speech speech() const;
+
     // The call ended on the far end: releases the phone. False if the phone is not in a state
     // that can be released.
     bool networkRelease();
@@ -527,6 +544,15 @@ private:
     bool m_mwiAcked;                // the phone cleared / acknowledged already: nothing to wait for after the sequence
     modemcellular::Compandor m_compandor;   // speech path at 8 kHz
     bool m_compandorOn;             // the phone was ordered to switch its compandor in for this call
+    void meterCall();               // the meters follow the call of m_transaction
+    modemcellular::SpeechMeter m_rxMeter;
+    modemcellular::SpeechMeter m_txMeter;
+    const NmtTransaction* m_meterTransaction;   // the call the meters measure (identity only)
+    uint64_t m_meterCall;
+    bool m_meterLive;
+    char m_meterCountry;
+    std::string m_meterNumber;
+    uint64_t m_meterLimitedStart;
     NmtDmsLink m_dms;               // short message call: the data link
     std::vector<uint8_t> m_smsRx;   // octets from the phone that are not a whole message yet
     bool m_smsSent;                 // all we sent is acknowledged
