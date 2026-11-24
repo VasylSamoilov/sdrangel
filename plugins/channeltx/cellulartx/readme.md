@@ -12,11 +12,13 @@ The queue holds the lead of the transmitter over the receiver and follows the sm
 
 The top and bottom bars of the channel window are described [here](../../../sdrgui/channel/readme.md)
 
-<h3>Stream</h3>
+![Cellular Tx plugin GUI](../../../doc/img/CellularTx_plugin.png)
+
+<h3>1: Stream</h3>
 
 The center frequency and sample rate of the device, the lead of the queues in ms, the number of blocks received and how often a queue was restarted because audio piled up. The sample rate has to be an even multiple of 48 kHz (960 kS/s, 1.92 MS/s, 2.4 MS/s ...); the plugin says so when it is not.
 
-<h3>Carrier boxes</h3>
+<h3>2: Carrier boxes</h3>
 
 One box per carrier: the network and the channel number, the offset of the carrier from the center of the stream in kHz, the milliseconds of audio in its queue and how many times the queue ran empty. The fill should stay near the lead. A queue that runs empty over and over means that the device takes audio faster than the receiver delivers it (or the lead is too small): the carrier then has gaps and phones lose frames.
 

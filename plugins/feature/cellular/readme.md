@@ -22,19 +22,41 @@ A network is one base station with its own carriers, registered phones, calls an
 
 The window fits small screens: the tabs are on its side, the tables scroll, the settings of a network are in a dialog.
 
-<h3>Start / Stop, summary, options</h3>
+![Cellular feature GUI](../../../doc/img/Cellular_plugin_mobiles.png)
 
-Start takes the networks that are on to the air, Stop takes all networks off the air. Next to it: how many networks are on the air, the phones registered and the calls. The options button opens the options of the tester:
+<h3>1: Start / Stop</h3>
+
+Start takes the networks that are on to the air, Stop takes all networks off the air.
+
+<h3>2: Summary</h3>
+
+How many networks are on the air, the phones registered and the calls.
+
+<h3>3: Options</h3>
+
+Opens the options of the tester:
+
+![Cellular options](../../../doc/img/Cellular_plugin_options.png)
 
 * Transmit lead: how far the transmitters run ahead of the receivers. The lead is part of the round trip between a phone and the base station: the answer to a phone is late by the time the audio takes through the receiving device, the controller, the lead and the transmitting device. Keep the round trip below about 300 ms. If the transmit queues run empty (the Empty column of Carriers) the lead is too small. Taken when the tester starts.
 
-<h3>Mobiles</h3>
+<h3>4: Tabs</h3>
+
+Mobiles, Test, Log, Networks and Carriers, below.
+
+<h3>5: Mobiles</h3>
 
 The phones the tester knows, its book, and the phones the networks hear (their identity in a frame for the channel it came on, or a roaming update), one row per phone. The first line has a dot for what it does (green in a call, orange ringing or paged, blue registered, grey heard, dark not seen), its name and number; the second line what is known of it: the country digit Y1 of the last network that heard it, its password K, SMS centre, voice mail number, short messages the centre keeps for it and an indicator that waits for it. The State column has what it does now and where it was heard last. Rows stay where they are.
 
-What the tester learns of a phone goes into its record by itself: the password in its seizure frames (when two frames agree), the numbers it dials, the SMS centre it really sends to or fetches from (with the traffic area of the network), the traffic areas it was heard on. Double click (or the pencil) opens the record: name, notes, password, SMS centre and voice mail number (pick one of the numbers it dialled or type one), voice mail code. Each value is marked learned or typed: a typed value stays, learning does not change it; clear it to learn it again. The book is kept with the settings (presets) and over restarts of the networks. The plus adds a phone by its number, the bin forgets one (a phone the networks hear comes back). Right click: the record, copy the number, the actions of the Test tab on the phone (by the network that heard it last, else the network of the Test tab), and forget.
+What the tester learns of a phone goes into its record by itself: the password in its seizure frames (when two frames agree), the numbers it dials, the SMS centre it really sends to or fetches from (with the traffic area of the network), the traffic areas it was heard on.
 
-<h3>Test</h3>
+![Record of a phone](../../../doc/img/Cellular_plugin_mobile.png)
+
+Double click (or the pencil) opens the record: name, notes, password, SMS centre and voice mail number (pick one of the numbers it dialled or type one), voice mail code. Each value is marked learned or typed: a typed value stays, learning does not change it; clear it to learn it again. The book is kept with the settings (presets) and over restarts of the networks. The plus adds a phone by its number, the bin forgets one (a phone the networks hear comes back). Right click: the record, copy the number, the actions of the Test tab on the phone (by the network that heard it last, else the network of the Test tab), and forget.
+
+<h3>6: Test</h3>
+
+![Cellular Test tab](../../../doc/img/Cellular_plugin_test.png)
 
 Actions of a network on one phone. Network: the network that does it. Phone: the country digit and the six digits, typed or one the network heard; below it what the phone does now.
 
@@ -44,15 +66,22 @@ Actions of a network on one phone. Network: the network that does it. Phone: the
 * Power: orders the phone in its call to high, medium or low power.
 * Move: switches the call to another traffic channel of the network (any: the first free one).
 
-<h3>Log</h3>
+<h3>7: Log</h3>
+
+![Cellular Log tab](../../../doc/img/Cellular_plugin_log.png)
 
 The events of all networks, of the tester itself, or of one network. A badge tells what a line is about: FRAME, CALL, SMS, IND (indicators), PWR (power), PHONE, TONE, NET (a network starts, stops, goes on the air), WARN. With Frames, every frame from the phones (with its quality and level) and every frame to them except the indications a channel sends all the time; a frame sent again and again is shown once with its count. In a short message call the frames of the data link are there too (DMS: DT with its number and its bytes as the other side takes them, the random number and its format, RR, NR, frames rejected by their check sum). Touch tones (DTMF) a phone sends in a call, keys pressed or a code it sends by itself (a voice mail code), are logged as a group when it has sent none for 2 s: "tones from 3726136: 123456". The view stays where it was scrolled to; at the end it follows the new lines. The bin clears it.
 
 The record button writes the log into a .csv file as well (the save button picks the file; it is appended to, the header is written when it is new): every line of all networks and of the tester, with the frames, whatever the view shows, in the columns Date, Time, Network (empty for the tester), Kind (the badge) and Text. A frame sent again and again is a line with its count there too. The file is written by the feature, so it is written also without the window and with SDRangel's server (`logEnabled`, `logFilename` in the settings).
 
-<h3>Networks</h3>
+<h3>8: Networks</h3>
+
+![Cellular Networks tab](../../../doc/img/Cellular_plugin_networks.png)
 
 The networks of the tester. On: on the air while the tester runs; a network is switched on or off without touching the others. The plus button adds a network (off until switched on), the pencil (or a double click) opens the settings of the selected network, the bin removes it. Changed settings of a running network are taken with OK: the network starts again with them, and its calls are cleared. Renaming a network does not start it again. The settings of a network:
+
+![Settings of a network](../../../doc/img/Cellular_plugin_network.png)
+
 
 * Name: the name of the network.
 * On the air while the tester runs: as On in the list.
@@ -70,7 +99,9 @@ The networks of the tester. On: on the air while the tester runs; a network is s
 
 A network is refused if its carriers do not fit one receiving and one transmitting device.
 
-<h3>Carriers</h3>
+<h3>9: Carriers</h3>
+
+![Cellular Carriers tab](../../../doc/img/Cellular_plugin_carriers.png)
 
 The carriers of the networks: network, channel, type, frequencies, state of the channel, received level, milliseconds of audio in the transmit queue, number of times the queue ran empty, the phone the channel serves. A carrier that cannot go on the air is red, with the reason: a channel that is not in the plan of the country, a frequency outside the span of the device, or the frequency of a channel of another network on the same device.
 

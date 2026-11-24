@@ -10,11 +10,13 @@ The plugin has no radio settings of its own. The Cellular feature gives it the c
 
 The top and bottom bars of the channel window are described [here](../../../sdrgui/channel/readme.md)
 
-<h3>Stream</h3>
+![Cellular Rx plugin GUI](../../../doc/img/CellularRx_plugin.png)
+
+<h3>1: Stream</h3>
 
 The center frequency and sample rate of the device. The sample rate has to be an even multiple of 48 kHz (960 kS/s, 1.92 MS/s, 2.4 MS/s ...); the plugin says so when it is not. It also says when no network uses the device.
 
-<h3>Carrier boxes</h3>
+<h3>2: Carrier boxes</h3>
 
 One box per carrier: the network and the channel number, the offset of the carrier from the center of the stream in kHz, and the received level in dB of full scale. A level around -100 dB is noise: no phone is transmitting.
 
