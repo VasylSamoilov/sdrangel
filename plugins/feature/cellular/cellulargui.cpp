@@ -57,6 +57,7 @@
 
 #include "cellularbook.h"
 #include "cellularchannelgrid.h"
+#include "cellularcolumns.h"
 #include "cellulargui.h"
 #include "cellularmobiles.h"
 
@@ -823,7 +824,7 @@ QWidget *CellularGUI::buildNetworks()
         "without touching the others");
     m_networks->setToolTip("The networks of the tester; double click to edit one. Right click on the "
         "header: show or hide columns; drag a header to move a column");
-    setupColumns(m_networks, &m_settings.m_networkColumnIndexes, &m_settings.m_networkColumnSizes,
+    CellularColumns::setup(m_networks, &m_settings.m_networkColumnIndexes, &m_settings.m_networkColumnSizes,
         {"On", "Y1=8 test", "NMT-450", "FI - Finland", "8", "12", "10:cctc, 18:tc:1"});
     layout->addWidget(m_networks);
     QToolButton *add = iconButton(nullptr, ":/plus.png", "Add a network (off until switched on)");
@@ -899,77 +900,10 @@ QWidget *CellularGUI::buildCarriers()
     m_carriers->horizontalHeaderItem(CarUnderruns)->setToolTip("Times the transmit queue ran empty: the transmit lead is too small");
     m_carriers->setToolTip("The carriers of the networks on the air. Red: it cannot go on the air, with the reason. "
         "Right click on the header: show or hide columns; drag a header to move a column");
-    setupColumns(m_carriers, &m_settings.m_carrierColumnIndexes, &m_settings.m_carrierColumnSizes,
+    CellularColumns::setup(m_carriers, &m_settings.m_carrierColumnIndexes, &m_settings.m_carrierColumnSizes,
         {"Y1=8 test", "123", "CC/TC", "463.4250", "453.4250", "roaming: confirm", "-100.0", "1000", "0", "1234567"});
     layout->addWidget(m_carriers);
     return page;
-}
-
-void CellularGUI::setupColumns(QTableWidget *table, QList<int> *indexes, QList<int> *sizes, const QStringList& sample)
-{
-    QHeaderView *header = table->horizontalHeader();
-    QMenu *menu = new QMenu(table);
-
-    header->setSectionsMovable(true);
-    header->setSectionResizeMode(QHeaderView::Interactive);
-    // the widths of the columns from a sample row, as SDRangel's tables size themselves
-    const int row = table->rowCount();
-    table->insertRow(row);
-    for (int col = 0; col < sample.size() && col < table->columnCount(); col++) {
-        table->setItem(row, col, new QTableWidgetItem(sample[col]));
-    }
-    table->resizeColumnsToContents();
-    table->removeRow(row);
-
-    for (int col = 0; col < table->columnCount(); col++)
-    {
-        QAction *action = menu->addAction(table->horizontalHeaderItem(col)->text());
-        action->setCheckable(true);
-        action->setChecked(true);
-        connect(action, &QAction::triggered, table, [table, col](bool checked) {
-            table->setColumnHidden(col, !checked);
-        });
-    }
-    header->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(header, &QHeaderView::customContextMenuRequested, menu, [header, menu](const QPoint& pos) {
-        menu->popup(header->viewport()->mapToGlobal(pos));
-    });
-
-    applyColumns(table, *indexes, *sizes);
-    connect(header, &QHeaderView::sectionMoved, this, [indexes](int logical, int, int visual) {
-        if (logical >= 0 && logical < indexes->size()) {
-            (*indexes)[logical] = visual;
-        }
-    });
-    connect(header, &QHeaderView::sectionResized, this, [sizes](int logical, int, int size) {
-        if (logical >= 0 && logical < sizes->size()) {
-            (*sizes)[logical] = size;
-        }
-    });
-}
-
-void CellularGUI::applyColumns(QTableWidget *table, const QList<int>& indexes, const QList<int>& sizes)
-{
-    QHeaderView *header = table->horizontalHeader();
-    QMenu *menu = table->findChild<QMenu*>();
-
-    // copies: moving and resizing the sections reports back into the settings
-    const QList<int> order = indexes;
-    const QList<int> widths = sizes;
-    for (int col = 0; col < table->columnCount() && col < widths.size(); col++)
-    {
-        const bool hidden = widths[col] == 0;
-        header->setSectionHidden(col, hidden);
-        if (menu && col < menu->actions().size()) {
-            menu->actions().at(col)->setChecked(!hidden);
-        }
-        if (widths[col] > 0) {
-            table->setColumnWidth(col, widths[col]);
-        }
-    }
-    for (int col = 0; col < table->columnCount() && col < order.size(); col++) {
-        header->moveSection(header->visualIndex(col), order[col]);
-    }
 }
 
 void CellularGUI::openSettings()
@@ -1404,8 +1338,8 @@ void CellularGUI::displaySettings()
         }
     }
     fillNetworkCombos();
-    applyColumns(m_networks, m_settings.m_networkColumnIndexes, m_settings.m_networkColumnSizes);
-    applyColumns(m_carriers, m_settings.m_carrierColumnIndexes, m_settings.m_carrierColumnSizes);
+    CellularColumns::apply(m_networks, m_settings.m_networkColumnIndexes, m_settings.m_networkColumnSizes);
+    CellularColumns::apply(m_carriers, m_settings.m_carrierColumnIndexes, m_settings.m_carrierColumnSizes);
 
     getRollupContents()->restoreState(m_rollupState);
     m_doApplySettings = true;

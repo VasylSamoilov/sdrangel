@@ -29,6 +29,7 @@ if(NOT SERVER_MODE)
         ${cellular_SOURCES}
         cellularbandstrip.cpp
         cellularchannelgrid.cpp
+        cellularcolumns.cpp
         cellulargui.cpp
         cellularmobiles.cpp
     )
@@ -36,6 +37,7 @@ if(NOT SERVER_MODE)
         ${cellular_HEADERS}
         cellularbandstrip.h
         cellularchannelgrid.h
+        cellularcolumns.h
         cellulargui.h
         cellularmobiles.h
     )
