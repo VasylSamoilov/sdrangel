@@ -69,8 +69,8 @@ std::string decodeText(const Cs::Codepage& codepage, const std::string& codes)
 
 int main()
 {
-    // The codepages: 26 POCSAG, 14 FLEX, 1 GSC, keys unique within the protocol, each found by its key, generic ASCII
-    // the default
+    // The codepages: 28 POCSAG, 17 FLEX, 1 GSC, 7 NMT, keys unique within the protocol, each found by its key, the
+    // default of each protocol first
     std::set<std::string> keys;
     bool found = true;
 
@@ -81,9 +81,32 @@ int main()
     }
 
     check((Cs::codepages("pocsag").size() == 28) && (Cs::codepages("flex").size() == 17) && (Cs::codepages("gsc").size() == 1)
-        && (keys.size() == Cs::codepages().size()) && found, "46 codepages, keys unique in each protocol, each found by its key");
+        && (keys.size() == Cs::codepages().size()) && found, "53 codepages, keys unique in each protocol, each found by its key");
     check(encode(find("pocsag", "generic", "generic", "hebrew"), "\xD7\x90\xD7\xAA" "A") == std::vector<uint8_t>({0x60, 0x7A, 0x41}),
         "POCSAG Hebrew: alef 0x60, tav 0x7A, ASCII kept");
+    {
+        // NMT SMS (Annex 24 4.3): the GSM default and the 8-bit sets 0-4, the Nokia read on air on set 0
+        const Cs::Codepage *gsm = find("nmt", "generic", "generic", "gsm");
+        const Cs::Codepage *set0 = find("nmt", "generic", "generic", "cyrillic");
+        const Cs::Codepage *nokia = find("nmt", "nokia", "generic", "cyrillic");
+        bool ok = false;
+        check((Cs::codepages("nmt").size() == 7) && gsm && set0 && nokia && (gsm->codes() == 128) && (set0->codes() == 256)
+            && (nokia->m_table == set0->m_table) && (Cs::defaultFor("nmt") == gsm), "NMT: 7 codepages, GSM 7-bit the default, set 0 8-bit, Nokia on set 0");
+        // "ABC-" + Cyrillic U YI ZHE UKR_IE: the codes the phone sent, back to the same text
+        const std::string ukr = "ABC-\xD0\xA3\xD0\x87\xD0\x96\xD0\x84";
+        check(encode(set0, ukr) == std::vector<uint8_t>({0x41, 0x42, 0x43, 0x2D, 0x96, 0x82, 0x89, 0x80})
+            && (decodeText(*set0, std::string("A\x85" "C-\x96\x82\x89\x80")) == "A\xD0\x92" "C-\xD0\xA3\xD0\x87\xD0\x96\xD0\x84"),
+            "NMT set 0: the codes of the standard and of the phone, both ways");
+        check((encode(find("nmt", "generic", "generic", "central"), "\xC3\x87") == std::vector<uint8_t>({0x09}))
+            && (encode(find("nmt", "generic", "generic", "thai"), "\xE0\xB8\xBF") == std::vector<uint8_t>({0xBF}))
+            && (encode(find("nmt", "generic", "generic", "baltic"), "\xC5\xBD") == std::vector<uint8_t>({0x95}))
+            && (encode(find("nmt", "generic", "generic", "western"), "\xC3\x9E") == std::vector<uint8_t>({0x91})),
+            "NMT sets 1-4: a letter of each; C cedilla of set 2 as its GSM code");
+        check((decodeText(*gsm, "a\nb\r") == "a\xE2\x90\x8A" "b\xE2\x90\x8D") && (encode(gsm, "a\nb") == std::vector<uint8_t>({0x61, 0x0A, 0x62}))
+            && (decodeText(*gsm, "\x1B") == "<0x1B>"), "NMT: CR LF one-line symbols, the control characters taken; the escape no character");
+        encode(gsm, "\xD0\x96", &ok);
+        check(!ok, "NMT GSM: no Cyrillic");
+    }
     {
         QString text = "ab<0x03>c<...>", status = ".cXXXXXX.XXXXX";
         RadioPagingRecode::reverseText(text, status);

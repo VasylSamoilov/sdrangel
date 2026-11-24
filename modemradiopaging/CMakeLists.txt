@@ -30,6 +30,7 @@ set(modemradiopaging_SOURCES
     charsets/flexlinguistlatin.cpp
     charsets/flexlinguistscripts.cpp
     charsets/gscascii.cpp
+    charsets/nmtsms.cpp
     charsets/flexbeepwearalarm.cpp
     charsets/rot13.cpp
     charsets/kanji.cpp

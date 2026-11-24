@@ -134,6 +134,14 @@ const std::vector<RadioPagingCharset::Codepage>& RadioPagingCharset::codepages()
         {"flex", "generic", "generic", "kanji", "Generic - Kanji (Shift JIS, HEX/binary messages)", &pocsagAscii, &kanji},
         // GSC
         {"gsc", "generic", "generic", "ascii", "Generic - ASCII", &gscAscii},
+        // NMT SMS: TP-DCS 0x00 and 0x30 + set (Annex 24 4.2, 4.3)
+        {"nmt", "generic", "generic", "gsm", "Generic - GSM default alphabet", &nmtGsm},
+        {"nmt", "generic", "generic", "cyrillic", "Generic - Set 0 Cyrillic", &nmtCyrillic},
+        {"nmt", "nokia", "generic", "cyrillic", "Nokia - Set 0 Cyrillic", &nmtCyrillic},
+        {"nmt", "generic", "generic", "baltic", "Generic - Set 1 Baltic", &nmtBaltic},
+        {"nmt", "generic", "generic", "central", "Generic - Set 2 Central", &nmtCentral},
+        {"nmt", "generic", "generic", "western", "Generic - Set 3 Western", &nmtWestern},
+        {"nmt", "generic", "generic", "thai", "Generic - Set 4 Thai", &nmtThai},
     };
 
     return list;
@@ -431,7 +439,7 @@ RadioPagingCustomCodepage::RadioPagingCustomCodepage(const std::string& protocol
     bool rtl = false;
     parse(m_protocol, text, codes, rtl, error);   // The codes before the first not valid one
 
-    for (int code = 0; code < 128; code++)
+    for (int code = 0; code < 256; code++)
     {
         for (int i = 0; i < RadioPagingCharset::m_maxGlyphs; i++) {
             m_entries[code][i] = (code < size) ? table->m_entries[code][i] : nullptr;

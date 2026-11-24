@@ -45,7 +45,7 @@ public:
 
     struct Table
     {
-        int m_codeBits;                         //!< 7 (128 entries) or 6 (64)
+        int m_codeBits;                         //!< 7 (128 entries), 6 (64) or 8 (256, NMT 8-bit sets)
         const Entry *m_entries;
     };
 
@@ -142,7 +142,7 @@ public:
 private:
     std::string m_protocol;
     std::vector<std::string> m_glyphs;      //!< The UTF-8 of each code mapped
-    RadioPagingCharset::Entry m_entries[128];
+    RadioPagingCharset::Entry m_entries[256];
     RadioPagingCharset::Table m_table;
     RadioPagingCharset::Codepage m_codepage;
 };

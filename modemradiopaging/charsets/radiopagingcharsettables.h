@@ -67,6 +67,14 @@ extern const RadioPagingCharset::Table flexLinguistVietnamese;
 // GSC (6 bits): the character set of Rep. 900-2 Table VII
 extern const RadioPagingCharset::Table gscAscii;
 
+// NMT SMS (Annex 24): the GSM default alphabet (7 bits) and NMT Character Sets 0-4 (8 bits)
+extern const RadioPagingCharset::Table nmtGsm;
+extern const RadioPagingCharset::Table nmtCyrillic;
+extern const RadioPagingCharset::Table nmtBaltic;
+extern const RadioPagingCharset::Table nmtCentral;
+extern const RadioPagingCharset::Table nmtWestern;
+extern const RadioPagingCharset::Table nmtThai;
+
 } // namespace RadioPagingCharsetTables
 
 #endif // MODEMRADIOPAGING_RADIOPAGINGCHARSETTABLES_H
