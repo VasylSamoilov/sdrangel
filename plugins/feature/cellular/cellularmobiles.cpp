@@ -143,7 +143,7 @@ CellularMobileDialog::CellularMobileDialog(const modemnmt::NmtPhoneRecord& recor
     scroll->setFrameShape(QFrame::NoFrame);
     QWidget *page = new QWidget(scroll);
     QFormLayout *form = new QFormLayout(page);
-    form->setRowWrapPolicy(QFormLayout::WrapAllRows);
+    form->setRowWrapPolicy(QFormLayout::WrapLongRows);    // as the settings of a network
     form->setContentsMargins(0, 0, 0, 0);
     scroll->setWidget(page);
     layout->addWidget(scroll);
