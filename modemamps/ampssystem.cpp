@@ -54,6 +54,18 @@ const char *AmpsSystem::stateName(State state)
     case State::MoAssign: return "MO assignment";
     case State::MoAssignSend: return "MO assignment sending";
     case State::MoAssignConfirm: return "MO assignment wait confirm";
+    case State::Page: return "page";
+    case State::PageSend: return "page sending";
+    case State::PageReply: return "page wait reply";
+    case State::Reject: return "reject";
+    case State::RejectSend: return "reject sending";
+    case State::MtAssign: return "MT assignment";
+    case State::MtAssignSend: return "MT assignment sending";
+    case State::MtAssignConfirm: return "MT assignment wait confirm";
+    case State::MtAlert: return "MT alert";
+    case State::MtAlertSend: return "MT alert sending";
+    case State::MtAlertConfirm: return "MT alert wait confirm";
+    case State::MtAnswerWait: return "MT answer wait";
     case State::Call: return "call";
     case State::Release: return "release";
     case State::ReleaseSend: return "release sending";
@@ -68,7 +80,10 @@ enum class TimerKind
     Sat,            // the SAT of the phone on the new voice channel (SAT_TO1)
     Fade,           // the SAT lost or wrong in a call (SAT_TO2)
     StRelease,      // the signalling tone lasting: the phone releases (ST_RELEASE_TIME)
-    Release         // the phone confirming our release (RELEASE_TIMER)
+    Release,        // the phone confirming our release (RELEASE_TIMER)
+    Page,           // the page response (PAGE_TO1, PAGE_TO2)
+    Alert,          // the phone's tone after the alert order (ALERT_TO)
+    Answer          // the phone ringing, its answer (ANSWER_TO)
 };
 
 struct AmpsSystem::Transaction
@@ -88,6 +103,9 @@ struct AmpsSystem::Transaction
     modemcellular::Timer timer;
     TimerKind kind = TimerKind::None;
     double stStart = -1.0;              // the signalling tone came on, -1 not on
+    bool mt = false;                    // a call to the phone, not answered yet
+    int pageTry = 1;
+    int alertTry = 1;
 };
 
 AmpsSystem::AmpsSystem(const modemcellular::Clock& clock, const AmpsSystemConfig& config) :
@@ -205,6 +223,37 @@ void AmpsSystem::receivedRecc(int channel, const ReccMessage& m)
 
     const bool registration = m.order == kOrderRegistration && ((m.msgType == 0 && m.ordq <= 3) || (m.msgType == 1 && m.ordq == 3));
     const bool origination = m.t == 1 && m.order == kOrderPage && m.ordq == 0 && m.msgType == 0;
+    const bool pageResponse = m.t == 0 && m.order == kOrderPage && m.ordq == 0 && m.msgType == 0;
+
+    if (pageResponse)
+    {
+        Transaction* t = transactionOf(m.min1, m.min2);
+        if (!t || (t->state != State::Page && t->state != State::PageSend && t->state != State::PageReply))
+        {
+            // osmocom: a page response nobody paged for is rejected
+            log(subscriber.number() + ": page response without a page");
+            if (!t) {
+                create(subscriber, State::Reject, channel);
+            }
+            return;
+        }
+        t->timer.stop();
+        t->kind = TimerKind::None;
+        t->subscriber.esn = m.esn;
+        t->subscriber.scm = m.scm;
+        t->channel = channel;
+        const int vc = freeVoiceChannel();
+        if (vc < 0)
+        {
+            log(subscriber.number() + ": page response, no voice channel free");
+            callFailed(t, modemcellular::Cause::NoChannel);
+            setState(t, State::Reject);
+            return;
+        }
+        t->voiceChannel = vc;
+        setState(t, State::MtAssign);
+        return;
+    }
 
     if (registration)
     {
@@ -285,24 +334,42 @@ bool AmpsSystem::nextFocc(int channel, FoccMessage& message)
             setState(t, State::ReorderSend);
             message = FoccMessage::order(si.dcc, s.min1, s.min2, kOrderReorder, 0, 0);
             return true;
+        case State::Reject:
+            setState(t, State::RejectSend);
+            message = FoccMessage::order(si.dcc, s.min1, s.min2, kOrderRelease, 0, 0);
+            return true;
         case State::RegisterAckSend:
         case State::ReorderSend:
+        case State::RejectSend:
             // sent: the next one
             destroy(t);
             continue;
+        case State::Page:
+            setState(t, State::PageSend);
+            message = FoccMessage::order(si.dcc, s.min1, s.min2, kOrderPage, 0, 0);
+            return true;
+        case State::PageSend:
+            // sent: the time for the response (osmocom: 8 s, 4 s for the second page), and the
+            // round trip of the radio
+            setState(t, State::PageReply);
+            t->kind = TimerKind::Page;
+            t->timer.start((t->pageTry == 1 ? kPageTimeout1 : kPageTimeout2) + m_config.roundTrip);
+            return false;
         case State::MoAssign:
+        case State::MtAssign:
         {
             // the voice channel is keyed (SAT, no speech) while its designation goes out
             Channel& vc = m_channels[t->voiceChannel];
             if (!vc.busy && vc.mode == AmpsMode::Off) {
                 vc.mode = AmpsMode::Silence;
             }
-            setState(t, State::MoAssignSend);
+            setState(t, t->state == State::MoAssign ? State::MoAssignSend : State::MtAssignSend);
             message = FoccMessage::voiceChannel(si.dcc, s.min1, s.min2, static_cast<uint8_t>(vc.config.scc), si.vmac,
                 static_cast<uint16_t>(vc.config.channel));
             return true;
         }
         case State::MoAssignSend:
+        case State::MtAssignSend:
             assignVoiceChannel(t);
             return false;
         default:
@@ -319,7 +386,9 @@ void AmpsSystem::assignVoiceChannel(Transaction* t)
     if (!valid(vc) || m_channels[vc].busy)
     {
         log(t->subscriber.number() + ": the voice channel is not free any more");
-        if (m_clearHandler) {
+        if (t->mt) {
+            callFailed(t, modemcellular::Cause::NoChannel);
+        } else if (m_clearHandler) {
             m_clearHandler(t->subscriber);
         }
         destroy(t);
@@ -332,15 +401,73 @@ void AmpsSystem::assignVoiceChannel(Transaction* t)
     t->channel = vc;
     t->kind = TimerKind::Sat;
     t->timer.start(kSatTimeout1 + m_config.roundTrip);
-    setState(t, State::MoAssignConfirm);
+    setState(t, t->mt ? State::MtAssignConfirm : State::MoAssignConfirm);
+}
+
+void AmpsSystem::callFailed(Transaction* t, modemcellular::Cause cause)
+{
+    if (t->mt)
+    {
+        t->mt = false;
+        if (m_failed) {
+            m_failed(t->subscriber, cause);
+        }
+    }
+}
+
+bool AmpsSystem::startCall(const std::string& number, modemcellular::Cause* cause)
+{
+    const auto refuse = [cause](modemcellular::Cause c) {
+        if (cause) {
+            *cause = c;
+        }
+        return false;
+    };
+
+    if (number.size() != 10 || number.find_first_not_of("0123456789") != std::string::npos) {
+        return refuse(modemcellular::Cause::InvalidNumber);
+    }
+    AmpsSubscriber subscriber;
+    subscriber.min2 = ReccAssembler::min2Of(number.substr(0, 3));
+    subscriber.min1 = ReccAssembler::min1Of(number.substr(3));
+    const auto it = m_registered.find(number);
+    if (it != m_registered.end()) {
+        subscriber = it->second;
+    }
+
+    // osmocom's call_down_setup: busy, a voice channel, the paging channel
+    if (transactionOf(subscriber.min1, subscriber.min2)) {
+        return refuse(modemcellular::Cause::Busy);
+    }
+    if (freeVoiceChannel() < 0) {
+        return refuse(modemcellular::Cause::NoChannel);
+    }
+    int pc = -1;
+    for (size_t i = 0; i < m_channels.size() && pc < 0; i++)
+    {
+        if (m_channels[i].config.type != AmpsChannelType::Voice) {
+            pc = static_cast<int>(i);
+        }
+    }
+    if (pc < 0) {
+        return refuse(modemcellular::Cause::OutOfOrder);
+    }
+    Transaction* t = create(subscriber, State::Page, pc);
+    t->mt = true;
+    t->pageTry = 1;
+    return true;
 }
 
 // osmocom's amps_release: the release order on the FVC until the phone confirms it with its tone
 void AmpsSystem::release(Transaction* t, bool tellNetwork)
 {
-    if (tellNetwork && m_clearHandler) {
+    // a call to the phone that was not answered fails with its cause; an answered call is cleared
+    if (tellNetwork && t->mt) {
+        callFailed(t, modemcellular::Cause::TempFail);
+    } else if (tellNetwork && m_clearHandler) {
         m_clearHandler(t->subscriber);
     }
+    t->mt = false;
     t->kind = TimerKind::Release;
     t->timer.start(kReleaseTimeout + m_config.roundTrip);
     t->stStart = -1.0;
@@ -392,6 +519,33 @@ void AmpsSystem::timeout(Transaction* t)
         goIdle(channel);
         break;
     }
+    case TimerKind::Page:
+        if (t->pageTry++ == kPageTries)
+        {
+            log(t->subscriber.number() + ": no page response");
+            callFailed(t, modemcellular::Cause::OutOfOrder);
+            destroy(t);
+        }
+        else {
+            setState(t, State::Page);           // paged again
+        }
+        break;
+    case TimerKind::Alert:
+        if (t->alertTry++ == kAlertTries)
+        {
+            log(t->subscriber.number() + ": the phone does not ring");
+            release(t, true);
+        }
+        else
+        {
+            setState(t, State::MtAlert);        // the alert again
+            m_channels[t->channel].mode = AmpsMode::Frame;
+        }
+        break;
+    case TimerKind::Answer:
+        log(t->subscriber.number() + ": no answer");
+        release(t, true);
+        break;
     case TimerKind::None:
         break;
     }
@@ -416,6 +570,16 @@ void AmpsSystem::satChanged(int channel, int scc)
         t->kind = TimerKind::None;
         setState(t, State::Call);
         c.mode = AmpsMode::Audio;
+        return;
+    }
+    if (scc >= 0 && t->state == State::MtAssignConfirm)
+    {
+        // the phone is on the voice channel: the alert order
+        t->timer.stop();
+        t->kind = TimerKind::None;
+        t->alertTry = 1;
+        setState(t, State::MtAlert);
+        c.mode = AmpsMode::Frame;
         return;
     }
     if (t->state != State::Call) {
@@ -449,6 +613,35 @@ void AmpsSystem::signallingTone(int channel, bool on)
         return;
     }
     const double now = m_clock.now();
+
+    if (on && (t->state == State::MtAlert || t->state == State::MtAlertSend || t->state == State::MtAlertConfirm))
+    {
+        // the phone rings: speech on, the answer awaited (osmocom)
+        t->timer.stop();
+        if (m_alerting) {
+            m_alerting(t->subscriber);
+        }
+        m_channels[channel].mode = AmpsMode::Audio;
+        setState(t, State::MtAnswerWait);
+        t->kind = TimerKind::Answer;
+        t->timer.start(kAnswerTimeout);
+        return;
+    }
+    if (t->state == State::MtAnswerWait)
+    {
+        // its tone stops with the SAT there: answered
+        if (!on && m_channels[channel].sat >= 0)
+        {
+            t->timer.stop();
+            t->kind = TimerKind::None;
+            t->mt = false;
+            setState(t, State::Call);
+            if (m_answered) {
+                m_answered(t->subscriber);
+            }
+        }
+        return;
+    }
 
     if (t->state == State::Call || t->state == State::MoAssignConfirm)
     {
@@ -510,6 +703,21 @@ bool AmpsSystem::nextFvc(int channel, uint64_t& word)
 {
     Transaction* t = valid(channel) ? transactionOn(channel) : nullptr;
 
+    if (t && t->state == State::MtAlert)
+    {
+        setState(t, State::MtAlertSend);
+        word = fvc::order(static_cast<uint8_t>(m_channels[channel].config.scc), kOrderAlert, 0, 0);
+        return true;
+    }
+    if (t && t->state == State::MtAlertSend)
+    {
+        // sent: the phone's tone awaited with SAT and silence (osmocom ALERT_TO, and the round trip)
+        setState(t, State::MtAlertConfirm);
+        t->kind = TimerKind::Alert;
+        t->timer.start(kAlertTimeout + m_config.roundTrip);
+        m_channels[channel].mode = AmpsMode::Silence;
+        return false;
+    }
     if (t && (t->state == State::Release || t->state == State::ReleaseSend))
     {
         // the release goes out again and again until the phone confirms it (osmocom)
@@ -558,9 +766,14 @@ bool AmpsSystem::releaseCall(const std::string& number)
         if (t->subscriber.number() != number) {
             continue;
         }
-        if (t->state == State::Call || t->state == State::MoAssignConfirm) {
+        t->mt = false;                      // the network knows
+        const bool onVoice = valid(t->channel) && m_channels[t->channel].config.type == AmpsChannelType::Voice;
+        if (t->state == State::Release || t->state == State::ReleaseSend) {
+            return true;
+        }
+        if (onVoice) {
             release(t, false);
-        } else if (t->state != State::Release && t->state != State::ReleaseSend) {
+        } else {
             destroy(t);
         }
         return true;

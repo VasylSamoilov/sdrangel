@@ -31,6 +31,7 @@
 #include "ampsplan.h"
 #include "ampsrecc.h"
 #include "ampssysinfo.h"
+#include "calltypes.h"
 #include "clock.h"
 #include "timer.h"
 #include "export.h"
@@ -91,6 +92,12 @@ public:
     static constexpr double kFlashMin = 0.2;            // signalling tone: a flash
     static constexpr double kFlashMax = 0.8;            // longer: a release
     static constexpr double kStReleaseTime = 3.0;       // a release of the phone if the tone lasts
+    static constexpr int kPageTries = 2;
+    static constexpr double kPageTimeout1 = 8.0;        // the page response, first page
+    static constexpr double kPageTimeout2 = 4.0;        // and the second
+    static constexpr int kAlertTries = 3;
+    static constexpr double kAlertTimeout = 0.9;        // the phone's tone after the alert order (and the round trip)
+    static constexpr double kAnswerTimeout = 60.0;
 
     enum class State
     {
@@ -98,6 +105,12 @@ public:
         Reorder, ReorderSend,               // the call refused on the FOCC
         MoAssign, MoAssignSend,             // the voice channel designated on the FOCC
         MoAssignConfirm,                    // on the voice channel, waiting for the SAT of the phone
+        Page, PageSend, PageReply,          // a call to the phone: paged on the FOCC, waiting for its response
+        Reject, RejectSend,                 // the page response refused on the FOCC (release order)
+        MtAssign, MtAssignSend,             // the voice channel designated on the FOCC
+        MtAssignConfirm,                    // on the voice channel, waiting for the SAT of the phone
+        MtAlert, MtAlertSend, MtAlertConfirm,   // the alert order on the FVC, waiting for the phone's tone
+        MtAnswerWait,                       // the phone rings (its tone), waiting for the answer
         Call,
         Release, ReleaseSend                // our release on the FVC, waiting for the phone's tone
     };
@@ -111,6 +124,9 @@ public:
     using AudioFromMobile = std::function<void(const AmpsSubscriber& subscriber, const float* samples, int count)>;
     using AudioToMobile = std::function<void(const AmpsSubscriber& subscriber, float* samples, int count)>;
     using LogHandler = std::function<void(const std::string& text)>;
+    // a call to the phone (startCall): it rings, it answered, it failed (the cause for the network)
+    using CallEventHandler = std::function<void(const AmpsSubscriber& subscriber)>;
+    using CallFailedHandler = std::function<void(const AmpsSubscriber& subscriber, modemcellular::Cause cause)>;
 
     AmpsSystem(const modemcellular::Clock& clock, const AmpsSystemConfig& config);
     ~AmpsSystem();
@@ -127,6 +143,16 @@ public:
         m_audioToMobile = std::move(toMobile);
     }
     void setLogHandler(LogHandler handler) { m_log = std::move(handler); }
+    void setCallToPhoneHandlers(CallEventHandler alerting, CallEventHandler answered, CallFailedHandler failed)
+    {
+        m_alerting = std::move(alerting);
+        m_answered = std::move(answered);
+        m_failed = std::move(failed);
+    }
+    // A call to the phone with this number (10 digits): paged on the control channel (osmocom's
+    // call_down_setup). False with the cause if it cannot be: the phone in a transaction (busy), no
+    // voice channel free, no control channel.
+    bool startCall(const std::string& number, modemcellular::Cause* cause = nullptr);
 
     // the events of the channels (index into config().channels)
     void receivedRecc(int channel, const ReccMessage& message);
@@ -185,6 +211,7 @@ private:
     void reorder(const AmpsSubscriber& subscriber, int channel);
     void assignVoiceChannel(Transaction* transaction);
     void release(Transaction* transaction, bool tellNetwork);
+    void callFailed(Transaction* transaction, modemcellular::Cause cause);
     void phoneReleased(Transaction* transaction);
     void timeout(Transaction* transaction);
     void setState(Transaction* transaction, State state);
@@ -203,6 +230,9 @@ private:
     AudioFromMobile m_audioFromMobile;
     AudioToMobile m_audioToMobile;
     LogHandler m_log;
+    CallEventHandler m_alerting;
+    CallEventHandler m_answered;
+    CallFailedHandler m_failed;
 };
 
 } // namespace modemamps

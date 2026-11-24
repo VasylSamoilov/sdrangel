@@ -247,8 +247,119 @@ static void testFlashAndHeldTone()
     CHECK(n.clears == 1 && n.system.mode(kVc) == AmpsMode::Off);
 }
 
+struct Mt
+{
+    int alerting = 0;
+    int answered = 0;
+    std::vector<modemcellular::Cause> failed;
+};
+
+static void mtHandlers(Network& n, Mt& mt)
+{
+    n.system.setCallToPhoneHandlers([&mt](const AmpsSubscriber&) { mt.alerting++; },
+        [&mt](const AmpsSubscriber&) { mt.answered++; },
+        [&mt](const AmpsSubscriber&, modemcellular::Cause c) { mt.failed.push_back(c); });
+}
+
+// A call to the phone: paged on the FOCC (ORDER 0), its page response (T 0), the designation, its SAT,
+// the alert on the FVC, its tone (ringing), the tone off (answered), the call
+static void testCallToPhone()
+{
+    Network n;
+    Mt mt;
+    FoccMessage m;
+    uint64_t w = 0;
+
+    mtHandlers(n, mt);
+    n.system.receivedRecc(kCc, phone(1, kOrderRegistration, 3, ""));
+    n.system.nextFocc(kCc, m);
+    n.system.nextFocc(kCc, m);
+    CHECK(n.system.startCall("2162177526"));
+    CHECK(n.system.nextFocc(kCc, m));
+    CHECK(field(words::kExtendedAddressOrder, m.word2, "ORDER") == kOrderPage && field(words::kExtendedAddressOrder, m.word2, "SCC") == 3);
+    CHECK(!n.system.nextFocc(kCc, m));                      // sent: waiting for the response
+    n.wait(1.0);
+    n.system.receivedRecc(kCc, phone(0, kOrderPage, 0, ""));
+    CHECK(n.system.nextFocc(kCc, m) && field(words::kExtendedAddressChannel, m.word2, "CHAN") == 356);
+    CHECK(!n.system.nextFocc(kCc, m));
+    CHECK(n.system.mode(kVc) == AmpsMode::Silence);
+    n.system.satChanged(kVc, 0);
+    CHECK(n.system.mode(kVc) == AmpsMode::Frame);
+    CHECK(n.system.nextFvc(kVc, w) && field(words::kFvcOrder, w, "ORDER") == kOrderAlert);
+    CHECK(!n.system.nextFvc(kVc, w) && n.system.mode(kVc) == AmpsMode::Silence);
+    n.wait(0.5);
+    n.system.signallingTone(kVc, true);
+    CHECK(mt.alerting == 1 && n.system.mode(kVc) == AmpsMode::Audio);
+    n.wait(3.0);
+    n.system.signallingTone(kVc, false);
+    CHECK(mt.answered == 1 && mt.failed.empty());
+    CHECK(n.system.transactions().size() == 1 && n.system.transactions()[0].state == AmpsSystem::State::Call);
+    // a phone in a call is busy
+    modemcellular::Cause cause = modemcellular::Cause::Normal;
+    CHECK(!n.system.startCall("2162177526", &cause) && cause == modemcellular::Cause::Busy);
+    CHECK(!n.system.startCall("21621775", &cause) && cause == modemcellular::Cause::InvalidNumber);
+}
+
+// No page response: paged again after 8 s, given up 4 s after that
+static void testNoPageResponse()
+{
+    Network n;
+    Mt mt;
+    FoccMessage m;
+
+    mtHandlers(n, mt);
+    CHECK(n.system.startCall("2162177526"));
+    n.system.nextFocc(kCc, m);
+    n.system.nextFocc(kCc, m);
+    n.wait(7.9);
+    CHECK(!n.system.nextFocc(kCc, m));
+    n.wait(0.2);
+    CHECK(n.system.nextFocc(kCc, m) && field(words::kExtendedAddressOrder, m.word2, "ORDER") == kOrderPage);
+    n.system.nextFocc(kCc, m);
+    n.wait(4.1);
+    CHECK(mt.failed.size() == 1 && !mt.failed.empty() && mt.failed[0] == modemcellular::Cause::OutOfOrder);
+    CHECK(n.system.transactions().empty());
+}
+
+// The phone does not ring after three alerts: our release, the call failed
+static void testNoRing()
+{
+    Network n;
+    Mt mt;
+    FoccMessage m;
+    uint64_t w = 0;
+    int alerts = 0;
+
+    mtHandlers(n, mt);
+    n.system.startCall("2162177526");
+    n.system.nextFocc(kCc, m);
+    n.system.nextFocc(kCc, m);
+    n.system.receivedRecc(kCc, phone(0, kOrderPage, 0, ""));
+    n.system.nextFocc(kCc, m);
+    n.system.nextFocc(kCc, m);
+    n.system.satChanged(kVc, 0);
+    for (int k = 0; k < 6; k++)
+    {
+        while (n.system.mode(kVc) == AmpsMode::Frame && n.system.nextFvc(kVc, w))
+        {
+            if (field(words::kFvcOrder, w, "ORDER") == kOrderAlert) {
+                alerts++;
+            } else {
+                break;
+            }
+        }
+        n.wait(1.0);
+    }
+    CHECK(alerts == 3);
+    CHECK(mt.failed.size() == 1 && !mt.failed.empty() && mt.failed[0] == modemcellular::Cause::TempFail);
+    CHECK(mt.alerting == 0);
+}
+
 int main()
 {
+    testCallToPhone();
+    testNoPageResponse();
+    testNoRing();
     testRegistration();
     testOrigination();
     testRefused();
