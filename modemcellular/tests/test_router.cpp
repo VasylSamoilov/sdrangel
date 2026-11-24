@@ -182,6 +182,66 @@ static void testEchoFallbackReturnsAudio()
     CHECK(readAudio(f.router, r.callref)[0] == 0.25f);
 }
 
+// A call to a fallback endpoint ends at its time limit, or when the endpoint finished.
+struct OnceEndpoint : public AudioEndpoint
+{
+    int left;
+    explicit OnceEndpoint(int samples) : left(samples) {}
+    void fromMobile(const float*, int) override {}
+    void toMobile(float* samples, int count) override
+    {
+        std::fill(samples, samples + count, 0.0f);
+        left -= count;
+    }
+    bool finished() const override { return left <= 0; }
+};
+
+static void testCallLimitAndFinishedEndpoint()
+{
+    {
+        Fixture f;
+        FakeLeg a("A");
+        f.router.setFallback(CallRouter::Fallback::Echo);
+        f.router.setCallLimit(3.0);
+        f.router.setup(a, "100", "999");
+        f.step(0);
+        f.step(0);
+        CHECK(a.joined() == "proceeding,answer");
+        f.step(2800);
+        CHECK(a.joined() == "proceeding,answer");
+        f.step(400);
+        CHECK(a.joined() == "proceeding,answer,release:normal");
+        CHECK(f.router.callCount() == 0);
+    }
+    {
+        // no limit: the call stays
+        Fixture f;
+        FakeLeg a("A");
+        f.router.setFallback(CallRouter::Fallback::Echo);
+        f.router.setup(a, "100", "999");
+        f.step(0);
+        f.step(60000);
+        CHECK(a.joined() == "proceeding,answer");
+    }
+    {
+        // the endpoint played once: 1 s of audio pulled, the call ends
+        Fixture f;
+        FakeLeg a("A");
+        f.router.setFallbackFactory([] { return std::unique_ptr<AudioEndpoint>(new OnceEndpoint(8000)); });
+        CallRouter::SetupResult r = f.router.setup(a, "100", "999");
+        f.step(0);
+        f.step(0);
+        for (int i = 0; i < 49; i++) {
+            readAudio(f.router, r.callref);
+        }
+        f.step(200);
+        CHECK(a.joined() == "proceeding,answer");
+        readAudio(f.router, r.callref);
+        f.step(200);
+        CHECK(a.joined() == "proceeding,answer,release:normal");
+    }
+}
+
 static void testAnswerDelayOfEndpoint()
 {
     Fixture f;
@@ -783,6 +843,7 @@ int main()
 {
     testUnregisteredNumberGoesToMusic();
     testEchoFallbackReturnsAudio();
+    testCallLimitAndFinishedEndpoint();
     testAnswerDelayOfEndpoint();
     testAudioBeforeAnswerIsDropped();
     testRegisteredNumberRoutesToMobileWithRingback();

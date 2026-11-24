@@ -32,6 +32,8 @@ public:
     virtual void fromMobile(const float* samples, int count) = 0;
     // Audio for the mobile. Always writes count samples, silence if nothing is available.
     virtual void toMobile(float* samples, int count) = 0;
+    // The endpoint has nothing more to say (music played once): the call is ended normally.
+    virtual bool finished() const { return false; }
 };
 
 } // namespace modemcellular

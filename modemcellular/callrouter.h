@@ -104,6 +104,10 @@ public:
     void setAnswerDelay(double seconds) { m_answerDelay = seconds; }
     // How long a busy or congestion tone plays before the call is released (30 s).
     void setToneTimeout(double seconds) { m_toneTimeout = seconds; }
+    // How long a call to a fallback endpoint (echo, music) may last after the answer, 0 for no
+    // limit; it is ended normally then, so no call stays on forever. A fallback endpoint that
+    // finished (music played once) ends its call as well.
+    void setCallLimit(double seconds) { m_callLimit = seconds; }
 
     // Instead of calling the legs directly, hand every notification to this handler. The
     // handler runs inside router calls and must only queue the notification; deliver() makes
@@ -167,6 +171,9 @@ private:
     EndpointFactory m_factory;
     double m_answerDelay;
     double m_toneTimeout;
+    double m_callLimit = 0.0;
+    void onEndpointCheck(CallRef refA);
+    void endEndpointCall(CallRef refA);
     ToneSet m_toneSet;
     std::function<void(Notification&&)> m_handler;
     CallRef m_nextRef;

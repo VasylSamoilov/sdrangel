@@ -37,6 +37,7 @@ constexpr size_t kTrimmedQueueSamples = kAudioSampleRate * 3 / 50;
 
 // A tone that announces the end of a call plays for this long, then the call is released.
 constexpr double kDefaultToneTimeout = 30.0;
+constexpr double kEndpointCheck = 0.2;     // s: a fallback endpoint's end and time limit
 
 void pushAudio(std::deque<float>& queue, const float* samples, int count)
 {
@@ -112,6 +113,8 @@ struct CallRouter::Call
     std::unique_ptr<Timer> proceedingTimer;
     std::unique_ptr<Timer> answerTimer;
     std::unique_ptr<Timer> toneTimer;
+    std::unique_ptr<Timer> checkTimer;      // a fallback endpoint: finished
+    std::unique_ptr<Timer> limitTimer;      // a fallback endpoint: the time limit
 };
 
 CallRouter::CallRouter(TimerService& timers, ToneSet toneSet) :
@@ -458,6 +461,41 @@ void CallRouter::onEndpointAnswer(CallRef refA)
 
     call->connected = true;
     notify(Notification::Type::Answer, call->legA, refA);
+    if (call->endpoint)
+    {
+        // the endpoint's end is looked at five times a second, the time limit has its timer
+        call->checkTimer.reset(new Timer(m_timers, [this, refA] { onEndpointCheck(refA); }));
+        call->checkTimer->start(kEndpointCheck);
+        if (m_callLimit > 0.0)
+        {
+            call->limitTimer.reset(new Timer(m_timers, [this, refA] { endEndpointCall(refA); }));
+            call->limitTimer->start(m_callLimit);
+        }
+    }
+}
+
+void CallRouter::onEndpointCheck(CallRef refA)
+{
+    Call* call = findCall(refA);
+
+    if (!call || !call->endpoint) {
+        return;
+    }
+    if (call->endpoint->finished())
+    {
+        endEndpointCall(refA);
+        return;
+    }
+    call->checkTimer->start(kEndpointCheck);
+}
+
+void CallRouter::endEndpointCall(CallRef refA)
+{
+    if (!findCall(refA)) {
+        return;
+    }
+    std::unique_ptr<Call> ended = takeCall(refA);
+    notify(Notification::Type::Release, ended->legA, refA, Cause::Normal);
 }
 
 void CallRouter::farAlerting(CallRef refA)
