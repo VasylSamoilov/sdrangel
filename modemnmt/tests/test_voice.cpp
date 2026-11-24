@@ -554,6 +554,30 @@ static void testSpeechBothWays()
     }
 }
 
+// The noise gate's products do not fold into the band (it runs at 48 kHz as in osmocom-analog's
+// NMT; at 16 kHz the 5th and 7th products of 1.8 to 3.3 kHz came back 23 dB below the tone).
+static void testGateProducts()
+{
+    for (double hz : {1800.0, 2600.0, 3300.0})
+    {
+        RxAudioChain chain(kRate);
+        std::vector<float> out;
+        chain.setSink([&](const float* s, int n) { out.insert(out.end(), s, s + n); });
+        const std::vector<float> in = sine(hz, 0.4, kRate, static_cast<size_t>(kRate));
+        chain.process(in.data(), static_cast<int>(in.size()), 0);
+
+        const double tone = toneAmplitude(out, out.size() / 2, out.size(), hz, kCallRate);
+        double worst = 0.0;
+        for (double g = 100.0; g < 3900.0; g += 10.0)
+        {
+            if (std::fabs(g - hz) >= 30.0) {
+                worst = std::max(worst, toneAmplitude(out, out.size() / 2, out.size(), g, kCallRate));
+            }
+        }
+        CHECK(20.0 * std::log10(worst / tone) < -38.0);
+    }
+}
+
 // The deviation limiter: loud speech is scaled down so that after the pre-emphasis it stays within
 // the largest deviation with the supervisory tone; speech at a normal level is not touched.
 static void testLimiter()
@@ -981,6 +1005,7 @@ int main()
     testSupervisoryDetector();
     testToneGenerator();
     testRxChain();
+    testGateProducts();
     testTxSource();
     testConfigLimits();
     testSpeechBothWays();

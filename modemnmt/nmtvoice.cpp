@@ -172,29 +172,34 @@ void SupervisoryTone::add(float* samples, int length)
 namespace
 {
 
-// the rate of the filters, twice the call's
-const double kFilterRate = 2.0 * kCallRate;
+// the band pass runs at twice the call's rate, the gate at osmocom-analog's 48 kHz
+const double kBandRate = 2.0 * kCallRate;
+const double kGateRate = 6.0 * kCallRate;
 // The resampler to 16 kHz: only what would fold into the band has to go (from 12.6 kHz up, at
 // 16 kHz), the band edge is made after it.
 const double kResamplerCutoff = 6000.0;
-const double kResamplerTapsPerPhase = kInterpolatorTapsPerPhase;
 // The band pass at 16 kHz: edges 250 Hz wide (Blackman: 5.5 / width taps), -6 dB at 175 Hz and
 // 3650 Hz, so 300 Hz to 3.4 kHz is flat and the supervisory tones (from 3955 Hz) are gone.
 const double kBandLow = 175.0;
 const double kBandHigh = 3650.0;
-const int kBandTaps = static_cast<int>(5.5 * kFilterRate / 250.0) | 1;
-// The low pass after the gate: flat to 3.4 kHz, gone from 4.6 kHz, so nothing folds into the
-// band at 8 kHz.
-const double kLowCutoff = 4000.0;
-const int kLowTaps = static_cast<int>(5.5 * kFilterRate / 1200.0) | 1;
+const int kBandTaps = static_cast<int>(5.5 * kBandRate / 250.0) | 1;
+// Up to 48 kHz for the gate: the band is below 3.65 kHz, its images (from 12.35 kHz) go; the
+// edge of the short filter (about 2 kHz wide) stays above the band.
+const double kUpCutoff = 5000.0;
+// From 48 kHz to 8 kHz after the gate: flat to 3.4 kHz, the gate's products gone from about
+// 4.6 kHz, so they do not fold into the band; computed for the 8 kHz samples only, so the
+// filter can be long (192 taps per phase, Hamming).
+const double kDownCutoff = 4000.0;
+const double kDownTapsPerPhase = 192.0 / kInterpolatorPhases;
 
 } // namespace
 
 RxAudioChain::RxAudioChain(double sampleRate) :
     m_sampleRate(sampleRate),
-    m_distance(static_cast<Real>(sampleRate / kFilterRate)),
+    m_distance(static_cast<Real>(sampleRate / kBandRate)),
     m_remain(0.0f),
-    m_keep(true)
+    m_upRemain(0.0f),
+    m_downRemain(0.0f)
 {
     create();
     m_block.reserve(kCallBlock);
@@ -203,38 +208,57 @@ RxAudioChain::RxAudioChain(double sampleRate) :
 void RxAudioChain::create()
 {
     // below 16 kHz the resampler goes up, its band is what the input has
-    const double cutoff = std::min(kResamplerCutoff, 0.45 * std::min(m_sampleRate, kFilterRate));
+    const double cutoff = std::min(kResamplerCutoff, 0.45 * std::min(m_sampleRate, kBandRate));
 
-    m_resampler.create(kInterpolatorPhases, m_sampleRate, cutoff, kResamplerTapsPerPhase);
-    m_bandpass.create(kBandTaps, kFilterRate, kBandLow, kBandHigh);
-    m_lowpass.create(kLowTaps, kFilterRate, kLowCutoff);
+    m_resampler.create(kInterpolatorPhases, m_sampleRate, cutoff, kInterpolatorTapsPerPhase);
+    m_bandpass.create(kBandTaps, kBandRate, kBandLow, kBandHigh);
+    m_up.create(kInterpolatorPhases, kBandRate, kUpCutoff, kInterpolatorTapsPerPhase);
+    m_down.create(kInterpolatorPhases, kGateRate, kDownCutoff, kDownTapsPerPhase);
 }
 
 void RxAudioChain::reset()
 {
     create();                           // creating the filters again clears their history
     m_remain = 0.0f;
-    m_keep = true;
+    m_upRemain = 0.0f;
+    m_downRemain = 0.0f;
     m_block.clear();
 }
 
+// One sample at 16 kHz: the band pass, then up to 48 kHz.
 void RxAudioChain::filtered(double sample)
 {
-    double y = m_bandpass.filter(static_cast<Real>(sample));
-    // Noise gate, as osmocom-analog's NMT and AMPS (37fe472): what the phone's microphone
-    // picks up when nobody speaks (the room, its own earpiece), lifted by the phone's
-    // compressor, stays below the threshold and does not go to the network; above it the
-    // threshold is taken off and made up again.
+    const Complex in(m_bandpass.filter(static_cast<Real>(sample)), 0.0f);
+    Complex out;
+    const Real step = static_cast<Real>(kBandRate / kGateRate);
+
+    while (!m_up.interpolate(&m_upRemain, in, &out))
+    {
+        gated(out.real());
+        m_upRemain += step;
+    }
+}
+
+// One sample at 48 kHz: the gate, then down to 8 kHz.
+void RxAudioChain::gated(double y)
+{
+    // Noise gate, as osmocom-analog's NMT and AMPS (37fe472), at its rate (48 kHz), so that its
+    // products are those of osmocom-analog: what the phone's microphone picks up when nobody
+    // speaks (the room, its own earpiece), lifted by the phone's compressor, stays below the
+    // threshold and does not go to the network; above it the threshold is taken off and made up
+    // again.
     const double a = std::fabs(y);
     y = (a < kRxNoiseGate) ? 0.0 : ((y >= 0.0) ? 1.0 : -1.0) * (a - kRxNoiseGate) / (1.0 - kRxNoiseGate);
-    y = m_lowpass.filter(static_cast<Real>(y));
 
-    const bool keep = m_keep;
-    m_keep = !m_keep;
-    if (!keep || !m_sink) {
+    Complex out;
+    if (!m_down.decimate(&m_downRemain, Complex(static_cast<Real>(y), 0.0f), &out)) {
         return;
     }
-    m_block.push_back(static_cast<float>(y));
+    m_downRemain += static_cast<Real>(kGateRate / kCallRate);
+    if (!m_sink) {
+        return;
+    }
+    m_block.push_back(out.real());
     if (m_block.size() == static_cast<size_t>(kCallBlock))
     {
         m_sink(m_block.data(), kCallBlock);

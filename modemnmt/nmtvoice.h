@@ -174,9 +174,10 @@ constexpr double kRxNoiseGate = 0.10;
 // - the channel rate to 16 kHz (Interpolator, any ratio; only the kept samples are computed);
 // - at 16 kHz a band pass that keeps 300 Hz to 3.4 kHz flat and takes the supervisory tones
 //   (NMT Doc 450-4 5.15: at least 30 dB at 4 kHz +-55 Hz) and the hum out before the gate;
-// - the noise gate;
-// - a low pass for the products of the gate, then every second sample: 8 kHz, in blocks of 160.
-// The sharp edges are made at 16 kHz, where they cost a third of what they would at 48 kHz.
+// - up to 48 kHz, the noise gate there (its products then are osmocom-analog's: at 16 kHz they
+//   folded into the band, 23 dB below a tone);
+// - down to 8 kHz (Interpolator, the 8 kHz samples only), in blocks of 160.
+// The sharp band edges are made at 16 kHz, a third of the work they would be at 48 kHz.
 class MODEMNMT_API RxAudioChain
 {
 public:
@@ -198,14 +199,17 @@ public:
 private:
     void create();
     void filtered(double sample);       // one sample at 16 kHz
+    void gated(double sample);          // one sample at 48 kHz
 
     double m_sampleRate;
     Interpolator m_resampler;           // the channel rate to 16 kHz
     Real m_distance;                    // input samples per 16 kHz sample
     Real m_remain;
     Bandpass<Real> m_bandpass;          // at 16 kHz
-    Lowpass<Real> m_lowpass;
-    bool m_keep;                        // every second 16 kHz sample is an 8 kHz sample
+    Interpolator m_up;                  // 16 kHz to 48 kHz, for the gate
+    Real m_upRemain;
+    Interpolator m_down;                // 48 kHz to 8 kHz
+    Real m_downRemain;
     Sink m_sink;
     std::vector<float> m_block;
 };
