@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include <QDateTime>
 #include <QFile>
 
 #include "audio/audiodevicemanager.h"
@@ -137,8 +138,23 @@ CellularMusicInput::~CellularMusicInput()
     DSPEngine::instance()->getAudioDeviceManager()->removeAudioSource(&m_fifo);
 }
 
+void CellularMusicInput::drain()
+{
+    if (QDateTime::currentMSecsSinceEpoch() - m_lastFill < 200) {
+        return;
+    }
+    const uint32_t available = m_fifo.fill();
+    if (available)
+    {
+        m_block.resize(available);
+        m_fifo.read(reinterpret_cast<quint8*>(m_block.data()), available);
+    }
+    m_ready.clear();
+}
+
 void CellularMusicInput::fill(float* samples, int count)
 {
+    m_lastFill = QDateTime::currentMSecsSinceEpoch();
     // what the device delivered, mixed to mono and resampled to 8 kHz
     const uint32_t available = m_fifo.fill();
     m_block.resize(available);

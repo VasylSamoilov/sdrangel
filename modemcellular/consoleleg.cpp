@@ -192,8 +192,8 @@ void ConsoleLeg::process(int count)
             m_handler(text);
         }
     }
-    if (count <= 0) {
-        return;
+    if (count <= 0 || heard == 0) {
+        return;         // no call: nothing to the speaker either
     }
     m_in.assign(static_cast<size_t>(count), 0.0f);
     m_out.assign(static_cast<size_t>(count), 0.0f);

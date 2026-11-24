@@ -50,6 +50,9 @@ public:
     CellularMusicInput& operator=(const CellularMusicInput&) = delete;
 
     void fill(float* samples, int count);
+    // what the device delivered while nothing took it (no call for 200 ms) is thrown away, so the
+    // FIFO does not overflow and a call starts with what is said now; call once per block
+    void drain();
     int rate() const { return m_rate; }
 
 private:
@@ -61,6 +64,7 @@ private:
     Real m_remain;
     std::vector<float> m_ready;     // 8 kHz samples not taken yet
     std::vector<AudioSample> m_block;
+    qint64 m_lastFill = 0;          // ms since the epoch of the last fill()
 };
 
 #endif // INCLUDE_FEATURE_CELLULARFAREND_H_

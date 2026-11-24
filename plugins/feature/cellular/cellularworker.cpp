@@ -1648,6 +1648,16 @@ void CellularWorker::processBatch(Radio& radio)
     listenOutput();
     consoleOutput();
     reportConsole();
+    // the audio inputs that nothing took (no call) are thrown away
+    if (m_microphone) {
+        m_microphone->drain();
+    }
+    for (const std::unique_ptr<Network>& n : m_networks)
+    {
+        if (n->musicInput) {
+            n->musicInput->drain();
+        }
+    }
 }
 
 // the audio for a transmitter goes through the pipe it registered from the controller to it
