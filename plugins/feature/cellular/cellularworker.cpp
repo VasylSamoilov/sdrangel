@@ -70,33 +70,35 @@ QString stateName(NmtChannel::State state)
 {
     switch (state)
     {
+    // the signalling states of NMT Doc 450-1 (1997) 4.4.1: scheme A call from the MS, B call to
+    // the MS, C switching call in progress, D roaming updating, 4.4.1.3 clearing
     case NmtChannel::State::Idle: return "idle";
-    case NmtChannel::State::RoamingIdent: return "roaming: identity";
-    case NmtChannel::State::RoamingConfirm: return "roaming: confirm";
-    case NmtChannel::State::MoIdent: return "call: identity";
-    case NmtChannel::State::MoConfirm: return "call: proceed to send";
-    case NmtChannel::State::MoDialling: return "call: dialling";
-    case NmtChannel::State::MoComplete: return "call: address complete";
-    case NmtChannel::State::Active: return "call: connected";
-    case NmtChannel::State::MtIdent: return "paging: identity";
-    case NmtChannel::State::MtRinging: return "paging: ringing";
-    case NmtChannel::State::MtComplete: return "paging: answered";
-    case NmtChannel::State::MoRelease: return "release by the phone";
-    case NmtChannel::State::MtRelease: return "release";
-    case NmtChannel::State::ScipOrder: return "switch: order";
-    case NmtChannel::State::ScipIdent: return "switch: waiting";
-    case NmtChannel::State::ScipIdentReq: return "switch: identity";
-    case NmtChannel::State::ScipRelease: return "switch: release";
-    case NmtChannel::State::MftIn: return "MFT: in";
-    case NmtChannel::State::Mft: return "MFT";
-    case NmtChannel::State::MftOut: return "MFT: out";
-    case NmtChannel::State::PowerChange: return "call: power change";
-    case NmtChannel::State::RecallProceed: return "recall: proceed";
-    case NmtChannel::State::RecallDigits: return "recall: digits";
-    case NmtChannel::State::RecallEnd: return "recall: end";
-    case NmtChannel::State::MtAutoanswer: return "paging: autoanswer";
-    case NmtChannel::State::MwiClear: return "message waiting: release";
-    case NmtChannel::State::MwiInCall: return "message waiting: in call";
+    case NmtChannel::State::RoamingIdent: return "D4 MTX requests identity";
+    case NmtChannel::State::RoamingConfirm: return "D6 roaming updating confirmation";
+    case NmtChannel::State::MoIdent: return "A4 MTX requests identity";
+    case NmtChannel::State::MoConfirm: return "A6 MTX ready to receive digits";
+    case NmtChannel::State::MoDialling: return "A7 transmission of digits";
+    case NmtChannel::State::MoComplete: return "A8 address complete";
+    case NmtChannel::State::Active: return "speech";
+    case NmtChannel::State::MtIdent: return "B7 MTX requests identity";
+    case NmtChannel::State::MtRinging: return "B10 MTX sends ringing order";
+    case NmtChannel::State::MtComplete: return "B13 answer";
+    case NmtChannel::State::MoRelease: return "MS clearing";
+    case NmtChannel::State::MtRelease: return "MTX clearing";
+    case NmtChannel::State::ScipOrder: return "C switching: channel order";
+    case NmtChannel::State::ScipIdent: return "C switching: MS to the new TC";
+    case NmtChannel::State::ScipIdentReq: return "C switching: MTX requests identity";
+    case NmtChannel::State::ScipRelease: return "C switching: forced release";
+    case NmtChannel::State::MftIn: return "MFT converter in";
+    case NmtChannel::State::Mft: return "MFT converter";
+    case NmtChannel::State::MftOut: return "MFT converter out";
+    case NmtChannel::State::PowerChange: return "MS output power change";
+    case NmtChannel::State::RecallProceed: return "register recall";
+    case NmtChannel::State::RecallDigits: return "register recall: digits";
+    case NmtChannel::State::RecallEnd: return "register recall: end";
+    case NmtChannel::State::MtAutoanswer: return "B2 automatic answer";
+    case NmtChannel::State::MwiClear: return "MTX clearing with message waiting";
+    case NmtChannel::State::MwiInCall: return "message waiting indication";
     case NmtChannel::State::Sms: return "short message";
     }
     return "?";
@@ -151,6 +153,7 @@ void CellularWorker::handleInputMessages()
             action(static_cast<const Cellular::MsgAction&>(*message));
         } else if (MsgSmsCentres::match(*message)) {
             m_smsCentres = static_cast<const MsgSmsCentres&>(*message).m_centres;
+            m_bookPhones = static_cast<const MsgSmsCentres&>(*message).m_phones;
         } else if (MsgNames::match(*message)) {
             rename(static_cast<const MsgNames&>(*message));
         }
@@ -317,6 +320,26 @@ void CellularWorker::setHandlers(Network& n)
         trafficArea(n, y1, area);
         const std::string number = numberText(subscriber).toStdString();
         known(number).noteDialled(dialled, y1, area);
+        // where the call goes: the number and what answers it
+        const auto own = m_smsCentres.find(std::make_pair(static_cast<int>(n.config.system), number));
+        QString type;
+        if (dialled == n.config.smscNumber || (own != m_smsCentres.end() && own->second == dialled)) {
+            type = "SMS centre";
+        } else if (n.cellular && n.cellular->isRegistered(dialled)) {
+            type = "phone";
+        } else if (n.phones.count(dialled) > 0 || m_known.count(dialled) > 0
+                   || m_bookPhones.count(std::make_pair(static_cast<int>(n.config.system), dialled)) > 0) {
+            type = "phone, not registered here: paged";
+        } else {
+            type = n.music ? "music, no phone has the number" : "echo, no phone has the number";
+        }
+        const QString to = QString::fromStdString(dialled);
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        n.callInfo[number] = {QString("call to %1 (%2)").arg(to).arg(type.section(',', 0, 0)), now};
+        if (type.startsWith("phone")) {
+            n.callInfo[dialled] = {QString("call from %1 (phone)").arg(QString::fromStdString(number)), now};
+        }
+        log(n.id, QString("%1 calls %2: %3").arg(QString::fromStdString(number)).arg(to).arg(type), Cellular::MsgReportLog::Call);
         if (m_reports) {
             m_reports->push(Cellular::MsgBookLearn::create(Cellular::MsgBookLearn::Dialled, n.config.system, number, dialled, y1, area));
         }
@@ -413,6 +436,9 @@ void CellularWorker::action(const Cellular::MsgAction& msg)
         }
         const bool registered = system.isRegistered(country, digits);
         ok = n.caller->call(number, "", n.bridge->legOf(number), std::move(endpoint), &cause);
+        if (ok) {
+            n.callInfo[number] = {QString("call from the tester (%1)").arg(n.music ? "music" : "echo"), QDateTime::currentMSecsSinceEpoch()};
+        }
         log(n.id, ok
             ? QString("%1: paging the phone (%2), the far end is %3").arg(what).arg(registered ? "registered" : "not registered")
                 .arg(n.music ? "music" : "echo")
@@ -1115,6 +1141,11 @@ void CellularWorker::tryBind(Network& n)
     }
 
     n.bridge = std::make_unique<modemnmt::NmtCellularBridge>(*n.station->system(), *n.cellular);
+    // a call to a phone the tester knows (heard, or in the book) pages it also without a roaming update
+    n.bridge->setKnownPhone([this, network = &n](const std::string& number) {
+        return network->phones.count(number) > 0 || m_known.count(number) > 0
+            || m_bookPhones.count(std::make_pair(static_cast<int>(network->config.system), number)) > 0;
+    });
     n.caller = std::make_unique<modemcellular::TestCaller>(*n.cellular);
     setHandlers(n);
     n.phones.clear();
@@ -1343,6 +1374,23 @@ void CellularWorker::reportSpeech(Network& n, bool logLine)
             toTx.carriers.push_back({ids[i], s.live, s.txRecent, s.txCall});
         }
     }
+    // the destination of a call goes with the phone off the channels (after a while: it is noted
+    // when the phone dials, before its channel shows the call)
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    for (auto it = n.callInfo.begin(); it != n.callInfo.end();)
+    {
+        bool onChannel = false;
+        for (size_t i = 0; i < system->channelCount(); i++)
+        {
+            const modemnmt::NmtTransaction *t = system->channel(i).currentTransaction();
+            onChannel = onChannel || (t && modemnmt::NmtCellularBridge::numberOf(t->subscriber) == it->first);
+        }
+        if (!onChannel && now - it->second.since > 5000) {
+            it = n.callInfo.erase(it);
+        } else {
+            ++it;
+        }
+    }
     if (!toRx.carriers.empty())
     {
         sendTo(n.rx->channel, modemcellular::encodeSpeech(toRx));
@@ -1439,10 +1487,35 @@ void CellularWorker::reportStatus(const Network& n)
         });
         for (const Cellular::MsgReportStatus::Carrier& c : msg->m_carriers)
         {
-            if (!c.phone.isEmpty() && phones.count(c.phone.toStdString()) > 0) {
-                phones[c.phone.toStdString()].state = QString("channel %1: %2").arg(c.channel).arg(c.state);
+            if (!c.phone.isEmpty() && phones.count(c.phone.toStdString()) > 0)
+            {
+                // with the destination of its call when it has one
+                const auto info = n.callInfo.find(c.phone.toStdString());
+                phones[c.phone.toStdString()].state = info != n.callInfo.end()
+                    ? QString("channel %1: %2: %3").arg(c.channel).arg(info->second.text).arg(c.state)
+                    : QString("channel %1: %2").arg(c.channel).arg(c.state);
             }
         }
+        // a call to a phone that is still on the calling channel: scheme B before the traffic channel
+        system->forEachTransaction([&phones, &n](const modemnmt::NmtTransaction& t) {
+            const char *step = nullptr;
+            switch (t.ccPhase)
+            {
+            case modemnmt::NmtTransaction::CcPhase::Deferred: step = "B2 MS is called (waiting for its battery saving group)"; break;
+            case modemnmt::NmtTransaction::CcPhase::Page: step = "B2 MS is called (2a)"; break;
+            case modemnmt::NmtTransaction::CcPhase::Order: step = "B5 MTX sends channel order (2b)"; break;
+            case modemnmt::NmtTransaction::CcPhase::Queue: step = "B5 queueing (2f), waiting for a free TC"; break;
+            case modemnmt::NmtTransaction::CcPhase::None: break;
+            }
+            if (!step) {
+                return;
+            }
+            const std::string number = modemnmt::NmtCellularBridge::numberOf(t.subscriber);
+            Cellular::MsgReportStatus::Phone& phone = phones[number];
+            phone.number = QString::fromStdString(number);
+            const auto info = n.callInfo.find(number);
+            phone.state = QString("calling channel: %1%2").arg(info != n.callInfo.end() ? info->second.text + ": " : QString()).arg(step);
+        });
         for (auto& p : phones)
         {
             Cellular::MsgReportStatus::Phone& phone = p.second;

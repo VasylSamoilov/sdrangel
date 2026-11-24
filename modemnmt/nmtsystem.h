@@ -201,6 +201,13 @@ public:
 
     void run() { m_timers.run(); }
     size_t transactionCount() const { return m_transactions.size(); }
+    // every transaction, read only (what the phones do, for a display)
+    void forEachTransaction(const std::function<void(const NmtTransaction&)>& function) const
+    {
+        for (const NmtTransaction& t : m_transactions) {
+            function(t);
+        }
+    }
 
     // NmtHost
     modemcellular::TimerService& timers() override { return m_timers; }

@@ -21,6 +21,7 @@
 #include <deque>
 #include <map>
 #include <memory>
+#include <set>
 #include <vector>
 
 #include <QObject>
@@ -79,6 +80,7 @@ public:
 
     public:
         std::map<std::pair<int, std::string>, std::string> m_centres;
+        std::set<std::pair<int, std::string>> m_phones;     // every phone of the book, by system and number
         static MsgSmsCentres* create() { return new MsgSmsCentres(); }
 
     private:
@@ -170,6 +172,14 @@ private:
             bool live = false;
         };
         std::vector<SpeechSeen> speechSeen;
+        // the call of a phone, by number: "call to 43664558 (echo)", "call from 3726136 (phone)";
+        // kept while the phone is on a channel, and since when
+        struct CallInfo
+        {
+            QString text;
+            qint64 since = 0;               // ms since the epoch
+        };
+        std::map<std::string, CallInfo> callInfo;
         uint64_t batches = 0;
         uint64_t gaps = 0;                      // batches of the receiver that did not arrive
         uint64_t nextSample = 0;
@@ -220,6 +230,7 @@ private:
     std::vector<std::unique_ptr<Network>> m_networks;
     std::map<std::string, modemnmt::NmtPhoneInfo> m_known;
     std::map<std::pair<int, std::string>, std::string> m_smsCentres;   // of the phones, from the book
+    std::set<std::pair<int, std::string>> m_bookPhones;                // the phones of the book
     // touch tones in the speech of the phones (DTMF), by number: the keys of a group are logged
     // together when the phone sent no key for a while
     struct ToneListener
