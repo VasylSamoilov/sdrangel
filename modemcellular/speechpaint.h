@@ -118,7 +118,14 @@ namespace detail
 
     inline QString limitText(const modemcellular::SpeechStats& s)
     {
-        return s.speech ? QString("%1%").arg(100.0 * s.limitShare(), 0, 'f', 1) : QString("-");
+        if (!s.speech) {
+            return QString("-");
+        }
+        // a few samples at the limit are not 0.0 %
+        if (s.atLimit > 0 && s.limitShare() < 0.0005) {
+            return QString("<0.1%");
+        }
+        return QString("%1%").arg(100.0 * s.limitShare(), 0, 'f', 1);
     }
 } // namespace detail
 

@@ -705,8 +705,10 @@ QWidget *CellularGUI::buildPhones()
 
     // one row per phone: the book and the phones the networks hear; two lines each (the delegate)
     m_phones = makeTable(page, {"Mobile", "State", "Speech"});
-    m_phones->horizontalHeader()->setSectionResizeMode(MobileName, QHeaderView::Stretch);
-    m_phones->horizontalHeader()->setSectionResizeMode(MobileState, QHeaderView::ResizeToContents);
+    // the state takes the room that is left (its text grows with the call: destination and
+    // signalling state); the phone keeps the width of its name and chips
+    m_phones->horizontalHeader()->setSectionResizeMode(MobileName, QHeaderView::ResizeToContents);
+    m_phones->horizontalHeader()->setSectionResizeMode(MobileState, QHeaderView::Stretch);
     m_phones->horizontalHeader()->setSectionResizeMode(MobileSpeech, QHeaderView::ResizeToContents);
     m_phones->horizontalHeader()->setStretchLastSection(false);
     m_phones->setItemDelegateForColumn(MobileName, new CellularMobileDelegate(m_phones));
@@ -1202,7 +1204,9 @@ QString CellularGUI::liveText(const QString& number, int& network, QColor& colou
                 last = p.lastHeard;
                 state = p.state.isEmpty() ? QString("idle") : p.state;
                 line = QString("%1%2").arg(networkName(it.key()))
-                    .arg(p.lastHeard.isValid() ? QString(", %1 dB, %2").arg(p.level, 0, 'f', 1).arg(p.lastHeard.toString("HH:mm:ss")) : QString());
+                    .arg(p.lastHeard.isValid() ? QString(", %1 dB%2, %3").arg(p.level, 0, 'f', 1)
+                        .arg(p.power >= 0 ? QString(", power %1").arg(p.power) : QString())   // level in its frames
+                        .arg(p.lastHeard.toString("HH:mm:ss")) : QString());
                 colour = state.contains("call") || state.contains("conversation") ? QColor(0x3f, 0xbf, 0x5f)
                     : state.contains("ring") || state.contains("pag") || state.contains("sms") ? QColor(0xe0, 0xa0, 0x30)
                     : p.registered ? QColor(0x4a, 0x8a, 0xd0) : QColor(0x9a, 0x9a, 0x9a);
