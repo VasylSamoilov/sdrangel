@@ -16,7 +16,9 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include <algorithm>
+#include <cmath>
 
+#include <QFontMetricsF>
 #include <QHeaderView>
 #include <QMenu>
 
@@ -196,11 +198,14 @@ void CellularChannelGrid::setPlan(modemnmt::System system, const QString& countr
             m_sections.push_back(section);
         }
     }
+    // the text is laid out with fractional advances (2023 is 22.19 px in the small Liberation
+    // Sans): the integer width (22) would leave a column too narrow by a fraction, and elided
+    const QFontMetricsF metrics(font());
     int widest = 0;
     for (size_t i = 0; i < m_cells.size(); i++)
     {
         m_byChannel[m_cells[i].channel] = static_cast<int>(i);
-        widest = std::max(widest, fontMetrics().horizontalAdvance(QString::number(m_cells[i].channel)));
+        widest = std::max(widest, static_cast<int>(std::ceil(metrics.horizontalAdvance(QString::number(m_cells[i].channel)))));
     }
     // the margins the style puts around the text of an item, and the grid line
     const int margins = 2 * (style()->pixelMetric(QStyle::PM_FocusFrameHMargin, nullptr, this) + 1) + 1;
