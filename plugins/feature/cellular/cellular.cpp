@@ -897,6 +897,7 @@ int Cellular::webapiReportGet(SWGSDRangel::SWGFeatureReport& response, QString& 
 
             carrier->init();
             carrier->setChannel(c.channel);
+            *carrier->getType() = c.type;
             carrier->setDownlink(static_cast<qint64>(c.downlink));
             carrier->setUplink(static_cast<qint64>(c.uplink));
             *carrier->getState() = c.state;

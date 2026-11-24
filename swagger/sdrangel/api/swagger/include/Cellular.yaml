@@ -279,6 +279,9 @@ CellularCarrierReport:
     channel:
       type: integer
       description: "Channel number."
+    type:
+      type: string
+      description: "Type of the channel as in the network's carriers (NMT CC, TC, AC/TC, CC/TC; AMPS CC/PC, VC)."
     downlink:
       type: integer
       format: int64

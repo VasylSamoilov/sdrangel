@@ -5308,6 +5308,10 @@ margin-bottom: 20px;
       "type" : "integer",
       "description" : "Channel number."
     },
+    "type" : {
+      "type" : "string",
+      "description" : "Type of the channel as in the network's carriers (NMT CC, TC, AC/TC, CC/TC; AMPS CC/PC, VC)."
+    },
     "downlink" : {
       "type" : "integer",
       "format" : "int64",
@@ -5454,7 +5458,19 @@ margin-bottom: 20px;
     },
     "system" : {
       "type" : "integer",
-      "description" : "(0 NMT-450, 1 NMT-900)"
+      "description" : "(0 NMT-450, 1 NMT-900, 2 AMPS)"
+    },
+    "sid" : {
+      "type" : "integer",
+      "description" : "AMPS: the system identification SID 0..32767."
+    },
+    "dcc" : {
+      "type" : "integer",
+      "description" : "AMPS: the digital colour code 0..3."
+    },
+    "scc" : {
+      "type" : "integer",
+      "description" : "AMPS: the SAT colour code 0..2 of the voice channels (a carrier may give its own: 356:vc:1)."
     },
     "country" : {
       "type" : "string",
@@ -5499,6 +5515,42 @@ margin-bottom: 20px;
     "fallback" : {
       "type" : "integer",
       "description" : "What answers a call to a number that is not registered (0 echo, 1 music)."
+    },
+    "echoDelay" : {
+      "type" : "integer",
+      "description" : "Delay of the echo in ms (200..3000)."
+    },
+    "echoLevel" : {
+      "type" : "integer",
+      "description" : "Level of the echo in dB (-30..0)."
+    },
+    "echoAnnounce" : {
+      "type" : "integer",
+      "description" : "A short tone when the echo answers (1) or not (0)."
+    },
+    "musicSource" : {
+      "type" : "integer",
+      "description" : "Source of the music (0 built-in melody, 1 WAV file, 2 audio input)."
+    },
+    "musicFile" : {
+      "type" : "string",
+      "description" : "The WAV file played as music."
+    },
+    "musicInput" : {
+      "type" : "string",
+      "description" : "The audio input device played as music, by name; empty for the default."
+    },
+    "musicLevel" : {
+      "type" : "integer",
+      "description" : "Level of the music in dB (-30..0)."
+    },
+    "musicLoop" : {
+      "type" : "integer",
+      "description" : "Play the music in a loop (1) or once, then end the call (0)."
+    },
+    "callLimit" : {
+      "type" : "integer",
+      "description" : "The longest call to echo or music in seconds (0..3600), 0 for no limit."
     },
     "rxDeviceSetIndex" : {
       "type" : "integer",
@@ -5597,6 +5649,14 @@ margin-bottom: 20px;
       "description" : "Lead of the transmitters over the receivers in ms (part of the round trip). Taken when the controller starts.",
       "minimum" : 20,
       "maximum" : 1000
+    },
+    "logEnabled" : {
+      "type" : "integer",
+      "description" : "Write the log also into the file logFilename (1 enabled, 0 disabled): CSV with the columns Date, Time, Network, Kind, Text, appended to."
+    },
+    "logFilename" : {
+      "type" : "string",
+      "description" : "Log file name or path."
     },
     "networks" : {
       "type" : "array",
@@ -76193,7 +76253,7 @@ $(document).ready(function() {
           </div>
           <div id="generator">
             <div class="content">
-              Generated 2026-11-24T00:55:59.704Z
+              Generated 2026-11-24T23:14:25.720Z
             </div>
           </div>
       </div>

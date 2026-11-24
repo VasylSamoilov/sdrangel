@@ -30,6 +30,8 @@ SWGCellularCarrierReport::SWGCellularCarrierReport(QString* json) {
 SWGCellularCarrierReport::SWGCellularCarrierReport() {
     channel = 0;
     m_channel_isSet = false;
+    type = nullptr;
+    m_type_isSet = false;
     downlink = 0L;
     m_downlink_isSet = false;
     uplink = 0L;
@@ -56,6 +58,8 @@ void
 SWGCellularCarrierReport::init() {
     channel = 0;
     m_channel_isSet = false;
+    type = new QString("");
+    m_type_isSet = false;
     downlink = 0L;
     m_downlink_isSet = false;
     uplink = 0L;
@@ -77,6 +81,9 @@ SWGCellularCarrierReport::init() {
 void
 SWGCellularCarrierReport::cleanup() {
 
+    if(type != nullptr) { 
+        delete type;
+    }
 
 
     if(state != nullptr) { 
@@ -103,6 +110,8 @@ SWGCellularCarrierReport::fromJson(QString &json) {
 void
 SWGCellularCarrierReport::fromJsonObject(QJsonObject &pJson) {
     ::SWGSDRangel::setValue(&channel, pJson["channel"], "qint32", "");
+    
+    ::SWGSDRangel::setValue(&type, pJson["type"], "QString", "QString");
     
     ::SWGSDRangel::setValue(&downlink, pJson["downlink"], "qint64", "");
     
@@ -138,6 +147,9 @@ SWGCellularCarrierReport::asJsonObject() {
     QJsonObject* obj = new QJsonObject();
     if(m_channel_isSet){
         obj->insert("channel", QJsonValue(channel));
+    }
+    if(type != nullptr && *type != QString("")){
+        toJsonValue(QString("type"), type, obj, QString("QString"));
     }
     if(m_downlink_isSet){
         obj->insert("downlink", QJsonValue(downlink));
@@ -175,6 +187,16 @@ void
 SWGCellularCarrierReport::setChannel(qint32 channel) {
     this->channel = channel;
     this->m_channel_isSet = true;
+}
+
+QString*
+SWGCellularCarrierReport::getType() {
+    return type;
+}
+void
+SWGCellularCarrierReport::setType(QString* type) {
+    this->type = type;
+    this->m_type_isSet = true;
 }
 
 qint64
@@ -263,6 +285,9 @@ SWGCellularCarrierReport::isSet(){
     bool isObjectUpdated = false;
     do{
         if(m_channel_isSet){
+            isObjectUpdated = true; break;
+        }
+        if(type && *type != QString("")){
             isObjectUpdated = true; break;
         }
         if(m_downlink_isSet){

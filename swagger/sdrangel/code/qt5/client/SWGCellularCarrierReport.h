@@ -45,6 +45,9 @@ public:
     qint32 getChannel();
     void setChannel(qint32 channel);
 
+    QString* getType();
+    void setType(QString* type);
+
     qint64 getDownlink();
     void setDownlink(qint64 downlink);
 
@@ -75,6 +78,9 @@ public:
 private:
     qint32 channel;
     bool m_channel_isSet;
+
+    QString* type;
+    bool m_type_isSet;
 
     qint64 downlink;
     bool m_downlink_isSet;
