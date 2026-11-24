@@ -35,6 +35,7 @@
 
 #include "carrierqueue.h"
 #include "carrierradio.h"
+#include "carrierwire.h"
 
 #include "cellulartxsettings.h"
 
@@ -94,6 +95,8 @@ public:
     Status status() const;
     // the names of the networks on the device by id, as the controller sent them
     std::map<int, QString> networkNames() const;
+    // the speech to the phones of the calls on the carriers by id, as the controller sent it
+    std::map<int, modemcellular::WireSpeech::Carrier> speech() const;
     qint64 getDeviceCenterFrequency() const { return m_centerFrequency; }
     // audio of the controller into the queues (thread of the audio, see CellularTxAudio)
     void writeBatch(const modemcellular::CarrierBatch& batch);
@@ -125,6 +128,8 @@ private:
     std::vector<std::complex<float>> m_buffer;
     QTimer m_statusTimer;
     std::map<int, QString> m_networkNames;     // under m_mutex
+    std::map<int, modemcellular::WireSpeech::Carrier> m_speech;    // under m_mutex
+    std::map<int, qint64> m_speechAt;          // ms since the epoch of the last report of a carrier
 
     bool handleMessage(const Message& cmd) override;
     void makeTransmitter();

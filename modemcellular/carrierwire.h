@@ -24,6 +24,7 @@
 
 #include "carrierbatch.h"
 #include "carrierradio.h"
+#include "speechmeter.h"
 #include "export.h"
 
 namespace modemcellular
@@ -40,7 +41,8 @@ enum class WireKind : uint8_t
     SpanRequest = 3,    // controller to radio: send the span
     Tuning = 4,         // controller to radio: the carriers to run (none: stop)
     TxStatus = 5,       // transmitter to controller: queue fill and underruns per carrier
-    Names = 6           // controller to radio: the names of the networks, for its display
+    Names = 6,          // controller to radio: the names of the networks, for its display
+    Speech = 7          // controller to radio: the speech of the calls on its carriers, for its display
 };
 
 struct WireSpan
@@ -69,6 +71,20 @@ struct WireNames
     std::vector<std::string> names;
 };
 
+// The speech of the calls on carriers of the radio, one direction: what the receiver hears from
+// the phone (receive radio), what the transmitter sends to it (transmit radio).
+struct WireSpeech
+{
+    struct Carrier
+    {
+        int carrier = 0;                // id, as in the batches
+        bool live = false;              // the call is on; false: the call ended, `call` is the whole call
+        SpeechStats recent;             // the last 2 s (live)
+        SpeechStats call;               // the whole call
+    };
+    std::vector<Carrier> carriers;
+};
+
 MODEMCELLULAR_API WireKind wireKind(const uint8_t* data, size_t size);
 
 MODEMCELLULAR_API std::vector<uint8_t> encodeBatch(const CarrierBatch& batch);
@@ -88,6 +104,9 @@ MODEMCELLULAR_API bool decodeTxStatus(const uint8_t* data, size_t size, WireTxSt
 // None when the lists differ in length or a name is longer than kMaxName
 MODEMCELLULAR_API std::vector<uint8_t> encodeNames(const WireNames& names);
 MODEMCELLULAR_API bool decodeNames(const uint8_t* data, size_t size, WireNames& names);
+
+MODEMCELLULAR_API std::vector<uint8_t> encodeSpeech(const WireSpeech& speech);
+MODEMCELLULAR_API bool decodeSpeech(const uint8_t* data, size_t size, WireSpeech& speech);
 
 } // namespace modemcellular
 

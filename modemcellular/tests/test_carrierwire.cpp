@@ -178,11 +178,63 @@ static void testNames()
     CHECK(decodeNames(wire.data(), wire.size(), out) && out.networks.empty() && out.names.empty());
 }
 
+// The call meters of the carriers: every count, the energies and the live flag come through.
+static void testSpeech()
+{
+    WireSpeech speech;
+    for (int k = 0; k < 2; k++)
+    {
+        WireSpeech::Carrier c;
+        c.carrier = 90010 + k;
+        c.live = k == 0;
+        for (int i = 0; i < SpeechStats::kBins; i++) {
+            c.recent.bins[i] = static_cast<uint64_t>(i * 7 + k);
+            c.call.bins[i] = static_cast<uint64_t>(i * 1000 + 3);
+        }
+        c.recent.speech = 1600;
+        c.recent.pause = 14400;
+        c.recent.atLimit = 5;
+        c.recent.energy = 12.5;
+        c.call.speech = 800000;
+        c.call.energy = 1.0e5;
+        for (int b = 0; b < SpeechStats::kBands; b++) {
+            c.recent.bandEnergy[b] = 0.5 * (b + 1);
+            c.call.bandEnergy[b] = 100.0 * (b + 1);
+        }
+        c.recent.peak = 1.567;
+        speech.carriers.push_back(c);
+    }
+    std::vector<uint8_t> wire = encodeSpeech(speech);
+    WireSpeech out;
+    CHECK(wireKind(wire.data(), wire.size()) == WireKind::Speech);
+    CHECK(decodeSpeech(wire.data(), wire.size(), out));
+    CHECK(out.carriers.size() == 2);
+    for (size_t k = 0; k < out.carriers.size() && k < 2; k++)
+    {
+        const WireSpeech::Carrier& a = speech.carriers[k];
+        const WireSpeech::Carrier& b = out.carriers[k];
+        CHECK(a.carrier == b.carrier && a.live == b.live);
+        CHECK(a.recent.bins == b.recent.bins && a.call.bins == b.call.bins);
+        CHECK(a.recent.speech == b.recent.speech && a.recent.pause == b.recent.pause && a.recent.atLimit == b.recent.atLimit);
+        CHECK(a.recent.energy == b.recent.energy && a.call.energy == b.call.energy);
+        CHECK(a.recent.bandEnergy == b.recent.bandEnergy && a.call.bandEnergy == b.call.bandEnergy);
+        CHECK(a.recent.peak == b.recent.peak && a.call.speech == b.call.speech);
+    }
+    for (size_t cut = 1; cut < wire.size(); cut += 7) {
+        CHECK(!decodeSpeech(wire.data(), cut, out));
+    }
+    wire.push_back(0);
+    CHECK(!decodeSpeech(wire.data(), wire.size(), out));
+    wire = encodeSpeech(WireSpeech());
+    CHECK(decodeSpeech(wire.data(), wire.size(), out) && out.carriers.empty());
+}
+
 int main()
 {
     testBatch();
     testOthers();
     testNames();
+    testSpeech();
 
     if (g_failures == 0) {
         std::printf("all carrier wire tests passed\n");

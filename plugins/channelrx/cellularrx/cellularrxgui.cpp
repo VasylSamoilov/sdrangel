@@ -30,6 +30,7 @@
 
 #include "cellularrx.h"
 #include "cellularrxgui.h"
+#include "speechbox.h"
 
 namespace
 {
@@ -40,12 +41,12 @@ const int kIdStride = 10000;
 const char * const kWidest = "-1999.9 kHz, ch 9999";
 
 // the name of the network takes the room the line of the channel leaves
-void setBoxText(QLabel *box, const QString& name, int channel, const QString& line2, const QString& line3)
+void setBoxText(CellularCarrierBox *box, const QString& name, int channel, const QString& line2, const QString& line3)
 {
     const QFontMetrics fm = box->fontMetrics();
     const QString ch = QString(" ch %1").arg(channel);
     const int room = box->contentsRect().width() - 8 - fm.horizontalAdvance(ch);
-    box->setText(fm.elidedText(name, Qt::ElideRight, room) + ch + "\n" + line2 + "\n" + line3);
+    box->setLines(fm.elidedText(name, Qt::ElideRight, room) + ch + "\n" + line2 + "\n" + line3);
 }
 
 } // namespace
@@ -182,16 +183,16 @@ void CellularRxGUI::onMenuDialogCalled(const QPoint& p)
 
 void CellularRxGUI::rebuildBoxes(const std::vector<int>& ids)
 {
-    for (QLabel *box : m_boxes) {
+    for (CellularCarrierBox *box : m_boxes) {
         delete box;
     }
     m_boxes.clear();
     for (size_t i = 0; i < ids.size(); i++)
     {
-        QLabel *box = new QLabel(m_boxLayout->parentWidget());
-        box->setFrameShape(QFrame::Box);
-        box->setFixedWidth(box->fontMetrics().horizontalAdvance(kWidest) + 12);
-        box->setAlignment(Qt::AlignCenter);
+        // from the phone: the receiver hears it
+        CellularCarrierBox *box = new CellularCarrierBox(m_boxLayout->parentWidget(), CellularSpeechPaint::up());
+        box->setFixedWidth(std::max(box->fontMetrics().horizontalAdvance(kWidest) + 12,
+            CellularCarrierBox::meterWidth(box->fontMetrics())));
         m_boxLayout->addWidget(box);
         box->show();        // now, not queued as the layout does: fitHeight() needs its size
         m_boxes.push_back(box);
@@ -251,6 +252,12 @@ void CellularRxGUI::tick()
         rebuildBoxes(ids);
     }
     const std::map<int, QString> names = m_cellularRx->networkNames();
+    const std::map<int, modemcellular::WireSpeech::Carrier> speech = m_cellularRx->speech();
+    for (size_t i = 0; i < m_boxes.size() && i < status.carriers.size(); i++)
+    {
+        const auto s = speech.find(status.carriers[i].id);
+        m_boxes[i]->setSpeech(s != speech.end() ? &s->second : nullptr);
+    }
     for (size_t i = 0; i < m_boxes.size() && i < status.carriers.size(); i++)
     {
         const modemcellular::CarrierTuning& t = status.carriers[i];
@@ -258,7 +265,7 @@ void CellularRxGUI::tick()
         const int network = t.id / kIdStride;
         const auto it = names.find(network);
         const QString name = it != names.end() && !it->second.isEmpty() ? it->second : QString("net %1").arg(network);
-        QLabel *box = m_boxes[i];
+        CellularCarrierBox *box = m_boxes[i];
 
         setBoxText(box, name, t.id % kIdStride,
             QString("%1 kHz").arg(t.offset / 1e3, 0, 'f', 1),

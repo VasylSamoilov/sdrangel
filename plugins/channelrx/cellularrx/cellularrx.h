@@ -29,6 +29,7 @@
 #include "dsp/basebandsamplesink.h"
 #include "util/message.h"
 
+#include "carrierwire.h"
 #include "cellularrxbaseband.h"
 #include "cellularrxsettings.h"
 
@@ -72,6 +73,8 @@ public:
     CellularRxBaseband::Status status() const { return m_basebandSink->status(); }
     // the names of the networks on the device by id, as the controller sent them
     std::map<int, QString> networkNames() const;
+    // the speech from the phones of the calls on the carriers by id, as the controller sent it
+    std::map<int, modemcellular::WireSpeech::Carrier> speech() const;
     qint64 getDeviceCenterFrequency() const { return m_centerFrequency; }
 
     static const char * const m_channelIdURI;
@@ -85,7 +88,9 @@ private:
     int m_basebandSampleRate;
     qint64 m_centerFrequency;
     std::map<int, QString> m_networkNames;
-    mutable QMutex m_namesMutex;
+    std::map<int, modemcellular::WireSpeech::Carrier> m_speech;
+    std::map<int, qint64> m_speechAt;       // ms since the epoch of the last report of a carrier
+    mutable QMutex m_namesMutex;            // the names and the speech
 
     bool handleMessage(const Message& cmd) override;
     void sendSpan();

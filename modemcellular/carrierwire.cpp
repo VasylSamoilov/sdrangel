@@ -109,7 +109,7 @@ private:
 
 WireKind wireKind(const uint8_t* data, size_t size)
 {
-    if (!data || size < 1 || data[0] < 1 || data[0] > 6) {
+    if (!data || size < 1 || data[0] < 1 || data[0] > static_cast<uint8_t>(WireKind::Speech)) {
         return WireKind::None;
     }
     return static_cast<WireKind>(data[0]);
@@ -291,6 +291,74 @@ bool decodeNames(const uint8_t* data, size_t size, WireNames& names)
         const uint8_t length = r.get<uint8_t>();
         names.names[i].resize(r.ok() ? length : 0);
         r.getArray(&names.names[i][0], names.names[i].size());
+    }
+    return r.done();
+}
+
+namespace
+{
+
+void putStats(Writer& w, const SpeechStats& s)
+{
+    w.putArray(s.bins.data(), s.bins.size());
+    w.put(s.speech);
+    w.put(s.pause);
+    w.put(s.atLimit);
+    w.put(s.energy);
+    w.putArray(s.bandEnergy.data(), s.bandEnergy.size());
+    w.put(s.peak);
+}
+
+void getStats(Reader& r, SpeechStats& s)
+{
+    r.getArray(s.bins.data(), s.bins.size());
+    s.speech = r.get<uint64_t>();
+    s.pause = r.get<uint64_t>();
+    s.atLimit = r.get<uint64_t>();
+    s.energy = r.get<double>();
+    r.getArray(s.bandEnergy.data(), s.bandEnergy.size());
+    s.peak = r.get<double>();
+}
+
+const size_t kStatsBytes = SpeechStats::kBins * 8 + 3 * 8 + 8 + SpeechStats::kBands * 8 + 8;
+
+} // namespace
+
+std::vector<uint8_t> encodeSpeech(const WireSpeech& speech)
+{
+    Writer w(WireKind::Speech);
+    const uint32_t n = static_cast<uint32_t>(speech.carriers.size());
+
+    if (n > kMaxCarriers) {
+        return Writer(WireKind::None).take();
+    }
+    w.put(n);
+    for (const WireSpeech::Carrier& c : speech.carriers)
+    {
+        w.put(static_cast<int32_t>(c.carrier));
+        w.put(static_cast<uint8_t>(c.live ? 1 : 0));
+        putStats(w, c.recent);
+        putStats(w, c.call);
+    }
+    return w.take();
+}
+
+bool decodeSpeech(const uint8_t* data, size_t size, WireSpeech& speech)
+{
+    Reader r(data, size, WireKind::Speech);
+    const uint32_t n = r.get<uint32_t>();
+
+    if (!r.ok() || n > kMaxCarriers || size != 1 + 4 + n * (4 + 1 + 2 * kStatsBytes)) {
+        return false;
+    }
+    speech.carriers.resize(n);
+    for (uint32_t i = 0; i < n && r.ok(); i++)
+    {
+        WireSpeech::Carrier& c = speech.carriers[i];
+        c.carrier = r.get<int32_t>();
+        c.live = r.get<uint8_t>() != 0;
+        getStats(r, c.recent);
+        getStats(r, c.call);
     }
     return r.done();
 }

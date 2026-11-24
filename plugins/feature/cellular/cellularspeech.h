@@ -26,6 +26,7 @@
 #include <QWidget>
 
 #include "cellular.h"
+#include "speechpaint.h"
 
 // The speech of a phone's call as the GUI keeps it: the last report, and when it came.
 struct CellularSpeechSeen
@@ -38,22 +39,10 @@ struct CellularSpeechSeen
 
 class QPainter;
 
-// The call meters: for one direction of a call's speech, the level drawing (a grey bar for the
-// share of pauses, then where the speech samples landed from -40 to +4 dB of the reference, the
-// red line at the limit) and the spectrum drawing (six bands of the telephone band relative to
-// the speech level, -30..+0 dB).
+// The drawing of the call meters is shared with the radio channels (speechpaint.h); here the text.
 namespace CellularSpeechPaint
 {
-    // the arrows of the two directions: from the phone, to the phone
-    QString up();
-    QString down();
-    // one direction in `rect`: arrow, level, spectrum, share at the limit; dim: a call that ended
-    void direction(QPainter& painter, const QRect& rect, const QString& arrow, const modemcellular::SpeechStats& stats, bool dim);
-    // the height of one direction for a font
-    int lineHeight(const QFontMetrics& fm);
-    // the width it needs
-    int lineWidth(const QFontMetrics& fm);
-    // both directions as text, for tooltips and the record (several lines)
+    // both directions as text, for tooltips (several lines)
     QString text(const CellularCallSpeech& call, bool whole);
 }
 

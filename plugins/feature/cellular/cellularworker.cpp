@@ -858,6 +858,7 @@ void CellularWorker::handlePacket(Radio& radio, const QByteArray& bytes)
     case modemcellular::WireKind::SpanRequest:
     case modemcellular::WireKind::Tuning:
     case modemcellular::WireKind::Names:
+    case modemcellular::WireKind::Speech:
         return;
     }
 }
@@ -1276,6 +1277,17 @@ void CellularWorker::reportSpeech(Network& n, bool logLine)
         return;
     }
     Cellular::MsgReportSpeech *msg = Cellular::MsgReportSpeech::create(n.id);
+    // to the boxes of the carriers in the radios: the receiver shows the speech from the phone,
+    // the transmitter the speech to it
+    modemcellular::WireSpeech toRx, toTx;
+    std::vector<int> ids;                       // carrier id of each channel on air
+
+    for (size_t k = 0; k < n.station->carriers().size(); k++)
+    {
+        if (n.station->carriers()[k].onAir) {
+            ids.push_back(n.station->carrierId(k));
+        }
+    }
 
     for (size_t i = 0; i < system->channelCount() && i < n.speechSeen.size(); i++)
     {
@@ -1325,6 +1337,16 @@ void CellularWorker::reportSpeech(Network& n, bool logLine)
         seen.call = s.call;
         seen.live = s.live;
         msg->m_calls.append(call);
+        if (i < ids.size())
+        {
+            toRx.carriers.push_back({ids[i], s.live, s.rxRecent, s.rxCall});
+            toTx.carriers.push_back({ids[i], s.live, s.txRecent, s.txCall});
+        }
+    }
+    if (!toRx.carriers.empty())
+    {
+        sendTo(n.rx->channel, modemcellular::encodeSpeech(toRx));
+        sendTo(n.tx->channel, modemcellular::encodeSpeech(toTx));
     }
     if (msg->m_calls.isEmpty() || !m_reports) {
         delete msg;

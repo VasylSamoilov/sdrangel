@@ -16,6 +16,7 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.          //
 ///////////////////////////////////////////////////////////////////////////////////
 
+#include <QDateTime>
 #include <QDebug>
 
 #include "device/deviceapi.h"
@@ -146,6 +147,22 @@ bool CellularRx::handleMessage(const Message& cmd)
             }
             return true;
         }
+        case modemcellular::WireKind::Speech:
+        {
+            modemcellular::WireSpeech speech;
+
+            if (modemcellular::decodeSpeech(data, size, speech))
+            {
+                QMutexLocker locker(&m_namesMutex);
+                const qint64 now = QDateTime::currentMSecsSinceEpoch();
+                for (const modemcellular::WireSpeech::Carrier& c : speech.carriers)
+                {
+                    m_speech[c.carrier] = c;
+                    m_speechAt[c.carrier] = now;
+                }
+            }
+            return true;
+        }
         case modemcellular::WireKind::TxStatus:
             break;
         }
@@ -160,6 +177,23 @@ std::map<int, QString> CellularRx::networkNames() const
     QMutexLocker locker(&m_namesMutex);
 
     return m_networkNames;
+}
+
+std::map<int, modemcellular::WireSpeech::Carrier> CellularRx::speech() const
+{
+    QMutexLocker locker(&m_namesMutex);
+    std::map<int, modemcellular::WireSpeech::Carrier> speech = m_speech;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    // a live call whose reports stopped 2 s ago (the network went off) is shown as ended
+    for (auto& s : speech)
+    {
+        const auto at = m_speechAt.find(s.first);
+        if (s.second.live && (at == m_speechAt.end() || now - at->second > 2000)) {
+            s.second.live = false;
+        }
+    }
+    return speech;
 }
 
 // the span of the stream to the controller

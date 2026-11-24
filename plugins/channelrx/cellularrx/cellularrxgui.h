@@ -33,6 +33,7 @@ class BasebandSampleSink;
 class CellularRx;
 class FlowLayout;
 class QLabel;
+class CellularCarrierBox;
 
 // The span of the stream and one small box per carrier: which network and channel, where it is
 // in the stream, the level it receives.
@@ -78,7 +79,7 @@ private:
     MessageQueue m_inputMessageQueue;
     QLabel *m_span;
     FlowLayout *m_boxLayout;
-    std::vector<QLabel*> m_boxes;
+    std::vector<CellularCarrierBox*> m_boxes;
     std::vector<int> m_boxIds;
     unsigned int m_tickCount;
 

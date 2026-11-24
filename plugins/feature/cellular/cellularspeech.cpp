@@ -23,100 +23,13 @@
 #include <QAbstractItemView>
 #include <QHelpEvent>
 #include <QPainter>
+#include <QStringList>
 #include <QToolTip>
-
-namespace
-{
 
 using modemcellular::SpeechStats;
 
-const int kBinWidth = 4;            // px per level bin, with its gap
-const int kPauseWidth = 4;
-const int kBandWidth = 6;           // px per band, with its gap
-const int kGap = 5;
-const double kBandFloorDb = -40.0;  // the spectrum drawing: -40 .. 0 dB of the speech level
-// the limit of the call meters: 4.7 kHz of the 3 kHz reference (+3.9 dB)
-const double kLimitDb = 20.0 * std::log10(4.7 / 3.0);
-
-QColor binColour(int bin)
+namespace
 {
-    const double db = SpeechStats::kLowDb + (bin + 0.5) * (SpeechStats::kHighDb - SpeechStats::kLowDb) / SpeechStats::kBins;
-
-    if (bin == SpeechStats::kBins - 1) {
-        return QColor(0xd2, 0x48, 0x3f);        // the bin of the limit
-    }
-    if (db > kLimitDb - 3.0) {
-        return QColor(0xd4, 0x9a, 0x2a);        // within 3 dB of the limit
-    }
-    if (db < -20.0) {
-        return QColor(0x4f, 0x6f, 0x9f);        // quiet
-    }
-    return QColor(0x3f, 0x9f, 0x6a);
-}
-
-int levelWidth()
-{
-    return kPauseWidth + 3 + SpeechStats::kBins * kBinWidth;
-}
-
-int spectrumWidth()
-{
-    return SpeechStats::kBands * kBandWidth;
-}
-
-void paintLevel(QPainter& p, const QRect& r, const SpeechStats& s)
-{
-    const int h = r.height();
-    // pauses: the share of the time
-    const int pause = static_cast<int>(std::lround(s.pauseShare() * h));
-    p.fillRect(QRect(r.left(), r.bottom() - std::max(pause, 1) + 1, kPauseWidth, std::max(pause, 1)), QColor(0x55, 0x5c, 0x66));
-
-    const uint64_t most = *std::max_element(s.bins.begin(), s.bins.end());
-    const int x0 = r.left() + kPauseWidth + 3;
-    for (int i = 0; i < SpeechStats::kBins; i++)
-    {
-        int bh = most ? static_cast<int>(std::ceil(static_cast<double>(s.bins[i]) / static_cast<double>(most) * h)) : 0;
-        // samples at the limit always show, however few
-        if (i == SpeechStats::kBins - 1 && s.atLimit > 0) {
-            bh = std::max(bh, 3);
-        }
-        if (bh > 0) {
-            p.fillRect(QRect(x0 + i * kBinWidth, r.bottom() - bh + 1, kBinWidth - 1, bh), binColour(i));
-        }
-    }
-    // the scale's floor and the limit
-    p.setPen(QColor(0x3a, 0x40, 0x48));
-    p.drawLine(x0, r.bottom(), x0 + SpeechStats::kBins * kBinWidth - 2, r.bottom());
-    const double frac = (kLimitDb - SpeechStats::kLowDb) / (SpeechStats::kHighDb - SpeechStats::kLowDb);
-    const int lx = x0 + static_cast<int>(frac * SpeechStats::kBins * kBinWidth) - 1;
-    QPen pen(QColor(0xd2, 0x48, 0x3f));
-    pen.setStyle(Qt::DotLine);
-    p.setPen(pen);
-    p.drawLine(lx, r.top(), lx, r.bottom());
-}
-
-void paintSpectrum(QPainter& p, const QRect& r, const SpeechStats& s)
-{
-    const int h = r.height();
-    const std::array<double, SpeechStats::kBands> db = s.bandsDb();
-
-    for (int i = 0; i < SpeechStats::kBands; i++)
-    {
-        if (s.speech == 0) {
-            continue;
-        }
-        const double v = std::max(0.0, std::min(1.0, (db[i] - kBandFloorDb) / -kBandFloorDb));
-        const int bh = std::max(1, static_cast<int>(std::lround(v * h)));
-        p.fillRect(QRect(r.left() + i * kBandWidth, r.bottom() - bh + 1, kBandWidth - 1, bh), QColor(0x6a, 0x8f, 0xb8));
-    }
-    p.setPen(QColor(0x3a, 0x40, 0x48));
-    p.drawLine(r.left(), r.bottom(), r.left() + spectrumWidth() - 2, r.bottom());
-}
-
-QString limitText(const SpeechStats& s)
-{
-    return s.speech ? QString("%1%").arg(100.0 * s.limitShare(), 0, 'f', 1) : QString("-");
-}
 
 QString directionText(const SpeechStats& s)
 {
@@ -134,48 +47,6 @@ QString directionText(const SpeechStats& s)
 }
 
 } // namespace
-
-QString CellularSpeechPaint::up()
-{
-    return QString(QChar(0x2191));
-}
-
-QString CellularSpeechPaint::down()
-{
-    return QString(QChar(0x2193));
-}
-
-int CellularSpeechPaint::lineHeight(const QFontMetrics& fm)
-{
-    return fm.height() + 2;
-}
-
-int CellularSpeechPaint::lineWidth(const QFontMetrics& fm)
-{
-    return fm.horizontalAdvance(down()) + 4 + levelWidth() + kGap + spectrumWidth() + kGap + fm.horizontalAdvance("00.0%");
-}
-
-void CellularSpeechPaint::direction(QPainter& p, const QRect& rect, const QString& arrow, const SpeechStats& stats, bool dim)
-{
-    const QFontMetrics fm = p.fontMetrics();
-    const QRect draw(rect.left(), rect.top() + 2, rect.width(), rect.height() - 4);
-
-    p.save();
-    if (dim) {
-        p.setOpacity(0.55);
-    }
-    int x = rect.left();
-    p.setPen(QColor(0x8a, 0x92, 0x9c));
-    p.drawText(QRect(x, rect.top(), fm.horizontalAdvance(arrow) + 2, rect.height()), Qt::AlignVCenter | Qt::AlignLeft, arrow);
-    x += fm.horizontalAdvance(down()) + 4;
-    paintLevel(p, QRect(x, draw.top(), levelWidth(), draw.height()), stats);
-    x += levelWidth() + kGap;
-    paintSpectrum(p, QRect(x, draw.top(), spectrumWidth(), draw.height()), stats);
-    x += spectrumWidth() + kGap;
-    p.setPen(stats.atLimit ? QColor(0xd2, 0x48, 0x3f) : QColor(0x8a, 0x92, 0x9c));
-    p.drawText(QRect(x, rect.top(), rect.right() - x, rect.height()), Qt::AlignVCenter | Qt::AlignLeft, limitText(stats));
-    p.restore();
-}
 
 QString CellularSpeechPaint::text(const CellularCallSpeech& call, bool whole)
 {
@@ -210,6 +81,38 @@ void CellularSpeechLine::show(const CellularSpeechSeen *seen)
     setToolTip(CellularSpeechPaint::text(m_call, !m_live));
     setVisible(true);
     update();
+}
+
+QSize CellularSpeechLine::sizeHint() const
+{
+    const QFontMetrics fm(font());
+    return QSize(2 * CellularSpeechPaint::lineWidth(fm) + fm.horizontalAdvance("0000000  ") + 20, CellularSpeechPaint::lineHeight(fm) + 4);
+}
+
+QSize CellularSpeechLine::minimumSizeHint() const
+{
+    return QSize(0, sizeHint().height());
+}
+
+void CellularSpeechLine::paintEvent(QPaintEvent *)
+{
+    QPainter p(this);
+    const QFontMetrics fm(font());
+    const int h = CellularSpeechPaint::lineHeight(fm);
+    const int y = (height() - h) / 2;
+    const bool dim = !m_live;
+    const SpeechStats& rx = dim ? m_call.rxCall : m_call.rxRecent;
+    const SpeechStats& tx = dim ? m_call.txCall : m_call.txRecent;
+    // the phone, then each direction; the text goes first so a narrow panel still shows whose call
+    const QString who = m_call.phone + (dim ? " last call" : QString());
+    p.setPen(palette().color(QPalette::WindowText));
+    int x = 4;
+    p.drawText(QRect(x, y, fm.horizontalAdvance(who) + 2, h), Qt::AlignVCenter | Qt::AlignLeft, who);
+    x += fm.horizontalAdvance(who) + 10;
+    const int w = CellularSpeechPaint::lineWidth(fm);
+    CellularSpeechPaint::direction(p, QRect(x, y, w, h), CellularSpeechPaint::up(), rx, dim);
+    x += w + 8;
+    CellularSpeechPaint::direction(p, QRect(x, y, w, h), CellularSpeechPaint::down(), tx, dim);
 }
 
 CellularSpeechDelegate::CellularSpeechDelegate(QObject *parent, int numberRole, Lookup lookup) :
@@ -264,36 +167,4 @@ bool CellularSpeechDelegate::helpEvent(QHelpEvent *event, QAbstractItemView *vie
     }
     QToolTip::showText(event->globalPos(), CellularSpeechPaint::text(seen->call, !seen->live()), view);
     return true;
-}
-
-QSize CellularSpeechLine::sizeHint() const
-{
-    const QFontMetrics fm(font());
-    return QSize(2 * CellularSpeechPaint::lineWidth(fm) + fm.horizontalAdvance("0000000  ") + 20, CellularSpeechPaint::lineHeight(fm) + 4);
-}
-
-QSize CellularSpeechLine::minimumSizeHint() const
-{
-    return QSize(0, sizeHint().height());
-}
-
-void CellularSpeechLine::paintEvent(QPaintEvent *)
-{
-    QPainter p(this);
-    const QFontMetrics fm(font());
-    const int h = CellularSpeechPaint::lineHeight(fm);
-    const int y = (height() - h) / 2;
-    const bool dim = !m_live;
-    const SpeechStats& rx = dim ? m_call.rxCall : m_call.rxRecent;
-    const SpeechStats& tx = dim ? m_call.txCall : m_call.txRecent;
-    // the phone, then each direction; the text goes first so a narrow panel still shows whose call
-    const QString who = m_call.phone + (dim ? " last call" : QString());
-    p.setPen(palette().color(QPalette::WindowText));
-    int x = 4;
-    p.drawText(QRect(x, y, fm.horizontalAdvance(who) + 2, h), Qt::AlignVCenter | Qt::AlignLeft, who);
-    x += fm.horizontalAdvance(who) + 10;
-    const int w = CellularSpeechPaint::lineWidth(fm);
-    CellularSpeechPaint::direction(p, QRect(x, y, w, h), CellularSpeechPaint::up(), rx, dim);
-    x += w + 8;
-    CellularSpeechPaint::direction(p, QRect(x, y, w, h), CellularSpeechPaint::down(), tx, dim);
 }
