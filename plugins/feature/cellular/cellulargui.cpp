@@ -603,6 +603,26 @@ CellularGUI::~CellularGUI()
     m_cellular->setMessageQueueToGUI(nullptr);
 }
 
+// The contents need more height when the window is narrower (the summary wraps, so do the forms
+// of the tabs) and on some tabs than on others, but SDRangel takes the minimum size of a feature
+// window from its contents only when a section rolls up or down: the bottom of the window, with
+// its size grip, was cut off.
+void CellularGUI::fitHeight()
+{
+    m_tabs->updateGeometry();       // the height for the width of the tab shown is cached
+    getRollupContents()->arrangeRollups();
+    sizeToContents();
+    if (!isMaximized() && (height() < minimumHeight())) {
+        resize(width(), minimumHeight());
+    }
+}
+
+void CellularGUI::resizeEvent(QResizeEvent *event)
+{
+    FeatureGUI::resizeEvent(event);
+    fitHeight();
+}
+
 void CellularGUI::buildUI()
 {
     RollupContents *rollupContents = getRollupContents();
@@ -644,6 +664,7 @@ void CellularGUI::buildUI()
 
     connect(m_startStop, &ButtonSwitch::toggled, this, &CellularGUI::onStartStop);
     connect(options, &QToolButton::clicked, this, &CellularGUI::openSettings);
+    connect(m_tabs, &QTabWidget::currentChanged, this, &CellularGUI::fitHeight);
 }
 
 QWidget *CellularGUI::buildPhones()

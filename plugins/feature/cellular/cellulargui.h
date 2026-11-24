@@ -124,6 +124,8 @@ private:
     };
 
     void buildUI();
+    void fitHeight();
+    void resizeEvent(QResizeEvent *event) override;
     QWidget *buildPhones();
     QWidget *buildTest();
     QWidget *buildLog();
