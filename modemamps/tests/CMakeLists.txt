@@ -23,17 +23,28 @@ set(MODEMAMPS_LIB_SOURCES
     ../ampssystem.cpp
     ../ampschannel.cpp
     ../ampsbasestation.cpp
-    ../../modemcellular/clock.cpp
-    ../../modemcellular/timer.cpp
+    ../ampscellularbridge.cpp
     ../../modemcellular/biquad.cpp
+    ../../modemcellular/callrouter.cpp
+    ../../modemcellular/carrierradio.cpp
+    ../../modemcellular/cellularsystem.cpp
+    ../../modemcellular/clock.cpp
     ../../modemcellular/compandor.cpp
+    ../../modemcellular/echoendpoint.cpp
+    ../../modemcellular/echosuppressor.cpp
     ../../modemcellular/emphasis.cpp
+    ../../modemcellular/firfilter.cpp
+    ../../modemcellular/musicendpoint.cpp
+    ../../modemcellular/timer.cpp
+    ../../modemcellular/tonegenerator.cpp
     ../../modemcellular/txaudiosource.cpp)
 find_package(Qt5 COMPONENTS Core REQUIRED)
 
 # SDRangel's radio primitives the modules use, built from sdrbase as they are (needing only the Qt
 # headers), without the warnings of our own code made errors
 set(SDRBASE_DSP_SOURCES
+    ${SDRANGEL_ROOT}/sdrbase/dsp/dv/dvdtmf.cpp
+    ${SDRANGEL_ROOT}/sdrbase/dsp/firfilter.cpp
     ${SDRANGEL_ROOT}/sdrbase/dsp/fmpreemphasis.cpp
     ${SDRANGEL_ROOT}/sdrbase/dsp/goertzel.cpp
     ${SDRANGEL_ROOT}/sdrbase/dsp/interpolator.cpp
@@ -91,3 +102,4 @@ modemamps_add_test(modemamps_speech_test test_speech.cpp)
 modemamps_add_test(modemamps_system_test test_system.cpp)
 modemamps_add_test(modemamps_channel_test test_channel.cpp)
 modemamps_add_test(modemamps_basestation_test test_basestation.cpp)
+modemamps_add_test(modemamps_bridge_test test_bridge.cpp)

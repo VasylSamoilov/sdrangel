@@ -150,7 +150,7 @@ private:
     std::deque<uint8_t> m_bits;
 };
 
-static bool heardWord(const std::vector<uint64_t>& w, const std::function<bool(uint64_t)>& match)
+inline bool heardWord(const std::vector<uint64_t>& w, const std::function<bool(uint64_t)>& match)
 {
     for (uint64_t x : w)
     {

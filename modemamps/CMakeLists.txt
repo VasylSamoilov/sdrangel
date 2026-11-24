@@ -17,6 +17,7 @@ set(modemamps_SOURCES
     ampssystem.cpp
     ampschannel.cpp
     ampsbasestation.cpp
+    ampscellularbridge.cpp
 )
 
 set(modemamps_HEADERS
@@ -36,6 +37,7 @@ set(modemamps_HEADERS
     ampssystem.h
     ampschannel.h
     ampsbasestation.h
+    ampscellularbridge.h
 )
 
 include_directories(
