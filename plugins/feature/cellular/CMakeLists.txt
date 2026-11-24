@@ -34,6 +34,7 @@ if(NOT SERVER_MODE)
         cellularcolumns.cpp
         cellulargui.cpp
         cellularmobiles.cpp
+        cellularspeech.cpp
     )
     set(cellular_HEADERS
         ${cellular_HEADERS}
@@ -42,6 +43,7 @@ if(NOT SERVER_MODE)
         cellularcolumns.h
         cellulargui.h
         cellularmobiles.h
+        cellularspeech.h
     )
 
     set(TARGET_NAME ${PLUGINS_PREFIX}featurecellular)

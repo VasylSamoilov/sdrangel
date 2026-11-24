@@ -72,6 +72,7 @@ enum MobileColumn
 {
     MobileName,         // two lines: the state dot, name and number; the chips
     MobileState,        // two lines: what it does now; where and how it was heard
+    MobileSpeech,       // two lines: the call meters, from the phone and to the phone
     MobileColCount
 };
 
@@ -685,6 +686,8 @@ void CellularGUI::buildUI()
     m_tabs->addTab(buildNetworks(), "Networks");
     m_tabs->addTab(buildCarriers(), "Carriers");
     layout->addWidget(m_tabs, 1);
+    m_speechLine = new CellularSpeechLine(main);
+    layout->addWidget(m_speechLine);
     main->setMinimumWidth(0);
     // the tabs take the height of the window
     main->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -701,11 +704,19 @@ QWidget *CellularGUI::buildPhones()
     layout->setContentsMargins(0, 0, 0, 0);
 
     // one row per phone: the book and the phones the networks hear; two lines each (the delegate)
-    m_phones = makeTable(page, {"Mobile", "State"});
+    m_phones = makeTable(page, {"Mobile", "State", "Speech"});
     m_phones->horizontalHeader()->setSectionResizeMode(MobileName, QHeaderView::Stretch);
     m_phones->horizontalHeader()->setSectionResizeMode(MobileState, QHeaderView::ResizeToContents);
+    m_phones->horizontalHeader()->setSectionResizeMode(MobileSpeech, QHeaderView::ResizeToContents);
     m_phones->horizontalHeader()->setStretchLastSection(false);
     m_phones->setItemDelegateForColumn(MobileName, new CellularMobileDelegate(m_phones));
+    m_phones->setItemDelegateForColumn(MobileSpeech, new CellularSpeechDelegate(m_phones, CellularMobileRole::Number,
+        [this](const QString& number) { return speechOf(number); }));
+    m_phones->horizontalHeaderItem(MobileSpeech)->setToolTip(QString("The speech of the phone's call: %1 from the phone "
+        "(demodulated), %2 to the phone. Each: the pauses (grey), where the speech landed from -40 to +4 dB of the "
+        "reference (red line: 4.7 kHz, the largest deviation), six bands from 300 Hz to 3.4 kHz, the share at the "
+        "limit. The last 2 s during the call; after it, the whole call dimmed").arg(CellularSpeechPaint::up())
+        .arg(CellularSpeechPaint::down()));
     m_phones->setWordWrap(true);
     m_phones->setToolTip("The phones the tester knows (its book) and the ones the networks hear. "
         "Double click: the record of the phone; right click: actions on it");
@@ -728,6 +739,7 @@ QWidget *CellularGUI::buildPhones()
         return true;
     };
     connect(m_phones, &QTableWidget::customContextMenuRequested, this, &CellularGUI::phoneMenu);
+    connect(m_phones, &QTableWidget::itemSelectionChanged, this, &CellularGUI::showSpeech);
     connect(m_phones, &QTableWidget::cellDoubleClicked, this, [this](int row, int) {
         if (const QTableWidgetItem *item = m_phones->item(row, MobileName)) {
             editMobile(static_cast<modemnmt::System>(item->data(CellularMobileRole::System).toInt()),
@@ -1461,6 +1473,38 @@ void CellularGUI::onStartStop(bool checked)
 
 // ---- what the tester reports ----
 
+const CellularSpeechSeen *CellularGUI::speechOf(const QString& number) const
+{
+    const auto it = m_speech.constFind(number);
+    return it == m_speech.constEnd() ? nullptr : &it.value();
+}
+
+// The status line follows the selected phone (its call, or its last call), else the only call
+// that is on.
+void CellularGUI::showSpeech()
+{
+    const QModelIndexList rows = m_phones->selectionModel()->selectedRows();
+    const QTableWidgetItem *item = rows.isEmpty() ? nullptr : m_phones->item(rows.first().row(), MobileName);
+    const CellularSpeechSeen *seen = item ? speechOf(item->data(CellularMobileRole::Number).toString()) : nullptr;
+
+    if (!seen)
+    {
+        int live = 0;
+        for (auto it = m_speech.constBegin(); it != m_speech.constEnd(); ++it)
+        {
+            if (it->live())
+            {
+                live++;
+                seen = &it.value();
+            }
+        }
+        if (live != 1) {
+            seen = nullptr;
+        }
+    }
+    m_speechLine->show(seen);
+}
+
 void CellularGUI::showStatus(const Cellular::MsgReportStatus& report)
 {
     NetworkStatus& s = m_status[report.m_network];
@@ -1471,7 +1515,17 @@ void CellularGUI::showStatus(const Cellular::MsgReportStatus& report)
     s.summary = report.m_summary;
     s.carriers = report.m_carriers;
     s.phones = report.m_phones;
+    // the last calls of the phones, for a GUI that opened after them
+    for (const Cellular::MsgReportStatus::Phone& p : report.m_phones)
+    {
+        if (p.lastCall.call > 0 && !m_speech.contains(p.number))
+        {
+            m_speech[p.number].call = p.lastCall;
+            m_speech[p.number].received = p.lastCall.ended;
+        }
+    }
     showMobiles();
+    showSpeech();
     showCarriers();
     showSummary();
     showTestPhone();
@@ -1744,6 +1798,19 @@ bool CellularGUI::handleMessage(const Message& message)
     else if (Cellular::MsgReportStatus::match(message))
     {
         showStatus(static_cast<const Cellular::MsgReportStatus&>(message));
+        return true;
+    }
+    else if (Cellular::MsgReportSpeech::match(message))
+    {
+        const Cellular::MsgReportSpeech& report = static_cast<const Cellular::MsgReportSpeech&>(message);
+        const QDateTime now = QDateTime::currentDateTime();
+        for (const CellularCallSpeech& call : report.m_calls)
+        {
+            m_speech[call.phone].call = call;
+            m_speech[call.phone].received = now;
+        }
+        m_phones->viewport()->update();
+        showSpeech();
         return true;
     }
     else if (Cellular::MsgBookRecord::match(message))

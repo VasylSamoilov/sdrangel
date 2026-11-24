@@ -31,6 +31,7 @@
 #include "cellular.h"
 #include "cellularbandstrip.h"
 #include "cellularsettings.h"
+#include "cellularspeech.h"
 #include "nmtphonebook.h"
 
 class PluginAPI;
@@ -149,6 +150,8 @@ private:
     void showCarriers();
     void showSummary();
     void showTestPhone();
+    void showSpeech();
+    const CellularSpeechSeen *speechOf(const QString& number) const;
     void fillNetworkCombos();
     void addLog(int network, const QString& text, int kind);
     QString logHtml(const LogLine& line, bool withNetwork) const;
@@ -174,6 +177,8 @@ private:
     // Mobiles
     QTableWidget *m_phones;
     modemnmt::NmtPhoneBook m_book;              // a copy of the feature's, for presets and the table
+    QMap<QString, CellularSpeechSeen> m_speech; // the call meters, by number: the last report of its call
+    CellularSpeechLine *m_speechLine;           // under the tabs: the followed call
     // Test
     QComboBox *m_testNetwork;
     QComboBox *m_testPhone;
