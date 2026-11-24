@@ -228,12 +228,15 @@ CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& sett
     m_areaNo->setSpecialValueText("none");
     m_areaNo->setToolTip("Area number 1..4 (the phones stay in their area), none: every phone is taken");
     form->addRow("Area number", m_areaNo);
-    m_msPower = new QSpinBox(page);
-    m_msPower->setRange(0, 3);
-    m_msPower->setToolTip("Power level the phones send with (NMT Doc 450-3 5.7.1): 3 high (15 W or 7 W), "
-        "2 medium (10 dB less), 1 and 0 low (20 dB less). A phone that receives the network strongly in a call "
-        "goes to low power by itself");
-    form->addRow("Phone power", m_msPower);
+    m_msPower = new QComboBox(page);
+    m_msPower->addItem("3 high (15 W, handheld 7 W)", 3);
+    m_msPower->addItem("2 medium (10 dB less)", 2);
+    m_msPower->addItem("1 low (20 dB less)", 1);
+    m_msPower->addItem("0 low (20 dB less)", 0);
+    m_msPower->setToolTip("The highest power level the phones may send with, in the power bits of every frame "
+        "(NMT Doc 450-3 5.7.1; osmocom-analog's default is 1). A phone that receives the network strongly in a "
+        "call goes lower by itself; the Test tab can order another level in a call");
+    form->addRow("Phone power (max)", m_msPower);
     // the channels: the plan of the country as a grid, the same as text below it
     m_grid = new CellularChannelGrid(page);
     m_grid->setToolTip("The channels of the country plan by frequency (each row starts at the downlink frequency on its left). "
@@ -298,7 +301,7 @@ CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& sett
     m_y1->setValue(settings.m_y1);
     m_area->setValue(settings.m_area);
     m_areaNo->setValue(settings.m_areaNo);
-    m_msPower->setValue(settings.m_msPower);
+    m_msPower->setCurrentIndex(std::max(0, m_msPower->findData(settings.m_msPower)));
     m_carriers->setText(settings.m_carriers);
     m_compandor->setChecked(settings.m_compandor);
     m_callerId->setChecked(settings.m_sendCallerId);
@@ -570,7 +573,7 @@ void CellularNetworkDialog::read(CellularNetworkSettings& s) const
     s.m_y1 = m_y1->value();
     s.m_area = m_area->value();
     s.m_areaNo = m_areaNo->value();
-    s.m_msPower = m_msPower->value();
+    s.m_msPower = m_msPower->currentData().toInt();
     s.m_carriers = m_carriers->text();
     s.m_compandor = m_compandor->isChecked();
     s.m_sendCallerId = m_callerId->isChecked();

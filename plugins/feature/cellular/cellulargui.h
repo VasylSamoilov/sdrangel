@@ -85,7 +85,7 @@ private:
     QSpinBox *m_y1;
     QSpinBox *m_area;
     QSpinBox *m_areaNo;
-    QSpinBox *m_msPower;
+    QComboBox *m_msPower;
     QLineEdit *m_carriers;
     QCheckBox *m_compandor;
     QCheckBox *m_callerId;

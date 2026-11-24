@@ -1177,6 +1177,10 @@ void CellularWorker::tryBind(Network& n)
     log(n.id, QString("on the air with %1 carrier%2 (receiver %3, transmitter %4, lead %5 ms)")
         .arg(carriers).arg(carriers == 1 ? "" : "s").arg(spanText(rxSpan)).arg(spanText(txSpan))
         .arg(m_lead / modemnmt::NmtBaseStation::kAudioRate * 1e3, 0, 'f', 0), Cellular::MsgReportLog::Network);
+    static const char * const levels[] = {"low, 20 dB less", "low, 20 dB less", "medium, 10 dB less", "high"};
+    const int power = std::max(0, std::min(3, n.config.msPower));
+    log(n.id, QString("the phones send with power level %1 at most (%2), in the power bits of every frame")
+        .arg(power).arg(levels[power]), Cellular::MsgReportLog::Power);
     reportStatus(n);
 }
 
