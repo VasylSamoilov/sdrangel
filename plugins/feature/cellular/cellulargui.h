@@ -19,6 +19,7 @@
 #define INCLUDE_FEATURE_CELLULARGUI_H_
 
 #include <QDialog>
+#include <QDateTime>
 #include <QMap>
 #include <QWidget>
 
@@ -190,6 +191,39 @@ private:
     QTableWidget *m_phones;
     modemnmt::NmtPhoneBook m_book;              // a copy of the feature's, for presets and the table
     QMap<QString, CellularSpeechSeen> m_speech; // the call meters, by number: the last report of its call
+    // Console
+    QWidget *buildConsole();
+    void showConsole();
+    void consoleKey(QChar key);
+    QString consoleTarget() const;
+    int networkOfPhone(const QString& number) const;
+    struct ConsoleView                      // the console's last report
+    {
+        int m_state = 0;                    // Cellular::MsgReportConsole::State
+        int m_network = 0;
+        QString m_peer;
+        QDateTime m_since;
+        QString m_keys;
+    };
+    ConsoleView m_consoleReport;
+    QLabel *m_consoleBell;
+    QLabel *m_consoleState;
+    QLabel *m_consoleKeys;
+    QLineEdit *m_consoleNumber;
+    QToolButton *m_consoleCall;
+    QToolButton *m_consoleAnswer;
+    QToolButton *m_consoleHangUp;
+    QLineEdit *m_consoleSms;
+    QList<QCheckBox*> m_consoleMwi;         // the indicators, property "flag"
+    QWidget *m_consoleInCall;
+    QSpinBox *m_consoleChannel;
+    QComboBox *m_consolePower;
+    QLineEdit *m_consoleOwn;
+    QComboBox *m_consoleSpeaker;
+    QComboBox *m_consoleMic;
+    QSpinBox *m_consoleVolume;
+    QSpinBox *m_consoleGain;
+    QCheckBox *m_consoleAuto;
     CellularSpeechLine *m_speechLine;           // under the tabs: the followed call
     // Test
     QComboBox *m_testNetwork;

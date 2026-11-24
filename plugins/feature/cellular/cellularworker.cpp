@@ -40,6 +40,7 @@
 MESSAGE_CLASS_DEFINITION(CellularWorker::MsgAddNetwork, Message)
 MESSAGE_CLASS_DEFINITION(CellularWorker::MsgSmsCentres, Message)
 MESSAGE_CLASS_DEFINITION(CellularWorker::MsgNames, Message)
+MESSAGE_CLASS_DEFINITION(CellularWorker::MsgConsole, Message)
 
 using modemnmt::ChannelType;
 using modemnmt::NmtChannel;
@@ -137,6 +138,12 @@ CellularWorker::~CellularWorker()
     if (m_audioSink) {
         DSPEngine::instance()->getAudioDeviceManager()->removeAudioSink(&m_audioFifo);
     }
+    if (m_consoleSink) {
+        DSPEngine::instance()->getAudioDeviceManager()->removeAudioSink(&m_consoleFifo);
+    }
+    for (std::unique_ptr<Network>& n : m_networks) {
+        n->console.reset();
+    }
     // the bridges go before the systems they connect
     for (std::unique_ptr<Network>& n : m_networks)
     {
@@ -160,6 +167,8 @@ void CellularWorker::handleInputMessages()
             m_smsCentres = static_cast<const MsgSmsCentres&>(*message).m_centres;
         } else if (MsgNames::match(*message)) {
             rename(static_cast<const MsgNames&>(*message));
+        } else if (MsgConsole::match(*message)) {
+            setConsole(static_cast<const MsgConsole&>(*message).m_console);
         }
         delete message;
     }
@@ -321,6 +330,13 @@ void CellularWorker::setHandlers(Network& n)
             t.keys += k.m_key;
             t.network = id;
             t.lastMs = QDateTime::currentMSecsSinceEpoch();
+            // the console shows the touch tones of the phone it talks to at once
+            Network *busy = consoleBusy();
+            if (busy && busy->id == id && busy->console->peer() == numberText(subscriber).toStdString())
+            {
+                m_consoleKeys += QChar(k.m_key);
+                m_consoleState = -1;
+            }
         }
     });
     // a phone's own SMS centre (learned or picked in its record) reaches the centre too
@@ -404,6 +420,11 @@ void CellularWorker::setHandlers(Network& n)
 
 void CellularWorker::action(const Cellular::MsgAction& msg)
 {
+    if (msg.getAction() >= Cellular::MsgAction::ConsoleDial)
+    {
+        consoleAction(msg);
+        return;
+    }
     Network *found = nullptr;
     for (const std::unique_ptr<Network>& network : m_networks)
     {
@@ -542,6 +563,12 @@ void CellularWorker::action(const Cellular::MsgAction& msg)
     case Cellular::MsgAction::Listen:
         listen(n.id, msg.getNumber(), msg.getValue());
         return;
+    case Cellular::MsgAction::ConsoleDial:      // the console's: consoleAction()
+    case Cellular::MsgAction::ConsoleAnswer:
+    case Cellular::MsgAction::ConsoleHangUp:
+    case Cellular::MsgAction::ConsoleDigit:
+    case Cellular::MsgAction::ConsoleSms:
+        return;
     }
     log(n.id, what + (ok ? ": started" : ": refused: " + refused));
 }
@@ -640,6 +667,238 @@ void CellularWorker::listen(int network, const QString& number, int mode)
     m_listenNetwork = network;
     m_listenNumber = number;
     log(network, QString("listening to %1: %2").arg(number).arg(names[mode]), Cellular::MsgReportLog::Call);
+}
+
+// ---- the console ----
+
+int CellularWorker::consoleOutputDevice() const
+{
+    return m_console.m_speaker.isEmpty() ? -1
+        : DSPEngine::instance()->getAudioDeviceManager()->getOutputDeviceIndex(m_console.m_speaker);
+}
+
+void CellularWorker::setConsole(const CellularConsole& console)
+{
+    const bool renumbered = console.m_number != m_console.m_number;
+    const bool newMic = console.m_microphone != m_console.m_microphone || !m_microphone;
+    const bool newSpeaker = console.m_speaker != m_console.m_speaker || !m_consoleSpeaker;
+    m_console = console;
+    AudioDeviceManager *audio = DSPEngine::instance()->getAudioDeviceManager();
+
+    if (newMic) {
+        m_microphone = std::make_unique<CellularMusicInput>(m_console.m_microphone);
+    }
+    m_micGain = static_cast<float>(std::pow(10.0, std::max(-20, std::min(20, m_console.m_micGainDb)) / 20.0));
+    if (newSpeaker)
+    {
+        if (m_consoleSink) {
+            audio->removeAudioSink(&m_consoleFifo);
+        }
+        const int device = consoleOutputDevice();
+        const int rate = audio->getOutputSampleRate(device);
+        m_consoleSpeaker = std::make_unique<modemcellular::CallListener>(rate > 0 ? rate : 48000);
+        m_consoleSpeaker->setMode(modemcellular::CallListener::Mode::FromPhone);
+        m_consoleFifo.setSize(static_cast<uint32_t>((rate > 0 ? rate : 48000) / 2));
+        audio->addAudioSink(&m_consoleFifo, &m_inputMessageQueue, device);
+        m_consoleSink = true;
+    }
+    m_consoleSpeaker->setVolumeDb(m_console.m_volumeDb);
+    for (const std::unique_ptr<Network>& n : m_networks)
+    {
+        if (!n->console) {
+            continue;
+        }
+        if (renumbered) {
+            makeConsole(*n);
+        } else {
+            n->console->setAutoAnswer(m_console.m_autoAnswer);
+        }
+    }
+}
+
+// The console's number on the network: a leg of its router.
+void CellularWorker::makeConsole(Network& n)
+{
+    n.console.reset();
+    if (!n.cellular || m_console.m_number.isEmpty()) {
+        return;
+    }
+    n.console = std::make_unique<modemcellular::ConsoleLeg>(*n.cellular, m_console.m_number.toStdString());
+    n.console->setAutoAnswer(m_console.m_autoAnswer);
+    Network *network = &n;
+    n.console->setEventHandler([this, network](const std::string& text) { consoleEvent(*network, text); });
+    n.console->setMicrophone([this](float* samples, int count) {
+        if (m_microphone)
+        {
+            m_microphone->fill(samples, count);
+            for (int i = 0; i < count; i++) {
+                samples[i] *= m_micGain;
+            }
+        }
+    });
+    n.console->setSpeaker([this](const float* samples, int count) {
+        if (m_consoleSpeaker)
+        {
+            m_consoleSpeaker->fromPhone(samples, count);
+            // the speaker's other side stays silent (mono of the far end)
+            static const std::vector<float> silence(1024, 0.0f);
+            m_consoleSpeaker->toPhone(silence.data(), std::min(count, 1024));
+        }
+    });
+}
+
+CellularWorker::Network *CellularWorker::consoleBusy()
+{
+    for (const std::unique_ptr<Network>& n : m_networks)
+    {
+        if (n->console && n->console->state() != modemcellular::ConsoleLeg::State::Idle) {
+            return n.get();
+        }
+    }
+    return nullptr;
+}
+
+// The network of a console call: given, the one the number was heard on, else the first on the air.
+CellularWorker::Network *CellularWorker::consoleNetwork(int network, const QString& number)
+{
+    Network *first = nullptr;
+    for (const std::unique_ptr<Network>& n : m_networks)
+    {
+        if (!running(*n) || !n->console) {
+            continue;
+        }
+        if (n->id == network) {
+            return n.get();
+        }
+        if (network == 0 && n->phones.count(number.toStdString()) > 0) {
+            return n.get();
+        }
+        if (!first) {
+            first = n.get();
+        }
+    }
+    return network == 0 ? first : nullptr;
+}
+
+void CellularWorker::consoleEvent(Network& n, const std::string& text)
+{
+    // one call at a time over all networks: a call that rings while the console is busy on another
+    if (text.find(": ringing") != std::string::npos && text.rfind("call from", 0) == 0)
+    {
+        for (const std::unique_ptr<Network>& other : m_networks)
+        {
+            if (other.get() != &n && other->console && other->console->state() != modemcellular::ConsoleLeg::State::Idle)
+            {
+                log(n.id, "console: " + QString::fromStdString(text) + ", refused: the console is in a call on " + other->name,
+                    Cellular::MsgReportLog::Call);
+                n.console->hangUp();
+                return;
+            }
+        }
+    }
+    log(n.id, "console: " + QString::fromStdString(text), Cellular::MsgReportLog::Call);
+    m_consoleState = -1;        // report now
+}
+
+void CellularWorker::consoleAction(const Cellular::MsgAction& msg)
+{
+    const QString what = QString("console %1 %2").arg(Cellular::MsgAction::name(msg.getAction())).arg(msg.getNumber());
+    Network *busy = consoleBusy();
+
+    switch (msg.getAction())
+    {
+    case Cellular::MsgAction::ConsoleDial:
+    {
+        if (busy)
+        {
+            log(busy->id, what + ": the console is in a call");
+            return;
+        }
+        Network *n = consoleNetwork(msg.getNetwork(), msg.getNumber());
+        if (!n)
+        {
+            log(0, what + ": no network on the air");
+            return;
+        }
+        modemcellular::Cause cause = modemcellular::Cause::Normal;
+        if (!n->console->dial(msg.getNumber().toStdString(), &cause)) {
+            log(n->id, what + QString(": refused (%1)").arg(modemcellular::TestCaller::causeName(cause)));
+        }
+        m_consoleKeys.clear();
+        return;
+    }
+    case Cellular::MsgAction::ConsoleAnswer:
+        if (busy) {
+            busy->console->answer();
+        }
+        m_consoleKeys.clear();
+        return;
+    case Cellular::MsgAction::ConsoleHangUp:
+        if (busy) {
+            busy->console->hangUp();
+        }
+        return;
+    case Cellular::MsgAction::ConsoleDigit:
+        if (busy && !msg.getText().isEmpty()) {
+            busy->console->digit(msg.getText().at(0).toLatin1());
+        }
+        return;
+    case Cellular::MsgAction::ConsoleSms:
+    {
+        const std::string number = msg.getNumber().toStdString();
+        Network *n = consoleNetwork(msg.getNetwork(), msg.getNumber());
+        if (!n || number.size() != 7)
+        {
+            log(n ? n->id : 0, what + ": the number is the country digit and six digits, on a network on the air");
+            return;
+        }
+        const bool ok = n->station->system()->sendSms(number[0], number.substr(1),
+            deliverMessage(m_console.m_number.toStdString(), msg.getText()));
+        log(n->id, QString("console SMS to %1 from %2: %3").arg(msg.getNumber()).arg(m_console.m_number)
+            .arg(ok ? "\"" + msg.getText() + "\" on its way" : "refused (the phone is busy or unknown)"), Cellular::MsgReportLog::Sms);
+        return;
+    }
+    default:
+        return;
+    }
+}
+
+void CellularWorker::reportConsole()
+{
+    Network *busy = consoleBusy();
+    const int state = busy ? static_cast<int>(busy->console->state()) : 0;
+
+    if (state != m_consoleState) {
+        m_consoleSince = QDateTime::currentDateTime();
+    }
+    // when it changes, and once a second during a call (its time)
+    if (state == m_consoleState && (state == 0 || ++m_consoleTick % kBlocksPerReport != 0)) {
+        return;
+    }
+    m_consoleState = state;
+    if (!m_reports) {
+        return;
+    }
+    Cellular::MsgReportConsole *msg = Cellular::MsgReportConsole::create();
+    msg->m_state = static_cast<Cellular::MsgReportConsole::State>(state);
+    msg->m_network = busy ? busy->id : 0;
+    msg->m_number = m_console.m_number;
+    msg->m_peer = busy ? QString::fromStdString(busy->console->peer()) : QString();
+    msg->m_since = m_consoleSince;
+    msg->m_keys = m_consoleKeys;
+    m_reports->push(msg);
+}
+
+void CellularWorker::consoleOutput()
+{
+    if (!m_consoleSpeaker || !m_consoleSink) {
+        return;
+    }
+    m_consoleFrames.clear();
+    const size_t frames = m_consoleSpeaker->take(m_consoleFrames);
+    if (frames > 0) {
+        m_consoleFifo.write(reinterpret_cast<const quint8*>(m_consoleFrames.data()), static_cast<uint32_t>(frames));
+    }
 }
 
 void CellularWorker::listenOutput()
@@ -1121,8 +1380,9 @@ void CellularWorker::removeAll()
 // takes the network off the air (the radios are told by the caller)
 void CellularWorker::unbind(Network& n)
 {
-    // the call of the tester goes before the router and the base station it uses
+    // the call of the tester and the console go before the router and the base station they use
     n.caller.reset();
+    n.console.reset();
     n.bridge.reset();
     if (n.station && n.station->running()) {
         n.station->bind({}, {});
@@ -1265,6 +1525,7 @@ void CellularWorker::tryBind(Network& n)
 
     n.bridge = std::make_unique<modemnmt::NmtCellularBridge>(*n.station->system(), *n.cellular);
     n.caller = std::make_unique<modemcellular::TestCaller>(*n.cellular);
+    makeConsole(n);
     setHandlers(n);
     n.phones.clear();
     n.boundRx = rxSpan;
@@ -1329,6 +1590,9 @@ void CellularWorker::processBatch(Radio& radio)
         n.bridge->run();
         // the audio of the tester's call, the same time as the block at the call rate
         n.caller->process(static_cast<int>(m_rx.length * modemcellular::kAudioSampleRate / modemnmt::NmtBaseStation::kAudioRate));
+        if (n.console) {
+            n.console->process(static_cast<int>(m_rx.length * modemcellular::kAudioSampleRate / modemnmt::NmtBaseStation::kAudioRate));
+        }
         sendPostponed(n);
         flushQuietTraces(n);
         flushTones(false);
@@ -1382,6 +1646,8 @@ void CellularWorker::processBatch(Radio& radio)
         sendAudio(out.first->channel, modemcellular::encodeBatch(out.second));
     }
     listenOutput();
+    consoleOutput();
+    reportConsole();
 }
 
 // the audio for a transmitter goes through the pipe it registered from the controller to it

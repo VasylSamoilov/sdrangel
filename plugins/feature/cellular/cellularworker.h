@@ -32,6 +32,7 @@
 #include "util/messagequeue.h"
 
 #include "calllistener.h"
+#include "consoleleg.h"
 #include "carrierbatch.h"
 #include "cellularfarend.h"
 #include "cellularsettings.h"
@@ -87,6 +88,18 @@ public:
 
     private:
         MsgSmsCentres() : Message() { }
+    };
+
+    // the console's settings (one console for all networks)
+    class MsgConsole : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        CellularConsole m_console;
+        static MsgConsole* create(const CellularConsole& console) { return new MsgConsole(console); }
+
+    private:
+        explicit MsgConsole(const CellularConsole& console) : Message(), m_console(console) { }
     };
 
     // the names of the networks by id: a rename does not start a network again
@@ -158,6 +171,7 @@ private:
         // the phones heard: their identity in a frame for the channel it came on
         std::map<std::string, Cellular::MsgReportStatus::Phone> phones;
         std::unique_ptr<modemcellular::TestCaller> caller;     // calls of the tester to a phone
+        std::unique_ptr<modemcellular::ConsoleLeg> console;    // the console's number on this network
         bool music = false;                     // the far end of calls to no phone: music, else echo
         std::unique_ptr<CellularMusicInput> musicInput;    // the audio input of the music, if it plays one
         // message waiting indicators the protocol could not send yet (the phone was busy), by number
@@ -225,6 +239,28 @@ private:
     // listening in: mode 0 off, 1 both sides (phone left), 2 from the phone, 3 to the phone
     void listen(int network, const QString& number, int mode);
     void listenOutput();                        // the listened call's audio to the speaker
+
+    // the console: its leg on each network, the microphone and the speaker (its device)
+    void setConsole(const CellularConsole& console);
+    void makeConsole(Network& n);
+    void consoleAction(const Cellular::MsgAction& action);
+    Network *consoleNetwork(int network, const QString& number);
+    Network *consoleBusy();                     // the network whose console leg has a call, null if none
+    void consoleEvent(Network& n, const std::string& text);
+    void reportConsole();
+    void consoleOutput();
+    int consoleOutputDevice() const;
+    CellularConsole m_console;
+    std::unique_ptr<CellularMusicInput> m_microphone;
+    float m_micGain = 1.0f;
+    std::unique_ptr<modemcellular::CallListener> m_consoleSpeaker;
+    AudioFifo m_consoleFifo;
+    bool m_consoleSink = false;
+    std::vector<int16_t> m_consoleFrames;
+    QDateTime m_consoleSince;
+    QString m_consoleKeys;                      // touch tones the peer sent in the console's call
+    int m_consoleState = 0;                     // as reported last
+    uint64_t m_consoleTick = 0;
 
     std::unique_ptr<modemcellular::CallListener> m_listener;
     AudioFifo m_audioFifo;

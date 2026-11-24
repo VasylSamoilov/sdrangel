@@ -297,6 +297,7 @@ void CellularSettings::resetToDefaults()
     m_leadMs = 100;
     m_logEnabled = false;
     m_logFilename = "cellular_log.csv";
+    m_console = CellularConsole();
     m_title = "Cellular";
     m_rgbColor = QColor(0, 160, 120).rgb();
     m_workspaceIndex = 0;
@@ -347,6 +348,13 @@ QByteArray CellularSettings::serialize() const
     s.writeS32(2, m_networks.size());
     s.writeBool(3, m_logEnabled);
     s.writeString(4, m_logFilename);
+    // the console (keys 5..10)
+    s.writeString(5, m_console.m_number);
+    s.writeString(6, m_console.m_speaker);
+    s.writeString(7, m_console.m_microphone);
+    s.writeS32(8, m_console.m_volumeDb);
+    s.writeS32(9, m_console.m_micGainDb);
+    s.writeBool(10, m_console.m_autoAnswer);
     s.writeString(20, m_title);
     s.writeU32(21, m_rgbColor);
     s.writeS32(22, m_workspaceIndex);
@@ -403,6 +411,13 @@ bool CellularSettings::deserialize(const QByteArray& data)
         d.readS32(2, &count, 0);
         d.readBool(3, &m_logEnabled, false);
         d.readString(4, &m_logFilename, "cellular_log.csv");
+        const CellularConsole console;
+        d.readString(5, &m_console.m_number, console.m_number);
+        d.readString(6, &m_console.m_speaker, "");
+        d.readString(7, &m_console.m_microphone, "");
+        d.readS32(8, &m_console.m_volumeDb, console.m_volumeDb);
+        d.readS32(9, &m_console.m_micGainDb, console.m_micGainDb);
+        d.readBool(10, &m_console.m_autoAnswer, console.m_autoAnswer);
         for (int i = 0; i < count && i < kMaxNetworks; i++)
         {
             CellularNetworkSettings n;

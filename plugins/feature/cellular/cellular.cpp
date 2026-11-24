@@ -48,6 +48,7 @@ MESSAGE_CLASS_DEFINITION(Cellular::MsgStartStop, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgToRadio, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgReportLog, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgReportSpeech, Message)
+MESSAGE_CLASS_DEFINITION(Cellular::MsgReportConsole, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgBookLearn, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgBookRecord, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgBookEdit, Message)
@@ -57,7 +58,8 @@ MESSAGE_CLASS_DEFINITION(Cellular::MsgAction, Message)
 
 namespace
 {
-const char* const kActionNames[] = {"call", "hangup", "release", "sms", "mwi", "power", "move", "hold", "forget", "listen"};
+const char* const kActionNames[] = {"call", "hangup", "release", "sms", "mwi", "power", "move", "hold", "forget", "listen",
+    "consoledial", "consoleanswer", "consolehangup", "consoledigit", "consolesms"};
 }
 
 bool Cellular::MsgAction::parse(const QString& name, Action& action)
@@ -129,6 +131,19 @@ void Cellular::sendBookRecord(const modemnmt::NmtPhoneRecord& record, bool remov
 }
 
 // the worker answers each phone's own SMS centre
+void Cellular::sendConsole()
+{
+    if (!m_running || !m_worker) {
+        return;
+    }
+    CellularConsole console;
+    {
+        QMutexLocker locker(&m_settingsMutex);
+        console = m_settings.m_console;
+    }
+    m_worker->getInputMessageQueue()->push(CellularWorker::MsgConsole::create(console));
+}
+
 void Cellular::sendSmsCentres()
 {
     if (!m_running || !m_worker) {
@@ -351,6 +366,7 @@ void Cellular::start()
     m_thread->start();
     m_running = true;
     sendSmsCentres();
+    sendConsole();
     setState(StRunning);
     report(0, QString("started, transmit lead %1 ms").arg(m_settings.m_leadMs));
     applyNetworks();
@@ -525,6 +541,7 @@ bool Cellular::handleMessage(const Message& cmd)
         restartNetworks(cfg.getRestart() == MsgConfigureCellular::Restart::All);
         applyNetworks();
         sendNames();
+        sendConsole();
         return true;
     }
     else if (MsgStartStop::match(cmd))
@@ -632,6 +649,13 @@ bool Cellular::handleMessage(const Message& cmd)
         writeLog(report.getNetwork(), report.getText(), report.getKind());
         if (getMessageQueueToGUI()) {
             getMessageQueueToGUI()->push(MsgReportLog::create(report.getNetwork(), report.getText(), report.getKind()));
+        }
+        return true;
+    }
+    else if (MsgReportConsole::match(cmd))
+    {
+        if (getMessageQueueToGUI()) {
+            getMessageQueueToGUI()->push(static_cast<const MsgReportConsole&>(cmd).clone());
         }
         return true;
     }

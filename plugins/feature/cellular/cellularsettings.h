@@ -44,7 +44,7 @@ struct CellularFarEnd
     QString m_musicInput;       // the audio input device by name, empty: the default
     int m_musicLevelDb = 0;     // at most 0
     bool m_musicLoop = true;    // false: plays once, then the call ends
-    int m_callLimitS = 0;       // the longest call to echo or music in seconds, 0: no limit
+    int m_callLimitS = 0;       // the longest call of the network in seconds (any call), 0: no limit
 
     bool operator==(const CellularFarEnd& o) const;
     bool operator!=(const CellularFarEnd& o) const { return !(*this == o); }
@@ -98,9 +98,28 @@ struct CellularNetworkSettings
 };
 
 // The networks of the controller.
+// The console: the operator's own phone, one for all networks.
+struct CellularConsole
+{
+    QString m_number = "1000001";   // the number the phones call it on, registered on every network
+    QString m_speaker;              // the audio output by name, empty: the default (also for listening in)
+    QString m_microphone;           // the audio input by name, empty: the default
+    int m_volumeDb = 0;             // the speaker, at most 0
+    int m_micGainDb = 0;            // the microphone, -20..+20 dB
+    bool m_autoAnswer = false;      // a call to it is answered at once
+
+    bool operator==(const CellularConsole& o) const
+    {
+        return m_number == o.m_number && m_speaker == o.m_speaker && m_microphone == o.m_microphone
+            && m_volumeDb == o.m_volumeDb && m_micGainDb == o.m_micGainDb && m_autoAnswer == o.m_autoAnswer;
+    }
+    bool operator!=(const CellularConsole& o) const { return !(*this == o); }
+};
+
 struct CellularSettings
 {
     QList<CellularNetworkSettings> m_networks;
+    CellularConsole m_console;
     int m_leadMs;               // lead of the transmitters over the receivers
     bool m_logEnabled;          // the log also into the .csv file m_logFilename
     QString m_logFilename;

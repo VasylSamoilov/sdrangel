@@ -133,7 +133,13 @@ public:
             Move,       // the call of the phone to another traffic channel (value: channel, 0 any)
             Hold,       // a short message (text) the centre keeps until the phone fetches it
             Forget,     // the record of the phone in the book (the system of the network)
-            Listen      // listen in to the phone's call (value: 0 off, 1 both sides, 2 from the phone, 3 to it)
+            Listen,     // listen in to the phone's call (value: 0 off, 1 both sides, 2 from the phone, 3 to it)
+            // the console (network 0: the one the number is heard on, else the first on the air)
+            ConsoleDial,    // calls the number
+            ConsoleAnswer,  // answers the call that rings
+            ConsoleHangUp,  // ends its call, or refuses the one that rings
+            ConsoleDigit,   // a touch tone into its call (text: the key)
+            ConsoleSms      // a short message from the console's number to the phone (text)
         };
         static bool parse(const QString& name, Action& action);
         static const char* name(Action action);
@@ -308,6 +314,26 @@ public:
         explicit MsgReportStatus(int network) : Message(), m_network(network) { }
     };
 
+    // the console: its call, when it changes and once a second during a call
+    class MsgReportConsole : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        enum State { Idle, Calling, Ringback, Incoming, Connected };   // as modemcellular::ConsoleLeg
+        State m_state = Idle;
+        int m_network = 0;          // the network of its call
+        QString m_number;           // its own
+        QString m_peer;             // the number it calls or that calls it
+        QDateTime m_since;          // the state since
+        QString m_keys;             // touch tones the peer sent in the call
+        static MsgReportConsole* create() { return new MsgReportConsole(); }
+        MsgReportConsole* clone() const { return new MsgReportConsole(*this); }
+
+    private:
+        MsgReportConsole() : Message() { }
+        MsgReportConsole(const MsgReportConsole&) = default;
+    };
+
     // the speech of the calls of a network: five times a second while a call is on, and once for
     // a call that ended
     class MsgReportSpeech : public Message {
@@ -394,6 +420,7 @@ private:
     void sendBookRecord(const modemnmt::NmtPhoneRecord& record, bool removed = false);
     void sendSmsCentres();
     void sendNames();
+    void sendConsole();         // the console's settings to the worker
     void stop();
     void startNetwork(const CellularNetworkSettings& network);
     void stopNetwork(int id);
