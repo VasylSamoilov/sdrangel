@@ -161,6 +161,7 @@ bool Cellular::deserialize(const QByteArray& data)
         CellularBook::fromBytes(m_settings.m_book, m_book);
     }
     sendSmsCentres();
+    applyLogFile();
 
     if (m_guiMessageQueue) {
         m_guiMessageQueue->push(MsgConfigureCellular::create(m_settings));
@@ -205,8 +206,53 @@ int Cellular::webapiRun(bool run, SWGSDRangel::SWGDeviceState& response, QString
 void Cellular::report(int network, const QString& text)
 {
     qInfo().noquote() << QString("Cellular: network %1: %2").arg(network).arg(text);
+    writeLog(network, text, MsgReportLog::Event);
     if (getMessageQueueToGUI()) {
         getMessageQueueToGUI()->push(MsgReportLog::create(network, text));
+    }
+}
+
+QString Cellular::MsgReportLog::kindName(Kind kind)
+{
+    static const char *const names[] = {"", "FRAME", "CALL", "SMS", "IND", "PWR", "PHONE", "TONE", "NET", "WARN"};
+
+    return (kind >= Event && kind <= Warning) ? QString(names[kind]) : QString();
+}
+
+void Cellular::writeLog(int network, const QString& text, MsgReportLog::Kind kind)
+{
+    if (!m_logFile.isOpen()) {
+        return;
+    }
+    QString name;
+    if (network)
+    {
+        QMutexLocker locker(&m_settingsMutex);
+        const CellularNetworkSettings *n = m_settings.network(network);
+        name = n ? n->m_name : QString("network %1").arg(network);
+    }
+    m_logFile.write(QDateTime::currentDateTime(), name, MsgReportLog::kindName(kind), text);
+}
+
+void Cellular::applyLogFile()
+{
+    bool enabled;
+    QString filename;
+    {
+        QMutexLocker locker(&m_settingsMutex);
+        enabled = m_settings.m_logEnabled;
+        filename = m_settings.m_logFilename;
+    }
+    if (!enabled || filename.isEmpty())
+    {
+        m_logFile.close();
+        return;
+    }
+    if (m_logFile.isOpen() && m_logFile.filename() == filename) {
+        return;
+    }
+    if (!m_logFile.open(filename)) {
+        report(0, QString("warning: cannot open the log file %1").arg(filename));
     }
 }
 
@@ -455,6 +501,7 @@ bool Cellular::handleMessage(const Message& cmd)
             m_settings = cfg.getSettings();
             m_settings.setRollupState(nullptr);
         }
+        applyLogFile();
         restartNetworks(cfg.getRestart() == MsgConfigureCellular::Restart::All);
         applyNetworks();
         return true;
@@ -559,10 +606,10 @@ bool Cellular::handleMessage(const Message& cmd)
     }
     else if (MsgReportLog::match(cmd))
     {
-        // from the worker, on to the GUI
-        if (getMessageQueueToGUI())
-        {
-            const MsgReportLog& report = static_cast<const MsgReportLog&>(cmd);
+        // from the worker, into the file and on to the GUI
+        const MsgReportLog& report = static_cast<const MsgReportLog&>(cmd);
+        writeLog(report.getNetwork(), report.getText(), report.getKind());
+        if (getMessageQueueToGUI()) {
             getMessageQueueToGUI()->push(MsgReportLog::create(report.getNetwork(), report.getText(), report.getKind()));
         }
         return true;
@@ -857,6 +904,12 @@ void Cellular::webapiFormatFeatureSettings(SWGSDRangel::SWGFeatureSettings& resp
     SWGSDRangel::SWGCellularSettings *s = response.getCellularSettings();
 
     s->setLeadMs(settings.m_leadMs);
+    s->setLogEnabled(settings.m_logEnabled ? 1 : 0);
+    if (s->getLogFilename()) {
+        *s->getLogFilename() = settings.m_logFilename;
+    } else {
+        s->setLogFilename(new QString(settings.m_logFilename));
+    }
     if (s->getTitle()) {
         *s->getTitle() = settings.m_title;
     } else {
@@ -908,6 +961,12 @@ void Cellular::webapiUpdateFeatureSettings(CellularSettings& settings, const QSt
 
     if (featureSettingsKeys.contains("leadMs")) {
         settings.m_leadMs = std::max(20, std::min(1000, s->getLeadMs()));
+    }
+    if (featureSettingsKeys.contains("logEnabled")) {
+        settings.m_logEnabled = s->getLogEnabled() != 0;
+    }
+    if (featureSettingsKeys.contains("logFilename") && s->getLogFilename()) {
+        settings.m_logFilename = *s->getLogFilename();
     }
     if (featureSettingsKeys.contains("title") && s->getTitle()) {
         settings.m_title = *s->getTitle();

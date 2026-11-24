@@ -30,6 +30,10 @@ SWGCellularSettings::SWGCellularSettings(QString* json) {
 SWGCellularSettings::SWGCellularSettings() {
     lead_ms = 0;
     m_lead_ms_isSet = false;
+    log_enabled = 0;
+    m_log_enabled_isSet = false;
+    log_filename = nullptr;
+    m_log_filename_isSet = false;
     networks = nullptr;
     m_networks_isSet = false;
     mobiles = nullptr;
@@ -48,6 +52,10 @@ void
 SWGCellularSettings::init() {
     lead_ms = 0;
     m_lead_ms_isSet = false;
+    log_enabled = 0;
+    m_log_enabled_isSet = false;
+    log_filename = new QString("");
+    m_log_filename_isSet = false;
     networks = new QList<SWGCellularNetworkSettings*>();
     m_networks_isSet = false;
     mobiles = new QList<SWGCellularMobile*>();
@@ -61,6 +69,10 @@ SWGCellularSettings::init() {
 void
 SWGCellularSettings::cleanup() {
 
+
+    if(log_filename != nullptr) { 
+        delete log_filename;
+    }
     if(networks != nullptr) { 
         auto arr = networks;
         for(auto o: *arr) { 
@@ -94,6 +106,10 @@ void
 SWGCellularSettings::fromJsonObject(QJsonObject &pJson) {
     ::SWGSDRangel::setValue(&lead_ms, pJson["leadMs"], "qint32", "");
     
+    ::SWGSDRangel::setValue(&log_enabled, pJson["logEnabled"], "qint32", "");
+    
+    ::SWGSDRangel::setValue(&log_filename, pJson["logFilename"], "QString", "QString");
+    
     
     ::SWGSDRangel::setValue(&networks, pJson["networks"], "QList", "SWGCellularNetworkSettings");
     
@@ -121,6 +137,12 @@ SWGCellularSettings::asJsonObject() {
     if(m_lead_ms_isSet){
         obj->insert("leadMs", QJsonValue(lead_ms));
     }
+    if(m_log_enabled_isSet){
+        obj->insert("logEnabled", QJsonValue(log_enabled));
+    }
+    if(log_filename != nullptr && *log_filename != QString("")){
+        toJsonValue(QString("logFilename"), log_filename, obj, QString("QString"));
+    }
     if(networks && networks->size() > 0){
         toJsonArray((QList<void*>*)networks, obj, "networks", "SWGCellularNetworkSettings");
     }
@@ -145,6 +167,26 @@ void
 SWGCellularSettings::setLeadMs(qint32 lead_ms) {
     this->lead_ms = lead_ms;
     this->m_lead_ms_isSet = true;
+}
+
+qint32
+SWGCellularSettings::getLogEnabled() {
+    return log_enabled;
+}
+void
+SWGCellularSettings::setLogEnabled(qint32 log_enabled) {
+    this->log_enabled = log_enabled;
+    this->m_log_enabled_isSet = true;
+}
+
+QString*
+SWGCellularSettings::getLogFilename() {
+    return log_filename;
+}
+void
+SWGCellularSettings::setLogFilename(QString* log_filename) {
+    this->log_filename = log_filename;
+    this->m_log_filename_isSet = true;
 }
 
 QList<SWGCellularNetworkSettings*>*
@@ -193,6 +235,12 @@ SWGCellularSettings::isSet(){
     bool isObjectUpdated = false;
     do{
         if(m_lead_ms_isSet){
+            isObjectUpdated = true; break;
+        }
+        if(m_log_enabled_isSet){
+            isObjectUpdated = true; break;
+        }
+        if(log_filename && *log_filename != QString("")){
             isObjectUpdated = true; break;
         }
         if(networks && (networks->size() > 0)){

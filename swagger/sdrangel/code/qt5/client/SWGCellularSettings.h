@@ -48,6 +48,12 @@ public:
     qint32 getLeadMs();
     void setLeadMs(qint32 lead_ms);
 
+    qint32 getLogEnabled();
+    void setLogEnabled(qint32 log_enabled);
+
+    QString* getLogFilename();
+    void setLogFilename(QString* log_filename);
+
     QList<SWGCellularNetworkSettings*>* getNetworks();
     void setNetworks(QList<SWGCellularNetworkSettings*>* networks);
 
@@ -66,6 +72,12 @@ public:
 private:
     qint32 lead_ms;
     bool m_lead_ms_isSet;
+
+    qint32 log_enabled;
+    bool m_log_enabled_isSet;
+
+    QString* log_filename;
+    bool m_log_filename_isSet;
 
     QList<SWGCellularNetworkSettings*>* networks;
     bool m_networks_isSet;

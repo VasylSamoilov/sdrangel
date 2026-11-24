@@ -267,6 +267,8 @@ void CellularSettings::resetToDefaults()
     m_networks.clear();
     m_networks.append(CellularNetworkSettings(1));
     m_leadMs = 100;
+    m_logEnabled = false;
+    m_logFilename = "cellular_log.csv";
     m_title = "Cellular";
     m_rgbColor = QColor(0, 160, 120).rgb();
     m_workspaceIndex = 0;
@@ -315,6 +317,8 @@ QByteArray CellularSettings::serialize() const
 
     s.writeS32(1, m_leadMs);
     s.writeS32(2, m_networks.size());
+    s.writeBool(3, m_logEnabled);
+    s.writeString(4, m_logFilename);
     s.writeString(20, m_title);
     s.writeU32(21, m_rgbColor);
     s.writeS32(22, m_workspaceIndex);
@@ -360,6 +364,8 @@ bool CellularSettings::deserialize(const QByteArray& data)
         readNetwork(d, n, 1);
         m_networks.append(n);
         d.readS32(14, &m_leadMs, 100);
+        m_logEnabled = false;
+        m_logFilename = "cellular_log.csv";
     }
     else
     {
@@ -367,6 +373,8 @@ bool CellularSettings::deserialize(const QByteArray& data)
 
         d.readS32(1, &m_leadMs, 100);
         d.readS32(2, &count, 0);
+        d.readBool(3, &m_logEnabled, false);
+        d.readString(4, &m_logFilename, "cellular_log.csv");
         for (int i = 0; i < count && i < kMaxNetworks; i++)
         {
             CellularNetworkSettings n;

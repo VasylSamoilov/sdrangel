@@ -29,6 +29,7 @@
 #include "feature/feature.h"
 #include "util/message.h"
 
+#include "cellularlogfile.h"
 #include "cellularsettings.h"
 #include "nmtphonebook.h"
 
@@ -213,6 +214,8 @@ public:
     public:
         // what the line is about (a badge in the log)
         enum Kind { Event, Frame, Call, Sms, Mwi, Power, Phone, Tone, Network, Warning };
+        // its badge: FRAME, CALL ..., empty for an event
+        static QString kindName(Kind kind);
         int getNetwork() const { return m_network; }
         const QString& getText() const { return m_text; }
         Kind getKind() const { return m_kind; }
@@ -345,6 +348,7 @@ private:
     // the book of phones: changed in the thread of the feature, read by the web API
     modemnmt::NmtPhoneBook m_book;
     mutable QMutex m_bookMutex;
+    CellularLogFile m_logFile;                  // the log in a file, as the settings say
 
     void start();
     void sendBookRecord(const modemnmt::NmtPhoneRecord& record, bool removed = false);
@@ -358,6 +362,10 @@ private:
     MessageQueue *usePipe(ChannelAPI *channel);
     void releasePipe(ChannelAPI *channel);
     void report(int network, const QString& text);
+    // a line of the log into the file (the GUI gets it too, by its own way)
+    void writeLog(int network, const QString& text, MsgReportLog::Kind kind);
+    // opens or closes the file of the log after the settings changed
+    void applyLogFile();
     void keepReport(const MsgReportStatus& report);
     void dropReport(int network);
 

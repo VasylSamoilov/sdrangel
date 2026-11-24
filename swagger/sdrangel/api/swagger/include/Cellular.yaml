@@ -6,6 +6,12 @@ CellularSettings:
       description: "Lead of the transmitters over the receivers in ms (part of the round trip). Taken when the controller starts."
       minimum: 20
       maximum: 1000
+    logEnabled:
+      type: integer
+      description: "Write the log also into the file logFilename (1 enabled, 0 disabled): CSV with the columns Date, Time, Network, Kind, Text, appended to."
+    logFilename:
+      type: string
+      description: "Log file name or path."
     networks:
       description: "The networks. When present the list replaces the networks of the controller; while it runs, networks that are switched on start and networks that are switched off or not in the list stop."
       type: array

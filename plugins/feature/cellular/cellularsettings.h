@@ -77,6 +77,8 @@ struct CellularSettings
 {
     QList<CellularNetworkSettings> m_networks;
     int m_leadMs;               // lead of the transmitters over the receivers
+    bool m_logEnabled;          // the log also into the .csv file m_logFilename
+    QString m_logFilename;
 
     QString m_title;
     quint32 m_rgbColor;
