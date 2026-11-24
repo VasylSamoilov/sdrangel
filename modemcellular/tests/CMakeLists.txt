@@ -26,7 +26,8 @@ set(MODEMCELLULAR_LIB_SOURCES
     ../speechmeter.cpp
     ../testcaller.cpp
     ../timer.cpp
-    ../tonegenerator.cpp)
+    ../tonegenerator.cpp
+    ../txaudiosource.cpp)
 
 find_package(Qt5 COMPONENTS Core REQUIRED)
 

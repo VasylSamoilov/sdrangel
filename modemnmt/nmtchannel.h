@@ -525,7 +525,7 @@ private:
     SupervisoryDetector m_superDetector;
     SupervisoryTone m_superTone;
     RxAudioChain m_rxAudio;
-    TxAudioSource m_txAudio;
+    modemcellular::TxAudioSource m_txAudio;
     SpeechLimiter m_limiter;
     bool m_limiterActive;           // speech is going out; false: the next speech starts afresh
     std::vector<float> m_speech;

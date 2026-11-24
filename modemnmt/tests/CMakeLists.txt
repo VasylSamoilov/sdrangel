@@ -38,7 +38,8 @@ set(MODEMNMT_LIB_SOURCES
     ../../modemcellular/musicendpoint.cpp
     ../../modemcellular/speechmeter.cpp
     ../../modemcellular/timer.cpp
-    ../../modemcellular/tonegenerator.cpp)
+    ../../modemcellular/tonegenerator.cpp
+    ../../modemcellular/txaudiosource.cpp)
 find_package(Threads REQUIRED)
 find_package(Qt5 COMPONENTS Core REQUIRED)
 

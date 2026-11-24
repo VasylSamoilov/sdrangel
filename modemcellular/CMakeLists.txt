@@ -20,6 +20,7 @@ set(modemcellular_SOURCES
     testcaller.cpp
     timer.cpp
     tonegenerator.cpp
+    txaudiosource.cpp
 )
 
 set(modemcellular_HEADERS
@@ -46,6 +47,7 @@ set(modemcellular_HEADERS
     testcaller.h
     timer.h
     tonegenerator.h
+    txaudiosource.h
 )
 
 include_directories(

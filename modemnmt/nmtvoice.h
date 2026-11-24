@@ -31,6 +31,7 @@
 
 #include "biquad.h"
 #include "emphasis.h"
+#include "txaudiosource.h"
 #include "export.h"
 
 namespace modemnmt
@@ -214,34 +215,7 @@ private:
     std::vector<float> m_block;
 };
 
-// Audio from the call towards the radio: 8 kHz to the channel rate, pulled in blocks of 160. The
-// resampler is SDRangel's polyphase Interpolator as its DSD demodulator uses it from 8 kHz (3.4
-// kHz; phases and taps above): 3 kHz -0.35 dB, the images about 60 dB down.
-class MODEMNMT_API TxAudioSource
-{
-public:
-    using Pull = std::function<void(float* samples, int count)>;
-
-    explicit TxAudioSource(double sampleRate);
-    // the Interpolator holds its taps by pointer and must not be copied
-    TxAudioSource(const TxAudioSource&) = delete;
-    TxAudioSource& operator=(const TxAudioSource&) = delete;
-
-    void setPull(Pull pull) { m_pull = std::move(pull); }
-    // Writes length samples (replace, or add), scaled by gain
-    void generate(float* samples, int length, bool add, double gain);
-    void reset();
-
-private:
-    double nextCallSample();
-
-    Real m_step;                        // call samples per output sample
-    Interpolator m_interpolator;
-    Real m_remain;                      // position of the output after the last call sample taken
-    Pull m_pull;
-    std::vector<float> m_block;
-    size_t m_blockPos;
-};
+// Audio from the call towards the radio: modemcellular's TxAudioSource (8 kHz to the channel rate).
 
 } // namespace modemnmt
 

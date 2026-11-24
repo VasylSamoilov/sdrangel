@@ -34,6 +34,7 @@ using namespace modemnmt;
 using modemcellular::BiquadHighpass;
 using modemcellular::BiquadLowpass;
 using modemcellular::Emphasis;
+using modemcellular::TxAudioSource;
 
 static int g_failures = 0;
 
