@@ -954,7 +954,10 @@ int Cellular::webapiActionsPost(const QStringList& featureActionsKeys, SWGSDRang
     }
 
     const QString number = actions->getNumber() ? actions->getNumber()->trimmed() : QString();
-    if (number.isEmpty())
+    // the console's answer, hang up and touch tones are of its own call: no number
+    const bool consoleOwn = (action == MsgAction::ConsoleAnswer) || (action == MsgAction::ConsoleHangUp)
+        || (action == MsgAction::ConsoleDigit);
+    if (number.isEmpty() && !consoleOwn)
     {
         errorMessage = "The action needs the number of the phone";
         return 400;
