@@ -179,6 +179,18 @@
 #  define MODEMNMT_API
 #endif
 
+/* the 'MODEMAMPS_API' controls the import/export of 'modemamps' symbols
+ */
+#if !defined(sdrangel_STATIC)
+#  ifdef modemamps_EXPORTS
+#    define MODEMAMPS_API __SDR_EXPORT
+#  else
+#    define MODEMAMPS_API __SDR_IMPORT
+#  endif
+#else
+#  define MODEMAMPS_API
+#endif
+
 /* the 'MODEMCELLULAR_API' controls the import/export of 'modemcellular' symbols
  */
 #if !defined(sdrangel_STATIC)
