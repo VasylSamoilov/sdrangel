@@ -1,6 +1,7 @@
 project(modemcellular)
 
 set(modemcellular_SOURCES
+    biquad.cpp
     calllistener.cpp
     callrouter.cpp
     carrierqueue.cpp
@@ -12,6 +13,7 @@ set(modemcellular_SOURCES
     consoleleg.cpp
     echoendpoint.cpp
     echosuppressor.cpp
+    emphasis.cpp
     firfilter.cpp
     musicendpoint.cpp
     speechmeter.cpp
@@ -22,6 +24,7 @@ set(modemcellular_SOURCES
 
 set(modemcellular_HEADERS
     audioendpoint.h
+    biquad.h
     calllistener.h
     callrouter.h
     calltypes.h
@@ -35,6 +38,7 @@ set(modemcellular_HEADERS
     consoleleg.h
     echoendpoint.h
     echosuppressor.h
+    emphasis.h
     firfilter.h
     mobileleg.h
     musicendpoint.h

@@ -291,8 +291,8 @@ bool NmtBaseStation::bind(const std::vector<NmtStreamSpan>& rxStreams, const std
         m_channels.push_back(&m_system->addChannel(cc, kAudioRate, 1.0));
         // the clock of the battery saving frames (NMT Doc 450-1 4.3.3.12): the time of day
         m_channels.back()->setTimeOfDay(m_timeOfDay ? m_timeOfDay : TimeOfDay(&NmtBaseStation::localTimeOfDay));
-        m_rxEmphasis.push_back(std::make_unique<Emphasis>(kAudioRate));
-        m_txEmphasis.push_back(std::make_unique<Emphasis>(kAudioRate));
+        m_rxEmphasis.push_back(std::make_unique<modemcellular::Emphasis>(kAudioRate));
+        m_txEmphasis.push_back(std::make_unique<modemcellular::Emphasis>(kAudioRate));
         c.onAir = true;
     }
 

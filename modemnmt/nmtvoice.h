@@ -88,7 +88,7 @@ public:
 
 private:
     double m_sampleRate;
-    Emphasis m_emphasis;                // the pre-emphasis of the transmitter, to find the peaks
+    modemcellular::Emphasis m_emphasis; // the pre-emphasis of the transmitter, to find the peaks
     double m_limit;
     double m_release;                   // factor per sample the gain may rise
     int m_delay;                        // the lookahead in samples

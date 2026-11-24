@@ -25,10 +25,15 @@
 #include <string>
 #include <vector>
 
+#include "biquad.h"
 #include "clock.h"
+#include "emphasis.h"
 #include "nmtsystem.h"
 
 using namespace modemnmt;
+using modemcellular::BiquadHighpass;
+using modemcellular::BiquadLowpass;
+using modemcellular::Emphasis;
 
 static int g_failures = 0;
 

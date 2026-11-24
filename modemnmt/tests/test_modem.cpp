@@ -25,6 +25,7 @@
 #include "nmtmodem.h"
 
 using namespace modemnmt;
+using modemcellular::BiquadLowpass;
 
 static int g_failures = 0;
 

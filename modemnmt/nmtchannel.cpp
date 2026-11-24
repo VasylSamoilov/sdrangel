@@ -244,7 +244,7 @@ NmtChannel::NmtChannel(const ChannelConfig& config, double sampleRate, double de
     // pre-emphasized level at -2 dB re the reference (osmocom-analog's NMT; NMT has 3.9 dB from the
     // 3.0 kHz reference to the 4.7 kHz largest deviation. Echo test on air with the user's voice,
     // knee -3/-2/-1 dB: loss 1.9/1.5/0.6 dB, limiter hits 0/0/3; -2 dB sounded clearest).
-    m_compandor.setCompressorKnee(std::pow(10.0, -2.0 / 20.0), Emphasis::kCutOff);
+    m_compandor.setCompressorKnee(std::pow(10.0, -2.0 / 20.0), modemcellular::Emphasis::kCutOff);
     m_dms.setDataHandler([this](const std::vector<uint8_t>& data) { smsData(data); });
     m_dms.setFrameTap([this](bool rx, const std::string& text) {
         if (m_dmsTap) {

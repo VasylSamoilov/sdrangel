@@ -151,7 +151,7 @@ void SupervisoryDetector::decode()
 
 SupervisoryTone::SupervisoryTone(double sampleRate, int number, double level) :
     m_enabled(validNumber(number)),
-    m_level(m_enabled ? level * kSupervisoryDeviation / kSpeechDeviationHz / Emphasis::preGain(kSupervisoryHz[number - 1], sampleRate) : 0.0)
+    m_level(m_enabled ? level * kSupervisoryDeviation / kSpeechDeviationHz / modemcellular::Emphasis::preGain(kSupervisoryHz[number - 1], sampleRate) : 0.0)
 {
     if (m_enabled) {
         m_nco.setFreq(static_cast<Real>(kSupervisoryHz[number - 1]), static_cast<Real>(sampleRate));
@@ -316,7 +316,7 @@ void SpeechLimiter::reset()
     m_pos = 0;
     m_mSum = static_cast<double>(m_delay + 1);
     m_gain = 1.0;
-    m_emphasis = Emphasis(m_sampleRate);
+    m_emphasis = modemcellular::Emphasis(m_sampleRate);
 }
 
 void SpeechLimiter::process(float* samples, int length)

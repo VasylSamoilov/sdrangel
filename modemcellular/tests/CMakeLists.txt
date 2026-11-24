@@ -8,6 +8,7 @@ find_package(Threads REQUIRED)
 get_filename_component(SDRANGEL_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 
 set(MODEMCELLULAR_LIB_SOURCES
+    ../biquad.cpp
     ../calllistener.cpp
     ../callrouter.cpp
     ../carrierqueue.cpp
@@ -19,6 +20,7 @@ set(MODEMCELLULAR_LIB_SOURCES
     ../consoleleg.cpp
     ../echoendpoint.cpp
     ../echosuppressor.cpp
+    ../emphasis.cpp
     ../firfilter.cpp
     ../musicendpoint.cpp
     ../speechmeter.cpp

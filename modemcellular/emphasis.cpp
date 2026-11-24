@@ -22,7 +22,7 @@
 #include <cmath>
 #include <vector>
 
-namespace modemnmt
+namespace modemcellular
 {
 
 namespace
@@ -123,4 +123,4 @@ void Emphasis::de(float* samples, int count)
     deRaw(samples, count);
 }
 
-} // namespace modemnmt
+} // namespace modemcellular

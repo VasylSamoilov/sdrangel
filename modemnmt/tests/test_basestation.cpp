@@ -28,6 +28,7 @@
 
 using modemcellular::CarrierBatch;
 using modemcellular::CarrierQueue;
+using modemcellular::Emphasis;
 
 static NmtNetworkConfig network(std::vector<int> channels)
 {

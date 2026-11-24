@@ -21,7 +21,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace modemnmt
+namespace modemcellular
 {
 
 namespace
@@ -95,4 +95,4 @@ BiquadHighpass::BiquadHighpass(double cutoffHz, double sampleRate, int sections)
     m_b2 = (1.0 - k / q + k * k) * norm;
 }
 
-} // namespace modemnmt
+} // namespace modemcellular

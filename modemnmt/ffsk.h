@@ -85,8 +85,8 @@ private:
     double m_rotation;         // cycles per sample of the mixer
     double m_mixPhase;         // cycles
     double m_lastPhase;        // radians
-    BiquadLowpass m_lowpassI;
-    BiquadLowpass m_lowpassQ;
+    modemcellular::BiquadLowpass m_lowpassI;
+    modemcellular::BiquadLowpass m_lowpassQ;
     double m_bitsPerSample;
     double m_bitAdjust;
     double m_bitPos;           // bits

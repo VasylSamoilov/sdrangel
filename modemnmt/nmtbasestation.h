@@ -164,8 +164,8 @@ private:
     std::vector<int> m_onAir;                   // indices into m_carriers
     std::vector<NmtChannel*> m_channels;        // parallel to m_onAir
     TimeOfDay m_timeOfDay;
-    std::vector<std::unique_ptr<Emphasis>> m_rxEmphasis;
-    std::vector<std::unique_ptr<Emphasis>> m_txEmphasis;
+    std::vector<std::unique_ptr<modemcellular::Emphasis>> m_rxEmphasis;
+    std::vector<std::unique_ptr<modemcellular::Emphasis>> m_txEmphasis;
     std::vector<float> m_audio;
 };
 
