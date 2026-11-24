@@ -1688,7 +1688,13 @@ bool CellularGUI::handleMessage(const Message& message)
     }
     else if (Cellular::MsgConfigureCellular::match(message))
     {
+        // the columns are the GUI's: moving one does not reach the feature, its copy is old
+        const CellularSettings view = m_settings;
         m_settings = static_cast<const Cellular::MsgConfigureCellular&>(message).getSettings();
+        m_settings.m_networkColumnIndexes = view.m_networkColumnIndexes;
+        m_settings.m_networkColumnSizes = view.m_networkColumnSizes;
+        m_settings.m_carrierColumnIndexes = view.m_carrierColumnIndexes;
+        m_settings.m_carrierColumnSizes = view.m_carrierColumnSizes;
         m_settings.setRollupState(&m_rollupState);
         displaySettings();
         return true;
