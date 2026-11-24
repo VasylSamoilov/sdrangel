@@ -977,11 +977,10 @@ QWidget *CellularGUI::buildTest()
     QPushButton *call = new QPushButton("Call");
     call->setToolTip("The network calls the phone: it is paged, registered or not, and rings. "
         "When it answers it hears the echo of itself or music, as set in Other numbers of the network");
-    QPushButton *hangUp = new QPushButton("Hang up");
-    hangUp->setToolTip("Ends the call the network made to the phone");
     QPushButton *release = new QPushButton("Release");
-    release->setToolTip("Releases any call of the phone from the network side");
-    form->addRow("Call", flowRow(page, {call, hangUp, release}));
+    m_testRelease = release;
+    release->setToolTip("Ends the call of the phone from the network side: the test call, or any other call it has");
+    form->addRow("Call", flowRow(page, {call, release}));
 
     m_smsText = new QLineEdit(page);
     m_smsText->setPlaceholderText("Short message to the phone");
@@ -1020,22 +1019,21 @@ QWidget *CellularGUI::buildTest()
     m_powerLevel->setToolTip("Power level ordered to the phone in its call (NMT Doc 450-1 4.4.1.8): high 15 W or 7 W, "
         "medium 10 dB less, low 20 dB less");
     QPushButton *power = new QPushButton("Order");
+    m_testPower = power;
     power->setToolTip("Orders the power level to the phone in its call; the log tells whether it took it");
     form->addRow("Power", flowRow(page, {m_powerLevel, power}));
 
-    m_moveChannel = new QSpinBox();
-    m_moveChannel->setRange(0, 2023);
-    m_moveChannel->setSpecialValueText("any");
-    m_moveChannel->setToolTip("Traffic channel to move the call to; any: the first free one");
+    m_moveChannel = new QComboBox();
+    m_moveChannel->setToolTip("The voice (traffic) channel to move the call to: one of the network's, or any free one");
     QPushButton *move = new QPushButton("Move");
-    move->setToolTip("Moves the call of the phone to another traffic channel of the network (switching a call in progress)");
-    form->addRow("Move", flowRow(page, {m_moveChannel, move}));
+    m_testMove = move;
+    move->setToolTip("Moves the call of the phone to that voice channel (switching a call in progress, NMT Doc 450-1 4.4.1.4)");
+    form->addRow("Voice channel", flowRow(page, {m_moveChannel, move}));
 
     auto act = [this](int action, const QString& text, int value) {
         requestAction(m_testNetwork->currentData().toInt(), m_testPhone->currentText().trimmed(), action, text, value);
     };
     connect(call, &QPushButton::clicked, this, [act]() { act(Cellular::MsgAction::Call, QString(), 0); });
-    connect(hangUp, &QPushButton::clicked, this, [act]() { act(Cellular::MsgAction::HangUp, QString(), 0); });
     connect(release, &QPushButton::clicked, this, [act]() { act(Cellular::MsgAction::Release, QString(), 0); });
     connect(sms, &QPushButton::clicked, this, [this, act]() { act(Cellular::MsgAction::Sms, m_smsText->text(), 0); });
     connect(keep, &QPushButton::clicked, this, [this, act]() { act(Cellular::MsgAction::Hold, m_smsText->text(), 0); });
@@ -1045,8 +1043,13 @@ QWidget *CellularGUI::buildTest()
     connect(power, &QPushButton::clicked, this, [this, act]() {
         act(Cellular::MsgAction::Power, QString(), m_powerLevel->currentData().toInt());
     });
-    connect(move, &QPushButton::clicked, this, [this, act]() { act(Cellular::MsgAction::Move, QString(), m_moveChannel->value()); });
-    connect(m_testNetwork, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() { showTestPhone(); });
+    connect(move, &QPushButton::clicked, this, [this, act]() {
+        act(Cellular::MsgAction::Move, QString(), m_moveChannel->currentData().toInt());
+    });
+    connect(m_testNetwork, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
+        voiceChannels(m_moveChannel, m_testNetwork->currentData().toInt());
+        showTestPhone();
+    });
     connect(m_testPhone, &QComboBox::currentTextChanged, this, [this]() { showTestPhone(); });
     return page;
 }
@@ -1426,12 +1429,11 @@ QWidget *CellularGUI::buildConsole()
     m_consoleInCall = new QWidget(page);
     QFormLayout *inCall = new QFormLayout(m_consoleInCall);
     inCall->setContentsMargins(0, 0, 0, 0);
-    m_consoleChannel = new QSpinBox(m_consoleInCall);
-    m_consoleChannel->setRange(0, 2047);
-    m_consoleChannel->setSpecialValueText("any free");
-    m_consoleChannel->setToolTip("Switching call in progress (NMT Doc 450-1 4.4.1.4): the phone to another traffic channel");
-    QToolButton *move = iconButton(m_consoleInCall, ":/swap.png", "Move the call to the channel");
-    inCall->addRow("Channel", flowRow(m_consoleInCall, {m_consoleChannel, move}));
+    m_consoleChannel = new QComboBox(m_consoleInCall);
+    m_consoleChannel->setToolTip("The voice (traffic) channel to move the call to: one of the network's, or any free one");
+    QToolButton *move = iconButton(m_consoleInCall, ":/swap.png",
+        "Move the call to that voice channel (switching a call in progress, NMT Doc 450-1 4.4.1.4)");
+    inCall->addRow("Voice channel", flowRow(m_consoleInCall, {m_consoleChannel, move}));
     m_consolePower = new QComboBox(m_consoleInCall);
     m_consolePower->addItem("High", 3);
     m_consolePower->addItem("Medium", 2);
@@ -1441,7 +1443,7 @@ QWidget *CellularGUI::buildConsole()
     inCall->addRow("Power", flowRow(m_consoleInCall, {m_consolePower, power}));
     layout->addWidget(m_consoleInCall);
     connect(move, &QToolButton::clicked, this, [this]() {
-        requestAction(m_consoleReport.m_network, m_consoleReport.m_peer, Cellular::MsgAction::Move, QString(), m_consoleChannel->value());
+        requestAction(m_consoleReport.m_network, m_consoleReport.m_peer, Cellular::MsgAction::Move, QString(), m_consoleChannel->currentData().toInt());
     });
     connect(power, &QToolButton::clicked, this, [this]() {
         requestAction(m_consoleReport.m_network, m_consoleReport.m_peer, Cellular::MsgAction::Power, QString(),
@@ -1631,7 +1633,11 @@ void CellularGUI::showConsole()
     m_consoleSpeakerMute->setStyleSheet(inCall && !c.m_speakerMute ? "QToolButton { background-color : green; }"
         : "QToolButton { background:rgb(79,79,79); }");
     // with a phone in the call: its orders (only a phone number has a call on a channel)
-    m_consoleInCall->setVisible(r.m_state == R::Connected && r.m_peer.size() == 7);
+    // always there (rows never move), usable only in a call with a phone
+    m_consoleInCall->setEnabled(r.m_state == R::Connected && r.m_peer.size() == 7);
+    if (r.m_network) {
+        voiceChannels(m_consoleChannel, r.m_network);
+    }
 }
 
 void CellularGUI::requestAction(int network, const QString& number, int action, const QString& text, int value)
@@ -2204,6 +2210,37 @@ void CellularGUI::showSummary()
 }
 
 // What the phone of the Test tab does now, and the phones its network heard to choose from.
+void CellularGUI::voiceChannels(QComboBox *box, int network) const
+{
+    const int kept = box->currentData().toInt();
+    std::vector<modemnmt::NmtCarrierConfig> carriers;
+    QString error;
+    const CellularNetworkSettings *n = m_settings.network(network);
+    if (n) {
+        CellularNetworkSettings::parseCarriers(n->m_carriers, carriers, error);
+    }
+    QList<int> channels;
+    for (const modemnmt::NmtCarrierConfig& c : carriers)
+    {
+        if (c.type == modemnmt::ChannelType::Tc || c.type == modemnmt::ChannelType::AcTc || c.type == modemnmt::ChannelType::CcTc) {
+            channels.append(c.channel);
+        }
+    }
+    QList<int> shown;
+    for (int i = 1; i < box->count(); i++) {
+        shown.append(box->itemData(i).toInt());
+    }
+    if (box->count() > 0 && shown == channels) {
+        return;
+    }
+    box->clear();
+    box->addItem("any free", 0);
+    for (int c : channels) {
+        box->addItem(QString::number(c), c);
+    }
+    box->setCurrentIndex(std::max(0, box->findData(kept)));
+}
+
 void CellularGUI::showTestPhone()
 {
     const int network = m_testNetwork->currentData().toInt();
@@ -2227,6 +2264,24 @@ void CellularGUI::showTestPhone()
     }
     m_testState->setText(state);
     m_testState->setVisible(!number.isEmpty());
+    voiceChannels(m_moveChannel, network);
+
+    // the orders of a call only while the phone has one: release any call, power and voice
+    // channel in a conversation on a voice channel
+    bool busy = false;
+    if (it != m_status.constEnd())
+    {
+        for (const Cellular::MsgReportStatus::Phone& p : it->phones) {
+            busy = busy || (p.number == number && !p.state.isEmpty());
+        }
+    }
+    const CellularSpeechSeen *seen = speechOf(number);
+    const bool talking = seen && seen->live();
+    m_testRelease->setEnabled(busy || talking);
+    for (QWidget *w : {static_cast<QWidget*>(m_powerLevel), static_cast<QWidget*>(m_testPower),
+                       static_cast<QWidget*>(m_moveChannel), static_cast<QWidget*>(m_testMove)}) {
+        w->setEnabled(talking);
+    }
 
     // the list changes only when other phones were heard; the text being typed stays
     QStringList items;

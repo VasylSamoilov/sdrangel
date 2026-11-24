@@ -231,7 +231,7 @@ private:
     QLineEdit *m_consoleSms;
     QList<QCheckBox*> m_consoleMwi;         // the indicators, property "flag"
     QWidget *m_consoleInCall;
-    QSpinBox *m_consoleChannel;
+    QComboBox *m_consoleChannel;
     QComboBox *m_consolePower;
     QLineEdit *m_consoleOwn;
     QSpinBox *m_consoleVolume;
@@ -245,7 +245,12 @@ private:
     QLineEdit *m_smsText;
     QComboBox *m_mwiKind;
     QComboBox *m_powerLevel;
-    QSpinBox *m_moveChannel;
+    QComboBox *m_moveChannel;               // "any free" (0) and the network's voice channels
+    QPushButton *m_testRelease;
+    QPushButton *m_testPower;
+    QPushButton *m_testMove;
+    // the voice channels of a network in a list: "any free" (0), then each by its number
+    void voiceChannels(QComboBox *box, int network) const;
     // Log
     QComboBox *m_logNetwork;
     QCheckBox *m_logFrames;

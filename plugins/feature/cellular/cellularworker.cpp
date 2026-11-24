@@ -484,6 +484,13 @@ void CellularWorker::action(const Cellular::MsgAction& msg)
         log(n.id, what + ": hung up");
         return;
     case Cellular::MsgAction::Release:
+        // the test call of this phone: its caller hangs up; any other call: the network releases it
+        if (n.caller->state() != modemcellular::TestCaller::State::Idle && n.caller->number() == msg.getNumber().toStdString())
+        {
+            n.caller->hangUp();
+            log(n.id, what + ": the test call hung up");
+            return;
+        }
         ok = system.releaseCall(country, digits);
         refused = "the phone has no call that can be released";
         break;
