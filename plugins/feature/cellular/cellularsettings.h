@@ -26,6 +26,30 @@
 
 class Serializable;
 
+// What answers the calls of a network to numbers that are no phone: echo or music, and how.
+struct CellularFarEnd
+{
+    enum MusicSource
+    {
+        MusicMelody = 0,        // the built-in melody
+        MusicFile = 1,          // a sound file (WAV)
+        MusicInput = 2          // an SDRangel audio input
+    };
+
+    int m_echoDelayMs = 1000;   // 200..3000
+    int m_echoLevelDb = 0;      // at most 0
+    bool m_echoAnnounce = false;    // a short tone when the echo answers
+    int m_musicSource = MusicMelody;
+    QString m_musicFile;
+    QString m_musicInput;       // the audio input device by name, empty: the default
+    int m_musicLevelDb = 0;     // at most 0
+    bool m_musicLoop = true;    // false: plays once, then the call ends
+    int m_callLimitS = 0;       // the longest call to echo or music in seconds, 0: no limit
+
+    bool operator==(const CellularFarEnd& o) const;
+    bool operator!=(const CellularFarEnd& o) const { return !(*this == o); }
+};
+
 // One NMT network (one base station) and the radios it runs on.
 struct CellularNetworkSettings
 {
@@ -51,6 +75,7 @@ struct CellularNetworkSettings
     bool m_sendClock;
     QString m_smscNumber;
     int m_fallback;
+    CellularFarEnd m_farEnd;
 
     // the device sets that carry the Cellular Rx and the Cellular Tx channel of this network
     int m_rxDeviceSetIndex;

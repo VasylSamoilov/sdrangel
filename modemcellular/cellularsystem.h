@@ -68,6 +68,7 @@ public:
     void setFallbackFactory(CallRouter::EndpointFactory factory);
     void setAnswerDelay(double seconds);
     void setToneTimeout(double seconds);
+    void setCallLimit(double seconds);
     void setSubscriberListener(SubscriberListener listener);
 
     // Subscriber hooks for the protocol layers: call when a mobile registers, de-registers

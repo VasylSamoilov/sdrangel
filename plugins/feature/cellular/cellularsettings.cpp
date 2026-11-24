@@ -94,8 +94,16 @@ void CellularNetworkSettings::resetToDefaults()
     m_sendClock = false;
     m_smscNumber = "";
     m_fallback = FallbackEcho;
+    m_farEnd = CellularFarEnd();
     m_rxDeviceSetIndex = 0;
     m_txDeviceSetIndex = 1;
+}
+
+bool CellularFarEnd::operator==(const CellularFarEnd& o) const
+{
+    return m_echoDelayMs == o.m_echoDelayMs && m_echoLevelDb == o.m_echoLevelDb && m_echoAnnounce == o.m_echoAnnounce
+        && m_musicSource == o.m_musicSource && m_musicFile == o.m_musicFile && m_musicInput == o.m_musicInput
+        && m_musicLevelDb == o.m_musicLevelDb && m_musicLoop == o.m_musicLoop && m_callLimitS == o.m_callLimitS;
 }
 
 QByteArray CellularNetworkSettings::serialize() const
@@ -107,6 +115,16 @@ QByteArray CellularNetworkSettings::serialize() const
     s.writeBool(3, m_enabled);
     s.writeS32(4, m_y1);
     writeNetwork(s, *this, 10);
+    // the far ends (keys 40..)
+    s.writeS32(40, m_farEnd.m_echoDelayMs);
+    s.writeS32(41, m_farEnd.m_echoLevelDb);
+    s.writeBool(42, m_farEnd.m_echoAnnounce);
+    s.writeS32(43, m_farEnd.m_musicSource);
+    s.writeString(44, m_farEnd.m_musicFile);
+    s.writeString(45, m_farEnd.m_musicInput);
+    s.writeS32(46, m_farEnd.m_musicLevelDb);
+    s.writeBool(47, m_farEnd.m_musicLoop);
+    s.writeS32(48, m_farEnd.m_callLimitS);
     return s.final();
 }
 
@@ -122,6 +140,16 @@ bool CellularNetworkSettings::deserialize(const QByteArray& data)
     d.readBool(3, &m_enabled, true);
     d.readS32(4, &m_y1, -1);
     readNetwork(d, *this, 10);
+    const CellularFarEnd defaults;
+    d.readS32(40, &m_farEnd.m_echoDelayMs, defaults.m_echoDelayMs);
+    d.readS32(41, &m_farEnd.m_echoLevelDb, defaults.m_echoLevelDb);
+    d.readBool(42, &m_farEnd.m_echoAnnounce, defaults.m_echoAnnounce);
+    d.readS32(43, &m_farEnd.m_musicSource, defaults.m_musicSource);
+    d.readString(44, &m_farEnd.m_musicFile, "");
+    d.readString(45, &m_farEnd.m_musicInput, "");
+    d.readS32(46, &m_farEnd.m_musicLevelDb, defaults.m_musicLevelDb);
+    d.readBool(47, &m_farEnd.m_musicLoop, defaults.m_musicLoop);
+    d.readS32(48, &m_farEnd.m_callLimitS, defaults.m_callLimitS);
     return m_id >= 1 && m_id <= kMaxNetworkId;
 }
 
@@ -130,7 +158,7 @@ bool CellularNetworkSettings::sameNetwork(const CellularNetworkSettings& o) cons
     return m_id == o.m_id && m_system == o.m_system && m_country == o.m_country && m_area == o.m_area
         && m_y1 == o.m_y1 && m_areaNo == o.m_areaNo && m_msPower == o.m_msPower && m_carriers == o.m_carriers
         && m_compandor == o.m_compandor && m_sendCallerId == o.m_sendCallerId && m_sendClock == o.m_sendClock
-        && m_smscNumber == o.m_smscNumber && m_fallback == o.m_fallback
+        && m_smscNumber == o.m_smscNumber && m_fallback == o.m_fallback && m_farEnd == o.m_farEnd
         && m_rxDeviceSetIndex == o.m_rxDeviceSetIndex && m_txDeviceSetIndex == o.m_txDeviceSetIndex;
 }
 

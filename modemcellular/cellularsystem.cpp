@@ -63,6 +63,12 @@ void CellularSystem::setToneTimeout(double seconds)
     m_router.setToneTimeout(seconds);
 }
 
+void CellularSystem::setCallLimit(double seconds)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_router.setCallLimit(seconds);
+}
+
 void CellularSystem::setSubscriberListener(SubscriberListener listener)
 {
     std::lock_guard<std::mutex> lock(m_mutex);

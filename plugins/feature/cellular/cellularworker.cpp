@@ -546,6 +546,55 @@ void CellularWorker::action(const Cellular::MsgAction& msg)
     log(n.id, what + (ok ? ": started" : ": refused: " + refused));
 }
 
+void CellularWorker::setFarEnd(Network& n, const CellularFarEnd& farEnd)
+{
+    const int id = n.id;
+    n.musicInput.reset();
+    n.cellular->setCallLimit(farEnd.m_callLimitS);
+    const QString limit = farEnd.m_callLimitS > 0 ? QString(", calls end after %1 s").arg(farEnd.m_callLimitS) : QString();
+
+    if (!n.music)
+    {
+        const double delay = std::max(0.2, std::min(3.0, farEnd.m_echoDelayMs / 1000.0));
+        const double level = std::min(0, farEnd.m_echoLevelDb);
+        const bool announce = farEnd.m_echoAnnounce;
+        n.cellular->setFallbackFactory([delay, level, announce]() {
+            return std::unique_ptr<modemcellular::AudioEndpoint>(new modemcellular::EchoEndpoint(delay, level, announce));
+        });
+        log(id, QString("other numbers: echo, %1 s late, %2 dB%3%4").arg(delay, 0, 'f', 1).arg(level, 0, 'f', 0)
+            .arg(announce ? ", a tone when it answers" : "").arg(limit), Cellular::MsgReportLog::Network);
+        return;
+    }
+
+    modemcellular::MusicOptions options;
+    options.levelDb = std::min(0, farEnd.m_musicLevelDb);
+    options.loop = farEnd.m_musicLoop;
+    QString what = "the built-in melody";
+    if (farEnd.m_musicSource == CellularFarEnd::MusicFile)
+    {
+        QString error;
+        options.clip = CellularFarEndAudio::loadClip(farEnd.m_musicFile, error);
+        if (options.clip) {
+            what = QString("%1 (%2 s)").arg(farEnd.m_musicFile).arg(options.clip->size() / 8000.0, 0, 'f', 1);
+        } else {
+            log(id, "warning: music: " + error + "; the built-in melody plays", Cellular::MsgReportLog::Warning);
+        }
+    }
+    else if (farEnd.m_musicSource == CellularFarEnd::MusicInput)
+    {
+        n.musicInput = std::make_unique<CellularMusicInput>(farEnd.m_musicInput);
+        CellularMusicInput *input = n.musicInput.get();
+        options.input = [input](float* samples, int count) { input->fill(samples, count); };
+        what = QString("the audio input %1 (%2 Hz)").arg(farEnd.m_musicInput.isEmpty() ? "by default" : farEnd.m_musicInput)
+            .arg(input->rate());
+    }
+    n.cellular->setFallbackFactory([options]() {
+        return std::unique_ptr<modemcellular::AudioEndpoint>(new modemcellular::MusicEndpoint(options));
+    });
+    log(id, QString("other numbers: music, %1, %2 dB, %3%4").arg(what).arg(options.levelDb, 0, 'f', 0)
+        .arg(options.loop || options.input ? "looped" : "once, then the call ends").arg(limit), Cellular::MsgReportLog::Network);
+}
+
 // Listening in to one call at a time: on the default speaker of SDRangel (the console's later).
 void CellularWorker::listen(int network, const QString& number, int mode)
 {
@@ -989,8 +1038,8 @@ void CellularWorker::addNetwork(const MsgAddNetwork& add)
     n.station = std::make_unique<modemnmt::NmtBaseStation>(n.config);
     n.cellular = std::make_unique<modemcellular::CellularSystem>(n.station->clock(), modemcellular::ToneSet::Denmark);
     n.music = add.m_fallback == CellularNetworkSettings::FallbackMusic;
-    n.cellular->setFallback(n.music ? modemcellular::CallRouter::Fallback::Music : modemcellular::CallRouter::Fallback::Echo);
     const int id = n.id;
+    setFarEnd(n, add.m_farEnd);
     n.cellular->setSubscriberListener([this, id](const std::string& number, bool registered) {
         log(id, QString("%1 %2").arg(QString::fromStdString(number)).arg(registered ? "registered" : "gone"), Cellular::MsgReportLog::Phone);
     });

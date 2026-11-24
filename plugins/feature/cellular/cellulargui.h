@@ -40,6 +40,7 @@ class Feature;
 class ButtonSwitch;
 class QCheckBox;
 class QComboBox;
+class QDoubleSpinBox;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
@@ -92,6 +93,17 @@ private:
     QCheckBox *m_clock;
     QLineEdit *m_smsc;
     QComboBox *m_fallback;
+    QWidget *m_echoBox;
+    QDoubleSpinBox *m_echoDelay;
+    QSpinBox *m_echoLevel;
+    QCheckBox *m_echoAnnounce;
+    QWidget *m_musicBox;
+    QComboBox *m_musicSource;
+    QLineEdit *m_musicFile;
+    QComboBox *m_musicInput;                // item data: the device name, empty for the default
+    QSpinBox *m_musicLevel;
+    QComboBox *m_musicLoop;
+    QSpinBox *m_callLimit;
     QComboBox *m_rxDeviceSet;               // item data: the index of the device set
     QComboBox *m_txDeviceSet;
 };

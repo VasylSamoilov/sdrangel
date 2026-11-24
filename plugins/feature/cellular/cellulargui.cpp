@@ -23,6 +23,7 @@
 #include <QComboBox>
 #include <QDateTime>
 #include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QGuiApplication>
@@ -45,6 +46,7 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include "audio/audiodeviceinfo.h"
 #include "device/deviceapi.h"
 #include "device/deviceset.h"
 #include "dsp/devicesamplesink.h"
@@ -280,8 +282,85 @@ CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& sett
     form->addRow("SMS centre", m_smsc);
     m_fallback = new QComboBox(page);
     m_fallback->addItems({"Echo", "Music"});
-    m_fallback->setToolTip("What answers a call to a number that is not registered in this network");
+    m_fallback->setToolTip("What answers a call to a number that is no phone (a phone number is paged)");
     form->addRow("Other numbers", m_fallback);
+    // the echo
+    m_echoBox = new QWidget(page);
+    QFormLayout *echo = new QFormLayout(m_echoBox);
+    echo->setContentsMargins(12, 0, 0, 0);
+    m_echoDelay = new QDoubleSpinBox(m_echoBox);
+    m_echoDelay->setRange(0.2, 3.0);
+    m_echoDelay->setSingleStep(0.1);
+    m_echoDelay->setDecimals(1);
+    m_echoDelay->setSuffix(" s");
+    m_echoDelay->setToolTip("How late the caller hears itself: short to hear the radio path, long to hear oneself clearly");
+    echo->addRow("Delay", m_echoDelay);
+    m_echoLevel = new QSpinBox(m_echoBox);
+    m_echoLevel->setRange(-30, 0);
+    m_echoLevel->setSuffix(" dB");
+    m_echoLevel->setToolTip("The level of the echo, never louder than the caller spoke");
+    echo->addRow("Level", m_echoLevel);
+    m_echoAnnounce = new QCheckBox("A tone when it answers", m_echoBox);
+    m_echoAnnounce->setToolTip("1 kHz for 200 ms when the echo answers, so the caller knows");
+    echo->addRow(m_echoAnnounce);
+    form->addRow(m_echoBox);
+    // the music
+    m_musicBox = new QWidget(page);
+    QFormLayout *music = new QFormLayout(m_musicBox);
+    music->setContentsMargins(12, 0, 0, 0);
+    m_musicSource = new QComboBox(m_musicBox);
+    m_musicSource->addItems({"Built-in melody", "Sound file (WAV)", "Audio input"});
+    music->addRow("Source", m_musicSource);
+    QWidget *fileRow = new QWidget(m_musicBox);
+    QHBoxLayout *fileLayout = new QHBoxLayout(fileRow);
+    fileLayout->setContentsMargins(0, 0, 0, 0);
+    m_musicFile = new QLineEdit(fileRow);
+    m_musicFile->setToolTip("A 16 bit PCM WAV file, any rate, mono or stereo");
+    QToolButton *browse = new QToolButton(fileRow);
+    browse->setText("...");
+    browse->setToolTip("Pick the sound file");
+    fileLayout->addWidget(m_musicFile, 1);
+    fileLayout->addWidget(browse);
+    music->addRow("File", fileRow);
+    m_musicInput = new QComboBox(m_musicBox);
+    m_musicInput->addItem("Default", QString());
+    for (const AudioDeviceInfo& d : AudioDeviceInfo::availableInputDevices()) {
+        m_musicInput->addItem(d.deviceName(), d.deviceName());
+    }
+    m_musicInput->setToolTip("The SDRangel audio input that plays to the caller");
+    music->addRow("Input", m_musicInput);
+    m_musicLevel = new QSpinBox(m_musicBox);
+    m_musicLevel->setRange(-30, 0);
+    m_musicLevel->setSuffix(" dB");
+    m_musicLevel->setToolTip("The level of the music, never louder than the source (full scale at the speech reference)");
+    music->addRow("Level", m_musicLevel);
+    m_musicLoop = new QComboBox(m_musicBox);
+    m_musicLoop->addItems({"Looped", "Once, then hang up"});
+    music->addRow("Play", m_musicLoop);
+    form->addRow(m_musicBox);
+    m_callLimit = new QSpinBox(page);
+    m_callLimit->setRange(0, 3600);
+    m_callLimit->setSuffix(" s");
+    m_callLimit->setSpecialValueText("no limit");
+    m_callLimit->setToolTip("The longest call to the echo or the music; it is ended then, so no call stays on");
+    form->addRow("Longest call", m_callLimit);
+    auto farEndShown = [this, fileRow]() {
+        const bool isMusic = m_fallback->currentIndex() == 1;
+        m_echoBox->setVisible(!isMusic);
+        m_musicBox->setVisible(isMusic);
+        const int source = m_musicSource->currentIndex();
+        fileRow->setEnabled(source == CellularFarEnd::MusicFile);
+        m_musicInput->setEnabled(source == CellularFarEnd::MusicInput);
+        m_musicLoop->setEnabled(source != CellularFarEnd::MusicInput);     // a live input plays on
+    };
+    connect(m_fallback, QOverload<int>::of(&QComboBox::currentIndexChanged), this, farEndShown);
+    connect(m_musicSource, QOverload<int>::of(&QComboBox::currentIndexChanged), this, farEndShown);
+    connect(browse, &QToolButton::clicked, this, [this]() {
+        const QString path = QFileDialog::getOpenFileName(this, "Music for the calls", m_musicFile->text(), "WAV files (*.wav)");
+        if (!path.isEmpty()) {
+            m_musicFile->setText(path);
+        }
+    });
     m_rxDeviceSet = new QComboBox(page);
     m_rxDeviceSet->setToolTip("The receiving device set with the Cellular Rx channel that receives the phones; networks may share it");
     form->addRow("Receiver device set", m_rxDeviceSet);
@@ -307,6 +386,18 @@ CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& sett
     m_callerId->setChecked(settings.m_sendCallerId);
     m_clock->setChecked(settings.m_sendClock);
     m_smsc->setText(settings.m_smscNumber);
+    const CellularFarEnd& fe = settings.m_farEnd;
+    m_echoDelay->setValue(fe.m_echoDelayMs / 1000.0);
+    m_echoLevel->setValue(fe.m_echoLevelDb);
+    m_echoAnnounce->setChecked(fe.m_echoAnnounce);
+    m_musicSource->setCurrentIndex(std::max(0, std::min(2, fe.m_musicSource)));
+    m_musicFile->setText(fe.m_musicFile);
+    m_musicInput->setCurrentIndex(std::max(0, m_musicInput->findData(fe.m_musicInput)));
+    m_musicLevel->setValue(fe.m_musicLevelDb);
+    m_musicLoop->setCurrentIndex(fe.m_musicLoop ? 0 : 1);
+    m_callLimit->setValue(fe.m_callLimitS);
+    // setting the index shows the rows of the far end (echo or music)
+    m_fallback->setCurrentIndex(-1);
     m_fallback->setCurrentIndex(settings.m_fallback == CellularNetworkSettings::FallbackMusic ? 1 : 0);
     fillDeviceSets(m_rxDeviceSet, false, settings.m_rxDeviceSetIndex);
     fillDeviceSets(m_txDeviceSet, true, settings.m_txDeviceSetIndex);
@@ -580,6 +671,16 @@ void CellularNetworkDialog::read(CellularNetworkSettings& s) const
     s.m_sendClock = m_clock->isChecked();
     s.m_smscNumber = m_smsc->text();
     s.m_fallback = m_fallback->currentIndex() == 1 ? CellularNetworkSettings::FallbackMusic : CellularNetworkSettings::FallbackEcho;
+    CellularFarEnd& fe = s.m_farEnd;
+    fe.m_echoDelayMs = static_cast<int>(std::lround(m_echoDelay->value() * 1000.0));
+    fe.m_echoLevelDb = m_echoLevel->value();
+    fe.m_echoAnnounce = m_echoAnnounce->isChecked();
+    fe.m_musicSource = m_musicSource->currentIndex();
+    fe.m_musicFile = m_musicFile->text();
+    fe.m_musicInput = m_musicInput->currentData().toString();
+    fe.m_musicLevelDb = m_musicLevel->value();
+    fe.m_musicLoop = m_musicLoop->currentIndex() == 0;
+    fe.m_callLimitS = m_callLimit->value();
     s.m_rxDeviceSetIndex = m_rxDeviceSet->currentData().toInt();
     s.m_txDeviceSetIndex = m_txDeviceSet->currentData().toInt();
 }

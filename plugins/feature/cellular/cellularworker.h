@@ -33,6 +33,8 @@
 
 #include "calllistener.h"
 #include "carrierbatch.h"
+#include "cellularfarend.h"
+#include "cellularsettings.h"
 #include "carrierwire.h"
 #include "cellularsystem.h"
 #include "nmtbasestation.h"
@@ -65,6 +67,7 @@ public:
         QString m_name;
         modemnmt::NmtNetworkConfig m_config;
         int m_fallback = 0;
+        CellularFarEnd m_farEnd;
         ChannelAPI *m_rxChannel = nullptr;
         MessageQueue *m_rxPipe = nullptr;       // what the receiver sends us
         ChannelAPI *m_txChannel = nullptr;
@@ -156,6 +159,7 @@ private:
         std::map<std::string, Cellular::MsgReportStatus::Phone> phones;
         std::unique_ptr<modemcellular::TestCaller> caller;     // calls of the tester to a phone
         bool music = false;                     // the far end of calls to no phone: music, else echo
+        std::unique_ptr<CellularMusicInput> musicInput;    // the audio input of the music, if it plays one
         // message waiting indicators the protocol could not send yet (the phone was busy), by number
         struct PendingMwi
         {
@@ -229,6 +233,8 @@ private:
     QString m_listenNumber;
     std::vector<int16_t> m_listenFrames;
     void setHandlers(Network& n);
+    // what answers the calls to numbers that are no phone: echo or music with their settings
+    void setFarEnd(Network& n, const CellularFarEnd& farEnd);
 
     MessageQueue m_inputMessageQueue;
     MessageQueue *m_reports;
