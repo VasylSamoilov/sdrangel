@@ -48,6 +48,27 @@ bool isTraffic(modemnmt::ChannelType type)
     return type == modemnmt::ChannelType::Tc || type == modemnmt::ChannelType::AcTc || type == modemnmt::ChannelType::CcTc;
 }
 
+// what the standard says of a group, for the tooltip of its header
+QString groupTip(modemnmt::System system, modemnmt::NmtChannelGroup group, double spacingKHz)
+{
+    using G = modemnmt::NmtChannelGroup;
+    switch (group)
+    {
+    case G::Ordinary:
+        return QString("Ordinary channels, %1 kHz apart").arg(spacingKHz, 0, 'g', 3);
+    case G::Extension:
+        return "The extension band: optional, subject to national regulation (NMT Doc 450-1)";
+    case G::Interleaved:
+        if (system == modemnmt::System::Nmt900) {
+            return "12.5 kHz from the ordinary channels, channel numbers from 1024 up: the phones have them (NMT Doc 900-3)";
+        }
+        return "12.5 kHz above the ordinary channels, channel number + 200: optional (NMT Doc 450-1)";
+    case G::InterleavedExtension:
+        return "12.5 kHz above the extension channels, channel number + 200: optional (NMT Doc 450-1, 1997)";
+    }
+    return QString();
+}
+
 } // namespace
 
 QString CellularChannelGrid::typeText(modemnmt::ChannelType type)
@@ -105,6 +126,13 @@ CellularChannelGrid::CellularChannelGrid(QWidget *parent) :
     setMinimumHeight(120);
 
     connect(this, &QTableWidget::cellClicked, this, [this](int row, int col) {
+        if (row >= 0 && row < static_cast<int>(m_rowFirst.size()) && m_rowFirst[row] < 0)
+        {
+            Section& s = m_sections[m_rowSection[row]];
+            s.open = !s.open;
+            showSection(m_rowSection[row]);
+            return;
+        }
         const int index = cellIndex(row, col);
         if (index >= 0) {
             cycle(index);
@@ -119,23 +147,54 @@ void CellularChannelGrid::setPlan(modemnmt::System system, const QString& countr
 
     m_country = modemnmt::nmtCountry(system, country.toStdString());
     m_cells.clear();
+    m_sections.clear();
     m_byChannel.clear();
     if (m_country)
     {
+        // the groups in the order of the plan; the blocks of a group form one section
+        std::vector<modemnmt::NmtChannelGroup> groups;
         for (const modemnmt::NmtFrequencyBlock& block : m_country->blocks)
         {
-            for (int ch = block.firstChannel; ch <= block.lastChannel; ch++)
-            {
-                Cell cell;
-                cell.channel = ch;
-                if (modemnmt::nmtChannelFrequency(*m_country, ch, cell.frequency)) {
-                    m_cells.push_back(cell);
-                }
+            if (std::find(groups.begin(), groups.end(), block.group) == groups.end()) {
+                groups.push_back(block.group);
             }
         }
-        std::stable_sort(m_cells.begin(), m_cells.end(), [](const Cell& a, const Cell& b) {
-            return a.frequency.downlink < b.frequency.downlink;
-        });
+        for (modemnmt::NmtChannelGroup group : groups)
+        {
+            Section section;
+            QStringList ranges;
+            double spacing = 0.0;
+            section.group = group;
+            section.first = static_cast<int>(m_cells.size());
+            for (const modemnmt::NmtFrequencyBlock& block : m_country->blocks)
+            {
+                if (block.group != group) {
+                    continue;
+                }
+                ranges.append(QString("%1%2%3").arg(block.firstChannel).arg(QChar(0x2013)).arg(block.lastChannel));
+                spacing = std::abs(block.spacing) * 1000.0;
+                for (int ch = block.firstChannel; ch <= block.lastChannel; ch++)
+                {
+                    Cell cell;
+                    cell.channel = ch;
+                    if (modemnmt::nmtChannelFrequency(*m_country, ch, cell.frequency)) {
+                        m_cells.push_back(cell);
+                    }
+                }
+            }
+            std::stable_sort(m_cells.begin() + section.first, m_cells.end(), [](const Cell& a, const Cell& b) {
+                return a.frequency.downlink < b.frequency.downlink;
+            });
+            std::sort(ranges.begin(), ranges.end(), [](const QString& a, const QString& b) {
+                return a.section(QChar(0x2013), 0, 0).toInt() < b.section(QChar(0x2013), 0, 0).toInt();
+            });
+            section.count = static_cast<int>(m_cells.size()) - section.first;
+            section.title = QString("%1  %2").arg(modemnmt::nmtGroupName(group)).arg(ranges.join(", "));
+            section.tip = groupTip(system, group, spacing);
+            section.open = group == modemnmt::NmtChannelGroup::Ordinary
+                || (system == modemnmt::System::Nmt900 && group == modemnmt::NmtChannelGroup::Interleaved);
+            m_sections.push_back(section);
+        }
     }
     int widest = 0;
     for (size_t i = 0; i < m_cells.size(); i++)
@@ -147,7 +206,112 @@ void CellularChannelGrid::setPlan(modemnmt::System system, const QString& countr
     const int margins = 2 * (style()->pixelMetric(QStyle::PM_FocusFrameHMargin, nullptr, this) + 1) + 1;
     m_minColumn = std::max(20, widest + margins);
     fitColumns();
+    layOut();
     setCarriers(kept);
+}
+
+// the rows: per section its header (when there are several) and its cells, ten in a row
+void CellularChannelGrid::layOut()
+{
+    const bool headers = m_sections.size() > 1;
+    QStringList labels;
+
+    m_rowFirst.clear();
+    m_rowSection.clear();
+    m_cellRow.assign(m_cells.size(), -1);
+    for (size_t s = 0; s < m_sections.size(); s++)
+    {
+        Section& section = m_sections[s];
+        section.headerRow = -1;
+        if (headers)
+        {
+            section.headerRow = static_cast<int>(m_rowFirst.size());
+            m_rowFirst.push_back(-1);
+            m_rowSection.push_back(static_cast<int>(s));
+            labels.append(QString());
+        }
+        for (int i = 0; i < section.count; i += kColumns)
+        {
+            const int first = section.first + i;
+            for (int c = 0; c < kColumns && i + c < section.count; c++) {
+                m_cellRow[first + c] = static_cast<int>(m_rowFirst.size());
+            }
+            m_rowFirst.push_back(first);
+            m_rowSection.push_back(static_cast<int>(s));
+            // MHz with the decimals it has, at least two: 463.00, 462.5125 (interleaved)
+            QString mhz = QString::number(m_cells[first].frequency.downlink / 1e6, 'f', 4);
+            while (mhz.endsWith('0') && mhz.indexOf('.') < mhz.size() - 3) {
+                mhz.chop(1);
+            }
+            labels.append(mhz);
+        }
+    }
+
+    clearSpans();
+    setRowCount(0);                         // drops the items of the plan before
+    setRowCount(static_cast<int>(m_rowFirst.size()));
+    setVerticalHeaderLabels(labels);
+    for (int r = 0; r < rowCount(); r++)
+    {
+        if (m_rowFirst[r] < 0)
+        {
+            setSpan(r, 0, 1, kColumns);
+            QTableWidgetItem *header = new QTableWidgetItem();
+            header->setFlags(Qt::ItemIsEnabled);
+            QFont bold = font();
+            bold.setBold(true);
+            header->setFont(bold);
+            setItem(r, 0, header);
+            continue;
+        }
+        const Section& section = m_sections[m_rowSection[r]];
+        for (int c = 0; c < kColumns; c++)
+        {
+            if (m_rowFirst[r] + c >= section.first + section.count)
+            {
+                QTableWidgetItem *empty = new QTableWidgetItem();
+                empty->setFlags(Qt::NoItemFlags);
+                setItem(r, c, empty);
+            }
+        }
+    }
+    for (size_t s = 0; s < m_sections.size(); s++) {
+        showSection(static_cast<int>(s));
+    }
+}
+
+void CellularChannelGrid::showSection(int section)
+{
+    const Section& s = m_sections[section];
+
+    for (int r = 0; r < rowCount(); r++)
+    {
+        if (m_rowSection[r] == section && m_rowFirst[r] >= 0) {
+            setRowHidden(r, !s.open);
+        }
+    }
+    paintHeader(section);
+}
+
+void CellularChannelGrid::paintHeader(int section)
+{
+    const Section& s = m_sections[section];
+    QTableWidgetItem *header = s.headerRow >= 0 ? item(s.headerRow, 0) : nullptr;
+
+    if (!header) {
+        return;
+    }
+    int used = 0;
+    for (int i = s.first; i < s.first + s.count; i++) {
+        used += m_cells[i].used ? 1 : 0;
+    }
+    // a triangle pointing down when open, right when closed
+    QString text = QString("%1 %2").arg(QChar(s.open ? 0x25BE : 0x25B8)).arg(s.title);
+    if (used > 0) {
+        text += QString("  (%1 used)").arg(used);
+    }
+    header->setText(text);
+    header->setToolTip(s.tip + (s.open ? ". Click to close." : ". Click to open."));
 }
 
 void CellularChannelGrid::fitColumns()
@@ -177,6 +341,19 @@ void CellularChannelGrid::setCarriers(const std::vector<modemnmt::NmtCarrierConf
         {
             m_cells[*it].used = true;
             m_cells[*it].carrier = c;
+        }
+    }
+    // a section with carriers is open
+    for (size_t s = 0; s < m_sections.size(); s++)
+    {
+        Section& section = m_sections[s];
+        for (int i = section.first; i < section.first + section.count && !section.open; i++)
+        {
+            if (m_cells[i].used)
+            {
+                section.open = true;
+                showSection(static_cast<int>(s));
+            }
         }
     }
     refresh();
@@ -216,44 +393,38 @@ void CellularChannelGrid::setSpans(double downLow, double downHigh, double upLow
 
 int CellularChannelGrid::cellIndex(int row, int col) const
 {
-    const int index = row * kColumns + col;
+    if (row < 0 || row >= static_cast<int>(m_rowFirst.size()) || m_rowFirst[row] < 0 || col < 0 || col >= kColumns) {
+        return -1;
+    }
+    const Section& section = m_sections[m_rowSection[row]];
+    const int index = m_rowFirst[row] + col;
 
-    return (index >= 0 && index < static_cast<int>(m_cells.size())) ? index : -1;
+    return index < section.first + section.count ? index : -1;
 }
 
 void CellularChannelGrid::refresh()
 {
-    const int rows = (static_cast<int>(m_cells.size()) + kColumns - 1) / kColumns;
-    QStringList labels;
-
-    setRowCount(rows);
-    for (int r = 0; r < rows; r++) {
-        labels.append(QString::number(m_cells[r * kColumns].frequency.downlink / 1e6, 'f', 2));
+    for (size_t i = 0; i < m_cells.size(); i++) {
+        paintCell(static_cast<int>(i));
     }
-    setVerticalHeaderLabels(labels);
-    for (int i = 0; i < rows * kColumns; i++)
-    {
-        if (i < static_cast<int>(m_cells.size())) {
-            paintCell(i);
-        } else if (!item(i / kColumns, i % kColumns)) {
-            QTableWidgetItem *empty = new QTableWidgetItem();
-            empty->setFlags(Qt::NoItemFlags);
-            setItem(i / kColumns, i % kColumns, empty);
-        }
+    for (size_t s = 0; s < m_sections.size(); s++) {
+        paintHeader(static_cast<int>(s));
     }
 }
 
 void CellularChannelGrid::paintCell(int index)
 {
     const Cell& cell = m_cells[index];
-    QTableWidgetItem *it = item(index / kColumns, index % kColumns);
+    const int row = m_cellRow[index];
+    const int col = index - m_rowFirst[row];
+    QTableWidgetItem *it = item(row, col);
 
     if (!it)
     {
         it = new QTableWidgetItem();
         it->setTextAlignment(Qt::AlignCenter);
         it->setFlags(Qt::ItemIsEnabled);
-        setItem(index / kColumns, index % kColumns, it);
+        setItem(row, col, it);
     }
     it->setText(QString::number(cell.channel));
 
@@ -324,7 +495,13 @@ void CellularChannelGrid::cycle(int index)
     if (!cell.used || !isTraffic(cell.carrier.type)) {
         cell.carrier.supervisory = 0;
     }
+    cellChanged(index);
+}
+
+void CellularChannelGrid::cellChanged(int index)
+{
     paintCell(index);
+    paintHeader(m_rowSection[m_cellRow[index]]);
     emit changed();
 }
 
@@ -348,8 +525,7 @@ void CellularChannelGrid::menu(const QPoint& pos)
     types += T::Test;
     menu.addAction("Free", this, [this, index]() {
         m_cells[index].used = false;
-        paintCell(index);
-        emit changed();
+        cellChanged(index);
     });
     for (T type : types)
     {
@@ -361,8 +537,7 @@ void CellularChannelGrid::menu(const QPoint& pos)
             if (!isTraffic(type)) {
                 c.carrier.supervisory = 0;
             }
-            paintCell(index);
-            emit changed();
+            cellChanged(index);
         });
         a->setCheckable(true);
         a->setChecked(cell.used && cell.carrier.type == type);
@@ -377,8 +552,7 @@ void CellularChannelGrid::menu(const QPoint& pos)
             const QString label = value == 0 ? QString("Auto (1..4 in turn)") : value < 0 ? QString("None") : QString("Tone %1").arg(value);
             QAction *a = tones->addAction(label, this, [this, index, value]() {
                 m_cells[index].carrier.supervisory = value;
-                paintCell(index);
-                emit changed();
+                cellChanged(index);
             });
             a->setCheckable(true);
             a->setChecked(cell.carrier.supervisory == value);

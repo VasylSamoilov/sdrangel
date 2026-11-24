@@ -26,8 +26,11 @@
 #include "nmtbasestation.h"
 #include "nmtplan.h"
 
-// The channels of a country plan as cells, in the order of their frequency, ten in a row (the row
-// shows the downlink frequency of its first cell). A click cycles the type of a channel (free, CC,
+// The channels of a country plan as cells, ten in a row (the row shows the downlink frequency of its
+// first cell), in sections by the group of the channels (ordinary, extension, interleaved,
+// interleaved extension), each in the order of the frequency. A click on the header of a section
+// opens or closes it; the ordinary channels, the interleaved ones of NMT-900 (the phones have them)
+// and a section with carriers start open. A click on a cell cycles the type of a channel (free, CC,
 // TC, CC/TC); right click: any type and the supervisory tone of a traffic channel. Channels of other
 // networks are grey, channels outside the span of the devices dimmed.
 class CellularChannelGrid : public QTableWidget
@@ -62,8 +65,24 @@ private:
         modemnmt::NmtCarrierConfig carrier;
     };
 
+    // the cells of one group: m_cells[first, first + count)
+    struct Section
+    {
+        modemnmt::NmtChannelGroup group;
+        int first = 0;
+        int count = 0;
+        int headerRow = -1;                 // -1: no header (a plan of one group)
+        bool open = true;
+        QString title;
+        QString tip;
+    };
+
+    void layOut();
+    void showSection(int section);
+    void paintHeader(int section);
     void refresh();
     void paintCell(int index);
+    void cellChanged(int index);            // after a click or the menu: the cell, its header, changed()
     int cellIndex(int row, int col) const;
     void cycle(int index);
     void menu(const QPoint& pos);
@@ -72,7 +91,11 @@ private:
 
     const modemnmt::NmtCountry *m_country;
     int m_minColumn;                        // px: the widest channel number of the plan
-    std::vector<Cell> m_cells;              // in the order of the downlink frequency
+    std::vector<Cell> m_cells;              // by section, in each in the order of the downlink frequency
+    std::vector<Section> m_sections;
+    std::vector<int> m_rowFirst;            // the first cell of a row, -1 for a header
+    std::vector<int> m_rowSection;
+    std::vector<int> m_cellRow;
     QMap<int, int> m_byChannel;             // channel -> index of its cell
     QMap<int, QString> m_others;
     double m_downLow, m_downHigh, m_upLow, m_upHigh;
