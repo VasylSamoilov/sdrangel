@@ -77,10 +77,30 @@ static void testStream()
     CHECK(!tx.busy() && tx.nextBit() == -1);
 }
 
+// The word source is asked when a word has gone out: two words, then the end
+static void testSource()
+{
+    FvcTransmitter tx;
+    int asked = 0;
+    int bits = 0;
+
+    tx.setWordSource([&](uint64_t& w) {
+        asked++;
+        w = fvc::order(0, kOrderAlert, 0, 0);
+        return asked <= 2;
+    });
+    while (tx.nextBit() >= 0) {
+        bits++;
+    }
+    CHECK(bits == 2 * kFvcWordBits && asked == 3);
+    CHECK(tx.nextBit() == -1 && asked == 4);
+}
+
 int main()
 {
     testWords();
     testStream();
+    testSource();
 
     if (g_failures == 0) {
         std::printf("all FVC tests passed\n");

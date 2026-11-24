@@ -126,6 +126,37 @@ static void testMessageOverTrain()
     CHECK(ohd(tx.nextWord()) == kOhdSystemParameter1);          // then the train
 }
 
+// The message source is asked when nothing is being sent, at frames that are not the train: a
+// message it hands over goes out three times before it is asked again (osmocom's scheduling)
+static void testSource()
+{
+    FoccTransmitter tx = transmitter();
+    const FoccMessage m = FoccMessage::order(0, 0x222222, 0x222, kOrderRegistration, 3, 0);
+    int asked = 0;
+
+    tx.setMessageSource([&](FoccMessage& out) {
+        asked++;
+        if (asked == 1)
+        {
+            out = m;
+            return true;
+        }
+        return false;
+    });
+    for (int i = 0; i < 6; i++) {
+        tx.nextWord();                                          // the train
+    }
+    CHECK(asked == 0);
+    for (int r = 0; r < 3; r++)
+    {
+        CHECK(tx.nextWord() == m.word1);
+        CHECK(tx.nextWord() == m.word2);
+    }
+    CHECK(asked == 1);
+    CHECK(isFiller(tx.nextWord()) && asked == 2);
+    CHECK(isFiller(tx.nextWord()) && asked == 3);
+}
+
 // The bits: frames of 463, the word in both streams, the busy-idle bits idle (1)
 static void testBits()
 {
@@ -152,6 +183,7 @@ int main()
     testIdle();
     testMessage();
     testMessageOverTrain();
+    testSource();
     testBits();
 
     if (g_failures == 0) {

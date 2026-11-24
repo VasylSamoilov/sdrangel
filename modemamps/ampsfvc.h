@@ -20,6 +20,8 @@
 
 #include <cstdint>
 #include <deque>
+#include <functional>
+#include <utility>
 #include <vector>
 
 #include "export.h"
@@ -46,6 +48,10 @@ public:
     FvcTransmitter();
 
     void queue(uint64_t word) { m_queue.push_back(word); }
+    // Asked for the next word when the last one has gone out and none is queued (osmocom's
+    // amps_tx_frame_fvc). False: none, the stream ends.
+    using WordSource = std::function<bool(uint64_t&)>;
+    void setWordSource(WordSource source) { m_source = std::move(source); }
     // a word queued or being sent
     bool busy() const { return !m_queue.empty() || m_bitPos < m_bits.size(); }
     // the next bit (a bit source of the modulator), -1 when nothing is left: back to audio
@@ -53,6 +59,7 @@ public:
     void reset();
 
 private:
+    WordSource m_source;
     std::deque<uint64_t> m_queue;
     std::vector<uint8_t> m_bits;
     size_t m_bitPos;

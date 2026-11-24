@@ -70,11 +70,18 @@ uint64_t FoccTransmitter::nextWord()
         return word;
     }
 
-    if (!m_sending && !m_queue.empty())
+    if (!m_sending)
     {
-        m_message = m_queue.front();
-        m_queue.pop_front();
-        m_sending = true;
+        if (!m_queue.empty())
+        {
+            m_message = m_queue.front();
+            m_queue.pop_front();
+            m_sending = true;
+        }
+        else if (m_source && m_source(m_message))
+        {
+            m_sending = true;
+        }
         m_wordCount = 0;
         m_repeat = 0;
     }

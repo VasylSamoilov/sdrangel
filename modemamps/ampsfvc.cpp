@@ -56,11 +56,20 @@ int FvcTransmitter::nextBit()
 {
     if (m_bitPos >= m_bits.size())
     {
-        if (m_queue.empty()) {
+        uint64_t word = 0;
+
+        if (!m_queue.empty())
+        {
+            word = m_queue.front();
+            m_queue.pop_front();
+        }
+        else if (!m_source || !m_source(word))
+        {
+            m_bits.clear();
+            m_bitPos = 0;
             return -1;
         }
-        m_bits = fvcWord(m_queue.front());
-        m_queue.pop_front();
+        m_bits = fvcWord(word);
         m_bitPos = 0;
     }
     return m_bits[m_bitPos++];

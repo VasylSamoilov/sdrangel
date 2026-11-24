@@ -61,6 +61,11 @@ public:
     void setSystemInfo(const SystemInfo& si) { m_si = si; }
     const SystemInfo& systemInfo() const { return m_si; }
     void setRegistrationId(RegistrationId regid) { m_regid = std::move(regid); }
+    // Asked for the next message when none is being sent and none is queued, at a frame that is
+    // not the overhead train (osmocom's amps_tx_frame_focc: the call processing hands over its
+    // message, and a message it handed over before has then gone out completely). False: none.
+    using MessageSource = std::function<bool(FoccMessage&)>;
+    void setMessageSource(MessageSource source) { m_source = std::move(source); }
     // the message goes out after the ones queued, three times
     void queue(const FoccMessage& message) { m_queue.push_back(message); }
     size_t queued() const { return m_queue.size() + (m_sending ? 1 : 0); }
@@ -75,6 +80,7 @@ public:
 private:
     SystemInfo m_si;
     RegistrationId m_regid;
+    MessageSource m_source;
     std::deque<FoccMessage> m_queue;
     std::vector<uint64_t> m_train;      // the words of the train still to send
     size_t m_trainPos;
