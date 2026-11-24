@@ -106,6 +106,8 @@ struct AmpsSystem::Transaction
     bool mt = false;                    // a call to the phone, not answered yet
     int pageTry = 1;
     int alertTry = 1;
+    std::string callerId;               // of a call to the phone
+    std::vector<uint64_t> fvcWords;     // the words of an FVC message still to go (alert with info)
 };
 
 AmpsSystem::AmpsSystem(const modemcellular::Clock& clock, const AmpsSystemConfig& config) :
@@ -415,7 +417,7 @@ void AmpsSystem::callFailed(Transaction* t, modemcellular::Cause cause)
     }
 }
 
-bool AmpsSystem::startCall(const std::string& number, modemcellular::Cause* cause)
+bool AmpsSystem::startCall(const std::string& number, modemcellular::Cause* cause, const std::string& callerId)
 {
     const auto refuse = [cause](modemcellular::Cause c) {
         if (cause) {
@@ -455,6 +457,7 @@ bool AmpsSystem::startCall(const std::string& number, modemcellular::Cause* caus
     Transaction* t = create(subscriber, State::Page, pc);
     t->mt = true;
     t->pageTry = 1;
+    t->callerId = callerId;
     return true;
 }
 
@@ -705,8 +708,25 @@ bool AmpsSystem::nextFvc(int channel, uint64_t& word)
 
     if (t && t->state == State::MtAlert)
     {
+        const uint8_t pscc = static_cast<uint8_t>(m_channels[channel].config.scc);
         setState(t, State::MtAlertSend);
-        word = fvc::order(static_cast<uint8_t>(m_channels[channel].config.scc), kOrderAlert, 0, 0);
+        // the first alert with the caller's number when the network sends it (osmocom: ORDER 17 on
+        // the first try with a caller id)
+        t->fvcWords.clear();
+        if (m_config.sendCallerId && t->alertTry == 1 && !t->callerId.empty())
+        {
+            t->fvcWords = fvc::alertWithInfo(pscc, t->callerId);
+            word = t->fvcWords.front();
+            t->fvcWords.erase(t->fvcWords.begin());
+            return true;
+        }
+        word = fvc::order(pscc, kOrderAlert, 0, 0);
+        return true;
+    }
+    if (t && t->state == State::MtAlertSend && !t->fvcWords.empty())
+    {
+        word = t->fvcWords.front();
+        t->fvcWords.erase(t->fvcWords.begin());
         return true;
     }
     if (t && t->state == State::MtAlertSend)

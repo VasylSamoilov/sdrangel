@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -40,6 +41,11 @@ namespace fvc
 MODEMAMPS_API uint64_t order(uint8_t pscc, uint8_t order, uint8_t ordq, uint8_t msgType);
 // a handoff to another voice channel (SCC its SAT colour code)
 MODEMAMPS_API uint64_t handoff(uint8_t scc, uint8_t pscc, uint8_t dtx, uint8_t vmac, uint16_t chan);
+// The alert with info: the caller's number for the phone's display, as osmocom-analog sends it
+// (frame.c amps_encode_frame_fvc, ORDER 17 ORDQ 0): word 1 the order, word 2 the length (RL_W words of
+// characters, CPN_RL characters), SIGNAL 1 (medium pitch, long cadence), PI 0 (presentation allowed;
+// 2 number not available without one), SI 3 (network provided), then 3 characters a word.
+MODEMAMPS_API std::vector<uint64_t> alertWithInfo(uint8_t pscc, const std::string& callerId);
 } // namespace fvc
 
 class MODEMAMPS_API FvcTransmitter

@@ -195,6 +195,7 @@ bool AmpsBaseStation::bind(const std::vector<AmpsStreamSpan>& rxStreams, const s
     sc.si.cmac = static_cast<uint8_t>(m_config.msPower);
     sc.si.vmac = static_cast<uint8_t>(m_config.msPower);
     sc.roundTrip = m_config.roundTrip;
+    sc.sendCallerId = m_config.sendCallerId;
     for (int index : m_onAir)
     {
         const AmpsCarrierConfig& c = m_carriers[static_cast<size_t>(index)].config;

@@ -53,6 +53,7 @@ struct AmpsNetworkConfig
     int dcc = 0;
     int msPower = 4;                // the power level of the phones (osmocom's ms_power: CMAC, VMAC)
     double roundTrip = 0.0;         // the round trip of the radio, s (AmpsSystemConfig)
+    bool sendCallerId = false;      // the caller's number with the alert (AmpsSystemConfig)
     std::vector<AmpsCarrierConfig> carriers;
 };
 

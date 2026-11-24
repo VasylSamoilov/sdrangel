@@ -357,7 +357,7 @@ CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& sett
     form->addRow(m_callerId);
     m_clock = new QCheckBox("Send the time of day", page);
     form->addRow(m_clock);
-    m_nmtRows = {m_country, m_y1, m_area, m_areaNo, m_msPower, m_grid, legend, m_compandor, m_callerId, m_clock};
+    m_nmtRows = {m_country, m_y1, m_area, m_areaNo, m_msPower, m_grid, legend, m_compandor, m_clock};
     m_smsc = new QLineEdit(page);
     m_smsc->setToolTip("The number the phones send short messages to; empty: no short messages from the phones");
     form->addRow("SMS centre", m_smsc);

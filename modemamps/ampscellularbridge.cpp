@@ -60,12 +60,13 @@ public:
     }
 
     // These come from the router, on any thread, and are only queued.
-    void setup(modemcellular::CallRef callref, const std::string&, modemcellular::NumberType, const std::string&) override
+    void setup(modemcellular::CallRef callref, const std::string& callerId, modemcellular::NumberType, const std::string&) override
     {
         Event event;
         event.type = Event::Type::Setup;
         event.number = m_number;
         event.callref = callref;
+        event.callerId = callerId;
         m_bridge.queue(std::move(event));
     }
     void proceeding(modemcellular::CallRef) override {}
@@ -262,7 +263,7 @@ void AmpsCellularBridge::run()
             modemcellular::Cause cause = modemcellular::Cause::Busy;
             if (leg.callref()) {
                 m_cellular.release(event.callref, modemcellular::Cause::Busy);
-            } else if (!m_amps.startCall(leg.number(), &cause)) {
+            } else if (!m_amps.startCall(leg.number(), &cause, event.callerId)) {
                 m_cellular.release(event.callref, cause);
             } else {
                 leg.setCallref(event.callref);

@@ -56,6 +56,8 @@ MODEMAMPS_API extern const WordDef kReccDigits;                // words D to G: 
 // FVC (3.7.2)
 MODEMAMPS_API extern const WordDef kFvcOrder;                  // mobile station control message, SCC = 11
 MODEMAMPS_API extern const WordDef kFvcHandoff;                // SCC != 11
+MODEMAMPS_API extern const WordDef kFvcAlertInfo;              // word 2 of an alert with info (T1T2 01)
+MODEMAMPS_API extern const WordDef kFvcInfoCharacters;         // the next words: 3 characters each
 
 // RVC (2.7.2)
 MODEMAMPS_API extern const WordDef kRvcOrderConfirmation;

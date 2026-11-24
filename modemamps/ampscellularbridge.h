@@ -73,6 +73,7 @@ private:
         std::string number;
         modemcellular::CallRef callref = 0;
         modemcellular::Cause cause = modemcellular::Cause::Normal;
+        std::string callerId;                       // Setup
     };
 
     Leg& legFor(const AmpsSubscriber& subscriber);

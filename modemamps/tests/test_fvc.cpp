@@ -96,8 +96,33 @@ static void testSource()
     CHECK(tx.nextBit() == -1 && asked == 4);
 }
 
+// The caller id "1000001": the order (17), the length word (3 words of characters, 7 characters,
+// presentation allowed, network provided), the characters 3 a word, the last one short
+static void testAlertWithInfo()
+{
+    const std::vector<uint64_t> w = fvc::alertWithInfo(1, "1000001");
+
+    CHECK(w.size() == 5);
+    if (w.size() != 5) {
+        return;
+    }
+    for (uint64_t x : w) {
+        CHECK(bchCheck(x, kForwardMessageBits));
+    }
+    CHECK(wordField(words::kFvcOrder, w[0], "ORDER") == kOrderAlertWithInfo && wordField(words::kFvcOrder, w[0], "T1T2") == kT1T2Next);
+    CHECK(wordField(words::kFvcAlertInfo, w[1], "T1T2") == kT1T2First && wordField(words::kFvcAlertInfo, w[1], "RL_W") == 3);
+    CHECK(wordField(words::kFvcAlertInfo, w[1], "CPN_RL") == 7 && wordField(words::kFvcAlertInfo, w[1], "PI") == 0);
+    CHECK(wordField(words::kFvcAlertInfo, w[1], "SI") == 3 && wordField(words::kFvcAlertInfo, w[1], "SIGNAL") == 1);
+    CHECK(wordField(words::kFvcInfoCharacters, w[2], "CHARACTER 1") == '1' && wordField(words::kFvcInfoCharacters, w[2], "CHARACTER 3") == '0');
+    CHECK(wordField(words::kFvcInfoCharacters, w[4], "CHARACTER 1") == '1' && wordField(words::kFvcInfoCharacters, w[4], "CHARACTER 2") == 0);
+    // no number: not available
+    const std::vector<uint64_t> none = fvc::alertWithInfo(1, "");
+    CHECK(none.size() == 2 && wordField(words::kFvcAlertInfo, none[1], "PI") == 2);
+}
+
 int main()
 {
+    testAlertWithInfo();
     testWords();
     testStream();
     testSource();

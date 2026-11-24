@@ -356,6 +356,7 @@ bool CellularNetworkSettings::ampsNetworkConfig(modemamps::AmpsNetworkConfig& co
     config.sid = static_cast<uint16_t>(std::max(0, std::min(m_sid, 32767)));
     config.dcc = std::max(0, std::min(m_dcc, 3));
     config.msPower = std::max(0, std::min(m_msPower, 7));
+    config.sendCallerId = m_sendCallerId;
     if (m_scc < 0 || m_scc > 2)
     {
         error = "the SAT colour code is 0..2";

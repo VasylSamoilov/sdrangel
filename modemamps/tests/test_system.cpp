@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include "ampsfvc.h"
 #include "ampsmessages.h"
 #include "ampssystem.h"
 
@@ -300,6 +301,32 @@ static void testCallToPhone()
     CHECK(!n.system.startCall("21621775", &cause) && cause == modemcellular::Cause::InvalidNumber);
 }
 
+// With caller id on: the first alert is the alert with info (ORDER 17, the length, the characters),
+// the phone rings on it as on the alert
+static void testCallerId()
+{
+    AmpsSystemConfig c = Network::config();
+    c.sendCallerId = true;
+    modemcellular::SampleClock clock(48000.0);
+    AmpsSystem system(clock, c);
+    FoccMessage m;
+    uint64_t w = 0;
+    std::vector<uint64_t> sent;
+
+    CHECK(system.startCall("2162177526", nullptr, "1000001"));
+    system.nextFocc(kCc, m);
+    system.nextFocc(kCc, m);
+    system.receivedRecc(kCc, phone(0, kOrderPage, 0, ""));
+    system.nextFocc(kCc, m);
+    system.nextFocc(kCc, m);
+    system.satChanged(kVc, 0);
+    while (system.nextFvc(kVc, w)) {
+        sent.push_back(w);
+    }
+    CHECK(sent.size() == 5 && sent == fvc::alertWithInfo(0, "1000001"));
+    CHECK(system.mode(kVc) == AmpsMode::Silence);
+}
+
 // No page response: paged again after 8 s, given up 4 s after that
 static void testNoPageResponse()
 {
@@ -358,6 +385,7 @@ static void testNoRing()
 int main()
 {
     testCallToPhone();
+    testCallerId();
     testNoPageResponse();
     testNoRing();
     testRegistration();

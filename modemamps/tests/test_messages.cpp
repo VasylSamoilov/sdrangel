@@ -39,7 +39,7 @@ static void testSizes()
         &words::kSystemParameter1, &words::kSystemParameter2, &words::kRegistrationIncrement, &words::kRegistrationId,
         &words::kRescan, &words::kLocationArea, &words::kNewAccessChannelSet, &words::kOverloadControl,
         &words::kAccessTypeParameters, &words::kAccessAttemptParameters,
-        &words::kControlFiller, &words::kFvcOrder, &words::kFvcHandoff};
+        &words::kControlFiller, &words::kFvcOrder, &words::kFvcHandoff, &words::kFvcAlertInfo, &words::kFvcInfoCharacters};
     const WordDef *reverse[] = {&words::kReccA, &words::kReccB, &words::kReccSerial, &words::kReccPci, &words::kReccDigits,
         &words::kRvcOrderConfirmation, &words::kRvcDigits};
 

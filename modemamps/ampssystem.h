@@ -80,6 +80,9 @@ struct AmpsSystemConfig
     std::vector<AmpsChannelConfig> channels;
     // the round trip of the radio (s): what the phone sends in answer to us arrives this much later
     double roundTrip = 0.0;
+    // the number of the caller with the first alert of a call to a phone (alert with info), as
+    // osmocom's --send-callerid
+    bool sendCallerId = false;
 };
 
 class MODEMAMPS_API AmpsSystem
@@ -152,7 +155,7 @@ public:
     // A call to the phone with this number (10 digits): paged on the control channel (osmocom's
     // call_down_setup). False with the cause if it cannot be: the phone in a transaction (busy), no
     // voice channel free, no control channel.
-    bool startCall(const std::string& number, modemcellular::Cause* cause = nullptr);
+    bool startCall(const std::string& number, modemcellular::Cause* cause = nullptr, const std::string& callerId = std::string());
 
     // the events of the channels (index into config().channels)
     void receivedRecc(int channel, const ReccMessage& message);

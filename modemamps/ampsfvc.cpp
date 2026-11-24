@@ -38,6 +38,26 @@ uint64_t handoff(uint8_t scc, uint8_t pscc, uint8_t dtx, uint8_t vmac, uint16_t 
         {"DTX", dtx}, {"VMAC", vmac}, {"CHAN", chan}});
 }
 
+std::vector<uint64_t> alertWithInfo(uint8_t pscc, const std::string& callerId)
+{
+    std::vector<uint64_t> w;
+    const std::string id = callerId.substr(0, 63);          // CPN_RL is 6 bits
+    const int length = static_cast<int>(id.size());
+
+    w.push_back(order(pscc, kOrderAlertWithInfo, 0, 0));
+    w.push_back(encodeWord(words::kFvcAlertInfo, {{"T1T2", kT1T2First}, {"RL_W", (length + 2) / 3}, {"SIGNAL", 1},
+        {"CPN_RL", length}, {"PI", id.empty() ? 2 : 0}, {"SI", 3}}));
+    for (int i = 0; i < length; i += 3)
+    {
+        WordValues v = {{"T1T2", kT1T2First}};
+        for (int k = 0; k < 3 && i + k < length; k++) {
+            v["CHARACTER " + std::to_string(k + 1)] = static_cast<uint8_t>(id[static_cast<size_t>(i + k)]);
+        }
+        w.push_back(encodeWord(words::kFvcInfoCharacters, v));
+    }
+    return w;
+}
+
 } // namespace fvc
 
 FvcTransmitter::FvcTransmitter() :

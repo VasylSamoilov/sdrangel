@@ -82,6 +82,11 @@ const WordDef kFvcHandoff = {"Mobile Station Control Message (SCC != 11)", false
     {{"T1T2", 2}, {"SCC", 2}, {"PSCC", 2}, {"EF", 1}, {"RSVD", 4}, {"DTX", 1}, {"PVI", 1}, {"MEM", 1}, {"VMAC", 3},
      {"CHAN", 11}}};
 
+const WordDef kFvcAlertInfo = {"Word 2 - First Alert With Info Word", false,
+    {{"T1T2", 2}, {"RL_W", 5}, {"SIGNAL", 8}, {"CPN_RL", 6}, {"PI", 2}, {"SI", 2}, {"RSVD", 3}}};
+const WordDef kFvcInfoCharacters = {"Word N - Alert With Info Word", false,
+    {{"T1T2", 2}, {"RSVD", 2}, {"CHARACTER 1", 8}, {"CHARACTER 2", 8}, {"CHARACTER 3", 8}}};
+
 // RVC (2.7.2.1, p.69-71)
 const WordDef kRvcOrderConfirmation = {"Order Confirmation Message", true,
     {{"F", 1}, {"NAWC", 2}, {"T", 1}, {"LOCAL/MSG_TYPE", 5}, {"ORDQ", 3}, {"ORDER", 5}, {"RSVD", 19}}};
