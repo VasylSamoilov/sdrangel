@@ -252,6 +252,7 @@ static void testFromPhone()
     CHECK(steps >= 45 && steps <= 55);
     CHECK(s.tc->state() == State::MtRelease);
     phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0x11111), 1);
+    CHECK(pullClearing(*s.tc) == 3);                    // the last 0.1 s of the radio started the 1st L(15)
     CHECK(s.system.transactionCount() == 0);
     CHECK(s.calls.cleared == 0);
 }
@@ -339,6 +340,7 @@ static void testPhoneFetches()
     }
     CHECK(s.tc->state() == State::MtRelease);
     phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0x11111), 1);
+    CHECK(pullClearing(*s.tc) == 3);                    // the last 0.1 s of the radio started the 1st L(15)
     CHECK(s.system.transactionCount() == 0);
     CHECK(s.results.size() == 1 && !s.results.empty() && s.results[0].result == NmtServiceEnd::Ok);
     CHECK(s.calls.cleared == 0);
@@ -452,6 +454,7 @@ static void testToPhone()
     s.run(4.0);
     CHECK(s.tc->state() == State::MtRelease);
     phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0x11111), 1);
+    CHECK(pullClearing(*s.tc) == 0);                    // about 1 s of L(15) is on air already: only the frames 6
     CHECK(s.system.transactionCount() == 0);
     CHECK(s.results.size() == 1 && s.results[0].result == NmtServiceEnd::Ok);
 }
@@ -482,6 +485,8 @@ static void testToPhoneFails()
         s.run(1.5);
         CHECK(s.tc->state() == State::MtRelease);
         phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0x11111), 1);
+        CHECK(pullClearing(*s.tc) == 0);                // 0.5 s of L(15) is on air already: only the frames 6
+        CHECK(s.system.transactionCount() == 0);
         CHECK(s.results.size() == 1 && s.results[0].result == NmtServiceEnd::NoAck);
     }
     {
@@ -491,9 +496,8 @@ static void testToPhoneFails()
         CHECK(s.system.sendSms(s.phone.country, s.phone.number, hello()));
         s.toPhone();
         phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0x11111), 1);
-        for (int i = 0; i < 4; i++) {
-            pull(*s.tc);
-        }
+        CHECK(s.tc->state() == State::MoRelease);
+        CHECK(pullClearing(*s.tc) == 4);
         CHECK(s.system.transactionCount() == 0);
         CHECK(s.results.size() == 1 && s.results[0].result == NmtServiceEnd::Undelivered);
     }

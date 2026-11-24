@@ -66,8 +66,10 @@ static void testRoamingUpdate()
         CHECK(isLineSignal(pull(tc), 15));
     }
 
-    // the release guard of the phone ends it
+    // the release guard of the phone: 5 L(15) are out already, so the 4 idle frames 6 end it
     phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
+    CHECK(tc.state() == NmtChannel::State::MtRelease);
+    CHECK(pullClearing(tc) == 0);
     CHECK(tc.state() == NmtChannel::State::Idle);
     CHECK(system.transactionCount() == 0);
     CHECK(pull(tc).mt == MessageType::Frame4);
@@ -124,6 +126,8 @@ static void testReleaseGuardTimeout()
     CHECK(tc.state() == NmtChannel::State::MtRelease);
     // three of five are enough
     phoneSends(tc, lineSignalFrame(tc, phone, 0x41151), 1);
+    CHECK(tc.state() == NmtChannel::State::MtRelease);
+    CHECK(pullClearing(tc) == 4);
     CHECK(tc.state() == NmtChannel::State::Idle);
 }
 
@@ -175,10 +179,12 @@ static void testPhoneClears()
     phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
     CHECK(tc.state() == NmtChannel::State::MoRelease);
 
-    // L(15) four times, then the channel is idle again
+    // L(15) four times, then 4 idle frames 6, then the channel is idle again
     for (int i = 0; i < 4; i++) {
         CHECK(isLineSignal(pull(tc), 15));
     }
+    CHECK(tc.state() == NmtChannel::State::MoRelease);
+    CHECK(pullClearing(tc) == 0);
     CHECK(tc.state() == NmtChannel::State::Idle);
     CHECK(system.transactionCount() == 0);
     CHECK(pull(tc).mt == MessageType::Frame4);
@@ -265,9 +271,8 @@ static void testOneTransactionPerSubscriber()
 
     // ending one does not touch the other
     phoneSends(a, lineSignalFrame(a, phone, 0x11111), 1);
-    for (int i = 0; i < 4; i++) {
-        pull(a);
-    }
+    CHECK(a.state() == NmtChannel::State::MoRelease);
+    CHECK(pullClearing(a) == 4);
     CHECK(a.state() == NmtChannel::State::Idle);
     CHECK(b.state() == NmtChannel::State::RoamingIdent);
     CHECK(system.transactionCount() == 1);
@@ -296,6 +301,7 @@ static void testRoamingAgain()
             pull(tc);
         }
         phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
+        CHECK(pullClearing(tc) == 4);
         CHECK(tc.state() == NmtChannel::State::Idle);
     }
     CHECK(events == 2);
@@ -349,6 +355,7 @@ static void testStaleTimer()
     clock.advance(static_cast<int64_t>(kRate * 0.5));
     system.run();
     phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
+    CHECK(pullClearing(tc) == 4);
     CHECK(tc.state() == NmtChannel::State::Idle);
 
     clock.advance(static_cast<int64_t>(kRate * 0.5));           // 1 s
@@ -413,6 +420,66 @@ static void testWatchdog()
     CHECK(a.state() == NmtChannel::State::RoamingIdent);
 }
 
+// The clearing sequences of NMT Doc 450-1 4.4.1.3: the clearing signal L(15) for at least T' (4
+// frames), from the network on until the release guard is in, then T' (4) idle frames 6; the 4th
+// frame 6 ends the transaction. Written out frame by frame, without pullClearing.
+static void testClearingSequences()
+{
+    modemcellular::SampleClock clock(kRate);
+    NmtSystem system(clock);
+    NmtChannel& tc = system.addChannel(config(System::Nmt450, ChannelType::Tc, 100), kRate, 1.0);
+    const Phone phone;
+    auto toMtRelease = [&]() {
+        seize(tc, phone);
+        CHECK(isLineSignal(pull(tc), 3));
+        CHECK(isLineSignal(pull(tc), 3));
+        CHECK(tc.state() == NmtChannel::State::MtRelease);
+    };
+    auto idleFrames = [&](NmtChannel::State state) {
+        for (int i = 0; i < 3; i++)
+        {
+            CHECK(pull(tc).mt == MessageType::Frame6);
+            CHECK(tc.state() == state);                         // not on the 1st to 3rd frame 6
+            CHECK(system.transactionCount() == 1);
+        }
+        CHECK(pull(tc).mt == MessageType::Frame6);              // the 4th ends it
+        CHECK(tc.state() == NmtChannel::State::Idle);
+        CHECK(system.transactionCount() == 0);
+        CHECK(pull(tc).mt == MessageType::Frame4);
+    };
+
+    // (a) MTX clearing, the guard after the 1st L(15): L(15) still up to 4 in all
+    toMtRelease();
+    CHECK(isLineSignal(pull(tc), 15));
+    phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
+    CHECK(tc.state() == NmtChannel::State::MtRelease);
+    for (int i = 0; i < 3; i++) {
+        CHECK(isLineSignal(pull(tc), 15));
+    }
+    idleFrames(NmtChannel::State::MtRelease);
+
+    // (b) MTX clearing, the guard after the 7th L(15): no more L(15), at once the frames 6
+    toMtRelease();
+    for (int i = 0; i < 7; i++) {
+        CHECK(isLineSignal(pull(tc), 15));
+    }
+    CHECK(tc.state() == NmtChannel::State::MtRelease);
+    phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
+    CHECK(tc.state() == NmtChannel::State::MtRelease);
+    idleFrames(NmtChannel::State::MtRelease);
+
+    // (c) MS clearing: 4 L(15), 4 frames 6, then idle
+    seize(tc, phone);
+    phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
+    CHECK(tc.state() == NmtChannel::State::MoRelease);
+    for (int i = 0; i < 4; i++)
+    {
+        CHECK(isLineSignal(pull(tc), 15));
+        CHECK(tc.state() == NmtChannel::State::MoRelease);
+    }
+    idleFrames(NmtChannel::State::MoRelease);
+}
+
 static void testClearingInOtherStates()
 {
     modemcellular::SampleClock clock(kRate);
@@ -434,6 +501,8 @@ static void testClearingInOtherStates()
     pull(tc);
     CHECK(tc.state() == NmtChannel::State::MoRelease);
     pull(tc);
+    CHECK(tc.state() == NmtChannel::State::MoRelease);
+    CHECK(pullClearing(tc) == 0);                               // 4 L(15) in all, then the frames 6
     CHECK(tc.state() == NmtChannel::State::Idle);
 
     // a seizure of another phone while the channel is busy is not taken
@@ -453,15 +522,15 @@ static void testClearingInOtherStates()
 
     // three of five characters are enough for a clearing, wherever they are
     phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
+    CHECK(tc.state() == NmtChannel::State::MtRelease);
+    CHECK(pullClearing(tc) == 4);
     CHECK(tc.state() == NmtChannel::State::Idle);
     seize(tc, phone);
     phoneSends(tc, lineSignalFrame(tc, phone, 0x11145), 1);
     CHECK(tc.state() == NmtChannel::State::MoRelease);
 
     // the channel number of a clearing is not checked, the identity is (NMT Doc 450-1 4.7.2.3b)
-    for (int i = 0; i < 4; i++) {
-        pull(tc);
-    }
+    CHECK(pullClearing(tc) == 4);
     CHECK(tc.state() == NmtChannel::State::Idle);
     seize(tc, phone);
     Frame clearing = lineSignalFrame(tc, phone, 0x11111);
@@ -704,6 +773,7 @@ int main()
     testLoopbackAndDetached();
     testStaleTimer();
     testWatchdog();
+    testClearingSequences();
     testClearingInOtherStates();
     testDamagedFrames();
     testChannelGone();

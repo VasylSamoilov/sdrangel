@@ -106,6 +106,7 @@ struct Station
         pull(channel);
         pull(channel);
         phoneSends(channel, lineSignalFrame(channel, phone, 0x11111), 1);
+        CHECK(pullClearing(channel) == 4);
         CHECK(channel.state() == NmtChannel::State::Idle);
     }
 
@@ -231,9 +232,7 @@ static void testCallToEcho()
     // the phone clears: the call in the router ends
     phoneSends(*s.a, lineSignalFrame(*s.a, phone, 0x11111), 1);
     CHECK(s.cellular.callCount() == 0);
-    for (int i = 0; i < 4; i++) {
-        pull(*s.a);
-    }
+    CHECK(pullClearing(*s.a) == 4);
     CHECK(s.a->state() == NmtChannel::State::Idle);
 }
 
@@ -314,6 +313,7 @@ static void testCallToRegisteredPhone()
     CHECK(s.b->state() == NmtChannel::State::Idle);                 // the other phone never rang
 
     phoneSends(*s.a, lineSignalFrame(*s.a, first, 0x11111), 1);
+    CHECK(pullClearing(*s.a) == 2);                                 // the air from 2.0 s took the 1st L(15)
     CHECK(s.a->state() == NmtChannel::State::Idle);
 }
 
@@ -333,6 +333,7 @@ static void testRouterRefuses()
     CHECK(s.a->dspMode() == DspMode::Frame);
     CHECK(isLineSignal(pull(*s.a), 15));
     phoneSends(*s.a, lineSignalFrame(*s.a, phone, 0x11111), 1);
+    CHECK(pullClearing(*s.a) == 3);
     CHECK(s.a->state() == NmtChannel::State::Idle);
 }
 
@@ -485,6 +486,7 @@ static void testBridgeGoesAway()
         CHECK(s.a->state() == NmtChannel::State::MtRelease);
         CHECK(isLineSignal(pull(*s.a), 15));
         phoneSends(*s.a, lineSignalFrame(*s.a, phone, 0x11111), 1);
+        CHECK(pullClearing(*s.a) == 3);
         CHECK(s.a->state() == NmtChannel::State::Idle);
     }
 
@@ -524,9 +526,7 @@ static void testTwoCallsInARow()
         CHECK(s.a->state() == NmtChannel::State::Active);
         phoneSends(*s.a, lineSignalFrame(*s.a, phone, 0x11111), 1);
         CHECK(s.cellular.callCount() == 0);
-        for (int i = 0; i < 4; i++) {
-            pull(*s.a);
-        }
+        CHECK(pullClearing(*s.a) == 4);
         CHECK(s.a->state() == NmtChannel::State::Idle);
     }
 }
@@ -572,9 +572,7 @@ static void testMovedCall()
     // the phone clears on the new channel
     phoneSends(*s.b, lineSignalFrame(*s.b, phone, 0x11111), 1);
     CHECK(s.cellular.callCount() == 0);
-    for (int i = 0; i < 4; i++) {
-        pull(*s.b);
-    }
+    CHECK(pullClearing(*s.b) == 4);
     CHECK(s.b->state() == NmtChannel::State::Idle);
     CHECK(s.nmt.transactionCount() == 0);
 }
@@ -602,6 +600,7 @@ static void testFarEndReleasesDuringMove()
     }
     CHECK(s.b->state() == NmtChannel::State::Idle);
     phoneSends(*s.a, lineSignalFrame(*s.a, caller, 0x11111), 1);
+    CHECK(pullClearing(*s.a) == 4);
     CHECK(s.a->state() == NmtChannel::State::Idle);
     CHECK(s.nmt.transactionCount() == 0);
 }

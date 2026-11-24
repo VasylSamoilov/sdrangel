@@ -97,6 +97,10 @@ MessageType idleMessageType(ChannelType type)
 
 // How long the phone has to answer our release with the release guard.
 const double kReleaseTimeout = 2.0;
+// Clearing sequences (NMT Doc 450-1 4.4.1.3): the clearing signal 5a(L=13/15) at least T' (4
+// frames), from the network at most 2 s (until the release guard), then idle frames 6 for T'.
+const int kReleaseFrames = 4;
+const int kReleaseIdleFrames = 4;
 // Longest time a transaction may stay in a state that advances with the frames we send. The
 // frame counts are 8 + 4 frames (about 1.7 s); this only ends transactions of a channel that
 // stopped sending.
@@ -177,6 +181,8 @@ NmtChannel::NmtChannel(const ChannelConfig& config, double sampleRate, double de
     m_transaction(nullptr),
     m_rxFrameCount(0),
     m_txFrameCount(0),
+    m_releaseGuard(false),
+    m_releaseIdle(0),
     m_callingSlot(0),
     m_sampleRate(sampleRate),
     m_deviationFactor(deviationFactor),
@@ -1036,21 +1042,39 @@ void NmtChannel::enterActive()
 }
 
 // L(15): clearing, towards the exchange the release is acknowledged 4 times.
+// The phone cleared (MS clearing, 4.4.1.3): L(15) T', then idle frames T'.
 Frame NmtChannel::txMoRelease()
 {
-    Frame frame = lineSignalFrame(15);
-
-    if (++m_txFrameCount == 4) {
-        m_host->destroyTransaction(m_transaction);
+    if (m_txFrameCount < kReleaseFrames)
+    {
+        m_txFrameCount++;
+        return lineSignalFrame(15);
     }
-
-    return frame;
+    return releaseIdleFrame();
 }
 
-// L(15): clearing, call transfer not activated.
+// L(15): clearing, call transfer not activated (MTX clearing, 4.4.1.3): at least T', and on
+// until the release guard of the phone is in, then idle frames T'.
 Frame NmtChannel::txMtRelease()
 {
-    return lineSignalFrame(15);
+    if (m_txFrameCount < kReleaseFrames || !m_releaseGuard)
+    {
+        m_txFrameCount++;
+        return lineSignalFrame(15);
+    }
+    return releaseIdleFrame();
+}
+
+// The idle frames that end a clearing; the last one ends the transaction.
+Frame NmtChannel::releaseIdleFrame()
+{
+    Frame frame;
+
+    frame.mt = MessageType::Frame6;
+    if (++m_releaseIdle == kReleaseIdleFrames) {
+        m_host->destroyTransaction(m_transaction);
+    }
+    return frame;
 }
 
 // ---- procedures during the conversation (NMT Doc 450-1 para 4.4.1.8 to 4.4.1.10) ----
@@ -1612,6 +1636,7 @@ void NmtChannel::process(const Frame& frame)
             setDspMode(DspMode::Frame);
             m_state = State::MoRelease;
             m_txFrameCount = 0;
+            m_releaseIdle = 0;
             m_timer->start(kStateWatchdog);
             // message indicators for the phone go out before the release (4.4.1.16)
             if (transaction->mwiFlags && inCallState(previous) && transaction->mwiResult == NmtServiceEnd::Undelivered) {
@@ -2307,19 +2332,18 @@ Frame NmtChannel::txMwiClear()
     frame = lineSignalFrame(15);
     if (k == 2 + kAckFrames)
     {
+        m_state = State::MtRelease;
+        m_txFrameCount = 0;
+        m_releaseGuard = false;
+        m_releaseIdle = 0;
+        m_timer->start(kReleaseTimeout);
         if (m_mwiAcked)
         {
-            // the phone cleared first (or answered during the signal): this is the end
-            NmtTransaction* const transaction = m_transaction;
-
-            transaction->mwiResult = NmtServiceEnd::Ok;
-            m_host->destroyTransaction(transaction);
-        }
-        else
-        {
-            m_state = State::MtRelease;
-            m_txFrameCount = 0;
-            m_timer->start(kReleaseTimeout);
+            // the phone cleared first (or answered during the signal): the clearing signal was
+            // out for T', the idle frames end it
+            m_transaction->mwiResult = NmtServiceEnd::Ok;
+            m_txFrameCount = kReleaseFrames;
+            m_releaseGuard = true;
         }
     }
 
@@ -2339,6 +2363,7 @@ void NmtChannel::rxMwiClear(const Frame& frame)
     {
         m_state = State::MoRelease;
         m_txFrameCount = 0;
+        m_releaseIdle = 0;
         m_timer->start(kStateWatchdog);
         return;
     }
@@ -2396,7 +2421,13 @@ void NmtChannel::rxMtRelease(const Frame& frame)
     if (m_transaction->mwiResult == NmtServiceEnd::NoAck && m_transaction->mwiAtClearing) {
         m_transaction->mwiResult = NmtServiceEnd::Ok;
     }
-    m_host->destroyTransaction(m_transaction);
+    // the clearing signal goes on to T', then the idle frames end it (txMtRelease); the timer
+    // only ends a channel that stopped sending
+    if (!m_releaseGuard)
+    {
+        m_releaseGuard = true;
+        m_timer->start(kStateWatchdog);
+    }
 }
 
 // ---- states ----
@@ -2414,6 +2445,8 @@ void NmtChannel::release()
 
     m_state = State::MtRelease;
     m_txFrameCount = 0;
+    m_releaseGuard = false;
+    m_releaseIdle = 0;
     setDspMode(DspMode::Frame);
     m_timer->start(kReleaseTimeout);
     // message indicators for the phone go out before the release (4.4.1.16)
@@ -2449,6 +2482,8 @@ void NmtChannel::goIdle()
     m_state = State::Idle;
     m_compandorOn = false;
     m_txFrameCount = 0;
+    m_releaseGuard = false;
+    m_releaseIdle = 0;
     m_dialled.clear();
     m_recallDigits.clear();
     m_digitCount = 0;

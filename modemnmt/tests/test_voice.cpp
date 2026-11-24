@@ -943,9 +943,8 @@ static void testBadSamplesAndNextCall()
 
     // the call ends; a second call on the channel does not inherit the detection
     phoneSends(*call.tc, lineSignalFrame(*call.tc, call.phone, 0x11111), 1);
-    for (int i = 0; i < 4; i++) {
-        pull(*call.tc);
-    }
+    CHECK(call.tc->state() == State::MoRelease);
+    CHECK(pullClearing(*call.tc) == 4);
     CHECK(call.tc->state() == State::Idle);
     CHECK(!call.tc->supervisoryDetected());
 }

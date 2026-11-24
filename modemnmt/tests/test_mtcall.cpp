@@ -167,6 +167,8 @@ static void testCallFlow()
     for (int i = 0; i < 4; i++) {
         CHECK(isLineSignal(pull(tc), 15));
     }
+    CHECK(tc.state() == NmtChannel::State::MoRelease);
+    CHECK(pullClearing(tc) == 0);                       // then the 4 idle frames 6
     CHECK(tc.state() == NmtChannel::State::Idle);
     CHECK(system.transactionCount() == 0);
 }
@@ -352,9 +354,7 @@ static void testQueue()
     // the traffic channel is free again: the phone is paged again (it is standby, NMT Doc 450-3
     // 5.4.3), and its new answer gets the allocation
     phoneSends(tc, lineSignalFrame(tc, busy, 0x11111), 1);
-    for (int i = 0; i < 4; i++) {
-        pull(tc);
-    }
+    CHECK(pullClearing(tc) == 4);
     CHECK(tc.state() == NmtChannel::State::Idle);
     CHECK(pullCalling(cc).mt == MessageType::Frame2a);
     CHECK(system.callPhase('1', "123456") == Phase::Page);
@@ -499,6 +499,7 @@ static void testIdentityAndRingTimeouts()
         CHECK(tc.state() == NmtChannel::State::MtRelease);
         CHECK(isLineSignal(pull(tc), 15));
         phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
+        CHECK(pullClearing(tc) == 3);
         CHECK(tc.state() == NmtChannel::State::Idle);
         CHECK(events.cleared == 0);
     }
@@ -566,6 +567,7 @@ static void testFarEndReleases()
         CHECK(isLineSignal(pull(tc), 15));
         CHECK(events.failed.empty() && events.cleared == 0);
         phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
+        CHECK(pullClearing(tc) == 3);
         CHECK(tc.state() == NmtChannel::State::Idle);
         CHECK(system.transactionCount() == 0);
     }
@@ -656,9 +658,7 @@ static void testQueueCodes900()
 
         // the roaming update ends: the traffic channel is free for the next call
         phoneSends(tc, lineSignalFrame(tc, busy, 0x11111), 1);
-        for (int i = 0; i < 4; i++) {
-            pull(tc);
-        }
+        CHECK(pullClearing(tc) == 4);
         CHECK(tc.state() == NmtChannel::State::Idle);
     }
 }
@@ -796,9 +796,7 @@ static void testBusyCallingChannel()
 
     // the roaming ends, the next try pages on both
     phoneSends(busy, lineSignalFrame(busy, caller, 0x11111), 1);
-    for (int i = 0; i < 4; i++) {
-        pull(busy);
-    }
+    CHECK(pullClearing(busy) == 4);
     CHECK(busy.state() == NmtChannel::State::Idle);
     CHECK(isIdleCallingFrame(pull(busy)) && isIdleCallingFrame(pull(busy)));     // not in this try
     wait(clock, system, 1.05);
@@ -822,9 +820,7 @@ static void testPhoneIsBusy()
     CHECK(!system.startCall('1', "123456", "5551234", kNational));
     CHECK(cc.state() == NmtChannel::State::Idle);
     phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
-    for (int i = 0; i < 4; i++) {
-        pull(tc);
-    }
+    CHECK(pullClearing(tc) == 4);
     CHECK(system.startCall('1', "123456", "5551234", kNational));
 
     // paged: its own seizure on the traffic channel is not taken
@@ -933,9 +929,7 @@ static void testPriorityPhoneCall()
         CHECK(system.callPhase(phone.country, phone.number) == Phase::Queue);
 
         phoneSends(tc, lineSignalFrame(tc, busy, 0x11111), 1);
-        for (int i = 0; i < 4; i++) {
-            pull(tc);
-        }
+        CHECK(pullClearing(tc) == 4);
         // the second 2c is still due before the page
         CHECK(pullCalling(cc).mt == MessageType::Frame2c);
         CHECK(pullCalling(cc).mt == MessageType::Frame2a);
@@ -1237,9 +1231,7 @@ static void testBusyCallingChannel2()
         CHECK(events.cleared == 1);
         CHECK(events.failed.empty());
         CHECK(cc.state() == NmtChannel::State::MoRelease);
-        for (int i = 0; i < 4; i++) {
-            pull(cc);
-        }
+        CHECK(pullClearing(cc) == 4);
         CHECK(cc.state() == NmtChannel::State::Idle);
         CHECK(system.transactionCount() == 0);
     }

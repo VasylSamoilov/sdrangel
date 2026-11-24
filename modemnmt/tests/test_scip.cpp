@@ -201,6 +201,8 @@ static void testReleaseDuringSwitch()
         CHECK(s.b->state() == State::Idle);
         CHECK(s.system.transactionCount() == 1);
         phoneSends(*s.a, lineSignalFrame(*s.a, s.phone, 0x11111), 1);
+        CHECK(s.system.transactionCount() == 1);            // the clearing goes on to the frames 6
+        CHECK(pullClearing(*s.a) == 4);
         CHECK(s.system.transactionCount() == 0);
         CHECK(s.a->state() == State::Idle);
     }
@@ -215,9 +217,7 @@ static void testReleaseDuringSwitch()
         CHECK(s.calls.cleared == 1);
         CHECK(s.b->state() == State::Idle);
         CHECK(s.a->state() == State::MoRelease);
-        for (int i = 0; i < 4; i++) {
-            pull(*s.a);
-        }
+        CHECK(pullClearing(*s.a) == 4);
         CHECK(s.a->state() == State::Idle);
         CHECK(s.system.transactionCount() == 0);
     }

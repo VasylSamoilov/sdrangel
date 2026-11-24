@@ -86,6 +86,8 @@ static void testCallFlow()
     for (int i = 0; i < 4; i++) {
         CHECK(isLineSignal(pull(tc), 15));
     }
+    CHECK(tc.state() == State::MoRelease);
+    CHECK(pullClearing(tc) == 0);                       // then the 4 idle frames 6
     CHECK(tc.state() == State::Idle);
     CHECK(system.transactionCount() == 0);
     CHECK(pull(tc).mt == MessageType::Frame4);
@@ -120,6 +122,8 @@ static void testFarEndReleases()
     CHECK(!system.releaseCall('1', "999999"));
 
     phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
+    CHECK(tc.state() == State::MtRelease);
+    CHECK(pullClearing(tc) == 3);
     CHECK(tc.state() == State::Idle);
     CHECK(calls.cleared == 0);                          // the far end ended it, no clearing to report
     CHECK(system.transactionCount() == 0);
@@ -149,6 +153,7 @@ static void testCallRefused()
 
         // the phone's clearing of a call that was never taken is not reported
         phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
+        CHECK(pullClearing(tc) == 3);
         CHECK(tc.state() == State::Idle);
         CHECK(calls.cleared == 0);
     }
@@ -176,6 +181,7 @@ static void testDiallingTimeout()
     CHECK(tc.dspMode() == DspMode::Frame);
     CHECK(isLineSignal(pull(tc), 15));
     phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
+    CHECK(pullClearing(tc) == 3);
     CHECK(tc.state() == State::Idle);
 
     // every digit gives another second
@@ -207,6 +213,8 @@ static void testLostDigits()
     phoneSends(tc, digitFrame(tc, phone, '1', false), 1);
     CHECK(tc.state() == State::MtRelease);
     phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
+    CHECK(pullClearing(tc) == 4);
+    CHECK(tc.state() == State::Idle);
 
     // an odd digit more than three frame periods after the previous one: an even one was lost
     toDialTone(tc, phone);
@@ -215,6 +223,8 @@ static void testLostDigits()
     CHECK(tc.state() == State::MtRelease);
     CHECK(tc.dialled().size() == 2);
     phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
+    CHECK(pullClearing(tc) == 4);
+    CHECK(tc.state() == State::Idle);
 
     // an even digit repeated more than one period after: an odd one was lost
     toDialTone(tc, phone);
@@ -223,6 +233,8 @@ static void testLostDigits()
     phoneSends(tc, digitFrame(tc, phone, '2', false), 3);
     CHECK(tc.state() == State::MtRelease);
     phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
+    CHECK(pullClearing(tc) == 4);
+    CHECK(tc.state() == State::Idle);
 
     // slow but complete: three periods between digits are fine
     toDialTone(tc, phone);
@@ -279,9 +291,8 @@ static void testDamagedDigits()
         CHECK(!tc.nextFrame(ninth));                    // the call is connected
     }
     phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
-    for (int i = 0; i < 4; i++) {
-        pull(tc);
-    }
+    CHECK(pullClearing(tc) == 4);
+    CHECK(tc.state() == State::Idle);
 
     toDialTone(tc, phone);
     phoneSends(tc, digitFrame(tc, phone, 'B', true), 1);
@@ -298,9 +309,8 @@ static void testDamagedDigits()
         CHECK(!tc.nextFrame(ninth));                    // the call is connected
     }
     phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
-    for (int i = 0; i < 4; i++) {
-        pull(tc);
-    }
+    CHECK(pullClearing(tc) == 4);
+    CHECK(tc.state() == State::Idle);
     toDialTone(tc, phone);
     phoneSends(tc, idleFromPhone(), 1);
     CHECK(tc.state() == State::MoDialling);
@@ -328,9 +338,8 @@ static void testLongNumber()
         pull(tc);
     }
     phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
-    for (int i = 0; i < 4; i++) {
-        pull(tc);
-    }
+    CHECK(pullClearing(tc) == 4);
+    CHECK(tc.state() == State::Idle);
 
     // a 33rd digit is ignored: the call goes on with the 32 digits taken
     toDialTone(tc, phone);
@@ -506,9 +515,8 @@ static void testNetworkReleaseStates()
     CHECK(!system.releaseCall('1', "123456"));
     CHECK(tc.state() == State::MoConfirm);
     phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
-    for (int i = 0; i < 4; i++) {
-        pull(tc);
-    }
+    CHECK(pullClearing(tc) == 4);
+    CHECK(tc.state() == State::Idle);
 
     // in MoComplete, after two address-complete frames
     toDialTone(tc, phone);
@@ -522,6 +530,7 @@ static void testNetworkReleaseStates()
     CHECK(isLineSignal(pull(tc), 15));
     CHECK(calls.cleared == 0);
     phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
+    CHECK(pullClearing(tc) == 3);
     CHECK(tc.state() == State::Idle);
 
     // in MoComplete the phone clears: the exchange is told once
@@ -537,6 +546,8 @@ static void testNetworkReleaseStates()
     for (int i = 0; i < 4; i++) {
         CHECK(isLineSignal(pull(tc), 15));
     }
+    CHECK(tc.state() == State::MoRelease);
+    CHECK(pullClearing(tc) == 0);
     CHECK(tc.state() == State::Idle);
 
     // a phone that clears while the dial tone plays
@@ -546,9 +557,7 @@ static void testNetworkReleaseStates()
     CHECK(tc.dspMode() == DspMode::Frame);
     std::vector<float> block(480);
     CHECK(tc.render(block.data(), 480, false) > 0);     // frames again, not the tone
-    for (int i = 0; i < 4; i++) {
-        pull(tc);
-    }
+    CHECK(pullClearing(tc) == 3);                       // the render took the 1st L(15)
     CHECK(tc.state() == State::Idle);
 }
 
@@ -585,6 +594,7 @@ static void testHandlerReentrancy()
         CHECK(tc.dspMode() == DspMode::Frame);
         CHECK(isLineSignal(pull(tc), 15));
         phoneSends(tc, lineSignalFrame(tc, phone, 0x11111), 1);
+        CHECK(pullClearing(tc) == 3);
         CHECK(tc.state() == State::Idle);
         CHECK(system.transactionCount() == 0);
     }

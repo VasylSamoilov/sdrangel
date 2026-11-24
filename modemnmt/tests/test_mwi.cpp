@@ -225,8 +225,11 @@ static void testMessageCall()
     CHECK(s.tc->state() == State::MtRelease);
     CHECK(s.reports.empty());
 
-    // the phone clears: delivered
+    // the phone clears: delivered, after the clearing sequence of the release (the L(15) of the
+    // message call do not count for it)
     phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0x11111), 1);
+    CHECK(s.system.transactionCount() == 1);
+    CHECK(pullClearing(*s.tc) == 4);
     CHECK(s.system.transactionCount() == 0);
     CHECK(s.tc->state() == State::Idle);
     CHECK(s.reports.size() == 1 && s.reports[0].flags == MwiSms && s.reports[0].result == NmtServiceEnd::Ok);
@@ -313,8 +316,10 @@ static void testNoAcknowledgement()
         phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0x11111), 1);
         CHECK(s.tc->state() == State::MwiClear);
         for (int i = 0; i < 4; i++) {
-            pull(*s.tc);
+            CHECK(isLineSignal(pull(*s.tc), 15));
         }
+        CHECK(s.tc->state() == State::MtRelease);
+        CHECK(pullClearing(*s.tc) == 0);                // the guard is in: only the frames 6
         CHECK(s.system.transactionCount() == 0);
         CHECK(s.reports.size() == 1 && s.reports[0].result == NmtServiceEnd::Ok);
     }
@@ -447,6 +452,7 @@ static void testIndicatorsAtClearing()
         }
         CHECK(s.tc->state() == State::MtRelease);
         phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0x11111), 1);
+        CHECK(pullClearing(*s.tc) == 4);
         CHECK(s.system.transactionCount() == 0);
         CHECK(s.reports.size() == 1 && s.reports[0].flags == (MwiSms | MwiFax) && s.reports[0].result == NmtServiceEnd::Ok);
     }
@@ -466,6 +472,8 @@ static void testIndicatorsAtClearing()
         for (int i = 0; i < 4; i++) {
             CHECK(isLineSignal(pull(*s.tc), 15));
         }
+        CHECK(s.tc->state() == State::MtRelease);
+        CHECK(pullClearing(*s.tc) == 0);                // the guard is in: only the frames 6
         CHECK(s.system.transactionCount() == 0);
         CHECK(s.tc->state() == State::Idle);
         CHECK(s.reports.size() == 1 && s.reports[0].result == NmtServiceEnd::Ok);
@@ -509,6 +517,7 @@ static void testIndicatorsAtClearing()
             CHECK(isLineSignal(pull(*s.tc), 15));
         }
         phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0x11111), 1);
+        CHECK(pullClearing(*s.tc) == 4);
         CHECK(s.reports.size() == 1 && s.reports[0].result == NmtServiceEnd::Ok);
     }
 
@@ -539,9 +548,7 @@ static void testIndicatorsAtClearing()
         if (!phoneClears) {
             phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0x11111), 1);
         }
-        for (int i = 0; i < 10 && s.system.transactionCount(); i++) {
-            pull(*s.tc);
-        }
+        CHECK(pullClearing(*s.tc) == 3);
         CHECK(s.system.transactionCount() == 0);
         CHECK(s.reports.size() == 1 && !s.reports.empty() && s.reports[0].result == NmtServiceEnd::NoAck);
     }
@@ -657,6 +664,7 @@ static void testIndicatorsCarried()
             CHECK(isLineSignal(pull(*s.tc), 15));
         }
         phoneSends(*s.tc, lineSignalFrame(*s.tc, s.phone, 0x11111), 1);
+        CHECK(pullClearing(*s.tc) == 4);
         CHECK(s.reports.size() == 1 && s.reports[0].flags == (MwiSms | MwiFax) && s.reports[0].result == NmtServiceEnd::Ok);
     }
 
@@ -710,6 +718,7 @@ static void testClearingRace()
     for (int i = 0; i < 4; i++) {
         CHECK(isLineSignal(pull(*s.tc), 15));
     }
+    CHECK(pullClearing(*s.tc) == 0);                    // the guard is in: only the frames 6
     CHECK(s.reports.size() == 1 && s.reports[0].result == NmtServiceEnd::Ok);
 }
 
@@ -788,6 +797,7 @@ static void testIndicatorsDuringSwitch()
     for (int i = 0; i < 4; i++) {
         CHECK(isLineSignal(pull(b), 15));
     }
+    CHECK(pullClearing(b) == 0);                        // the guard is in: only the frames 6
     CHECK(reports.size() == 1 && reports[0].result == NmtServiceEnd::Ok);
     system.setMwiHandler(nullptr);
     system.setCallHandler(nullptr);

@@ -416,6 +416,7 @@ private:
     void failCall(modemcellular::Cause cause);
     Frame txMoRelease();
     Frame txMtRelease();
+    Frame releaseIdleFrame();
     Frame txMftIn();
     Frame txMftOut();
     Frame txPowerChange();
@@ -493,6 +494,8 @@ private:
     NmtTransaction* m_transaction;
     uint64_t m_rxFrameCount;        // frame periods since the seizure
     int m_txFrameCount;             // frames sent in the current state
+    bool m_releaseGuard;            // clearing: the release guard of the phone is in
+    int m_releaseIdle;              // clearing: idle frames sent after the clearing signal
     uint64_t m_callingSlot;         // idle calling channel: slots sent (even: idle frame, odd: carousel)
 
     double m_sampleRate;

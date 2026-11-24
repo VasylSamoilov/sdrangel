@@ -152,6 +152,38 @@ static Frame seizureFrame(const NmtChannel& channel, const Phone& phone, Message
 
 using State = NmtChannel::State;
 
+// The rest of a clearing (NMT Doc 450-1 4.4.1.3): the clearing signal L(15) that is still to go
+// (MTX clearing: until at least 4 are out and the release guard is in; MS clearing: 4 in all),
+// then 4 idle frames 6; the 4th frame 6, not one before, ends the transaction. Returns the number
+// of L(15) pulled here.
+[[maybe_unused]] static int pullClearing(NmtChannel& channel)
+{
+    const State state = channel.state();
+    int lineSignals = 0;
+    Frame f = pull(channel);
+
+    CHECK(state == State::MtRelease || state == State::MoRelease);
+    while (isLineSignal(f, 15) && lineSignals < 16)
+    {
+        lineSignals++;
+        f = pull(channel);
+    }
+    CHECK(lineSignals < 16);
+    for (int i = 0; i < 4; i++)
+    {
+        if (i > 0) {
+            f = pull(channel);
+        }
+        CHECK(f.mt == MessageType::Frame6);
+        if (i < 3) {
+            CHECK(channel.state() == state);
+        }
+    }
+    CHECK(channel.state() != state);
+
+    return lineSignals;
+}
+
 [[maybe_unused]] static Frame callFrame(const NmtChannel& channel, const Phone& phone)
 {
     return seizureFrame(channel, phone, MessageType::Frame10b);
