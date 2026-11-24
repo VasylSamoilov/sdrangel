@@ -3,6 +3,7 @@ project(cellular)
 set(cellular_SOURCES
     cellular.cpp
     cellularbook.cpp
+    cellularlogfile.cpp
     cellularsettings.cpp
     cellularworker.cpp
     cellularplugin.cpp
@@ -12,6 +13,7 @@ set(cellular_SOURCES
 set(cellular_HEADERS
     cellular.h
     cellularbook.h
+    cellularlogfile.h
     cellularsettings.h
     cellularworker.h
     cellularplugin.h
