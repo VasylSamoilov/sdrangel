@@ -53,8 +53,10 @@ add_library(sdrbase_dsp STATIC ${SDRBASE_DSP_SOURCES})
 target_include_directories(sdrbase_dsp PUBLIC ${SDRANGEL_ROOT}/sdrbase ${SDRANGEL_ROOT}/exports)
 target_compile_definitions(sdrbase_dsp PUBLIC sdrangel_STATIC)
 target_link_libraries(sdrbase_dsp PUBLIC Qt5::Core)
-# the SIMD paths of the headers (Interpolator) as SDRangel's build has them on x86-64
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+# the SIMD paths of the headers (Interpolator) as SDRangel's build has them on x86-64; off for a
+# suite of the plain C++ paths (ARM: the Pi, Android)
+option(MODEMNMT_TEST_SSE2 "Build the SSE2 paths of sdrbase as SDRangel does on x86-64" ON)
+if(MODEMNMT_TEST_SSE2 AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     target_compile_definitions(sdrbase_dsp PUBLIC USE_SSE2)
 endif()
 
