@@ -33,6 +33,7 @@ set(MODEMNMT_LIB_SOURCES
     ../../modemcellular/clock.cpp
     ../../modemcellular/compandor.cpp
     ../../modemcellular/echoendpoint.cpp
+    ../../modemcellular/echosuppressor.cpp
     ../../modemcellular/firfilter.cpp
     ../../modemcellular/musicendpoint.cpp
     ../../modemcellular/timer.cpp

@@ -22,6 +22,8 @@
 #include <vector>
 
 #include "dsp/dv/dvdtmf.h"
+#include "echosuppressor.h"
+#include "nmtvoice.h"
 
 namespace modemnmt
 {
@@ -47,19 +49,28 @@ public:
     // The digits the phone sends in the MFT state go to the far end as push-button tones (ITU-T
     // Q.23: 100 ms of tone, 50 ms of pause).
     void digit(char digit) { m_dtmf.queue(digit, 100, 50); }
-    // The speech of the phone with the tones of the digits added; it is the speech itself if there are none.
-    const float* withTones(const float* samples, int count)
+    // The speech of the phone towards the far end: its echo of the far end suppressed, then the
+    // tones of the digits added.
+    const float* fromPhone(modemcellular::CallRef callref, const float* samples, int count)
     {
-        if (!m_dtmf.active()) {
-            return samples;
-        }
+        echoFor(callref);
         m_scratch.assign(samples, samples + count);
-        m_tones.resize(static_cast<size_t>(count));
-        const int made = m_dtmf.generate(m_tones.data(), count);
-        for (int i = 0; i < made; i++) {
-            m_scratch[static_cast<size_t>(i)] += m_tones[static_cast<size_t>(i)];
+        m_echo.processRx(m_scratch.data(), count);
+        if (m_dtmf.active())
+        {
+            m_tones.resize(static_cast<size_t>(count));
+            const int made = m_dtmf.generate(m_tones.data(), count);
+            for (int i = 0; i < made; i++) {
+                m_scratch[static_cast<size_t>(i)] += m_tones[static_cast<size_t>(i)];
+            }
         }
         return m_scratch.data();
+    }
+    // The far end towards the phone: the reference of the echo suppressor.
+    void toPhone(modemcellular::CallRef callref, const float* samples, int count)
+    {
+        echoFor(callref);
+        m_echo.processTx(samples, count);
     }
     void clearTones() { m_dtmf.reset(); }
 
@@ -93,6 +104,17 @@ public:
     }
 
 private:
+    // A new call starts with a new echo suppressor (its delay is measured again). Called from the
+    // audio handlers only, under the station lock.
+    void echoFor(modemcellular::CallRef callref)
+    {
+        if (callref != m_echoRef)
+        {
+            m_echo = modemcellular::EchoSuppressor(kCallRate);
+            m_echoRef = callref;
+        }
+    }
+
     NmtCellularBridge& m_bridge;
     std::string m_number;
     NmtSubscriber m_subscriber;
@@ -103,6 +125,9 @@ private:
     DVDTMF::Generator m_dtmf;               // SDRangel's push-button tones
     std::vector<float> m_scratch;
     std::vector<float> m_tones;
+    // osmocom-analog's echo suppressor of the call, on as there by default
+    modemcellular::EchoSuppressor m_echo;
+    modemcellular::CallRef m_echoRef = 0;
 };
 
 std::string NmtCellularBridge::numberOf(const NmtSubscriber& subscriber)
@@ -195,13 +220,16 @@ NmtCellularBridge::NmtCellularBridge(NmtSystem& nmt, modemcellular::CellularSyst
             Leg& leg = legFor(subscriber);
             const modemcellular::CallRef callref = leg.callref();
             if (callref) {
-                m_cellular.audioFromMobile(callref, leg.withTones(samples, count), count);
+                m_cellular.audioFromMobile(callref, leg.fromPhone(callref, samples, count), count);
             }
         },
         [this](const NmtSubscriber& subscriber, float* samples, int count) {
-            const modemcellular::CallRef callref = legFor(subscriber).callref();
-            if (callref) {
+            Leg& leg = legFor(subscriber);
+            const modemcellular::CallRef callref = leg.callref();
+            if (callref)
+            {
                 m_cellular.audioToMobile(callref, samples, count);
+                leg.toPhone(callref, samples, count);
             }
         });
 }

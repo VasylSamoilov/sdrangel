@@ -9,6 +9,7 @@ set(modemcellular_SOURCES
     clock.cpp
     compandor.cpp
     echoendpoint.cpp
+    echosuppressor.cpp
     firfilter.cpp
     musicendpoint.cpp
     testcaller.cpp
@@ -28,6 +29,7 @@ set(modemcellular_HEADERS
     clock.h
     compandor.h
     echoendpoint.h
+    echosuppressor.h
     firfilter.h
     mobileleg.h
     musicendpoint.h

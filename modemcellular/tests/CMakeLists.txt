@@ -16,6 +16,7 @@ set(MODEMCELLULAR_LIB_SOURCES
     ../clock.cpp
     ../compandor.cpp
     ../echoendpoint.cpp
+    ../echosuppressor.cpp
     ../firfilter.cpp
     ../musicendpoint.cpp
     ../testcaller.cpp
@@ -66,6 +67,7 @@ modemcellular_add_test(modemcellular_timer_test test_timer.cpp)
 modemcellular_add_test(modemcellular_endpoint_test test_endpoints.cpp)
 modemcellular_add_test(modemcellular_tone_test test_tones.cpp)
 modemcellular_add_test(modemcellular_compandor_test test_compandor.cpp)
+modemcellular_add_test(modemcellular_echo_test test_echo.cpp)
 modemcellular_add_test(modemcellular_router_test test_router.cpp)
 modemcellular_add_test(modemcellular_system_test test_system.cpp)
 modemcellular_add_test(modemcellular_carrierqueue_test test_carrierqueue.cpp)
