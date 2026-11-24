@@ -52,17 +52,6 @@ int bitErrors(uint32_t a, uint32_t b)
 
 } // namespace
 
-uint64_t ReverseBurst::word() const
-{
-    for (int i = 0; i < kRepeats; i++)
-    {
-        if (ok[i]) {
-            return words[i];
-        }
-    }
-    return 0;
-}
-
 ReverseReceiver::ReverseReceiver(double sampleRate, bool tolerant) :
     m_demodulator(sampleRate, kFskBitRate, kFskDeviation),
     m_tolerant(tolerant),
@@ -208,6 +197,18 @@ void ReverseReceiver::decode()
         burst.ok[i] = bchCheck(word, kReverseMessageBits);
         burst.okCount += burst.ok[i] ? 1 : 0;
     }
+    for (int b = 0; b < kWordBits; b++)
+    {
+        int ones = 0;
+
+        for (int i = 0; i < repeats; i++) {
+            ones += static_cast<int>((burst.words[i] >> b) & 1);
+        }
+        if (2 * ones > repeats) {
+            burst.voted |= 1ull << b;
+        }
+    }
+    burst.votedOk = repeats > 0 && bchCheck(burst.voted, kReverseMessageBits);
 
     const bool more = (repeats > 0 && m_handler) ? m_handler(burst) : false;
 

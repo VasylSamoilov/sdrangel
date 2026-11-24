@@ -153,6 +153,35 @@ static void testRvcWords()
     CHECK(b.size() == 1 && !b.empty() && b[0].repeats == 3 && b[0].okCount == 3 && b[0].word() == w1);
 }
 
+// Every repeat with one bit wrong, each another: no repeat is right, the vote is
+static void testVote()
+{
+    const std::vector<uint64_t> w = registration();
+    std::vector<uint8_t> bits = reccMessage(3, {w[0]});
+
+    for (int i = 0; i < 5; i++) {
+        bits[kReccPrecursorBits + i * 48 + 5 + 7 * i] ^= 1;
+    }
+    ReverseReceiver rx(kRate, false);
+    const std::vector<ReverseBurst> b = receive(rx, bits, false);
+
+    CHECK(!b.empty());
+    if (!b.empty())
+    {
+        CHECK(b[0].okCount == 0 && b[0].dcc == 3);
+        CHECK(b[0].valid() && b[0].word() == w[0]);
+    }
+
+    // three repeats wrong in the same bit: the vote is wrong too, its parity tells
+    bits = reccMessage(3, {w[0]});
+    for (int i = 0; i < 3; i++) {
+        bits[kReccPrecursorBits + i * 48 + 9] ^= 1;
+    }
+    ReverseReceiver rx2(kRate, false);
+    const std::vector<ReverseBurst> b2 = receive(rx2, bits, false);
+    CHECK(b2.size() == 1 && !b2.empty() && b2[0].okCount == 2 && !b2[0].valid() && b2[0].word() == 0);
+}
+
 // A sync with one bit wrong only when tolerant
 static void testTolerant()
 {
@@ -184,6 +213,7 @@ int main()
     testRecc();
     testRvc();
     testRvcWords();
+    testVote();
     testTolerant();
     testDcc();
 
