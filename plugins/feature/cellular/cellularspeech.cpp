@@ -41,9 +41,9 @@ QString directionText(const SpeechStats& s)
     for (double d : b) {
         bands << QString::number(std::max(d, -40.0), 'f', 0);
     }
-    return QString("%1 dB rms, 99 % below %2 dB, %3 % at the limit, pauses %4 %, bands %5 dB")
+    return QString("%1 dB rms, 99 % below %2 dB, %3 % at the limit, peak %4 kHz, pauses %5 %, bands %6 dB")
         .arg(s.levelDb(), 0, 'f', 1).arg(s.p99Db(), 0, 'f', 1).arg(100.0 * s.limitShare(), 0, 'f', 1)
-        .arg(100.0 * s.pauseShare(), 0, 'f', 0).arg(bands.join(" "));
+        .arg(3.0 * s.peak, 0, 'f', 1).arg(100.0 * s.pauseShare(), 0, 'f', 0).arg(bands.join(" "));
 }
 
 } // namespace
