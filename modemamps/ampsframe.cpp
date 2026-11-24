@@ -34,6 +34,8 @@ const uint32_t kSyncMask = (1u << kWordSyncBits) - 1;
 const uint32_t kSyncNegative = ~kWordSync & kSyncMask;      // 0x0ed
 // osmocom sets the register to this after a sync: no sync within the next bits
 const uint32_t kSyncReset = 0x555;
+// RVC: the next repeat comes after 37 bits of dotting and the sync; a little more is waited for
+const int kRvcGapBits = 37 + kWordSyncBits + 4;
 
 int bitErrors(uint32_t a, uint32_t b)
 {
@@ -64,7 +66,10 @@ uint64_t ReverseBurst::word() const
 ReverseReceiver::ReverseReceiver(double sampleRate, bool tolerant) :
     m_demodulator(sampleRate, kFskBitRate, kFskDeviation),
     m_tolerant(tolerant),
-    m_channel(ChannelRecc)
+    m_channel(ChannelRecc),
+    m_repeats(0),
+    m_between(false),
+    m_gap(0)
 {
     m_demodulator.setBitSink([this](int bit, double quality, double level) { receiveBit(bit, quality, level); });
     reset();
@@ -84,6 +89,9 @@ void ReverseReceiver::reset()
     m_first = true;
     m_length = (m_channel == ChannelRecc) ? kDccBits + kBurstBits : kBurstBits;
     m_count = 0;
+    m_repeats = 0;
+    m_between = false;
+    m_gap = 0;
     m_level = 0.0;
     m_quality = 0.0;
     m_demodulator.endFrame();
@@ -117,6 +125,8 @@ void ReverseReceiver::receiveBit(int bit, double quality, double level)
             m_first = true;
             m_length = (m_channel == ChannelRecc) ? kDccBits + kBurstBits : kBurstBits;
             m_count = 0;
+            m_repeats = 0;
+            m_between = false;
             m_level = 0.0;
             m_quality = 0.0;
             m_sync = kSyncReset;
@@ -125,11 +135,44 @@ void ReverseReceiver::receiveBit(int bit, double quality, double level)
         return;
     }
 
+    if (m_between)
+    {
+        // RVC: the dotting and the sync of the next repeat, the same way up as the first
+        m_sync = ((m_sync << 1) | static_cast<uint32_t>(bit)) & kSyncMask;
+
+        if (bitErrors(m_sync, m_negative ? kSyncNegative : kWordSync) <= (m_tolerant ? 1 : 0))
+        {
+            m_between = false;
+            m_sync = kSyncReset;
+        }
+        else if (++m_gap > kRvcGapBits)
+        {
+            decode();                   // no more repeats: the ones received
+        }
+        return;
+    }
+
     m_level += level;
     m_quality += quality;
     m_bits[m_count++] = static_cast<uint8_t>(m_negative ? 1 - bit : bit);
-    if (m_count == m_length) {
-        decode();
+    if (m_channel == ChannelRecc)
+    {
+        if (m_count == m_length) {
+            decode();
+        }
+    }
+    else if (m_count % kWordBits == 0)
+    {
+        if (++m_repeats == kRepeats)
+        {
+            decode();
+        }
+        else
+        {
+            m_between = true;
+            m_gap = 0;
+            m_sync = kSyncReset;
+        }
     }
 }
 
@@ -137,10 +180,12 @@ void ReverseReceiver::decode()
 {
     ReverseBurst burst;
     int pos = 0;
+    const int repeats = (m_channel == ChannelRecc) ? kRepeats : m_repeats;
 
     burst.first = m_first;
     burst.negative = m_negative;
-    burst.level = m_level / m_count;
+    burst.repeats = repeats;
+    burst.level = (m_count > 0) ? m_level / m_count : 0.0;
     burst.quality = (m_level > 0.0) ? m_quality / m_level : 0.0;
 
     if (m_length == kDccBits + kBurstBits)
@@ -152,7 +197,7 @@ void ReverseReceiver::decode()
         }
         burst.dcc = decodeDcc(coded);
     }
-    for (int i = 0; i < kRepeats; i++)
+    for (int i = 0; i < repeats; i++)
     {
         uint64_t word = 0;
 
@@ -164,20 +209,25 @@ void ReverseReceiver::decode()
         burst.okCount += burst.ok[i] ? 1 : 0;
     }
 
-    const bool more = m_handler ? m_handler(burst) : false;
+    const bool more = (repeats > 0 && m_handler) ? m_handler(burst) : false;
 
     m_count = 0;
+    m_repeats = 0;
     m_level = 0.0;
     m_quality = 0.0;
     if (more)
     {
-        // the next word follows at once, without a sync
+        // RECC: the next word follows at once, without a sync; RVC: after its dotting and sync
         m_first = false;
         m_length = kBurstBits;
+        m_between = m_channel == ChannelRvc;
+        m_gap = 0;
+        m_sync = kSyncReset;
     }
     else
     {
         m_inFrame = false;
+        m_between = false;
         m_length = (m_channel == ChannelRecc) ? kDccBits + kBurstBits : kBurstBits;
         m_demodulator.endFrame();
     }

@@ -102,7 +102,7 @@ static void testRecc()
     }
 }
 
-// On the RVC the first, third and fifth repeat are read, the others are dotting and sync
+// On the RVC each repeat is taken after its own sync: all five
 static void testRvc()
 {
     const uint64_t w = encodeWord(words::kRvcOrderConfirmation, {{"F", 1}, {"T", 1}, {"ORDER", kOrderAlert}});
@@ -115,12 +115,42 @@ static void testRvc()
         return false;
     });
     send(rx, rvcMessage({w}), false);
-    CHECK(!b.empty());
-    if (!b.empty())
-    {
-        CHECK(b[0].dcc == -1 && b[0].word() == w);
-        CHECK(b[0].ok[0] && !b[0].ok[1] && b[0].ok[2] && !b[0].ok[3] && b[0].ok[4] && b[0].okCount == 3);
+    CHECK(b.size() == 1);
+    if (!b.empty()) {
+        CHECK(b[0].dcc == -1 && b[0].repeats == 5 && b[0].okCount == 5 && b[0].word() == w);
     }
+}
+
+// Two words on the RVC (the handler wants the second), and a message cut off after three repeats
+static void testRvcWords()
+{
+    const uint64_t w1 = encodeWord(words::kRvcDigits, {{"F", 1}, {"NAWC", 1}, {"DIGIT 1", 3}});
+    const uint64_t w2 = encodeWord(words::kRvcDigits, {{"F", 0}, {"NAWC", 0}, {"DIGIT 1", 7}});
+    ReverseReceiver rx(kRate, false);
+    std::vector<ReverseBurst> b;
+
+    rx.setChannel(ReverseReceiver::ChannelRvc);
+    rx.setBurstHandler([&](const ReverseBurst& burst) {
+        b.push_back(burst);
+        return wordField(words::kRvcDigits, burst.word(), "NAWC") > 0;
+    });
+    send(rx, rvcMessage({w1, w2}), false);
+    CHECK(b.size() == 2);
+    if (b.size() == 2)
+    {
+        CHECK(b[0].first && b[0].repeats == 5 && b[0].word() == w1);
+        CHECK(!b[1].first && b[1].repeats == 5 && b[1].word() == w2);
+    }
+
+    std::vector<uint8_t> bits = rvcMessage({w1});
+    bits.resize(101 + 11 + 48 + 2 * (37 + 11 + 48));
+    b.clear();
+    rx.setBurstHandler([&](const ReverseBurst& burst) {
+        b.push_back(burst);
+        return false;
+    });
+    send(rx, bits, false);
+    CHECK(b.size() == 1 && !b.empty() && b[0].repeats == 3 && b[0].okCount == 3 && b[0].word() == w1);
 }
 
 // A sync with one bit wrong only when tolerant
@@ -153,6 +183,7 @@ int main()
 {
     testRecc();
     testRvc();
+    testRvcWords();
     testTolerant();
     testDcc();
 

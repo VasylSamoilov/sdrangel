@@ -30,8 +30,10 @@
 // fsk_rx_bit, frame.c amps_decode_frame): after the word sync (either way up: a negative one turns
 // the bits over) it takes the five repeats of a word, 240 bits. On the reverse control channel the
 // first word comes after the coded DCC (247 bits); the words after it follow without a sync, as long
-// as the handler wants more. On the reverse voice channel the 240 bits after the sync hold the first,
-// third and fifth repeat (the second and fourth are dotting and sync and fail the parity).
+// as the handler wants more. On the reverse voice channel each repeat has its own dotting and sync:
+// each one is taken after its sync (osmocom reads 240 bits after the first sync, so its second and
+// fourth repeat are dotting and sync); a burst ends after 5 repeats or when the next sync does not
+// come.
 namespace modemamps
 {
 
@@ -39,6 +41,7 @@ struct MODEMAMPS_API ReverseBurst
 {
     bool first = true;                  // after a sync, else a word that followed
     int dcc = -1;                       // the decoded DCC of the first RECC word, -1 none or bad
+    int repeats = 0;                    // repeats received: RECC 5, RVC up to 5
     std::array<uint64_t, 5> words{};    // the 48 bit repeats, the first bit sent the most significant
     std::array<bool, 5> ok{};           // their parity is right
     int okCount = 0;
@@ -86,6 +89,9 @@ private:
     int m_length;                       // bits of the burst being received
     std::array<uint8_t, 247> m_bits;
     int m_count;
+    int m_repeats;                      // RVC: repeats received
+    bool m_between;                     // RVC: waiting for the sync of the next repeat
+    int m_gap;                          // bits of that wait
     double m_level;
     double m_quality;
 };
