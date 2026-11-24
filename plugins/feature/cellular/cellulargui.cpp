@@ -278,13 +278,11 @@ CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& sett
     m_fallback->addItems({"Echo", "Music"});
     m_fallback->setToolTip("What answers a call to a number that is not registered in this network");
     form->addRow("Other numbers", m_fallback);
-    m_rxDeviceSet = new QSpinBox(page);
-    m_rxDeviceSet->setRange(0, 99);
-    m_rxDeviceSet->setToolTip("The device set (R0, R1 ...) with the Cellular Rx channel; networks may share it");
+    m_rxDeviceSet = new QComboBox(page);
+    m_rxDeviceSet->setToolTip("The receiving device set with the Cellular Rx channel that receives the phones; networks may share it");
     form->addRow("Receiver device set", m_rxDeviceSet);
-    m_txDeviceSet = new QSpinBox(page);
-    m_txDeviceSet->setRange(0, 99);
-    m_txDeviceSet->setToolTip("The device set (T1, T2 ...) with the Cellular Tx channel; networks may share it");
+    m_txDeviceSet = new QComboBox(page);
+    m_txDeviceSet->setToolTip("The transmitting device set with the Cellular Tx channel that transmits the base station; networks may share it");
     form->addRow("Transmitter device set", m_txDeviceSet);
 
     QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
@@ -306,8 +304,8 @@ CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& sett
     m_clock->setChecked(settings.m_sendClock);
     m_smsc->setText(settings.m_smscNumber);
     m_fallback->setCurrentIndex(settings.m_fallback == CellularNetworkSettings::FallbackMusic ? 1 : 0);
-    m_rxDeviceSet->setValue(settings.m_rxDeviceSetIndex);
-    m_txDeviceSet->setValue(settings.m_txDeviceSetIndex);
+    fillDeviceSets(m_rxDeviceSet, false, settings.m_rxDeviceSetIndex);
+    fillDeviceSets(m_txDeviceSet, true, settings.m_txDeviceSetIndex);
     onPlanChanged();
     onTextChanged();
 
@@ -323,8 +321,8 @@ CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& sett
         onPlanChanged();
     });
     connect(m_country, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &CellularNetworkDialog::onPlanChanged);
-    connect(m_rxDeviceSet, QOverload<int>::of(&QSpinBox::valueChanged), this, &CellularNetworkDialog::onPlanChanged);
-    connect(m_txDeviceSet, QOverload<int>::of(&QSpinBox::valueChanged), this, &CellularNetworkDialog::onPlanChanged);
+    connect(m_rxDeviceSet, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &CellularNetworkDialog::onPlanChanged);
+    connect(m_txDeviceSet, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &CellularNetworkDialog::onPlanChanged);
     connect(m_grid, &CellularChannelGrid::changed, this, &CellularNetworkDialog::onGridChanged);
     connect(m_carriers, &QLineEdit::editingFinished, this, &CellularNetworkDialog::onTextChanged);
 }
@@ -362,10 +360,10 @@ void CellularNetworkDialog::onPlanChanged()
 
     m_grid->setPlan(m_system->currentIndex() == 1 ? modemnmt::System::Nmt900 : modemnmt::System::Nmt450,
         m_country->currentData().toString());
-    if (!deviceSpan(m_txDeviceSet->value(), true, downLow, downHigh, centre, rate)) {
+    if (!deviceSpan(m_txDeviceSet->currentData().toInt(), true, downLow, downHigh, centre, rate)) {
         downLow = downHigh = 0.0;
     }
-    if (!deviceSpan(m_rxDeviceSet->value(), false, upLow, upHigh, centre, rate)) {
+    if (!deviceSpan(m_rxDeviceSet->currentData().toInt(), false, upLow, upHigh, centre, rate)) {
         upLow = upHigh = 0.0;
     }
     m_grid->setSpans(downLow, downHigh, upLow, upHigh);
@@ -425,6 +423,35 @@ void CellularNetworkDialog::onTextChanged()
         m_grid->setCarriers(partial);
     }
     showBandwidth();
+}
+
+void CellularNetworkDialog::fillDeviceSets(QComboBox *combo, bool tx, int chosen)
+{
+    const std::vector<DeviceSet*>& sets = MainCore::instance()->getDeviceSets();
+    bool found = false;
+
+    combo->clear();
+    for (int i = 0; i < static_cast<int>(sets.size()); i++)
+    {
+        QString error;
+        if (!sets[i] || !sets[i]->m_deviceAPI || !Cellular::findRadio(i, tx, error)) {
+            continue;
+        }
+        DeviceAPI *api = sets[i]->m_deviceAPI;
+        const double centre = tx ? (api->getSampleSink() ? api->getSampleSink()->getCenterFrequency() : 0.0)
+            : (api->getSampleSource() ? api->getSampleSource()->getCenterFrequency() : 0.0);
+        combo->addItem(QString("%1%2  %3  %4 MHz").arg(tx ? "T" : "R").arg(i).arg(api->getHardwareId())
+            .arg(centre / 1e6, 0, 'f', 3), i);
+        found = found || i == chosen;
+    }
+    // a device set that is gone or has no channel stays as it is: the network says why it cannot start
+    if (!found)
+    {
+        QString error;
+        Cellular::findRadio(chosen, tx, error);
+        combo->addItem(QString("%1: %2").arg(chosen).arg(error), chosen);
+    }
+    combo->setCurrentIndex(combo->findData(chosen));
 }
 
 bool CellularNetworkDialog::deviceSpan(int index, bool tx, double& low, double& high, double& centre, int& rate)
@@ -503,8 +530,8 @@ void CellularNetworkDialog::showBandwidth()
         }
         return s + ".";
     };
-    text += describe("Transmitter", m_txDeviceSet->value(), true, downMin, downMax);
-    text += describe("receiver", m_rxDeviceSet->value(), false, upMin, upMax);
+    text += describe("Transmitter", m_txDeviceSet->currentData().toInt(), true, downMin, downMax);
+    text += describe("receiver", m_rxDeviceSet->currentData().toInt(), false, upMin, upMax);
     m_bandwidth->setText(text);
 }
 
@@ -549,8 +576,8 @@ void CellularNetworkDialog::read(CellularNetworkSettings& s) const
     s.m_sendClock = m_clock->isChecked();
     s.m_smscNumber = m_smsc->text();
     s.m_fallback = m_fallback->currentIndex() == 1 ? CellularNetworkSettings::FallbackMusic : CellularNetworkSettings::FallbackEcho;
-    s.m_rxDeviceSetIndex = m_rxDeviceSet->value();
-    s.m_txDeviceSetIndex = m_txDeviceSet->value();
+    s.m_rxDeviceSetIndex = m_rxDeviceSet->currentData().toInt();
+    s.m_txDeviceSetIndex = m_txDeviceSet->currentData().toInt();
 }
 
 // ---- the tester ----

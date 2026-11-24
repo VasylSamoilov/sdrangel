@@ -301,6 +301,8 @@ public:
 
     QByteArray serialize() const override;
     bool deserialize(const QByteArray& data) override;
+    // the Cellular Rx (tx: Cellular Tx) channel of a device set; error says why there is none
+    static ChannelAPI *findRadio(int deviceSetIndex, bool tx, QString& error);
 
     int webapiRun(bool run, SWGSDRangel::SWGDeviceState& response, QString& errorMessage) override;
     int webapiSettingsGet(SWGSDRangel::SWGFeatureSettings& response, QString& errorMessage) override;
@@ -359,7 +361,6 @@ private:
     void stopNetwork(int id);
     void restartNetworks(bool all);
     void applyNetworks();
-    ChannelAPI *findChannel(int deviceSetIndex, const QString& uri, QString& error) const;
     MessageQueue *usePipe(ChannelAPI *channel);
     void releasePipe(ChannelAPI *channel);
     void report(int network, const QString& text);

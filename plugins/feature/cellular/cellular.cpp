@@ -273,8 +273,9 @@ void Cellular::applyLogFile()
     }
 }
 
-ChannelAPI *Cellular::findChannel(int deviceSetIndex, const QString& uri, QString& error) const
+ChannelAPI *Cellular::findRadio(int deviceSetIndex, bool tx, QString& error)
 {
+    const QString uri = tx ? kTxURI : kRxURI;
     std::vector<DeviceSet*>& deviceSets = MainCore::instance()->getDeviceSets();
 
     if (deviceSetIndex < 0 || deviceSetIndex >= static_cast<int>(deviceSets.size()))
@@ -389,8 +390,8 @@ void Cellular::startNetwork(const CellularNetworkSettings& network)
         report(network.m_id, "error: carriers: " + error);
         return;
     }
-    ChannelAPI *rx = findChannel(network.m_rxDeviceSetIndex, kRxURI, error);
-    ChannelAPI *tx = rx ? findChannel(network.m_txDeviceSetIndex, kTxURI, error) : nullptr;
+    ChannelAPI *rx = findRadio(network.m_rxDeviceSetIndex, false, error);
+    ChannelAPI *tx = rx ? findRadio(network.m_txDeviceSetIndex, true, error) : nullptr;
     if (!rx || !tx)
     {
         report(network.m_id, "error: " + error);

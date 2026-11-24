@@ -16,7 +16,7 @@ A network is one base station with its own carriers, registered phones, calls an
 1. Add a receiving device set with a Cellular Rx channel and a transmitting device set with a Cellular Tx channel.
 2. Set the sample rate of both devices to an even multiple of 48 kHz: 960 kS/s, 1.92 MS/s, 2.4 MS/s ... The carriers of a network have to be inside the span of the device (75 % of the sample rate). Channel 1 of NMT-450 in Denmark is 463.000 MHz down and 453.000 MHz up, so a device at 453.3 MHz and one at 463.3 MHz with 960 kS/s carry the channels 1 to about 27.
 3. Run both devices.
-4. Add this feature, give the device set numbers of the radios in the settings of the network (Networks tab), switch it on and press Start.
+4. Add this feature, pick the device sets of the radios in the settings of the network (Networks tab), switch it on and press Start.
 
 <h2>Interface</h2>
 
@@ -95,7 +95,7 @@ The networks of the tester. On: on the air while the tester runs; a network is s
 * Compandor on speech, Send the number of the caller, Send the time of day: options of the network.
 * SMS centre: the number the phones send short messages to. Empty: no short messages from the phones, but a phone whose record (Mobiles) has an SMS centre reaches the centre on that number, whatever this one is: pick the number it dialled for its messages in its record, and its next message comes through, without changing the network.
 * Other numbers: what answers a call to a number that is not registered, echo or music.
-* Receiver device set, Transmitter device set: the device sets with the Cellular Rx and the Cellular Tx channel of the network.
+* Receiver device set, Transmitter device set: the device sets with the Cellular Rx and the Cellular Tx channel of the network. The lists hold the device sets that have such a channel, with their device and centre frequency (R0 TestSource 453.000 MHz). A device set that is chosen but not there, or has no such channel, stays in the list with the reason, until another one is picked.
 
 A network is refused if its carriers do not fit one receiving and one transmitting device.
 

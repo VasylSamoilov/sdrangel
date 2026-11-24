@@ -62,6 +62,8 @@ public:
     static QString carriersText(const std::vector<modemnmt::NmtCarrierConfig>& carriers);
     // span of a device set in Hz (where carriers go), false if it is not there or not of that direction
     static bool deviceSpan(int index, bool tx, double& low, double& high, double& centre, int& rate);
+    // the device sets with a Cellular Rx (tx: Cellular Tx) channel, and the one chosen even if not
+    static void fillDeviceSets(QComboBox *combo, bool tx, int chosen);
 
 private:
     void fillCountries(const QString& selected);
@@ -89,8 +91,8 @@ private:
     QCheckBox *m_clock;
     QLineEdit *m_smsc;
     QComboBox *m_fallback;
-    QSpinBox *m_rxDeviceSet;
-    QSpinBox *m_txDeviceSet;
+    QComboBox *m_rxDeviceSet;               // item data: the index of the device set
+    QComboBox *m_txDeviceSet;
 };
 
 // The networks of the tester and what it sees: phones, a test bench for one phone, the log, the
