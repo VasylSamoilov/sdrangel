@@ -510,11 +510,28 @@ static void testAcknowledgementWindow()
     CHECK(a.unacknowledged() == 19);
     feed(a, NmtDmsLink::encodeRr(true, false, false, 7));          // frame 6 is now the fourth
     CHECK(a.unacknowledged() == 15);
-    // RR(5) is NTX-2: the peer wants frame 5 again, which is gone: numbered again from 5
+    // RR(5) is NTX-2, a late answer to a repeated frame 4 (a slow radio path): frames 5 and 6 were
+    // acknowledged and still exist, so they go again as they were (Figure 1: NTX = N), nothing is
+    // numbered again (the peer keeps the data it has under those numbers)
     feed(a, NmtDmsLink::encodeRr(true, false, false, 5));
-    CHECK(a.unacknowledged() == 15 && a.nextTx() == ((5 + 15) & 7));
-    feed(a, NmtDmsLink::encodeRr(true, false, false, 6));          // the first, now frame 5
+    CHECK(a.unacknowledged() == 17 && a.nextTx() == ((2 + 20) & 7));
+    drain(a, 77);                                                  // the RR for the peer's random number
+    std::vector<uint8_t> frame = drain(a, 127);                    // no DT went out before: a whole frame
+    CHECK(text(frame, 26, 7) == "0111101");                       // DT(5) first
+    feed(a, NmtDmsLink::encodeRr(true, false, false, 6));          // frame 5 again
+    CHECK(a.unacknowledged() == 16);
+    feed(a, NmtDmsLink::encodeRr(true, false, false, 0));          // 6 and 7
     CHECK(a.unacknowledged() == 14);
+
+    // previous frames that do not exist (never sent in this link): numbered again from N
+    NmtDmsLink b;
+    b.startAsCaller();
+    feed(b, NmtDmsLink::encodeRr(true, false, false, 1));
+    feed(b, NmtDmsLink::encodeDt(true, true, 0, rand, true));
+    feed(b, NmtDmsLink::encodeRr(true, false, false, 2));
+    CHECK(b.queueData(d.data(), 7 * 4));                           // frames 2, 3, 4, 5
+    feed(b, NmtDmsLink::encodeRr(true, false, false, 7));          // NTX-3, before frame 0 of the link
+    CHECK(b.unacknowledged() == 4 && b.nextTx() == ((7 + 4) & 7));
 }
 
 // The answering side may queue before it heard anything; its random number is not behind data.

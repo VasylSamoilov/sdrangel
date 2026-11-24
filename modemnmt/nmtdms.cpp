@@ -185,6 +185,7 @@ void NmtDmsLink::reset()
     m_peerBusyTime = 0.0;
     m_peerIdentity.clear();
     m_txList.clear();
+    m_acked.clear();
     m_nTx = 0;
     m_txIndex = 0;
     m_passes = 0;
@@ -421,6 +422,10 @@ bool NmtDmsLink::ack(int n)
         if (m_txList.front().control && m_txList.front().data[0] == kCtRand) {
             m_randAcked = true;
         }
+        m_acked.push_back(m_txList.front());
+        if (m_acked.size() > 3) {
+            m_acked.pop_front();
+        }
         m_txList.pop_front();
     }
     // the frame that goes next stays, if it is still in the list; the repetitions count again
@@ -443,15 +448,31 @@ bool NmtDmsLink::ack(int n)
 }
 
 // An RR/NR(n) that acknowledges nothing (Annex 21 Figure 1, note 2): n = NTX to NTX+4 refers to
-// the frames under transmission and the next one, n = NTX-1 to NTX-3 to previous frames. Those
-// are gone from the list, so the peer lost count: transmission is restarted with NTX = n, the
-// frames that are not acknowledged are numbered again from n.
+// the frames under transmission and the next one, n = NTX-1 to NTX-3 to previous frames.
+// Figure 1 sets NTX = n: previous frames that exist (the last acknowledged ones) go again as
+// they were, from DT(n) on (a peer that answers a repeated frame late, e.g. over a slow radio
+// path, gets the same data under the same numbers). Only if they do not exist is transmission
+// restarted with NTX = n and the frames that are not acknowledged numbered again from n.
 void NmtDmsLink::restartFrom(int n)
 {
     const int first = m_txList.empty() ? m_nTx : m_txList.front().n;
 
     if (((n - first) & 7) <= 4) {
         return;
+    }
+    for (size_t i = 0; i < m_acked.size(); i++)
+    {
+        // the previous frames from DT(n) on follow each other up to the first one not acknowledged
+        if (m_acked[i].n == (n & 7) && ((first - n) & 7) == static_cast<int>(m_acked.size() - i))
+        {
+            for (size_t k = m_acked.size(); k > i; k--) {
+                m_txList.push_front(m_acked[k - 1]);
+            }
+            m_acked.erase(m_acked.begin() + static_cast<long>(i), m_acked.end());
+            m_txIndex = 0;
+            m_passes = 0;
+            return;
+        }
     }
     int next = n & 7;
 

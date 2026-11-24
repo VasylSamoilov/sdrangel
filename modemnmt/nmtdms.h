@@ -174,6 +174,9 @@ private:
 
     // transmission
     std::deque<TxFrame> m_txList;   // not acknowledged, in order, the first at m_txAck
+    // the last 3 acknowledged frames, oldest first: an RR(N) with N = NTX-1 to NTX-3 refers to
+    // them (Annex 21 Figure 1 note 2) and they go again as they were
+    std::deque<TxFrame> m_acked;
     int m_nTx;                      // number of the next frame we make
     size_t m_txIndex;               // which of the first frames goes next
     int m_passes;                   // repetitions of the frames since the last acknowledgement, at most 4
