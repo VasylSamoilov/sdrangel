@@ -64,11 +64,13 @@ struct Result
 
 // Modulates the bits at the rate (the bit clock of the sender off by ppm), adds noise (Hz rms) and
 // receives the data after the word sync, as the frame receiver will.
-static Result loop(double rate, const std::vector<uint8_t>& data, double noise, double ppm, unsigned seed)
+static Result loop(double rate, const std::vector<uint8_t>& data, double noise, double ppm, unsigned seed,
+    double trackGain = ManchesterDemodulator::kDefaultTrackGain)
 {
     const std::vector<uint8_t> bits = burst(data, 30);
     ManchesterModulator mod(rate, kFskBitRate * (1.0 + ppm * 1e-6), kFskDeviation);
     ManchesterDemodulator demod(rate, kFskBitRate, kFskDeviation);
+    demod.setTrackGain(trackGain);
     std::mt19937 gen(seed);
     std::normal_distribution<double> gauss(0.0, noise);
     size_t next = 0;
@@ -194,6 +196,21 @@ static void testNoiseAndClock()
     }
 }
 
+// In a frame the clock follows the crossings in the middle of the bits: a sender 1000 ppm off
+// (half a bit over the 480 bits) is received; free running (osmocom) it is not
+static void testClockTracking()
+{
+    const std::vector<uint8_t> data = randomBits(480, 7);
+
+    for (double ppm : {1000.0, -1000.0})
+    {
+        const Result r = loop(48000.0, data, 0.0, ppm, 8);
+        CHECK(r.found && errors(r.data, data) == 0);
+        const Result free = loop(48000.0, data, 0.0, ppm, 8, 0.0);
+        CHECK(free.found && errors(free.data, data) > 0);
+    }
+}
+
 // Noise alone does not keep a clock running: the dotting is not found in it, or dies within bits.
 static void testNoiseOnly()
 {
@@ -243,6 +260,7 @@ int main()
     testModulator();
     testRoundTrip();
     testNoiseAndClock();
+    testClockTracking();
     testNoiseOnly();
 
     if (g_failures == 0) {

@@ -34,6 +34,8 @@ const double kBestQuality = 0.68;
 const int kDottingLife = 12;
 // points of a mean between the samples
 const int kMeanPoints = 8;
+// the crossings within this many bits of the middle of a bit move the clock
+const double kTrackWindow = 0.25;
 
 } // namespace
 
@@ -110,6 +112,7 @@ ManchesterDemodulator::ManchesterDemodulator(double sampleRate, double bitRate, 
     m_dottingAverage(0.0),
     m_dottingLife(0),
     m_bitCount(0.0),
+    m_trackGain(kDefaultTrackGain),
     m_state(StateNone)
 {
     std::fill(std::begin(m_dotting), std::end(m_dotting), 0.0);
@@ -135,13 +138,17 @@ void ManchesterDemodulator::process(const float* samples, int length)
         m_pos = (m_pos + 1) % static_cast<int>(m_window.size());
         m_count = std::min(m_count + 1, static_cast<int>(m_window.size()));
 
-        if (m_state != StateFrame && ((m_last <= 0.0f && sample > 0.0f) || (m_last > 0.0f && sample <= 0.0f)))
+        if ((m_last <= 0.0f && sample > 0.0f) || (m_last > 0.0f && sample <= 0.0f))
         {
             // where between the last sample and this one the frequency crossed zero
             const double f = static_cast<double>(m_last) / (static_cast<double>(m_last) - static_cast<double>(sample));
             const double since = (1.0 - f) * m_bitsPerSample;
 
-            crossing(m_elapsed + f * m_bitsPerSample, since);
+            if (m_state == StateFrame) {
+                track(m_bitCount + f * m_bitsPerSample);
+            } else {
+                crossing(m_elapsed + f * m_bitsPerSample, since);
+            }
             m_elapsed = since;
         }
         else
@@ -185,6 +192,17 @@ void ManchesterDemodulator::crossing(double elapsed, double sinceCrossing)
         m_dottingAverage = std::fabs(average);
         // the bit is decided half a bit after its crossing; this sample is already past it
         m_bitCount = 0.5 + average + sinceCrossing - m_bitsPerSample;
+    }
+}
+
+void ManchesterDemodulator::track(double position)
+{
+    // a crossing in the middle of a bit comes half a bit before its decision; the ones at the
+    // edges (between two equal bits) are far from it and tell nothing
+    const double error = position - 0.5;
+
+    if (error > -kTrackWindow && error < kTrackWindow) {
+        m_bitCount -= m_trackGain * error;
     }
 }
 

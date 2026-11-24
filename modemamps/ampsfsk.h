@@ -62,8 +62,8 @@ private:
     int m_bit;
 };
 
-// The bit clock is set by the dotting (101010..: one zero crossing in every bit, one bit apart) and
-// runs free from there. A bit is the mean of the quarter bit after its zero crossing minus the mean
+// The bit clock is set by the dotting (101010..: one zero crossing in every bit, one bit apart); in
+// a frame it follows the crossings in the middle of the bits (osmocom runs it free). A bit is the mean of the quarter bit after its zero crossing minus the mean
 // of the quarter bit before it: 1 if the frequency went up. While no frame is received, the dotting is
 // looked for all the time, a better one sets the clock again; 12 bits after the last dotting the
 // clock stops if no frame started.
@@ -90,11 +90,16 @@ public:
     // how late the newest crossing came (osmocom divides their sum by 8, a mean of 7/8).
     static constexpr int kDottingIntervals = 7;
     static bool dottingPhase(const double* intervals, double& phase);
+    // How far a crossing in the middle of a bit pulls the clock in a frame (0: free running, as
+    // osmocom)
+    static constexpr double kDefaultTrackGain = 0.1;
+    void setTrackGain(double gain) { m_trackGain = gain; }
 
 private:
     enum State { StateNone, StateDotting, StateFrame };
 
     void crossing(double elapsed, double sinceCrossing);
+    void track(double position);
     void bit(double back);
     // the samples interpolated at back samples before the last one
     double at(double back) const;
@@ -113,6 +118,7 @@ private:
     double m_dottingAverage;
     int m_dottingLife;
     double m_bitCount;                      // bits, a bit is decided when it reaches 1
+    double m_trackGain;
     State m_state;
 };
 
