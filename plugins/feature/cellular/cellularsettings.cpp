@@ -355,6 +355,8 @@ QByteArray CellularSettings::serialize() const
     s.writeS32(8, m_console.m_volumeDb);
     s.writeS32(9, m_console.m_micGainDb);
     s.writeBool(10, m_console.m_autoAnswer);
+    s.writeBool(11, m_console.m_speakerMute);
+    s.writeBool(12, m_console.m_micMute);
     s.writeString(20, m_title);
     s.writeU32(21, m_rgbColor);
     s.writeS32(22, m_workspaceIndex);
@@ -418,6 +420,8 @@ bool CellularSettings::deserialize(const QByteArray& data)
         d.readS32(8, &m_console.m_volumeDb, console.m_volumeDb);
         d.readS32(9, &m_console.m_micGainDb, console.m_micGainDb);
         d.readBool(10, &m_console.m_autoAnswer, console.m_autoAnswer);
+        d.readBool(11, &m_console.m_speakerMute, console.m_speakerMute);
+        d.readBool(12, &m_console.m_micMute, console.m_micMute);
         for (int i = 0; i < count && i < kMaxNetworks; i++)
         {
             CellularNetworkSettings n;

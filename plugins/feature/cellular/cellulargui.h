@@ -210,20 +210,21 @@ private:
     QLabel *m_consoleState;
     QLabel *m_consoleKeys;
     QLineEdit *m_consoleNumber;
-    QToolButton *m_consoleCall;
-    QToolButton *m_consoleAnswer;
+    QToolButton *m_consoleCall;             // call, or answer the call that rings
     QToolButton *m_consoleHangUp;
-    QLineEdit *m_consoleSms;
+    QToolButton *m_consoleFlash;
+    QToolButton *m_consoleSpeakerMute;      // right click: the output device
+    ButtonSwitch *m_consoleMicOn;           // right click: the input device
+    void consoleDevice(const QPoint& p, bool input);
+    QPlainTextEdit *m_consoleSms;
     QList<QCheckBox*> m_consoleMwi;         // the indicators, property "flag"
     QWidget *m_consoleInCall;
     QSpinBox *m_consoleChannel;
     QComboBox *m_consolePower;
     QLineEdit *m_consoleOwn;
-    QComboBox *m_consoleSpeaker;
-    QComboBox *m_consoleMic;
     QSpinBox *m_consoleVolume;
     QSpinBox *m_consoleGain;
-    QCheckBox *m_consoleAuto;
+    ButtonSwitch *m_consoleAuto;
     CellularSpeechLine *m_speechLine;           // under the tabs: the followed call
     // Test
     QComboBox *m_testNetwork;

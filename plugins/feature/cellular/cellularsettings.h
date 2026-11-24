@@ -97,25 +97,28 @@ struct CellularNetworkSettings
     bool sameNetwork(const CellularNetworkSettings& other) const;
 };
 
-// The networks of the controller.
 // The console: the operator's own phone, one for all networks.
 struct CellularConsole
 {
     QString m_number = "1000001";   // the number the phones call it on, registered on every network
-    QString m_speaker;              // the audio output by name, empty: the default (also for listening in)
-    QString m_microphone;           // the audio input by name, empty: the default
+    QString m_speaker;              // the audio output by name, empty or SDRangel's default name: the default (also for listening in)
+    QString m_microphone;           // the audio input by name, empty or SDRangel's default name: the default
     int m_volumeDb = 0;             // the speaker, at most 0
     int m_micGainDb = 0;            // the microphone, -20..+20 dB
     bool m_autoAnswer = false;      // a call to it is answered at once
+    bool m_speakerMute = false;     // the speaker plays nothing (listening in too)
+    bool m_micMute = false;         // the far end hears silence (touch tones still go)
 
     bool operator==(const CellularConsole& o) const
     {
         return m_number == o.m_number && m_speaker == o.m_speaker && m_microphone == o.m_microphone
-            && m_volumeDb == o.m_volumeDb && m_micGainDb == o.m_micGainDb && m_autoAnswer == o.m_autoAnswer;
+            && m_volumeDb == o.m_volumeDb && m_micGainDb == o.m_micGainDb && m_autoAnswer == o.m_autoAnswer
+            && m_speakerMute == o.m_speakerMute && m_micMute == o.m_micMute;
     }
     bool operator!=(const CellularConsole& o) const { return !(*this == o); }
 };
 
+// The networks of the controller.
 struct CellularSettings
 {
     QList<CellularNetworkSettings> m_networks;

@@ -39,6 +39,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QRegularExpressionValidator>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSpinBox>
@@ -53,7 +54,12 @@
 #include "dsp/devicesamplesink.h"
 #include "dsp/devicesamplesource.h"
 #include "feature/featureuiset.h"
+#include "audio/audiodevicemanager.h"
+#include "dsp/dspengine.h"
+#include "gui/audioselectdialog.h"
 #include "gui/buttonswitch.h"
+#include "gui/crightclickenabler.h"
+#include "gui/dialogpositioner.h"
 #include "gui/flowlayout.h"
 #include "gui/rollupcontents.h"
 #include "maincore.h"
@@ -1240,7 +1246,18 @@ QWidget *CellularGUI::buildConsole()
     m_consoleState = new QLabel(page);
     m_consoleState->setWordWrap(true);
     stateRow->addWidget(m_consoleBell);
-    stateRow->addWidget(m_consoleState, 1);
+    stateRow->addWidget(m_consoleState);
+    // its own number: a network number, the country digit and six digits
+    m_consoleOwn = new QLineEdit(page);
+    m_consoleOwn->setValidator(new QRegularExpressionValidator(QRegularExpression("[0-9]{7}"), m_consoleOwn));
+    m_consoleOwn->setFixedWidth(m_consoleOwn->fontMetrics().horizontalAdvance("00000000") + 12);
+    m_consoleOwn->setToolTip("The console's own number (7 digits, as a phone's): the phones call it on every "
+        "network on the air, and its calls and messages come from it");
+    // "Idle. Console number [1000001]": the number where it is read
+    QLabel *own = new QLabel("Console number", page);
+    stateRow->addWidget(own);
+    stateRow->addWidget(m_consoleOwn);
+    stateRow->addStretch(1);
     layout->addLayout(stateRow);
     m_consoleKeys = new QLabel(page);
     m_consoleKeys->setToolTip("Touch tones the phone sent in the call (in-band DTMF), as they come");
@@ -1278,17 +1295,64 @@ QWidget *CellularGUI::buildConsole()
     }
     layout->addLayout(pad);
 
-    m_consoleCall = iconButton(page, ":/play.png", "Call the number");
-    m_consoleAnswer = iconButton(page, ":/bell_fill.png", "Answer the call that rings");
-    m_consoleHangUp = iconButton(page, ":/stop.png", "Hang up, or refuse the call that rings");
-    layout->addWidget(flowRow(page, {m_consoleCall, m_consoleAnswer, m_consoleHangUp}));
+    // the call, then the audio: as SDRangel's NFM demodulator and modulator (left: on/off, right: the device)
+    // as on a phone: the green key calls, or answers the call that rings; the red one hangs up or refuses
+    m_consoleCall = new QToolButton(page);
+    m_consoleCall->setMinimumWidth(64);
+    m_consoleHangUp = new QToolButton(page);
+    m_consoleHangUp->setText("Hang up");
+    m_consoleHangUp->setMinimumWidth(64);
+    m_consoleHangUp->setToolTip("Hang up, or refuse the call that rings");
+    m_consoleFlash = new QToolButton(page);
+    m_consoleFlash->setText("R");
+    m_consoleFlash->setMaximumWidth(22);
+    m_consoleFlash->setEnabled(false);
+    m_consoleFlash->setToolTip("Flash (register recall) to the far end. NMT has no signal that takes it to a phone: "
+        "it waits for a far end that does (the network port)");
+    m_consoleSpeakerMute = new QToolButton(page);
+    QIcon sound;
+    sound.addFile(":/sound_on.png", QSize(), QIcon::Normal, QIcon::Off);
+    sound.addFile(":/sound_off.png", QSize(), QIcon::Normal, QIcon::On);
+    m_consoleSpeakerMute->setIcon(sound);
+    m_consoleSpeakerMute->setCheckable(true);
+    m_consoleVolume = new QSpinBox(page);
+    m_consoleVolume->setRange(-40, 0);
+    m_consoleVolume->setSuffix(" dB");
+    m_consoleVolume->setToolTip("The speaker's level, at most 0 dB");
+    m_consoleMicOn = new ButtonSwitch(page);
+    m_consoleMicOn->setIcon(QIcon(":/microphone.png"));
+    m_consoleMicOn->setCheckable(true);
+    m_consoleGain = new QSpinBox(page);
+    m_consoleGain->setRange(-20, 20);
+    m_consoleGain->setSuffix(" dB");
+    m_consoleGain->setToolTip("The microphone's gain");
+    m_consoleAuto = new ButtonSwitch(page);
+    m_consoleAuto->setText("AUTO");
+    m_consoleAuto->setToolTip("Auto answer: a call to the console is answered at once, without ringing "
+        "(tests without anyone at the PC)");
+    layout->addWidget(flowRow(page, {m_consoleCall, m_consoleHangUp, m_consoleAuto, m_consoleFlash,
+        m_consoleSpeakerMute, m_consoleVolume, m_consoleMicOn, m_consoleGain}));
+    CRightClickEnabler *speakerRight = new CRightClickEnabler(m_consoleSpeakerMute);
+    connect(speakerRight, &CRightClickEnabler::rightClick, this, [this](const QPoint& p) { consoleDevice(p, false); });
+    CRightClickEnabler *micRight = new CRightClickEnabler(m_consoleMicOn);
+    connect(micRight, &CRightClickEnabler::rightClick, this, [this](const QPoint& p) { consoleDevice(p, true); });
 
     // messages to the number
     QFormLayout *form = new QFormLayout();
-    m_consoleSms = new QLineEdit(page);
-    m_consoleSms->setPlaceholderText("text");
-    QToolButton *sms = iconButton(page, ":/sms.png", "Send the text as a short message from the console's number");
-    form->addRow("SMS", flowRow(page, {m_consoleSms, sms}));
+    // the text over the full width, a few lines high; the send key at its end
+    QHBoxLayout *smsRow = new QHBoxLayout();
+    QLabel *smsIcon = new QLabel(page);
+    smsIcon->setPixmap(QIcon(":/sms.png").pixmap(16, 16));
+    smsIcon->setAlignment(Qt::AlignTop);
+    m_consoleSms = new QPlainTextEdit(page);
+    m_consoleSms->setPlaceholderText("Short message to the number");
+    m_consoleSms->setFixedHeight(m_consoleSms->fontMetrics().lineSpacing() * 3 + 12);
+    m_consoleSms->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    QToolButton *sms = iconButton(page, ":/arrow_left.png", "Send the text as a short message from the console's number");
+    smsRow->addWidget(smsIcon, 0, Qt::AlignTop);
+    smsRow->addWidget(m_consoleSms, 1);
+    smsRow->addWidget(sms, 0, Qt::AlignBottom);
+    layout->addLayout(smsRow);
     // the indicators: one message with the flags ticked, delivered when the phone can take it
     const QStringList kinds = {"SMS", "Voice mail", "Fax", "E-mail", "Data"};
     QList<QWidget*> flags;
@@ -1333,39 +1397,6 @@ QWidget *CellularGUI::buildConsole()
     });
 
     // its settings
-    QFormLayout *settings = new QFormLayout();
-    m_consoleOwn = new QLineEdit(page);
-    m_consoleOwn->setToolTip("The console's own number: the phones call it on every network on the air");
-    settings->addRow("Own number", m_consoleOwn);
-    m_consoleSpeaker = new QComboBox(page);
-    m_consoleSpeaker->addItem("Default", QString());
-    for (const AudioDeviceInfo& d : AudioDeviceInfo::availableOutputDevices()) {
-        m_consoleSpeaker->addItem(d.deviceName(), d.deviceName());
-    }
-    m_consoleSpeaker->setToolTip("The speaker of the console (also for listening in to a call)");
-    settings->addRow(new QLabel(page), m_consoleSpeaker);
-    static_cast<QLabel*>(settings->labelForField(m_consoleSpeaker))->setPixmap(QIcon(":/sound_on.png").pixmap(16, 16));
-    m_consoleMic = new QComboBox(page);
-    m_consoleMic->addItem("Default", QString());
-    for (const AudioDeviceInfo& d : AudioDeviceInfo::availableInputDevices()) {
-        m_consoleMic->addItem(d.deviceName(), d.deviceName());
-    }
-    m_consoleMic->setToolTip("The microphone of the console");
-    settings->addRow(new QLabel(page), m_consoleMic);
-    static_cast<QLabel*>(settings->labelForField(m_consoleMic))->setPixmap(QIcon(":/microphone.png").pixmap(16, 16));
-    m_consoleVolume = new QSpinBox(page);
-    m_consoleVolume->setRange(-40, 0);
-    m_consoleVolume->setSuffix(" dB");
-    m_consoleVolume->setToolTip("The speaker's level, at most 0 dB");
-    m_consoleGain = new QSpinBox(page);
-    m_consoleGain->setRange(-20, 20);
-    m_consoleGain->setSuffix(" dB");
-    m_consoleGain->setToolTip("The microphone's gain");
-    settings->addRow("Volume / mic", flowRow(page, {m_consoleVolume, m_consoleGain}));
-    m_consoleAuto = new QCheckBox("Answer at once", page);
-    m_consoleAuto->setToolTip("A call to the console is answered at once, without ringing (tests without anyone at the PC)");
-    settings->addRow(m_consoleAuto);
-    layout->addLayout(settings);
     layout->addStretch(1);
 
     connect(back, &QToolButton::clicked, this, [this]() { m_consoleNumber->backspace(); });
@@ -1375,19 +1406,19 @@ QWidget *CellularGUI::buildConsole()
         }
     });
     connect(m_consoleCall, &QToolButton::clicked, this, [this]() {
-        if (!m_consoleNumber->text().isEmpty()) {
+        if (m_consoleReport.m_state == Cellular::MsgReportConsole::Incoming) {
+            requestAction(0, QString(), Cellular::MsgAction::ConsoleAnswer, QString(), 0);
+        } else if (!m_consoleNumber->text().isEmpty()) {
             requestAction(0, m_consoleNumber->text(), Cellular::MsgAction::ConsoleDial, QString(), 0);
         }
-    });
-    connect(m_consoleAnswer, &QToolButton::clicked, this, [this]() {
-        requestAction(0, QString(), Cellular::MsgAction::ConsoleAnswer, QString(), 0);
     });
     connect(m_consoleHangUp, &QToolButton::clicked, this, [this]() {
         requestAction(0, QString(), Cellular::MsgAction::ConsoleHangUp, QString(), 0);
     });
     connect(sms, &QToolButton::clicked, this, [this]() {
-        if (!m_consoleNumber->text().isEmpty() && !m_consoleSms->text().isEmpty()) {
-            requestAction(0, consoleTarget(), Cellular::MsgAction::ConsoleSms, m_consoleSms->text(), 0);
+        const QString text = m_consoleSms->toPlainText();
+        if (!consoleTarget().isEmpty() && !text.isEmpty()) {
+            requestAction(0, consoleTarget(), Cellular::MsgAction::ConsoleSms, text, 0);
         }
     });
     connect(mwi, &QToolButton::clicked, this, [this]() {
@@ -1406,21 +1437,37 @@ QWidget *CellularGUI::buildConsole()
         }
         CellularConsole& c = m_settings.m_console;
         c.m_number = m_consoleOwn->text().trimmed();
-        c.m_speaker = m_consoleSpeaker->currentData().toString();
-        c.m_microphone = m_consoleMic->currentData().toString();
+        c.m_speakerMute = m_consoleSpeakerMute->isChecked();
+        c.m_micMute = !m_consoleMicOn->isChecked();
         c.m_volumeDb = m_consoleVolume->value();
         c.m_micGainDb = m_consoleGain->value();
         c.m_autoAnswer = m_consoleAuto->isChecked();
         applySettings();
     };
     connect(m_consoleOwn, &QLineEdit::editingFinished, this, changed);
-    connect(m_consoleSpeaker, QOverload<int>::of(&QComboBox::currentIndexChanged), this, changed);
-    connect(m_consoleMic, QOverload<int>::of(&QComboBox::currentIndexChanged), this, changed);
+    connect(m_consoleSpeakerMute, &QToolButton::toggled, this, changed);
+    connect(m_consoleMicOn, &QToolButton::toggled, this, changed);
     connect(m_consoleVolume, QOverload<int>::of(&QSpinBox::valueChanged), this, changed);
     connect(m_consoleGain, QOverload<int>::of(&QSpinBox::valueChanged), this, changed);
-    connect(m_consoleAuto, &QCheckBox::toggled, this, changed);
+    connect(m_consoleAuto, &QToolButton::toggled, this, changed);
     showConsole();
     return page;
+}
+
+// the speaker's or microphone's device, as SDRangel's channels select theirs
+void CellularGUI::consoleDevice(const QPoint& p, bool input)
+{
+    CellularConsole& c = m_settings.m_console;
+    AudioSelectDialog select(DSPEngine::instance()->getAudioDeviceManager(), input ? c.m_microphone : c.m_speaker, input);
+    select.move(p);
+    new DialogPositioner(&select, false);
+    select.exec();
+    if (!select.m_selected) {
+        return;
+    }
+    (input ? c.m_microphone : c.m_speaker) = select.m_audioDeviceName;
+    showConsole();
+    applySettings();
 }
 
 // the number the console's messages go to: the phone of its call, else the number typed
@@ -1463,8 +1510,15 @@ void CellularGUI::showConsole()
     if (!m_consoleOwn->hasFocus()) {
         m_consoleOwn->setText(c.m_number);
     }
-    m_consoleSpeaker->setCurrentIndex(std::max(0, m_consoleSpeaker->findData(c.m_speaker)));
-    m_consoleMic->setCurrentIndex(std::max(0, m_consoleMic->findData(c.m_microphone)));
+    m_consoleSpeakerMute->setChecked(c.m_speakerMute);
+    m_consoleMicOn->setChecked(!c.m_micMute);
+    const auto deviceName = [](const QString& name) {
+        return name.isEmpty() || name == AudioDeviceManager::m_defaultDeviceName ? QString("the default device") : name;
+    };
+    m_consoleSpeakerMute->setToolTip(QString("Left: mute/unmute the speaker (also listening in). Right: select the "
+        "audio output device (now %1)").arg(deviceName(c.m_speaker)));
+    m_consoleMicOn->setToolTip(QString("Left: microphone on/off (touch tones still go). Right: select the audio "
+        "input device (now %1)").arg(deviceName(c.m_microphone)));
     m_consoleVolume->setValue(c.m_volumeDb);
     m_consoleGain->setValue(c.m_micGainDb);
     m_consoleAuto->setChecked(c.m_autoAnswer);
@@ -1477,7 +1531,7 @@ void CellularGUI::showConsole()
     QString text;
     switch (r.m_state)
     {
-    case R::Idle: text = QString("Idle. The phones call the console on %1").arg(c.m_number); break;
+    case R::Idle: text = "Idle."; break;
     case R::Calling: text = QString("Calling %1: paging").arg(r.m_peer); break;
     case R::Ringback: text = QString("Calling %1: it rings").arg(r.m_peer); break;
     case R::Incoming: text = QString("<b>%1 calls the console</b>").arg(r.m_peer); break;
@@ -1490,9 +1544,21 @@ void CellularGUI::showConsole()
     m_consoleBell->setPixmap(QIcon(r.m_state == R::Incoming ? ":/bell_red.png" : ":/bell_line.png").pixmap(16, 16));
     m_consoleKeys->setText(r.m_keys.isEmpty() ? QString() : QString("Tones from %1: %2").arg(r.m_peer).arg(r.m_keys));
     m_consoleKeys->setVisible(!r.m_keys.isEmpty());
-    m_consoleCall->setEnabled(r.m_state == R::Idle);
-    m_consoleAnswer->setEnabled(r.m_state == R::Incoming);
-    m_consoleHangUp->setEnabled(r.m_state != R::Idle);
+    // the green key: dark idle (call), bright while a call rings (answer), mid in a call;
+    // the red key red while there is a call; the speaker green while a call is heard
+    const bool ringing = r.m_state == R::Incoming;
+    const bool inCall = r.m_state != R::Idle;
+    m_consoleCall->setText(ringing ? "Answer" : "Call");
+    m_consoleCall->setToolTip(ringing ? "Answer the call that rings" : "Call the number");
+    m_consoleCall->setEnabled(r.m_state == R::Idle || ringing);
+    m_consoleCall->setStyleSheet(ringing ? "QToolButton { background-color: rgb(40,200,40); color: black; font-weight: bold; }"
+        : inCall ? "QToolButton { background-color: rgb(40,120,40); }"
+        : "QToolButton { background-color: rgb(30,80,30); }");
+    m_consoleHangUp->setEnabled(inCall);
+    m_consoleHangUp->setStyleSheet(inCall ? "QToolButton { background-color: rgb(200,40,40); }"
+        : "QToolButton { background:rgb(79,79,79); }");
+    m_consoleSpeakerMute->setStyleSheet(inCall && !c.m_speakerMute ? "QToolButton { background-color : green; }"
+        : "QToolButton { background:rgb(79,79,79); }");
     // with a phone in the call: its orders (only a phone number has a call on a channel)
     m_consoleInCall->setVisible(r.m_state == R::Connected && r.m_peer.size() == 7);
 }

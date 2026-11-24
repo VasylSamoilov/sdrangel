@@ -701,7 +701,9 @@ bool Cellular::handleMessage(const Message& cmd)
             }
             return true;
         }
-        if (!m_running || m_active.find(action.getNetwork()) == m_active.end())
+        // the console's actions may name no network (0: the worker picks the one of the call)
+        const bool console = action.getAction() >= MsgAction::ConsoleDial && action.getNetwork() == 0;
+        if (!m_running || (!console && m_active.find(action.getNetwork()) == m_active.end()))
         {
             report(action.getNetwork(), QString("%1 %2: the network is not on the air")
                 .arg(MsgAction::name(action.getAction())).arg(action.getNumber()));

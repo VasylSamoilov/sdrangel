@@ -731,8 +731,9 @@ void CellularWorker::makeConsole(Network& n)
         if (m_microphone)
         {
             m_microphone->fill(samples, count);
+            const float gain = m_console.m_micMute ? 0.0f : m_micGain;
             for (int i = 0; i < count; i++) {
-                samples[i] *= m_micGain;
+                samples[i] *= gain;
             }
         }
     });
@@ -896,7 +897,7 @@ void CellularWorker::consoleOutput()
     }
     m_consoleFrames.clear();
     const size_t frames = m_consoleSpeaker->take(m_consoleFrames);
-    if (frames > 0) {
+    if (frames > 0 && !m_console.m_speakerMute) {
         m_consoleFifo.write(reinterpret_cast<const quint8*>(m_consoleFrames.data()), static_cast<uint32_t>(frames));
     }
 }
@@ -908,7 +909,7 @@ void CellularWorker::listenOutput()
     }
     m_listenFrames.clear();
     const size_t frames = m_listener->take(m_listenFrames);
-    if (frames > 0) {
+    if (frames > 0 && !m_console.m_speakerMute) {
         m_audioFifo.write(reinterpret_cast<const quint8*>(m_listenFrames.data()), static_cast<uint32_t>(frames));
     }
 }
