@@ -44,41 +44,79 @@ static void testBind()
     CHECK(bs.rxStream() == 1 && bs.txStream() == 2);
     const auto rx = bs.rxTuning();
     const auto tx = bs.txTuning();
-    CHECK(rx.size() == 4 && tx.size() == 4);
-    if (rx.size() == 4 && tx.size() == 4)
+    // all four are heard, only the control channel is sent while the voice channels are idle
+    CHECK(rx.size() == 4 && tx.size() == 1);
+    if (rx.size() == 4 && tx.size() == 1)
     {
         // osmocom's offsets: -135, -45, +45, +135 kHz
         CHECK(std::fabs(rx[0].offset + 135000.0) < 1.0 && std::fabs(rx[3].offset - 135000.0) < 1.0);
-        CHECK(std::fabs(tx[1].offset + 45000.0) < 1.0 && std::fabs(tx[2].offset - 45000.0) < 1.0);
+        CHECK(std::fabs(rx[1].offset + 45000.0) < 1.0 && std::fabs(rx[2].offset - 45000.0) < 1.0);
+        CHECK(tx[0].id == 10353 && std::fabs(tx[0].offset + 135000.0) < 1.0);
         CHECK(rx[0].id == 10353 && rx[0].passband == 15000.0 && rx[0].spacing == 30000.0);
     }
 }
 
-// The control carrier sends the overhead train, the idle voice carriers nothing
+// The control carrier sends the overhead train; the idle voice carriers are not keyed (osmocom: no
+// power); a call keys its voice carrier while its designation goes out, and its end takes it off
 static void testProcess()
 {
     AmpsBaseStation bs(network());
     FoccReader reader;
-    double voicePower = 0.0;
 
     bs.bind(kRx, kTx);
-    for (int b = 0; b < 100; b++)
-    {
+    CHECK(bs.txTuning().size() == 1 && bs.rxTuning().size() == 4);
+    const auto block = [&bs, &reader](int b) {
         modemcellular::CarrierBatch rx;
         modemcellular::CarrierBatch tx;
         rx.reset(static_cast<uint64_t>(b) * kBlock, kBlock, {10353, 10356, 10359, 10362});
         bs.process(rx, tx);
-        CHECK(tx.length == kBlock && tx.carriers.size() == 4);
         reader.process(tx.carrier(0), kBlock);
-        for (int i = 0; i < kBlock; i++) {
-            voicePower += tx.carrier(1)[i] * tx.carrier(1)[i];
-        }
+        return tx;
+    };
+    for (int b = 0; b < 100; b++)
+    {
+        const modemcellular::CarrierBatch tx = block(b);
+        CHECK(tx.length == kBlock && tx.carriers.size() == 1 && tx.carriers[0] == 10353);
     }
     CHECK(heardWord(reader.words, [](uint64_t w) {
         return wordField(words::kSystemParameter1, w, "OHD") == kOhdSystemParameter1 && wordField(words::kSystemParameter1, w, "SID1") == 27;
     }));
-    CHECK(voicePower == 0.0);
     CHECK(bs.samples() == 100u * kBlock);
+    CHECK(bs.txKeyingChanged() && !bs.txKeyingChanged());      // the first block keyed the control carrier
+
+    // the phone calls: its voice carrier is keyed within a few blocks
+    ReccMessage m;
+    m.t = 1;
+    m.min1 = ReccAssembler::min1Of("2177526");
+    m.min2 = ReccAssembler::min2Of("216");
+    m.dialled = "555";
+    bs.system()->setCallHandler([](const AmpsSubscriber&, const std::string&) { return true; });
+    bs.system()->receivedRecc(0, m);
+    size_t carriers = 0;
+    for (int b = 100; b < 120; b++) {
+        carriers = block(b).carriers.size();
+    }
+    CHECK(carriers == 2 && bs.txKeyingChanged() && bs.txTuning().size() == 2);
+    CHECK(bs.txTuning()[1].id == 10356);
+
+    // the phone is on the voice channel once the designation is sent; its release (the tone of
+    // 1.67 s, 170 blocks of 10 ms): off again
+    int b0 = 120;
+    while (b0 < 200 && (bs.system()->transactions().empty()
+        || bs.system()->transactions()[0].state != AmpsSystem::State::MoAssignConfirm)) {
+        block(b0++);
+    }
+    bs.system()->satChanged(1, 0);
+    CHECK(bs.system()->transactions().size() == 1 && bs.system()->transactions()[0].state == AmpsSystem::State::Call);
+    bs.system()->signallingTone(1, true);
+    for (int b = b0; b < b0 + 170; b++) {
+        block(b);
+    }
+    bs.system()->signallingTone(1, false);
+    for (int b = b0 + 170; b < b0 + 172; b++) {
+        carriers = block(b).carriers.size();
+    }
+    CHECK(carriers == 1 && bs.txKeyingChanged() && bs.txTuning().size() == 1);
 }
 
 // What keeps the network off

@@ -107,11 +107,15 @@ public:
     int rxStream() const { return m_rxStream; }
     int txStream() const { return m_txStream; }
     int carrierId(size_t index) const;
+    // the receiver hears all carriers on air; the transmitter sends those whose channel is not off
+    // (osmocom: an idle voice channel sends no power)
     std::vector<modemcellular::CarrierTuning> rxTuning() const;
     std::vector<modemcellular::CarrierTuning> txTuning() const;
+    // true once after process() when the carriers the transmitter sends changed: tune it again
+    bool txKeyingChanged();
 
-    // One received batch to the batch for the transmitter: the carriers on air, the same length, the
-    // same first sample.
+    // One received batch to the batch for the transmitter: the carriers it sends, the same length,
+    // the same first sample.
     void process(const modemcellular::CarrierBatch& rx, modemcellular::CarrierBatch& tx);
     uint64_t samples() const { return m_samples; }
 
@@ -132,6 +136,10 @@ private:
     AmpsStreamSpan m_txSpan;
     std::vector<int> m_onAir;                           // indices into m_carriers
     std::vector<std::unique_ptr<AmpsChannel>> m_channels;   // parallel to m_onAir
+    std::vector<std::vector<float>> m_render;           // the output of each channel of a block
+    std::vector<int> m_keyed;                           // the carrier ids the transmitter sends
+    bool m_keyingChanged = false;
+    bool keyed(size_t onAirIndex) const;
 };
 
 } // namespace modemamps

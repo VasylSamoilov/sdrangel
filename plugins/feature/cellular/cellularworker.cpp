@@ -1847,6 +1847,10 @@ void CellularWorker::processBatch(Radio& radio)
         {
             n.ampsStation->process(m_rx, n.txBatch);
             n.ampsBridge->run();
+            // a voice channel keyed for a call or off after it (osmocom: an idle one sends nothing)
+            if (n.ampsStation->txKeyingChanged() && n.tx) {
+                updateTuning(*n.tx);
+            }
         }
         else
         {

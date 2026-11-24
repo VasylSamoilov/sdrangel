@@ -17,6 +17,7 @@
 
 #include "ampsbasestation.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace modemamps
@@ -98,6 +99,8 @@ bool AmpsBaseStation::bind(const std::vector<AmpsStreamSpan>& rxStreams, const s
     m_channels.clear();
     m_onAir.clear();
     m_system.reset();
+    m_keyed.clear();
+    m_keyingChanged = false;
     m_rxStream = -1;
     m_txStream = -1;
     m_rxSpan = AmpsStreamSpan();
@@ -227,41 +230,78 @@ std::vector<modemcellular::CarrierTuning> AmpsBaseStation::rxTuning() const
     return out;
 }
 
+bool AmpsBaseStation::keyed(size_t onAirIndex) const
+{
+    return m_system && m_system->mode(static_cast<int>(onAirIndex)) != AmpsMode::Off;
+}
+
 std::vector<modemcellular::CarrierTuning> AmpsBaseStation::txTuning() const
 {
     std::vector<modemcellular::CarrierTuning> out;
 
-    for (int index : m_onAir)
+    for (size_t i = 0; i < m_onAir.size(); i++)
     {
+        if (!keyed(i)) {
+            continue;
+        }
+        const int index = m_onAir[i];
         const AmpsCarrierStatus& c = m_carriers[static_cast<size_t>(index)];
         out.push_back(tuning(carrierId(static_cast<size_t>(index)), c.frequency.downlink, m_txSpan.centre));
     }
     return out;
 }
 
+bool AmpsBaseStation::txKeyingChanged()
+{
+    const bool changed = m_keyingChanged;
+    m_keyingChanged = false;
+    return changed;
+}
+
 void AmpsBaseStation::process(const modemcellular::CarrierBatch& rx, modemcellular::CarrierBatch& tx)
 {
-    std::vector<int> ids;
-
-    for (int index : m_onAir) {
-        ids.push_back(carrierId(static_cast<size_t>(index)));
-    }
-    tx.reset(rx.sample, rx.length, m_system ? ids : std::vector<int>());
-    if (!m_system || rx.length <= 0) {
+    if (!m_system || rx.length <= 0)
+    {
+        tx.reset(rx.sample, rx.length, std::vector<int>());
         return;
     }
 
     for (size_t i = 0; i < m_channels.size(); i++)
     {
-        const int at = rx.find(ids[i]);
+        const int at = rx.find(carrierId(static_cast<size_t>(m_onAir[i])));
         if (at >= 0) {
             m_channels[i]->receive(rx.carrier(static_cast<size_t>(at)), rx.length);
         }
     }
     m_clock.advance(rx.length);
     m_system->run();
-    for (size_t i = 0; i < m_channels.size(); i++) {
-        m_channels[i]->render(tx.carrier(i), rx.length);
+
+    // each channel renders (a voice channel may be keyed by the control channel's message of this
+    // block), the batch carries the keyed ones
+    m_render.resize(m_channels.size());
+    for (size_t i = 0; i < m_channels.size(); i++)
+    {
+        m_render[i].resize(static_cast<size_t>(rx.length));
+        m_channels[i]->render(m_render[i].data(), rx.length);
+    }
+    std::vector<int> ids;
+    std::vector<size_t> from;
+    for (size_t i = 0; i < m_channels.size(); i++)
+    {
+        if (keyed(i))
+        {
+            ids.push_back(carrierId(static_cast<size_t>(m_onAir[i])));
+            from.push_back(i);
+        }
+    }
+    if (ids != m_keyed)
+    {
+        m_keyed = ids;
+        m_keyingChanged = true;
+    }
+    tx.reset(rx.sample, rx.length, ids);
+    for (size_t k = 0; k < from.size(); k++) {
+        std::copy(m_render[from[k]].begin(), m_render[from[k]].end(), tx.carrier(k));
     }
     m_samples += static_cast<uint64_t>(rx.length);
 }
