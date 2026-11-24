@@ -64,9 +64,11 @@ protected:
         }
         QPainter p(this);
         const QFontMetrics fm = fontMetrics();
-        const int h = CellularSpeechPaint::lineHeight(fm);
+        // in the empty last line of the text (setLines), inside the frame
+        const int h = fm.lineSpacing();
         const int w = CellularSpeechPaint::lineWidth(fm);
-        const QRect line((width() - w) / 2, height() - h - 3, w, h);
+        const int bottom = contentsRect().bottom() - (contentsRect().height() - 4 * h) / 2;
+        const QRect line((width() - w) / 2, bottom - h + 1, w, h);
         CellularSpeechPaint::direction(p, line, m_arrow, m_speech.live ? m_speech.recent : m_speech.call, !m_speech.live);
     }
 
