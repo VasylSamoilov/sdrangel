@@ -76,6 +76,12 @@ SWGCellularNetworkSettings::SWGCellularNetworkSettings() {
     m_music_loop_isSet = false;
     call_limit = 0;
     m_call_limit_isSet = false;
+    sid = 0;
+    m_sid_isSet = false;
+    dcc = 0;
+    m_dcc_isSet = false;
+    scc = 0;
+    m_scc_isSet = false;
     rx_device_set_index = 0;
     m_rx_device_set_index_isSet = false;
     tx_device_set_index = 0;
@@ -136,6 +142,12 @@ SWGCellularNetworkSettings::init() {
     m_music_loop_isSet = false;
     call_limit = 0;
     m_call_limit_isSet = false;
+    sid = 0;
+    m_sid_isSet = false;
+    dcc = 0;
+    m_dcc_isSet = false;
+    scc = 0;
+    m_scc_isSet = false;
     rx_device_set_index = 0;
     m_rx_device_set_index_isSet = false;
     tx_device_set_index = 0;
@@ -243,6 +255,12 @@ SWGCellularNetworkSettings::fromJsonObject(QJsonObject &pJson) {
 
     ::SWGSDRangel::setValue(&call_limit, pJson["callLimit"], "qint32", "");
 
+    ::SWGSDRangel::setValue(&sid, pJson["sid"], "qint32", "");
+
+    ::SWGSDRangel::setValue(&dcc, pJson["dcc"], "qint32", "");
+
+    ::SWGSDRangel::setValue(&scc, pJson["scc"], "qint32", "");
+
     ::SWGSDRangel::setValue(&rx_device_set_index, pJson["rxDeviceSetIndex"], "qint32", "");
     
     ::SWGSDRangel::setValue(&tx_device_set_index, pJson["txDeviceSetIndex"], "qint32", "");
@@ -334,6 +352,15 @@ SWGCellularNetworkSettings::asJsonObject() {
     }
     if(m_call_limit_isSet){
         obj->insert("callLimit", QJsonValue(call_limit));
+    }
+    if(m_sid_isSet){
+        obj->insert("sid", QJsonValue(sid));
+    }
+    if(m_dcc_isSet){
+        obj->insert("dcc", QJsonValue(dcc));
+    }
+    if(m_scc_isSet){
+        obj->insert("scc", QJsonValue(scc));
     }
     if(m_rx_device_set_index_isSet){
         obj->insert("rxDeviceSetIndex", QJsonValue(rx_device_set_index));
@@ -586,6 +613,36 @@ SWGCellularNetworkSettings::setCallLimit(qint32 call_limit) {
 }
 
 qint32
+SWGCellularNetworkSettings::getSid() {
+    return sid;
+}
+void
+SWGCellularNetworkSettings::setSid(qint32 sid) {
+    this->sid = sid;
+    this->m_sid_isSet = true;
+}
+
+qint32
+SWGCellularNetworkSettings::getDcc() {
+    return dcc;
+}
+void
+SWGCellularNetworkSettings::setDcc(qint32 dcc) {
+    this->dcc = dcc;
+    this->m_dcc_isSet = true;
+}
+
+qint32
+SWGCellularNetworkSettings::getScc() {
+    return scc;
+}
+void
+SWGCellularNetworkSettings::setScc(qint32 scc) {
+    this->scc = scc;
+    this->m_scc_isSet = true;
+}
+
+qint32
 SWGCellularNetworkSettings::getRxDeviceSetIndex() {
     return rx_device_set_index;
 }
@@ -680,6 +737,15 @@ SWGCellularNetworkSettings::isSet(){
             isObjectUpdated = true; break;
         }
         if(m_call_limit_isSet){
+            isObjectUpdated = true; break;
+        }
+        if(m_sid_isSet){
+            isObjectUpdated = true; break;
+        }
+        if(m_dcc_isSet){
+            isObjectUpdated = true; break;
+        }
+        if(m_scc_isSet){
             isObjectUpdated = true; break;
         }
         if(m_rx_device_set_index_isSet){

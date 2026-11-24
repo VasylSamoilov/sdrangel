@@ -94,6 +94,9 @@ void CellularNetworkSettings::resetToDefaults()
     m_sendClock = false;
     m_smscNumber = "";
     m_smsCodepage = "";
+    m_sid = 0;
+    m_dcc = 0;
+    m_scc = 0;
     m_fallback = FallbackEcho;
     m_farEnd = CellularFarEnd();
     m_rxDeviceSetIndex = 0;
@@ -127,6 +130,10 @@ QByteArray CellularNetworkSettings::serialize() const
     s.writeBool(47, m_farEnd.m_musicLoop);
     s.writeS32(48, m_farEnd.m_callLimitS);
     s.writeString(49, m_smsCodepage);
+    // AMPS (keys 50..)
+    s.writeS32(50, m_sid);
+    s.writeS32(51, m_dcc);
+    s.writeS32(52, m_scc);
     return s.final();
 }
 
@@ -153,6 +160,9 @@ bool CellularNetworkSettings::deserialize(const QByteArray& data)
     d.readBool(47, &m_farEnd.m_musicLoop, defaults.m_musicLoop);
     d.readS32(48, &m_farEnd.m_callLimitS, defaults.m_callLimitS);
     d.readString(49, &m_smsCodepage, "");
+    d.readS32(50, &m_sid, 0);
+    d.readS32(51, &m_dcc, 0);
+    d.readS32(52, &m_scc, 0);
     return m_id >= 1 && m_id <= kMaxNetworkId;
 }
 
@@ -162,6 +172,7 @@ bool CellularNetworkSettings::sameNetwork(const CellularNetworkSettings& o) cons
         && m_y1 == o.m_y1 && m_areaNo == o.m_areaNo && m_msPower == o.m_msPower && m_carriers == o.m_carriers
         && m_compandor == o.m_compandor && m_sendCallerId == o.m_sendCallerId && m_sendClock == o.m_sendClock
         && m_smscNumber == o.m_smscNumber && m_smsCodepage == o.m_smsCodepage && m_fallback == o.m_fallback && m_farEnd == o.m_farEnd
+        && m_sid == o.m_sid && m_dcc == o.m_dcc && m_scc == o.m_scc
         && m_rxDeviceSetIndex == o.m_rxDeviceSetIndex && m_txDeviceSetIndex == o.m_txDeviceSetIndex;
 }
 
@@ -283,6 +294,74 @@ bool CellularNetworkSettings::networkConfig(modemnmt::NmtNetworkConfig& config, 
     config.smscNumber = m_smscNumber.trimmed().toStdString();
 
     return parseCarriers(m_carriers, config.carriers, error);
+}
+
+bool CellularNetworkSettings::parseAmpsCarriers(const QString& text, int scc, std::vector<modemamps::AmpsCarrierConfig>& carriers,
+    QString& error)
+{
+    carriers.clear();
+
+    for (const QString& item : text.split(',', Qt::SkipEmptyParts))
+    {
+        const QStringList parts = item.trimmed().split(':');
+        modemamps::AmpsCarrierConfig c;
+        bool ok = false;
+
+        if (parts.size() < 2 || parts.size() > 3)
+        {
+            error = QString("\"%1\": channel:type[:scc], the type cc or vc, e.g. 353:cc").arg(item.trimmed());
+            return false;
+        }
+        c.channel = parts[0].trimmed().toInt(&ok);
+        if (!ok || c.channel <= 0 || c.channel >= modemamps::AmpsBaseStation::kIdStride)
+        {
+            error = QString("\"%1\": the channel is not a number").arg(item.trimmed());
+            return false;
+        }
+        const QString type = parts[1].trimmed().toLower();
+        if (type == "cc") {
+            c.type = modemamps::AmpsChannelType::ControlPaging;
+        } else if (type == "vc") {
+            c.type = modemamps::AmpsChannelType::Voice;
+        }
+        else
+        {
+            error = QString("\"%1\": the type is cc (control and paging) or vc (voice)").arg(item.trimmed());
+            return false;
+        }
+        c.scc = scc;
+        if (parts.size() > 2)
+        {
+            c.scc = parts[2].trimmed().toInt(&ok);
+            if (!ok || c.scc < 0 || c.scc > 2)
+            {
+                error = QString("\"%1\": the SAT colour code is 0..2").arg(item.trimmed());
+                return false;
+            }
+        }
+        carriers.push_back(c);
+    }
+    if (carriers.empty())
+    {
+        error = "no carriers";
+        return false;
+    }
+    return true;
+}
+
+bool CellularNetworkSettings::ampsNetworkConfig(modemamps::AmpsNetworkConfig& config, QString& error) const
+{
+    config = modemamps::AmpsNetworkConfig();
+    config.id = m_id;
+    config.sid = static_cast<uint16_t>(std::max(0, std::min(m_sid, 32767)));
+    config.dcc = std::max(0, std::min(m_dcc, 3));
+    config.msPower = std::max(0, std::min(m_msPower, 7));
+    if (m_scc < 0 || m_scc > 2)
+    {
+        error = "the SAT colour code is 0..2";
+        return false;
+    }
+    return parseAmpsCarriers(m_carriers, m_scc, config.carriers, error);
 }
 
 // ---- the controller ----

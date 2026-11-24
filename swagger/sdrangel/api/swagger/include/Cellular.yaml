@@ -82,7 +82,16 @@ CellularNetworkSettings:
       maximum: 1
     system:
       type: integer
-      description: "(0 NMT-450, 1 NMT-900)"
+      description: "(0 NMT-450, 1 NMT-900, 2 AMPS)"
+    sid:
+      type: integer
+      description: "AMPS: the system identification SID 0..32767."
+    dcc:
+      type: integer
+      description: "AMPS: the digital colour code 0..3."
+    scc:
+      type: integer
+      description: "AMPS: the SAT colour code 0..2 of the voice channels (a carrier may give its own: 356:vc:1)."
     country:
       type: string
       description: "Short name of the frequency plan: DK, SE, NO, FI, NL, HU ..."

@@ -42,6 +42,7 @@ class ButtonSwitch;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
+class QFormLayout;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
@@ -74,8 +75,19 @@ private:
     void onGridChanged();
     void onTextChanged();
     void showBandwidth();
+    bool amps() const;
+    // AMPS shows its own fields, NMT its own (the rows of the other system are hidden)
+    void showSystem();
+    void showAmpsBandwidth();
 
     CellularChannelGrid *m_grid;
+    QFormLayout *m_form;
+    QList<QWidget*> m_nmtRows;              // the fields only NMT has
+    QList<QWidget*> m_ampsRows;             // and AMPS
+    QSpinBox *m_sid;
+    QSpinBox *m_dcc;
+    QComboBox *m_scc;
+    QComboBox *m_ampsPower;
     QLabel *m_bandwidth;
     QLabel *m_carriersError;
 

@@ -22,6 +22,7 @@
 #include <QList>
 #include <QString>
 
+#include "ampsbasestation.h"
 #include "nmtbasestation.h"
 
 class Serializable;
@@ -50,7 +51,7 @@ struct CellularFarEnd
     bool operator!=(const CellularFarEnd& o) const { return !(*this == o); }
 };
 
-// One NMT network (one base station) and the radios it runs on.
+// One network (one base station, NMT or AMPS) and the radios it runs on.
 struct CellularNetworkSettings
 {
     enum Fallback
@@ -58,18 +59,27 @@ struct CellularNetworkSettings
         FallbackEcho = 0,       // calls to numbers that are not registered: echo
         FallbackMusic = 1       // or music
     };
+    enum System
+    {
+        SystemNmt450 = 0,
+        SystemNmt900 = 1,
+        SystemAmps = 2
+    };
 
     int m_id;                   // 1..: stable, the carrier ids are id * 10000 + channel
     QString m_name;
     bool m_enabled;             // on the air while the controller runs
 
-    int m_system;               // 0: NMT-450, 1: NMT-900
-    QString m_country;          // short name of the plan: DK, SE, NO, FI, NL, HU ...
-    int m_area;                 // traffic area Y2 within the country
-    int m_y1;                   // country digit Y1 in place of the country's (test network), -1: the country's
-    int m_areaNo;               // area number 1..4, 0 for none
-    int m_msPower;              // power level of the phones 0..3
-    QString m_carriers;         // "1:cctc:1, 5:tc:2, 6:tc:3" (see parseCarriers)
+    int m_system;               // System: NMT-450, NMT-900, AMPS
+    QString m_country;          // NMT: short name of the plan: DK, SE, NO, FI, NL, HU ...
+    int m_area;                 // NMT: traffic area Y2 within the country
+    int m_y1;                   // NMT: country digit Y1 in place of the country's (test network), -1: the country's
+    int m_areaNo;               // NMT: area number 1..4, 0 for none
+    int m_msPower;              // power level of the phones, NMT 0..3, AMPS 0..7
+    QString m_carriers;         // NMT "1:cctc:1, 5:tc:2" (see parseCarriers), AMPS "353:cc, 356:vc" (parseAmpsCarriers)
+    int m_sid;                  // AMPS: the system identification 0..32767
+    int m_dcc;                  // AMPS: the digital colour code 0..3
+    int m_scc;                  // AMPS: the SAT colour code 0..2 of the voice channels (a carrier may give its own)
     bool m_compandor;
     bool m_sendCallerId;
     bool m_sendClock;
@@ -94,6 +104,14 @@ struct CellularNetworkSettings
     static bool parseCarriers(const QString& text, std::vector<modemnmt::NmtCarrierConfig>& carriers, QString& error);
     // The network as the base station takes it; false with a reason if the carriers cannot be read.
     bool networkConfig(modemnmt::NmtNetworkConfig& config, QString& error) const;
+
+    bool isAmps() const { return m_system == SystemAmps; }
+    // The AMPS carriers, comma separated: channel:type[:scc]. The type is cc (the control and paging
+    // channel) or vc (a voice channel); the SAT colour code 0..2 of a voice channel, if not given,
+    // is the network's (scc). False with a reason if the text cannot be read.
+    static bool parseAmpsCarriers(const QString& text, int scc, std::vector<modemamps::AmpsCarrierConfig>& carriers, QString& error);
+    // The AMPS network as its base station takes it.
+    bool ampsNetworkConfig(modemamps::AmpsNetworkConfig& config, QString& error) const;
     // What the base station has to start again for (everything but the name and the switch).
     bool sameNetwork(const CellularNetworkSettings& other) const;
 };

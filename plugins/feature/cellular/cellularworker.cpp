@@ -154,8 +154,10 @@ CellularWorker::~CellularWorker()
     for (std::unique_ptr<Network>& n : m_networks)
     {
         n->bridge.reset();
+        n->ampsBridge.reset();
         n->cellular.reset();
         n->station.reset();
+        n->ampsStation.reset();
     }
 }
 
@@ -521,6 +523,11 @@ void CellularWorker::action(const Cellular::MsgAction& msg)
     }
 
     Network& n = *found;
+    if (!n.station)
+    {
+        log(n.id, what + ": not done for AMPS yet");
+        return;
+    }
     modemnmt::NmtSystem& system = *n.station->system();
     const std::string number = msg.getNumber().toStdString();
     const bool valid = number.size() == 7 && number.find_first_not_of("0123456789") == std::string::npos;
@@ -939,7 +946,8 @@ void CellularWorker::consoleAction(const Cellular::MsgAction& msg)
         modemcellular::Cause cause = modemcellular::Cause::Normal;
         // a phone's number (registered or not) is paged on the network, as a phone's call to it is
         const std::string dialled = msg.getNumber().toStdString();
-        if (!n->console->dial(dialled, n->bridge->legOf(dialled), &cause)) {
+        modemcellular::MobileLeg *leg = n->ampsBridge ? n->ampsBridge->legOf(dialled) : n->bridge->legOf(dialled);
+        if (!n->console->dial(dialled, leg, &cause)) {
             log(n->id, what + QString(": refused (%1)").arg(modemcellular::TestCaller::causeName(cause)));
         }
         m_consoleKeys.clear();
@@ -965,7 +973,7 @@ void CellularWorker::consoleAction(const Cellular::MsgAction& msg)
     {
         const std::string number = msg.getNumber().toStdString();
         Network *n = consoleNetwork(msg.getNetwork(), msg.getNumber());
-        if (!n || number.size() != 7)
+        if (!n || !n->station || number.size() != 7)
         {
             log(n ? n->id : 0, what + ": the number is the country digit and six digits, on a network on the air");
             return;
@@ -1217,7 +1225,30 @@ void CellularWorker::radioGone(qulonglong channel)
 
 bool CellularWorker::running(const Network& network) const
 {
+    if (network.ampsStation) {
+        return network.ampsStation->running() && network.ampsBridge;
+    }
     return network.station && network.station->running() && network.bridge;
+}
+
+// the carriers of either system as the worker compares and shows them
+std::vector<CellularWorker::CarrierView> CellularWorker::carrierViews(const Network& n)
+{
+    std::vector<CarrierView> out;
+
+    if (n.ampsStation)
+    {
+        for (const modemamps::AmpsCarrierStatus& c : n.ampsStation->carriers()) {
+            out.push_back({c.config.channel, c.frequency.downlink, c.frequency.uplink, c.planned, c.onAir});
+        }
+    }
+    else if (n.station)
+    {
+        for (const modemnmt::NmtCarrierStatus& c : n.station->carriers()) {
+            out.push_back({c.config.channel, c.frequency.downlink, c.frequency.uplink, c.planned, c.onAir});
+        }
+    }
+    return out;
 }
 
 // ---- radios ----
@@ -1286,12 +1317,12 @@ void CellularWorker::updateTuning(Radio& radio)
         }
         if (!radio.tx && n->rx == &radio)
         {
-            const std::vector<modemcellular::CarrierTuning> t = n->station->rxTuning();
+            const std::vector<modemcellular::CarrierTuning> t = n->ampsStation ? n->ampsStation->rxTuning() : n->station->rxTuning();
             tuning.carriers.insert(tuning.carriers.end(), t.begin(), t.end());
         }
         if (radio.tx && n->tx == &radio)
         {
-            const std::vector<modemcellular::CarrierTuning> t = n->station->txTuning();
+            const std::vector<modemcellular::CarrierTuning> t = n->ampsStation ? n->ampsStation->txTuning() : n->station->txTuning();
             tuning.carriers.insert(tuning.carriers.end(), t.begin(), t.end());
         }
     }
@@ -1417,6 +1448,40 @@ void CellularWorker::addNetwork(const MsgAddNetwork& add)
     n.name = add.m_name;
     n.config = add.m_config;
     n.smsCodepage = add.m_smsCodepage;
+
+    if (add.m_amps)
+    {
+        // an AMPS network: its base station and the router on its clock, the tones of America
+        n.ampsConfig = add.m_ampsConfig;
+        n.ampsConfig.roundTrip = m_lead / modemamps::AmpsBaseStation::kAudioRate + 0.1;
+        n.ampsStation = std::make_unique<modemamps::AmpsBaseStation>(n.ampsConfig);
+        n.cellular = std::make_unique<modemcellular::CellularSystem>(n.ampsStation->clock(), modemcellular::ToneSet::American);
+        n.music = add.m_fallback == CellularNetworkSettings::FallbackMusic;
+        const int ampsId = n.id;
+        setFarEnd(n, add.m_farEnd);
+        n.cellular->setSubscriberListener([this, ampsId](const std::string& number, bool registered) {
+            log(ampsId, QString("%1 %2").arg(QString::fromStdString(number)).arg(registered ? "registered" : "gone"), Cellular::MsgReportLog::Phone);
+        });
+        for (const modemamps::AmpsPlanIssue& issue : n.ampsStation->issues()) {
+            log(ampsId, QString::fromStdString((issue.error ? "error: " : "warning: ") + issue.text), Cellular::MsgReportLog::Warning);
+        }
+        for (const modemamps::AmpsCarrierStatus& c : n.ampsStation->carriers())
+        {
+            for (const modemamps::AmpsPlanIssue& issue : c.issues) {
+                log(ampsId, QString("channel %1: %2%3").arg(c.config.channel).arg(issue.error ? "error: " : "warning: ")
+                    .arg(QString::fromStdString(issue.text)), Cellular::MsgReportLog::Warning);
+            }
+        }
+        m_networks.push_back(std::move(network));
+        n.rx = radioFor(add.m_rxChannel, add.m_rxPipe, false);
+        n.tx = radioFor(add.m_txChannel, add.m_txPipe, true);
+        log(ampsId, QString("%1 started (AMPS, SID %2)").arg(n.name).arg(n.ampsConfig.sid), Cellular::MsgReportLog::Network);
+        tryBind(n);
+        if (!running(n)) {
+            reportStatus(n);
+        }
+        return;
+    }
     // the round trip of the radio: the transmit lead and about 100 ms of the receive path (device
     // buffers, the pipe of the Cellular Rx), in frame periods of 166 bits at 1200 bit/s
     {
@@ -1474,8 +1539,10 @@ void CellularWorker::remove(int id, bool retryOthers)
 
         unbind(n);
         n.bridge.reset();
+        n.ampsBridge.reset();
         n.cellular.reset();
         n.station.reset();
+        n.ampsStation.reset();
         log(id, QString("%1 stopped").arg(n.name), Cellular::MsgReportLog::Network);
         m_networks.erase(it);
         if (rx) {
@@ -1513,8 +1580,12 @@ void CellularWorker::unbind(Network& n)
     n.caller.reset();
     n.console.reset();
     n.bridge.reset();
+    n.ampsBridge.reset();
     if (n.station && n.station->running()) {
         n.station->bind({}, {});
+    }
+    if (n.ampsStation && n.ampsStation->running()) {
+        n.ampsStation->bind({}, {});
     }
     n.boundRx = modemcellular::WireSpan();
     n.boundTx = modemcellular::WireSpan();
@@ -1534,22 +1605,22 @@ QString CellularWorker::conflict(const Network& network) const
         if (!sameRx && !sameTx) {
             continue;
         }
-        for (const modemnmt::NmtCarrierStatus& mine : network.station->carriers())
+        for (const CarrierView& mine : carrierViews(network))
         {
             if (!mine.planned) {
                 continue;
             }
-            for (const modemnmt::NmtCarrierStatus& theirs : other->station->carriers())
+            for (const CarrierView& theirs : carrierViews(*other))
             {
                 if (!theirs.onAir) {
                     continue;
                 }
-                if ((sameRx && std::fabs(mine.frequency.uplink - theirs.frequency.uplink) < kMinSeparation)
-                    || (sameTx && std::fabs(mine.frequency.downlink - theirs.frequency.downlink) < kMinSeparation))
+                if ((sameRx && std::fabs(mine.uplink - theirs.uplink) < kMinSeparation)
+                    || (sameTx && std::fabs(mine.downlink - theirs.downlink) < kMinSeparation))
                 {
                     return QString("channel %1 (%2 MHz) is on the frequency of channel %3 of network %4 (%5)")
-                        .arg(mine.config.channel).arg(mine.frequency.downlink / 1e6, 0, 'f', 4)
-                        .arg(theirs.config.channel).arg(other->id).arg(other->name);
+                        .arg(mine.channel).arg(mine.downlink / 1e6, 0, 'f', 4)
+                        .arg(theirs.channel).arg(other->id).arg(other->name);
                 }
             }
         }
@@ -1568,16 +1639,16 @@ QStringList CellularWorker::neighbours(const Network& network) const
         if (other.get() == &network || !running(*other) || (other->rx != network.rx && other->tx != network.tx)) {
             continue;
         }
-        for (const modemnmt::NmtCarrierStatus& mine : network.station->carriers())
+        for (const CarrierView& mine : carrierViews(network))
         {
-            for (const modemnmt::NmtCarrierStatus& theirs : other->station->carriers())
+            for (const CarrierView& theirs : carrierViews(*other))
             {
-                const double d = std::fabs(mine.frequency.downlink - theirs.frequency.downlink);
+                const double d = std::fabs(mine.downlink - theirs.downlink);
 
                 if (mine.planned && theirs.onAir && d >= kMinSeparation && d < modemnmt::NmtBaseStation::kChannelSpacing)
                 {
                     out.append(QString("channel %1 is %2 kHz from channel %3 of network %4: they hear each other a little")
-                        .arg(mine.config.channel).arg(d / 1e3, 0, 'f', 1).arg(theirs.config.channel).arg(other->id));
+                        .arg(mine.channel).arg(d / 1e3, 0, 'f', 1).arg(theirs.channel).arg(other->id));
                 }
             }
         }
@@ -1627,6 +1698,11 @@ void CellularWorker::tryBind(Network& n)
     }
     for (const QString& near : neighbours(n)) {
         log(n.id, "warning: " + near);
+    }
+    if (n.ampsStation)
+    {
+        tryBindAmps(n, rxSpan, txSpan);
+        return;
     }
 
     const modemnmt::NmtStreamSpan rx = {1, rxSpan.centre, rxSpan.sampleRate};
@@ -1699,6 +1775,58 @@ void CellularWorker::tryBind(Network& n)
     reportStatus(n);
 }
 
+// the AMPS part of tryBind: the base station on the streams, the bridge, the tester's caller and the
+// console on its router
+void CellularWorker::tryBindAmps(Network& n, const modemcellular::WireSpan& rxSpan, const modemcellular::WireSpan& txSpan)
+{
+    const modemamps::AmpsStreamSpan rx = {1, rxSpan.centre, rxSpan.sampleRate};
+    const modemamps::AmpsStreamSpan tx = {2, txSpan.centre, txSpan.sampleRate};
+    const bool ok = n.ampsStation->bind({rx}, {tx});
+
+    for (const modemamps::AmpsCarrierStatus& c : n.ampsStation->carriers())
+    {
+        for (const modemamps::AmpsPlanIssue& issue : c.streamIssues) {
+            log(n.id, QString("channel %1 (%2 / %3 MHz): %4%5").arg(c.config.channel)
+                .arg(c.frequency.downlink / 1e6, 0, 'f', 4).arg(c.frequency.uplink / 1e6, 0, 'f', 4)
+                .arg(issue.error ? "error: " : "warning: ").arg(QString::fromStdString(issue.text)), Cellular::MsgReportLog::Warning);
+        }
+    }
+    for (const modemamps::AmpsPlanIssue& issue : n.ampsStation->streamIssues()) {
+        log(n.id, QString::fromStdString((issue.error ? "error: " : "warning: ") + issue.text), Cellular::MsgReportLog::Warning);
+    }
+    if (!ok)
+    {
+        log(n.id, QString("the network is off (receiver %1, transmitter %2)").arg(spanText(rxSpan)).arg(spanText(txSpan)),
+            Cellular::MsgReportLog::Warning);
+        reportStatus(n);
+        return;
+    }
+
+    modemamps::AmpsSystem& system = *n.ampsStation->system();
+    n.ampsBridge = std::make_unique<modemamps::AmpsCellularBridge>(system, *n.cellular);
+    n.caller = std::make_unique<modemcellular::TestCaller>(*n.cellular);
+    makeConsole(n);
+    const int id = n.id;
+    system.setLogHandler([this, id](const std::string& text) {
+        log(id, QString::fromStdString(text), Cellular::MsgReportLog::Event);
+    });
+    n.phones.clear();
+    n.boundRx = rxSpan;
+    n.boundTx = txSpan;
+    const size_t carriers = system.config().channels.size();
+    n.levels.assign(carriers, -100.0f);
+    n.traces.assign(carriers, Network::Trace());
+    n.speechSeen.assign(carriers, Network::SpeechSeen());
+    n.batches = 0;
+    n.gaps = 0;
+    updateTuning(*n.rx);
+    updateTuning(*n.tx);
+    log(n.id, QString("on the air with %1 carrier%2 (receiver %3, transmitter %4, lead %5 ms)")
+        .arg(carriers).arg(carriers == 1 ? "" : "s").arg(spanText(rxSpan)).arg(spanText(txSpan))
+        .arg(m_lead / modemamps::AmpsBaseStation::kAudioRate * 1e3, 0, 'f', 0), Cellular::MsgReportLog::Network);
+    reportStatus(n);
+}
+
 void CellularWorker::processBatch(Radio& radio)
 {
     m_txOut.clear();
@@ -1715,14 +1843,24 @@ void CellularWorker::processBatch(Radio& radio)
         }
         n.nextSample = m_rx.sample + static_cast<uint64_t>(m_rx.length);
 
-        n.station->process(m_rx, n.txBatch);
-        n.bridge->run();
+        if (n.ampsStation)
+        {
+            n.ampsStation->process(m_rx, n.txBatch);
+            n.ampsBridge->run();
+        }
+        else
+        {
+            n.station->process(m_rx, n.txBatch);
+            n.bridge->run();
+        }
         // the audio of the tester's call, the same time as the block at the call rate
         n.caller->process(static_cast<int>(m_rx.length * modemcellular::kAudioSampleRate / modemnmt::NmtBaseStation::kAudioRate));
         if (n.console) {
             n.console->process(static_cast<int>(m_rx.length * modemcellular::kAudioSampleRate / modemnmt::NmtBaseStation::kAudioRate));
         }
-        sendPostponed(n);
+        if (n.station) {
+            sendPostponed(n);           // NMT's short messages and indicators
+        }
         flushQuietTraces(n);
         flushTones(false);
 
@@ -1756,7 +1894,8 @@ void CellularWorker::processBatch(Radio& radio)
         if (n.batches % kBlocksPerLog == 0)
         {
             QString line = QString("%1 s on the air, %2 blocks missed;")
-                .arg(n.station->samples() / modemnmt::NmtBaseStation::kAudioRate, 0, 'f', 0).arg(n.gaps);
+                .arg((n.ampsStation ? n.ampsStation->samples() : n.station->samples()) / modemnmt::NmtBaseStation::kAudioRate, 0, 'f', 0)
+                .arg(n.gaps);
             const modemcellular::WireTxStatus& st = n.tx->txStatus;
             for (size_t k = 0; k < st.carriers.size(); k++)
             {
@@ -1831,7 +1970,8 @@ static QString speechText(const modemcellular::SpeechStats& s)
 
 void CellularWorker::reportSpeech(Network& n, bool logLine)
 {
-    modemnmt::NmtSystem *system = running(n) ? n.station->system() : nullptr;
+    // the speech meters of the channels are NMT's (AMPS has none yet)
+    modemnmt::NmtSystem *system = running(n) && n.station ? n.station->system() : nullptr;
 
     if (!system) {
         return;
@@ -1941,10 +2081,16 @@ void CellularWorker::reportSpeech(Network& n, bool logLine)
 
 void CellularWorker::reportStatus(const Network& n)
 {
-    if (!m_reports || !n.station) {
+    if (!m_reports || (!n.station && !n.ampsStation)) {
         return;
     }
     Cellular::MsgReportStatus *msg = Cellular::MsgReportStatus::create(n.id);
+    if (n.ampsStation)
+    {
+        reportAmpsStatus(n, msg);
+        m_reports->push(msg);
+        return;
+    }
     modemnmt::NmtSystem *system = running(n) ? n.station->system() : nullptr;
 
     if (system)
@@ -2071,4 +2217,92 @@ void CellularWorker::reportStatus(const Network& n)
     }
 
     m_reports->push(msg);
+}
+
+// The status of an AMPS network: the carriers with their mode and the state of the call on them,
+// the registered phones
+void CellularWorker::reportAmpsStatus(const Network& n, Cellular::MsgReportStatus *msg)
+{
+    modemamps::AmpsSystem *system = running(n) ? n.ampsStation->system() : nullptr;
+
+    if (system)
+    {
+        msg->m_onAir = true;
+        msg->m_registered = static_cast<int>(system->registeredCount());
+        msg->m_calls = n.cellular ? static_cast<int>(n.cellular->callCount()) : 0;
+        msg->m_summary = QString("On the air: %1 registered, %2 calls, %3 s, %4 blocks missed")
+            .arg(system->registeredCount())
+            .arg(n.cellular ? n.cellular->callCount() : 0)
+            .arg(n.ampsStation->samples() / modemamps::AmpsBaseStation::kAudioRate, 0, 'f', 0)
+            .arg(n.gaps);
+    }
+    else if (!n.rx->haveSpan || !n.tx->haveSpan) {
+        msg->m_summary = QString("Waiting for the %1").arg(!n.rx->haveSpan ? "receiver" : "transmitter");
+    } else {
+        msg->m_summary = "Off (see the log)";
+    }
+
+    const std::vector<modemamps::AmpsSystem::TransactionInfo> transactions =
+        system ? system->transactions() : std::vector<modemamps::AmpsSystem::TransactionInfo>();
+    size_t onAir = 0;
+    for (size_t i = 0; i < n.ampsStation->carriers().size(); i++)
+    {
+        const modemamps::AmpsCarrierStatus& c = n.ampsStation->carriers()[i];
+        Cellular::MsgReportStatus::Carrier row;
+
+        row.channel = c.config.channel;
+        row.type = modemamps::ampsTypeName(c.config.type);
+        row.downlink = c.frequency.downlink;
+        row.uplink = c.frequency.uplink;
+        if (c.onAir && system)
+        {
+            const int index = static_cast<int>(onAir);
+            row.state = modemamps::ampsModeName(system->mode(index));
+            for (const modemamps::AmpsSystem::TransactionInfo& t : transactions)
+            {
+                if (t.channel == index)
+                {
+                    row.phone = QString::fromStdString(t.subscriber.number());
+                    row.state = modemamps::AmpsSystem::stateName(t.state);
+                }
+            }
+            row.rxLevel = onAir < n.levels.size() ? n.levels[onAir] : -100.0f;
+            const int id = n.ampsStation->carrierId(i);
+            const modemcellular::WireTxStatus& st = n.tx->txStatus;
+            for (size_t k = 0; k < st.carriers.size(); k++)
+            {
+                if (st.carriers[k] == id)
+                {
+                    row.txFillMs = st.fill[k] / modemamps::AmpsBaseStation::kAudioRate * 1e3;
+                    row.underruns = st.underruns[k];
+                }
+            }
+            onAir++;
+        }
+        else
+        {
+            row.state = "off";
+            for (const modemamps::AmpsPlanIssue& issue : c.issues) {
+                if (issue.error) {
+                    row.state = "off: " + QString::fromStdString(issue.text);
+                }
+            }
+            for (const modemamps::AmpsPlanIssue& issue : c.streamIssues) {
+                if (issue.error) {
+                    row.state = "off: " + QString::fromStdString(issue.text);
+                }
+            }
+        }
+        msg->m_carriers.append(row);
+    }
+
+    if (system)
+    {
+        system->forEachRegistered([msg](const modemamps::AmpsSubscriber& s) {
+            Cellular::MsgReportStatus::Phone phone;
+            phone.number = QString::fromStdString(s.number());
+            phone.registered = true;
+            msg->m_phones.append(phone);
+        });
+    }
 }

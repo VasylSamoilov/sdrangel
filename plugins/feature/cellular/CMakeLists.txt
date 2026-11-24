@@ -27,6 +27,7 @@ set(cellular_HEADERS
 include_directories(
     ${CMAKE_SOURCE_DIR}/swagger/sdrangel/code/qt5/client
     ${CMAKE_SOURCE_DIR}/modemcellular
+    ${CMAKE_SOURCE_DIR}/modemamps
     ${CMAKE_SOURCE_DIR}/modemnmt
     ${CMAKE_SOURCE_DIR}/modemradiopaging
 )
@@ -79,6 +80,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     sdrbase
     ${TARGET_LIB_GUI}
     modemcellular
+    modemamps
     modemnmt
     modemradiopaging
 )

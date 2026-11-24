@@ -254,6 +254,7 @@ CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& sett
     scroll->setFrameShape(QFrame::NoFrame);
     QWidget *page = new QWidget(scroll);
     QFormLayout *form = new QFormLayout(page);
+    m_form = form;
     form->setRowWrapPolicy(QFormLayout::WrapLongRows);
     form->setContentsMargins(0, 0, 0, 0);
     scroll->setWidget(page);
@@ -265,8 +266,31 @@ CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& sett
     m_enabled = new QCheckBox("On the air while the tester runs", page);
     form->addRow(m_enabled);
     m_system = new QComboBox(page);
-    m_system->addItems({"NMT-450", "NMT-900"});
+    m_system->addItems({"NMT-450", "NMT-900", "AMPS"});
     form->addRow("System", m_system);
+    // AMPS: the system identification, the colour codes, the power of the phones
+    m_sid = new QSpinBox(page);
+    m_sid->setRange(0, 32767);
+    m_sid->setToolTip("The system identification SID of the network (osmocom -S sid=); the phone shows home or roaming by it");
+    form->addRow("SID", m_sid);
+    m_dcc = new QSpinBox(page);
+    m_dcc->setRange(0, 3);
+    m_dcc->setToolTip("The digital colour code DCC of the control channel 0..3; the phones send it back");
+    form->addRow("DCC", m_dcc);
+    m_scc = new QComboBox(page);
+    m_scc->addItem("0 (5970 Hz)", 0);
+    m_scc->addItem("1 (6000 Hz)", 1);
+    m_scc->addItem("2 (6030 Hz)", 2);
+    m_scc->setToolTip("The SAT colour code of the voice channels: the analog colour code of the base station "
+        "(TIA/EIA-553-A), the same on all its voice channels; a carrier may give its own (356:vc:1)");
+    form->addRow("SAT", m_scc);
+    m_ampsPower = new QComboBox(page);
+    for (int level = 0; level <= 7; level++) {
+        m_ampsPower->addItem(level == 0 ? QString("0 (highest)") : level == 7 ? QString("7 (lowest)") : QString::number(level), level);
+    }
+    m_ampsPower->setToolTip("The power level the phones send with 0..7, 4 dB apart (osmocom's default 4)");
+    form->addRow("Phone power", m_ampsPower);
+    m_ampsRows = {m_sid, m_dcc, m_scc, m_ampsPower};
     m_country = new QComboBox(page);
     m_country->setToolTip("The frequency plan of the country (the channel numbers, the country digit of the traffic area)");
     form->addRow("Country", m_country);
@@ -333,6 +357,7 @@ CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& sett
     form->addRow(m_callerId);
     m_clock = new QCheckBox("Send the time of day", page);
     form->addRow(m_clock);
+    m_nmtRows = {m_country, m_y1, m_area, m_areaNo, m_msPower, m_grid, legend, m_compandor, m_callerId, m_clock};
     m_smsc = new QLineEdit(page);
     m_smsc->setToolTip("The number the phones send short messages to; empty: no short messages from the phones");
     form->addRow("SMS centre", m_smsc);
@@ -344,6 +369,7 @@ CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& sett
         "default alphabet, or an NMT Character Set for the letters it has (8-bit, its DCS). A character without a code "
         "refuses the message. Received messages are shown with the set their DCS names");
     form->addRow("SMS codepage", m_smsCodepage);
+    m_nmtRows.append({m_smsc, m_smsCodepage});
     m_fallback = new QComboBox(page);
     m_fallback->addItems({"Echo", "Music"});
     m_fallback->setToolTip("What answers a call to a number that is no phone (a phone number is paged)");
@@ -440,8 +466,12 @@ CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& sett
 
     m_name->setText(settings.m_name);
     m_enabled->setChecked(settings.m_enabled);
-    m_system->setCurrentIndex(settings.m_system == 1 ? 1 : 0);
+    m_system->setCurrentIndex(std::max(0, std::min(2, settings.m_system)));
     fillCountries(settings.m_country);
+    m_sid->setValue(settings.m_sid);
+    m_dcc->setValue(settings.m_dcc);
+    m_scc->setCurrentIndex(std::max(0, std::min(2, settings.m_scc)));
+    m_ampsPower->setCurrentIndex(settings.isAmps() ? std::max(0, std::min(7, settings.m_msPower)) : 4);
     m_y1->setValue(settings.m_y1);
     m_area->setValue(settings.m_area);
     m_areaNo->setValue(settings.m_areaNo);
@@ -470,6 +500,7 @@ CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& sett
     m_fallback->setCurrentIndex(settings.m_fallback == CellularNetworkSettings::FallbackMusic ? 1 : 0);
     fillDeviceSets(m_rxDeviceSet, false, settings.m_rxDeviceSetIndex);
     fillDeviceSets(m_txDeviceSet, true, settings.m_txDeviceSetIndex);
+    showSystem();
     onPlanChanged();
     onTextChanged();
 
@@ -481,8 +512,27 @@ CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& sett
     resize(size);
 
     connect(m_system, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
-        fillCountries(m_country->currentData().toString());
+        if (amps())
+        {
+            // carriers of NMT are no AMPS carriers: the layout of osmocom's amps
+            std::vector<modemamps::AmpsCarrierConfig> c;
+            QString error;
+            if (!CellularNetworkSettings::parseAmpsCarriers(m_carriers->text(), 0, c, error)) {
+                m_carriers->setText("353:cc, 356:vc, 359:vc, 362:vc");
+            }
+        }
+        else
+        {
+            std::vector<modemnmt::NmtCarrierConfig> c;
+            QString error;
+            if (!CellularNetworkSettings::parseCarriers(m_carriers->text(), c, error)) {
+                m_carriers->setText("1:cctc, 5:tc");
+            }
+            fillCountries(m_country->currentData().toString());
+        }
+        showSystem();
         onPlanChanged();
+        onTextChanged();
     });
     connect(m_country, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &CellularNetworkDialog::onPlanChanged);
     connect(m_rxDeviceSet, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &CellularNetworkDialog::onPlanChanged);
@@ -516,11 +566,48 @@ QString CellularNetworkDialog::carriersText(const std::vector<modemnmt::NmtCarri
     return items.join(", ");
 }
 
+bool CellularNetworkDialog::amps() const
+{
+    return m_system->currentIndex() == CellularNetworkSettings::SystemAmps;
+}
+
+void CellularNetworkDialog::showSystem()
+{
+    const bool isAmps = amps();
+
+    for (QWidget *w : m_nmtRows)
+    {
+        w->setVisible(!isAmps);
+        if (QWidget *label = m_form->labelForField(w)) {
+            label->setVisible(!isAmps);
+        }
+    }
+    for (QWidget *w : m_ampsRows)
+    {
+        w->setVisible(isAmps);
+        if (QWidget *label = m_form->labelForField(w)) {
+            label->setVisible(isAmps);
+        }
+    }
+    m_carriers->setToolTip(isAmps
+        ? "The channels as text: channel:type[:sat], comma separated. Types: cc (control and paging, 313..354), vc (voice). "
+          "The SAT colour code 0..2 of a voice channel, if not the network's. Example: 353:cc, 356:vc, 359:vc"
+        : "The same channels as text: channel:type[:supervisory], comma separated. Types: cc (calling), "
+          "tc (traffic), cctc (both), actc, cca, ccb (NMT-900), test. Supervisory tone 1..4 (0 none) on every traffic channel, "
+          "or on none for 1..4 in turn. Example: 1:cctc:1, 5:tc:2, 6:tc:3");
+}
+
 // the plan of the country, the spans of the devices
 void CellularNetworkDialog::onPlanChanged()
 {
     double downLow = 0.0, downHigh = 0.0, upLow = 0.0, upHigh = 0.0, centre = 0.0;
     int rate = 0;
+
+    if (amps())
+    {
+        showAmpsBandwidth();
+        return;
+    }
 
     m_grid->setPlan(m_system->currentIndex() == 1 ? modemnmt::System::Nmt900 : modemnmt::System::Nmt450,
         m_country->currentData().toString());
@@ -545,6 +632,21 @@ void CellularNetworkDialog::onTextChanged()
 {
     std::vector<modemnmt::NmtCarrierConfig> carriers;
     QString error;
+
+    if (amps())
+    {
+        std::vector<modemamps::AmpsCarrierConfig> ampsCarriers;
+        if (CellularNetworkSettings::parseAmpsCarriers(m_carriers->text(), m_scc->currentData().toInt(), ampsCarriers, error)) {
+            m_carriersError->hide();
+        }
+        else
+        {
+            m_carriersError->setText(error);
+            m_carriersError->show();
+        }
+        showAmpsBandwidth();
+        return;
+    }
     // the tones written in the text; the parser gives the others 1..4 in turn, which the grid
     // does not take as given (they stay "auto" when the grid writes the text again)
     QMap<int, int> givenTones;
@@ -699,6 +801,61 @@ void CellularNetworkDialog::showBandwidth()
     m_bandwidth->setText(text);
 }
 
+// AMPS: the span of the carriers of the text (30 kHz each) and whether the devices take it
+void CellularNetworkDialog::showAmpsBandwidth()
+{
+    std::vector<modemamps::AmpsCarrierConfig> carriers;
+    QString error;
+
+    if (!CellularNetworkSettings::parseAmpsCarriers(m_carriers->text(), 0, carriers, error))
+    {
+        m_bandwidth->setText("No carriers.");
+        return;
+    }
+    double downMin = 1e12, downMax = 0.0, upMin = 1e12, upMax = 0.0;
+    for (const modemamps::AmpsCarrierConfig& c : carriers)
+    {
+        modemamps::AmpsChannelFrequency f;
+        if (modemamps::ampsChannelFrequency(c.channel, f))
+        {
+            downMin = std::min(downMin, f.downlink);
+            downMax = std::max(downMax, f.downlink);
+            upMin = std::min(upMin, f.uplink);
+            upMax = std::max(upMax, f.uplink);
+        }
+    }
+    if (downMax == 0.0)
+    {
+        m_bandwidth->setText("No carriers.");
+        return;
+    }
+    const double span = std::max(downMax - downMin, upMax - upMin) + modemamps::AmpsBaseStation::kCarrierBandwidth;
+    const int needed = static_cast<int>(std::ceil(span / modemamps::AmpsBaseStation::kUsableBandwidth / 96e3)) * 96000;
+    QString text = QString("Down %1 - %2 MHz, up %3 - %4 MHz: span %5 MHz, needs at least %6 kS/s.")
+        .arg(downMin / 1e6, 0, 'f', 4).arg(downMax / 1e6, 0, 'f', 4)
+        .arg(upMin / 1e6, 0, 'f', 4).arg(upMax / 1e6, 0, 'f', 4)
+        .arg(span / 1e6, 0, 'f', 3).arg(needed / 1000);
+
+    double low, high, centre;
+    int rate;
+    const double half = modemamps::AmpsBaseStation::kCarrierBandwidth / 2.0;
+    const auto describe = [&](const char *name, int index, bool tx, double minHz, double maxHz) {
+        if (!deviceSpan(index, tx, low, high, centre, rate)) {
+            return QString(" %1 %2: not there.").arg(name).arg(index);
+        }
+        const bool fits = minHz - half >= low && maxHz + half <= high;
+        QString s = QString(" %1 %2 at %3 MHz, %4 kS/s: %5").arg(name).arg(index).arg(centre / 1e6, 0, 'f', 4).arg(rate / 1000)
+            .arg(fits ? "<span style=\"color:#5fd07f;\">fits</span>" : "<span style=\"color:#ff6060;\">does not fit</span>");
+        if (!fits) {
+            s += QString(" (centre %1 MHz would take it)").arg((minHz + maxHz) / 2e6, 0, 'f', 4);
+        }
+        return s + ".";
+    };
+    text += describe("Transmitter", m_txDeviceSet->currentData().toInt(), true, downMin, downMax);
+    text += describe("receiver", m_rxDeviceSet->currentData().toInt(), false, upMin, upMax);
+    m_bandwidth->setText(text);
+}
+
 // the countries of the system, the short name as the data
 void CellularNetworkDialog::fillCountries(const QString& selected)
 {
@@ -733,7 +890,10 @@ void CellularNetworkDialog::read(CellularNetworkSettings& s) const
     s.m_y1 = m_y1->value();
     s.m_area = m_area->value();
     s.m_areaNo = m_areaNo->value();
-    s.m_msPower = m_msPower->currentData().toInt();
+    s.m_msPower = amps() ? m_ampsPower->currentData().toInt() : m_msPower->currentData().toInt();
+    s.m_sid = m_sid->value();
+    s.m_dcc = m_dcc->value();
+    s.m_scc = m_scc->currentData().toInt();
     s.m_carriers = m_carriers->text();
     s.m_compandor = m_compandor->isChecked();
     s.m_sendCallerId = m_callerId->isChecked();

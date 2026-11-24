@@ -400,9 +400,10 @@ void Cellular::stop()
 void Cellular::startNetwork(const CellularNetworkSettings& network)
 {
     modemnmt::NmtNetworkConfig config;
+    modemamps::AmpsNetworkConfig ampsConfig;
     QString error;
 
-    if (!network.networkConfig(config, error))
+    if (network.isAmps() ? !network.ampsNetworkConfig(ampsConfig, error) : !network.networkConfig(config, error))
     {
         report(network.m_id, "error: carriers: " + error);
         return;
@@ -419,6 +420,8 @@ void Cellular::startNetwork(const CellularNetworkSettings& network)
     msg->m_id = network.m_id;
     msg->m_name = network.m_name;
     msg->m_config = config;
+    msg->m_amps = network.isAmps();
+    msg->m_ampsConfig = ampsConfig;
     msg->m_fallback = network.m_fallback;
     msg->m_farEnd = network.m_farEnd;
     msg->m_smsCodepage = network.m_smsCodepage;
@@ -1011,6 +1014,9 @@ void Cellular::webapiFormatFeatureSettings(SWGSDRangel::SWGFeatureSettings& resp
         *item->getName() = n.m_name;
         item->setEnabled(n.m_enabled ? 1 : 0);
         item->setSystem(n.m_system);
+        item->setSid(n.m_sid);
+        item->setDcc(n.m_dcc);
+        item->setScc(n.m_scc);
         *item->getCountry() = n.m_country;
         item->setArea(n.m_area);
         item->setY1(n.m_y1);
@@ -1093,7 +1099,16 @@ void Cellular::webapiUpdateFeatureSettings(CellularSettings& settings, const QSt
             n.m_enabled = item->getEnabled() != 0;
         }
         if (given("system")) {
-            n.m_system = item->getSystem() == 1 ? 1 : 0;
+            n.m_system = std::max(0, std::min(static_cast<int>(CellularNetworkSettings::SystemAmps), item->getSystem()));
+        }
+        if (given("sid")) {
+            n.m_sid = std::max(0, std::min(32767, item->getSid()));
+        }
+        if (given("dcc")) {
+            n.m_dcc = std::max(0, std::min(3, item->getDcc()));
+        }
+        if (given("scc")) {
+            n.m_scc = std::max(0, std::min(2, item->getScc()));
         }
         if (given("country") && item->getCountry()) {
             n.m_country = *item->getCountry();

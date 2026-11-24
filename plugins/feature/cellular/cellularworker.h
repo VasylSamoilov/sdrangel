@@ -31,6 +31,8 @@
 #include "util/message.h"
 #include "util/messagequeue.h"
 
+#include "ampsbasestation.h"
+#include "ampscellularbridge.h"
 #include "calllistener.h"
 #include "consoleleg.h"
 #include "carrierbatch.h"
@@ -67,6 +69,8 @@ public:
         int m_id = 0;
         QString m_name;
         modemnmt::NmtNetworkConfig m_config;
+        bool m_amps = false;                    // an AMPS network: m_ampsConfig, else NMT: m_config
+        modemamps::AmpsNetworkConfig m_ampsConfig;
         int m_fallback = 0;
         CellularFarEnd m_farEnd;
         QString m_smsCodepage;                  // CellularSmsText key of the SMS sent, empty: GSM default
@@ -155,6 +159,10 @@ private:
         std::unique_ptr<modemnmt::NmtBaseStation> station;
         std::unique_ptr<modemcellular::CellularSystem> cellular;
         std::unique_ptr<modemnmt::NmtCellularBridge> bridge;
+        // an AMPS network has these in place of the NMT station and bridge (the rest is shared)
+        modemamps::AmpsNetworkConfig ampsConfig;
+        std::unique_ptr<modemamps::AmpsBaseStation> ampsStation;
+        std::unique_ptr<modemamps::AmpsCellularBridge> ampsBridge;
         modemcellular::WireSpan boundRx;
         modemcellular::WireSpan boundTx;
         modemcellular::CarrierBatch txBatch;
@@ -203,6 +211,18 @@ private:
         uint64_t gaps = 0;                      // batches of the receiver that did not arrive
         uint64_t nextSample = 0;
     };
+
+    struct CarrierView
+    {
+        int channel;
+        double downlink;
+        double uplink;
+        bool planned;
+        bool onAir;
+    };
+    static std::vector<CarrierView> carrierViews(const Network& n);
+    void tryBindAmps(Network& n, const modemcellular::WireSpan& rxSpan, const modemcellular::WireSpan& txSpan);
+    void reportAmpsStatus(const Network& n, Cellular::MsgReportStatus *msg);
 
     void addNetwork(const MsgAddNetwork& add);
     void remove(int id, bool retryOthers);

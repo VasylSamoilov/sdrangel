@@ -114,6 +114,15 @@ public:
     qint32 getCallLimit();
     void setCallLimit(qint32 call_limit);
 
+    qint32 getSid();
+    void setSid(qint32 sid);
+
+    qint32 getDcc();
+    void setDcc(qint32 dcc);
+
+    qint32 getScc();
+    void setScc(qint32 scc);
+
     qint32 getRxDeviceSetIndex();
     void setRxDeviceSetIndex(qint32 rx_device_set_index);
 
@@ -195,6 +204,15 @@ private:
 
     qint32 call_limit;
     bool m_call_limit_isSet;
+
+    qint32 sid;
+    bool m_sid_isSet;
+
+    qint32 dcc;
+    bool m_dcc_isSet;
+
+    qint32 scc;
+    bool m_scc_isSet;
 
     qint32 rx_device_set_index;
     bool m_rx_device_set_index_isSet;
