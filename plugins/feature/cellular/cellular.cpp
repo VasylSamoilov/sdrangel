@@ -140,7 +140,6 @@ void Cellular::sendSmsCentres()
         for (const modemnmt::NmtPhoneRecord *r : m_book.all())
         {
             const std::string& centre = r->value(modemnmt::NmtPhoneRecord::SmsCentre);
-            msg->m_phones.insert(std::make_pair(static_cast<int>(r->system), r->number));
             if (!centre.empty()) {
                 msg->m_centres[std::make_pair(static_cast<int>(r->system), r->number)] = centre;
             }

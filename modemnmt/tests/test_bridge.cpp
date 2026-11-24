@@ -209,7 +209,7 @@ static void testCallToEcho()
     s.cellular.setFallback(modemcellular::CallRouter::Fallback::Echo);
     s.cellular.setAnswerDelay(0.5);
     s.roam(*s.a, phone);
-    s.callFrom(*s.a, phone, "5551234");
+    s.callFrom(*s.a, phone, "555123");
     CHECK(s.cellular.callCount() == 1);
 
     // The phone speaks twice: 0.1 s to 0.4 s, before the router connects the call at 0.5 s,
@@ -367,7 +367,7 @@ static void testRegistrationLifetime()
         s.roam(*s.a, phone);
         s.roam(*s.b, phone);
         CHECK(s.cellular.isRegistered("1123456"));
-        s.callFrom(*s.b, phone, "5551234");
+        s.callFrom(*s.b, phone, "555123");
         const std::vector<float> sent = s.air(4.0, *s.b);
         CHECK(std::fabs(toneAmplitude(sent, static_cast<size_t>(kRate * 2.5), sent.size(), 1000.0, kRate) - gatedAmplitude(0.4)) < 0.02);
     }
@@ -448,7 +448,8 @@ static void testPhoneToPhone()
 }
 
 // A phone number that is not registered (the phone kept its traffic area, no roaming update since
-// the network started) is paged all the same; a number that is no phone number goes to the echo.
+// the network started) is paged all the same, as osmocom-analog does; a number that is no phone
+// number goes to the echo.
 static void testCallToUnregisteredPhone()
 {
     Station s(true);
@@ -456,7 +457,6 @@ static void testCallToUnregisteredPhone()
     callee.number = "654321";
 
     s.cellular.setFallback(modemcellular::CallRouter::Fallback::Echo);
-    s.bridge->setKnownPhone([](const std::string& number) { return number == "1654321"; });
     s.roam(*s.a, caller);
     CHECK(!s.cellular.isRegistered("1654321"));
     s.callFrom(*s.a, caller, "1654321");
@@ -472,10 +472,9 @@ static void testShortNumberToEcho()
     Phone caller;
 
     s.cellular.setFallback(modemcellular::CallRouter::Fallback::Echo);
-    s.bridge->setKnownPhone([](const std::string& number) { return number == "1654321"; });
     s.roam(*s.a, caller);
-    // a number that is no phone, and a phone number that is not known
-    for (const char *dialled : {"222", "5551234"})
+    // numbers that are no phone numbers (a phone number is the country digit and six digits)
+    for (const char *dialled : {"222", "555123"})
     {
         s.callFrom(*s.a, caller, dialled);
         s.air(0.05, *s.a, microphone({}));
@@ -518,7 +517,7 @@ static void testBridgeGoesAway()
         Station s;
         s.cellular.setFallback(modemcellular::CallRouter::Fallback::Echo);
         s.roam(*s.a, phone);
-        s.callFrom(*s.a, phone, "5551234");
+        s.callFrom(*s.a, phone, "555123");
         CHECK(s.cellular.callCount() == 1);
         s.bridge.reset();
         CHECK(s.cellular.callCount() == 0);
@@ -534,7 +533,7 @@ static void testBridgeGoesAway()
     {
         Station s;
         s.roam(*s.a, phone);
-        s.callFrom(*s.a, phone, "5551234");
+        s.callFrom(*s.a, phone, "555123");
         s.air(0.5, *s.a);
     }
 }
@@ -551,7 +550,7 @@ static void testTwoCallsInARow()
 
     for (int round = 0; round < 2; round++)
     {
-        s.callFrom(*s.a, phone, "5551234");
+        s.callFrom(*s.a, phone, "555123");
         CHECK(s.cellular.callCount() == 1);
         // a burst of speech 0.1 s to 0.5 s into the call; the echo of the new call starts silent
         // and brings it back a second later
@@ -581,7 +580,7 @@ static void testMovedCall()
     s.cellular.setFallback(modemcellular::CallRouter::Fallback::Echo);
     s.cellular.setAnswerDelay(0.1);
     s.roam(*s.a, phone);
-    s.callFrom(*s.a, phone, "5551234");
+    s.callFrom(*s.a, phone, "555123");
     s.airBoth(1.0, *s.a, microphone({}), *s.b, nullptr);
     CHECK(s.cellular.callCount() == 1);
 
@@ -626,7 +625,7 @@ static void testFarEndReleasesDuringMove()
 
     s.cellular.setFallback(modemcellular::CallRouter::Fallback::Echo);
     s.roam(*s.a, caller);
-    s.callFrom(*s.a, caller, "5551234");
+    s.callFrom(*s.a, caller, "555123");
     s.airBoth(1.0, *s.a, microphone({}), *s.b, nullptr);
     CHECK(s.nmt.moveCall(caller.country, caller.number));
     s.airBoth(0.2, *s.a, microphone({}), *s.b, microphone({}));
@@ -654,7 +653,7 @@ static void testMftDigitsAsTones()
     s.cellular.setFallback(modemcellular::CallRouter::Fallback::Echo);
     s.cellular.setAnswerDelay(0.1);
     s.roam(*s.a, phone);
-    s.callFrom(*s.a, phone, "5551234");
+    s.callFrom(*s.a, phone, "555123");
     s.air(1.0, *s.a, microphone({}));
 
     // the converter: the request, the acknowledgement frames, then the audio path stays

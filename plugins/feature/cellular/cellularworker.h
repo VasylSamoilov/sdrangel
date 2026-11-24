@@ -21,7 +21,6 @@
 #include <deque>
 #include <map>
 #include <memory>
-#include <set>
 #include <vector>
 
 #include <QObject>
@@ -79,9 +78,7 @@ public:
         MESSAGE_CLASS_DECLARATION
 
     public:
-        std::map<std::pair<int, std::string>, std::string> m_centres;
-        std::set<std::pair<int, std::string>> m_phones;     // every phone of the book, by system and number
-        static MsgSmsCentres* create() { return new MsgSmsCentres(); }
+        std::map<std::pair<int, std::string>, std::string> m_centres;        static MsgSmsCentres* create() { return new MsgSmsCentres(); }
 
     private:
         MsgSmsCentres() : Message() { }
@@ -229,9 +226,7 @@ private:
     std::map<ChannelAPI*, std::unique_ptr<Radio>> m_radios;
     std::vector<std::unique_ptr<Network>> m_networks;
     std::map<std::string, modemnmt::NmtPhoneInfo> m_known;
-    std::map<std::pair<int, std::string>, std::string> m_smsCentres;   // of the phones, from the book
-    std::set<std::pair<int, std::string>> m_bookPhones;                // the phones of the book
-    // touch tones in the speech of the phones (DTMF), by number: the keys of a group are logged
+    std::map<std::pair<int, std::string>, std::string> m_smsCentres;   // of the phones, from the book    // touch tones in the speech of the phones (DTMF), by number: the keys of a group are logged
     // together when the phone sent no key for a while
     struct ToneListener
     {

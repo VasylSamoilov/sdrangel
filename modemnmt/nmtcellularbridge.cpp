@@ -156,11 +156,12 @@ NmtCellularBridge::NmtCellularBridge(NmtSystem& nmt, modemcellular::CellularSyst
             leg.setCallref(0);
         }
 
-        // A known phone that is not registered here is paged all the same (osmocom-analog's NMT
-        // pages any number): a phone that kept its traffic area makes no roaming update after the
-        // network starts, and would otherwise be unreachable. Other numbers go to the fallback.
+        // A phone number (country digit and six digits) that is not registered here is paged all
+        // the same, as osmocom-analog's NMT does: a phone that kept its traffic area makes no
+        // roaming update after the network starts. If it does not answer, the caller hears the
+        // tone of the cause. Other numbers go to the fallback.
         modemcellular::MobileLeg *called = nullptr;
-        if (!m_cellular.isRegistered(dialled) && dialled != leg.number() && m_knownPhone && m_knownPhone(dialled)) {
+        if (!m_cellular.isRegistered(dialled) && dialled != leg.number()) {
             called = legOf(dialled);
         }
         const modemcellular::CallRouter::SetupResult result = m_cellular.setup(leg, leg.number(), dialled, called);

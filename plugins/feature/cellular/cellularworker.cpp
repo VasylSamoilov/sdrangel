@@ -153,7 +153,6 @@ void CellularWorker::handleInputMessages()
             action(static_cast<const Cellular::MsgAction&>(*message));
         } else if (MsgSmsCentres::match(*message)) {
             m_smsCentres = static_cast<const MsgSmsCentres&>(*message).m_centres;
-            m_bookPhones = static_cast<const MsgSmsCentres&>(*message).m_phones;
         } else if (MsgNames::match(*message)) {
             rename(static_cast<const MsgNames&>(*message));
         }
@@ -327,8 +326,7 @@ void CellularWorker::setHandlers(Network& n)
             type = "SMS centre";
         } else if (n.cellular && n.cellular->isRegistered(dialled)) {
             type = "phone";
-        } else if (n.phones.count(dialled) > 0 || m_known.count(dialled) > 0
-                   || m_bookPhones.count(std::make_pair(static_cast<int>(n.config.system), dialled)) > 0) {
+        } else if (dialled.size() == 7 && dialled.find_first_not_of("0123456789") == std::string::npos) {
             type = "phone, not registered here: paged";
         } else {
             type = n.music ? "music, no phone has the number" : "echo, no phone has the number";
@@ -1141,11 +1139,6 @@ void CellularWorker::tryBind(Network& n)
     }
 
     n.bridge = std::make_unique<modemnmt::NmtCellularBridge>(*n.station->system(), *n.cellular);
-    // a call to a phone the tester knows (heard, or in the book) pages it also without a roaming update
-    n.bridge->setKnownPhone([this, network = &n](const std::string& number) {
-        return network->phones.count(number) > 0 || m_known.count(number) > 0
-            || m_bookPhones.count(std::make_pair(static_cast<int>(network->config.system), number)) > 0;
-    });
     n.caller = std::make_unique<modemcellular::TestCaller>(*n.cellular);
     setHandlers(n);
     n.phones.clear();

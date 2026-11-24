@@ -74,12 +74,8 @@ public:
     // for a call to it (CellularSystem::setup with this leg); null if it is not such a number.
     // From the thread of the NmtSystem.
     modemcellular::MobileLeg* legOf(const std::string& number);
-    // Phones the owner knows (heard on a network, in its book): a call to such a number that is
-    // not registered here pages the phone instead of going to the fallback. Not set: none.
-    void setKnownPhone(std::function<bool(const std::string& number)> known) { m_knownPhone = std::move(known); }
 
 private:
-    std::function<bool(const std::string&)> m_knownPhone;
     class Leg;
     struct Event
     {
