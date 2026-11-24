@@ -53,9 +53,10 @@ void CellularColumns::setup(QTableWidget *table, QList<int> *indexes, QList<int>
     });
 
     apply(table, *indexes, *sizes);
-    QObject::connect(header, &QHeaderView::sectionMoved, table, [indexes](int logical, int, int visual) {
-        if (logical >= 0 && logical < indexes->size()) {
-            (*indexes)[logical] = visual;
+    // a move shifts the columns between its two places too: keep the place of every column
+    QObject::connect(header, &QHeaderView::sectionMoved, table, [header, indexes]() {
+        for (int col = 0; col < indexes->size() && col < header->count(); col++) {
+            (*indexes)[col] = header->visualIndex(col);
         }
     });
     QObject::connect(header, &QHeaderView::sectionResized, table, [sizes](int logical, int, int size) {
@@ -84,7 +85,12 @@ void CellularColumns::apply(QTableWidget *table, const QList<int>& indexes, cons
             table->setColumnWidth(col, widths[col]);
         }
     }
-    for (int col = 0; col < table->columnCount() && col < order.size(); col++) {
-        header->moveSection(header->visualIndex(col), order[col]);
+    // place by place from the left: a column moved in does not shift those placed before it
+    for (int visual = 0; visual < table->columnCount(); visual++)
+    {
+        const int col = order.indexOf(visual);
+        if (col >= 0 && col < table->columnCount()) {
+            header->moveSection(header->visualIndex(col), visual);
+        }
     }
 }
