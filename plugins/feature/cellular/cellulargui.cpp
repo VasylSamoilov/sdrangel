@@ -1567,23 +1567,16 @@ bool CellularGUI::logShown(const LogLine& line) const
 QString CellularGUI::logHtml(const LogLine& line, bool withNetwork) const
 {
     using K = Cellular::MsgReportLog;
-    static const struct { const char *text; const char *colour; } badges[] = {
-        {"", ""},                       // Event
-        {"FRAME", "#3a3a3a"},
-        {"CALL", "#2e6b3e"},
-        {"SMS", "#5b4a20"},
-        {"IND", "#4a3b6b"},
-        {"PWR", "#6b4a2b"},
-        {"PHONE", "#2b4867"},
-        {"TONE", "#2b5b5b"},
-        {"NET", "#3b3b5b"},
-        {"WARN", "#7a2b2b"},
+    // by kind: Event (no badge), Frame, Call, Sms, Mwi, Power, Phone, Tone, Network, Warning
+    static const char *const colours[] = {
+        "", "#3a3a3a", "#2e6b3e", "#5b4a20", "#4a3b6b", "#6b4a2b", "#2b4867", "#2b5b5b", "#3b3b5b", "#7a2b2b"
     };
     const int kind = (line.kind >= K::Event && line.kind <= K::Warning) ? line.kind : K::Event;
+    const QString badge = K::kindName(static_cast<K::Kind>(kind));
     QString html = line.time.toHtmlEscaped() + " ";
 
-    if (badges[kind].text[0]) {
-        html += QString("<span style=\"background-color:%1;\">&nbsp;%2&nbsp;</span> ").arg(badges[kind].colour).arg(badges[kind].text);
+    if (!badge.isEmpty()) {
+        html += QString("<span style=\"background-color:%1;\">&nbsp;%2&nbsp;</span> ").arg(colours[kind]).arg(badge);
     }
     if (withNetwork && line.network) {
         html += networkName(line.network).toHtmlEscaped() + ": ";
