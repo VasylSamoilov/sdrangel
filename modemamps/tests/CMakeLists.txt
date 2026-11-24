@@ -7,7 +7,8 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 get_filename_component(SDRANGEL_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 
 set(MODEMAMPS_LIB_SOURCES
-    ../ampsbch.cpp)
+    ../ampsbch.cpp
+    ../ampsstream.cpp)
 
 # Sanitizer: address (address and undefined behaviour) or off
 set(MODEMAMPS_TEST_SANITIZER "off" CACHE STRING "off or address")
@@ -35,3 +36,4 @@ function(modemamps_add_test name source)
 endfunction()
 
 modemamps_add_test(modemamps_bch_test test_bch.cpp)
+modemamps_add_test(modemamps_stream_test test_stream.cpp)

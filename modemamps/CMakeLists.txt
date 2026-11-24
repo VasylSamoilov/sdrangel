@@ -2,10 +2,12 @@ project(modemamps)
 
 set(modemamps_SOURCES
     ampsbch.cpp
+    ampsstream.cpp
 )
 
 set(modemamps_HEADERS
     ampsbch.h
+    ampsstream.h
 )
 
 include_directories(
