@@ -103,4 +103,29 @@ private:
     bool m_live = false;
 };
 
+// The call meters drawn large (as the proposal's hover card): a title, each direction with its
+// level and spectrum at twice the size and its numbers, then the phone's radio line (Mobiles).
+class CellularCallPanel : public QWidget
+{
+    Q_OBJECT
+
+public:
+    explicit CellularCallPanel(QWidget *parent = nullptr);
+    // seen null: no meters (a call not on a channel, or none); radio: the phone's Mobiles state
+    void show(const CellularSpeechSeen *seen, const QString& title, const QString& radio);
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
+    QSize sizeHint() const override;
+    QSize minimumSizeHint() const override;
+
+private:
+    int rowHeight() const;
+    CellularCallSpeech m_call;
+    bool m_has = false;
+    bool m_live = false;
+    QString m_title;
+    QString m_radio;
+};
+
 #endif // INCLUDE_FEATURE_CELLULARSPEECH_H_

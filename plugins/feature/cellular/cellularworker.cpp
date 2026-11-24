@@ -22,6 +22,7 @@
 
 #include <QDebug>
 
+#include "audio/audiodeviceinfo.h"
 #include "audio/audiodevicemanager.h"
 #include "channel/channelapi.h"
 #include "dsp/dspengine.h"
@@ -685,8 +686,17 @@ void CellularWorker::setConsole(const CellularConsole& console)
     m_console = console;
     AudioDeviceManager *audio = DSPEngine::instance()->getAudioDeviceManager();
 
-    if (newMic) {
+    if (newMic)
+    {
         m_microphone = std::make_unique<CellularMusicInput>(m_console.m_microphone);
+        // an input that is the monitor of an output (PipeWire/PulseAudio "....monitor") records what
+        // the speaker plays: the phone hears itself. A warning only: the operator decides.
+        const QString input = m_console.m_microphone.isEmpty() || m_console.m_microphone == AudioDeviceManager::m_defaultDeviceName
+            ? AudioDeviceInfo::defaultInputDevice().deviceName() : m_console.m_microphone;
+        if (input.contains("monitor", Qt::CaseInsensitive)) {
+            log(0, QString("console: warning, the microphone %1 is the monitor of an audio output: the phone hears "
+                "itself as an echo (mute the microphone or choose a real input)").arg(input));
+        }
     }
     m_micGain = static_cast<float>(std::pow(10.0, std::max(-20, std::min(20, m_console.m_micGainDb)) / 20.0));
     if (newSpeaker)

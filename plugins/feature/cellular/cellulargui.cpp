@@ -817,6 +817,51 @@ void CellularGUI::buildUI()
     connect(m_startStop, &ButtonSwitch::toggled, this, &CellularGUI::onStartStop);
     connect(options, &QToolButton::clicked, this, &CellularGUI::openSettings);
     connect(m_tabs, &QTabWidget::currentChanged, this, &CellularGUI::fitHeight);
+    connect(m_tabs, &QTabWidget::currentChanged, this, [this]() { showSpeech(); });
+
+    // the followed call in a section of its own: meters drawn large, the phone's radio line and
+    // the log lines of that phone and its channel
+    QWidget *call = new QWidget(rollupContents);
+    call->setObjectName("call");
+    call->setWindowTitle("Call");
+    QVBoxLayout *callLayout = new QVBoxLayout(call);
+    callLayout->setContentsMargins(3, 3, 3, 3);
+    callLayout->setSpacing(2);
+    QHBoxLayout *callTop = new QHBoxLayout();
+    m_callPanel = new CellularCallPanel(call);
+    callTop->addWidget(m_callPanel, 1);
+    m_callFollow = new ButtonSwitch(call);
+    QIcon follow;
+    follow.addFile(":/play.png", QSize(16, 16), QIcon::Normal, QIcon::Off);
+    follow.addFile(":/pause.png", QSize(16, 16), QIcon::Normal, QIcon::On);
+    m_callFollow->setIcon(follow);
+    m_callFollow->setChecked(true);
+    m_callFollow->setToolTip("Following the call (on): its meters and log lines come in. Off: they stop where they are");
+    callTop->addWidget(m_callFollow, 0, Qt::AlignTop);
+    callLayout->addLayout(callTop);
+    connect(m_callFollow, &QToolButton::toggled, this, [this](bool on) {
+        if (on) {
+            showSpeech();
+        }
+    });
+    m_callLog = new QPlainTextEdit(call);
+    m_callLog->setReadOnly(true);
+    m_callLog->setMaximumBlockCount(500);
+    m_callLog->setLineWrapMode(QPlainTextEdit::NoWrap);
+    m_callLog->setFixedHeight(m_callLog->fontMetrics().lineSpacing() * 8 + 10);
+    m_callLog->setToolTip("The log lines of the phone of the followed call and of its channel (frames, levels, orders)");
+    callLayout->addWidget(m_callLog);
+    call->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+}
+
+// A log line of the followed call: it names the phone (whole, or its six digits after X=) or its channel.
+bool CellularGUI::callLine(int network, const QString& text) const
+{
+    if (m_callNumber.isEmpty() || (m_callNetwork && network != m_callNetwork)) {
+        return false;
+    }
+    return text.contains(m_callNumber) || text.contains("X=" + m_callNumber.mid(1))
+        || (m_callChannel > 0 && text.startsWith(QString("ch %1 ").arg(m_callChannel)));
 }
 
 QWidget *CellularGUI::buildPhones()
@@ -1236,6 +1281,7 @@ QString CellularGUI::networkName(int id) const
 QWidget *CellularGUI::buildConsole()
 {
     QWidget *page = new QWidget(m_tabs);
+    m_consolePage = page;
     QVBoxLayout *layout = new QVBoxLayout(page);
     layout->setContentsMargins(4, 4, 4, 4);
 
@@ -1243,10 +1289,12 @@ QWidget *CellularGUI::buildConsole()
     QHBoxLayout *stateRow = new QHBoxLayout();
     m_consoleBell = new QLabel(page);
     m_consoleBell->setPixmap(QIcon(":/bell_line.png").pixmap(16, 16));
+    // one line whatever it says: the rows under it never move
     m_consoleState = new QLabel(page);
-    m_consoleState->setWordWrap(true);
+    m_consoleState->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    m_consoleState->setMinimumWidth(0);
     stateRow->addWidget(m_consoleBell);
-    stateRow->addWidget(m_consoleState);
+    stateRow->addWidget(m_consoleState, 1);
     // its own number: a network number, the country digit and six digits
     m_consoleOwn = new QLineEdit(page);
     m_consoleOwn->setValidator(new QRegularExpressionValidator(QRegularExpression("[0-9]{7}"), m_consoleOwn));
@@ -1257,10 +1305,18 @@ QWidget *CellularGUI::buildConsole()
     QLabel *own = new QLabel("Console number", page);
     stateRow->addWidget(own);
     stateRow->addWidget(m_consoleOwn);
-    stateRow->addStretch(1);
     layout->addLayout(stateRow);
+    // the phone of the call (two lines) and its touch tones (one): their room is always kept
+    m_consoleRadio = new QLabel(page);
+    m_consoleRadio->setToolTip("The phone of the call as the network hears it (as in Mobiles): its state, channel, "
+        "power level and signal. The call's meters and log are in the Call section");
+    m_consoleRadio->setFixedHeight(m_consoleRadio->fontMetrics().lineSpacing() * 2 + 2);
+    m_consoleRadio->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    layout->addWidget(m_consoleRadio);
     m_consoleKeys = new QLabel(page);
     m_consoleKeys->setToolTip("Touch tones the phone sent in the call (in-band DTMF), as they come");
+    m_consoleKeys->setFixedHeight(m_consoleKeys->fontMetrics().lineSpacing() + 2);
+    m_consoleKeys->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     layout->addWidget(m_consoleKeys);
 
     // the number and the pad
@@ -1450,6 +1506,26 @@ QWidget *CellularGUI::buildConsole()
     return page;
 }
 
+// The phone in the console's call, as its row in Mobiles shows it.
+QString CellularGUI::radioOf(const QString& number) const
+{
+    for (int row = 0; row < m_phones->rowCount() && !number.isEmpty(); row++)
+    {
+        const QTableWidgetItem *item = m_phones->item(row, MobileName);
+        const QTableWidgetItem *state = m_phones->item(row, MobileState);
+        if (item && state && item->data(CellularMobileRole::Number).toString() == number) {
+            return state->text();
+        }
+    }
+    return QString();
+}
+
+void CellularGUI::showConsoleRadio()
+{
+    const QString text = m_consoleReport.m_state != Cellular::MsgReportConsole::Idle ? radioOf(m_consoleReport.m_peer) : QString();
+    m_consoleRadio->setText(text);
+}
+
 // the speaker's or microphone's device, as SDRangel's channels select theirs
 void CellularGUI::consoleDevice(const QPoint& p, bool input)
 {
@@ -1539,7 +1615,6 @@ void CellularGUI::showConsole()
     m_consoleState->setText(text);
     m_consoleBell->setPixmap(QIcon(r.m_state == R::Incoming ? ":/bell_red.png" : ":/bell_line.png").pixmap(16, 16));
     m_consoleKeys->setText(r.m_keys.isEmpty() ? QString() : QString("Tones from %1: %2").arg(r.m_peer).arg(r.m_keys));
-    m_consoleKeys->setVisible(!r.m_keys.isEmpty());
     // the green key: dark idle (call), bright while a call rings (answer), mid in a call;
     // the red key red while there is a call; the speaker green while a call is heard
     const bool ringing = r.m_state == R::Incoming;
@@ -1799,6 +1874,7 @@ void CellularGUI::showMobiles()
     if (heightChanged) {
         m_phones->resizeRowsToContents();
     }
+    showSpeech();       // the followed call's radio line
 }
 
 void CellularGUI::editMobile(modemnmt::System system, const QString& number)
@@ -1953,9 +2029,17 @@ void CellularGUI::showSpeech()
 {
     const QModelIndexList rows = m_phones->selectionModel()->selectedRows();
     const QTableWidgetItem *item = rows.isEmpty() ? nullptr : m_phones->item(rows.first().row(), MobileName);
-    const CellularSpeechSeen *seen = item ? speechOf(item->data(CellularMobileRole::Number).toString()) : nullptr;
+    QString number = item ? item->data(CellularMobileRole::Number).toString() : QString();
+    const CellularSpeechSeen *seen = number.isEmpty() ? nullptr : speechOf(number);
+    const bool console = m_consoleReport.m_state != Cellular::MsgReportConsole::Idle && !m_consoleReport.m_peer.isEmpty();
 
-    if (!seen)
+    // on the Console tab: the call of the console (its other side, a phone of a network)
+    if (console && m_tabs->currentWidget() == m_consolePage)
+    {
+        number = m_consoleReport.m_peer;
+        seen = speechOf(number);
+    }
+    else if (!seen)
     {
         int live = 0;
         for (auto it = m_speech.constBegin(); it != m_speech.constEnd(); ++it)
@@ -1969,8 +2053,46 @@ void CellularGUI::showSpeech()
         if (live != 1) {
             seen = nullptr;
         }
+        number = seen ? seen->call.phone : console ? m_consoleReport.m_peer : number;
     }
     m_speechLine->show(seen);
+    showConsoleRadio();
+
+    // The Call section follows a phone from before its call, through its channel moves, to after
+    // it, until a call of another phone is followed; stopped, it keeps what it shows.
+    if (!m_callFollow->isChecked()) {
+        return;
+    }
+    if (!number.isEmpty() && number != m_callNumber)
+    {
+        m_callNumber = number;
+        m_callNetwork = number == m_consoleReport.m_peer && m_consoleReport.m_network ? m_consoleReport.m_network
+            : item && item->data(CellularMobileRole::Number).toString() == number ? item->data(CellularMobileRole::Network).toInt() : 0;
+        m_callChannel = 0;
+        m_callLog->clear();
+        // what the phone did before: the lines that name it
+        for (const LogLine& line : m_logLines)
+        {
+            if (callLine(line.network, line.text)) {
+                m_callLog->appendPlainText(line.time + " " + line.text);
+            }
+        }
+    }
+    const CellularSpeechSeen *followed = m_callNumber.isEmpty() ? nullptr : speechOf(m_callNumber);
+    const int channel = followed && followed->live() ? followed->call.channel : 0;
+    if (channel != m_callChannel)
+    {
+        // its channel's lines from now on (the channel it moved to)
+        m_callChannel = channel;
+        if (channel > 0) {
+            m_callLog->appendPlainText(QString("--- %1 on channel %2").arg(m_callNumber).arg(channel));
+        }
+    }
+    QString title = m_callNumber;
+    if (console && m_callNumber == m_consoleReport.m_peer) {
+        title += " with the console";
+    }
+    m_callPanel->show(followed, title, radioOf(m_callNumber));
 }
 
 void CellularGUI::showStatus(const Cellular::MsgReportStatus& report)
@@ -2162,6 +2284,9 @@ void CellularGUI::addLog(int network, const QString& text, int kind)
     if (m_logLines.size() > static_cast<size_t>(m_maxLogLines)) {
         m_logLines.pop_front();
     }
+    if (m_callFollow->isChecked() && callLine(network, text)) {
+        m_callLog->appendPlainText(line.time + " " + text);
+    }
     if (!logShown(line)) {
         return;
     }
@@ -2278,6 +2403,7 @@ bool CellularGUI::handleMessage(const Message& message)
         m_consoleReport.m_since = r.m_since;
         m_consoleReport.m_keys = r.m_keys;
         showConsole();
+        showSpeech();
         // a call to the console: its tab shows
         if (rings) {
             m_tabs->setCurrentIndex(1);

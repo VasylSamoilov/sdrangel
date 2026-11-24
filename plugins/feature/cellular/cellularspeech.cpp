@@ -48,7 +48,115 @@ QString directionText(const SpeechStats& s)
         .arg(3.0 * s.peak, 0, 'f', 1).arg(100.0 * s.pauseShare(), 0, 'f', 0).arg(bands.join(" "));
 }
 
+// the numbers of a direction for the panel, short
+QString panelText(const SpeechStats& s)
+{
+    if (s.speech == 0) {
+        return QString("no speech, pauses %1 %").arg(100.0 * s.pauseShare(), 0, 'f', 0);
+    }
+    return QString("%1 dB rms, peak %2 kHz, %3 at the limit, pauses %4 %")
+        .arg(s.levelDb(), 0, 'f', 1).arg(3.0 * s.peak, 0, 'f', 1)
+        .arg(CellularSpeechPaint::detail::limitText(s)).arg(100.0 * s.pauseShare(), 0, 'f', 0);
+}
+
+const int kPanelScale = 2;          // the drawings at twice their size in the line
+
 } // namespace
+
+CellularCallPanel::CellularCallPanel(QWidget *parent) :
+    QWidget(parent)
+{
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+}
+
+void CellularCallPanel::show(const CellularSpeechSeen *seen, const QString& title, const QString& radio)
+{
+    m_has = seen != nullptr;
+    if (seen)
+    {
+        m_call = seen->call;
+        m_live = seen->live();
+    }
+    m_title = title;
+    m_radio = radio;
+    updateGeometry();
+    update();
+}
+
+int CellularCallPanel::rowHeight() const
+{
+    return std::max(fontMetrics().height(), 14 * kPanelScale) + 6;
+}
+
+QSize CellularCallPanel::sizeHint() const
+{
+    const int line = fontMetrics().height() + 4;
+    return QSize(400, line * (m_radio.isEmpty() ? 1 : 2) + 2 * rowHeight() + 6);
+}
+
+QSize CellularCallPanel::minimumSizeHint() const
+{
+    return QSize(100, sizeHint().height());
+}
+
+void CellularCallPanel::paintEvent(QPaintEvent *)
+{
+    namespace D = CellularSpeechPaint::detail;
+    QPainter p(this);
+    const QFontMetrics fm = fontMetrics();
+    const int line = fm.height() + 4;
+    const QColor muted(0x8a, 0x92, 0x9c);
+    int y = 2;
+
+    QString head = m_title;
+    if (!m_has) {
+        head += head.isEmpty() ? "No call" : ": no speech measured (not a call on a channel)";
+    } else {
+        head += QString("%1channel %2, %3").arg(head.isEmpty() ? "" : " - ").arg(m_call.channel)
+            .arg(m_live ? "the last 2 s" : "the whole call");
+    }
+    p.setPen(muted);
+    p.drawText(QRect(4, y, width() - 8, line), Qt::AlignVCenter | Qt::AlignLeft, fm.elidedText(head, Qt::ElideRight, width() - 8));
+    y += line;
+
+    const int labelW = fm.horizontalAdvance("from the phone") + 24;
+    const int levelW = D::levelWidth() * kPanelScale;
+    const int spectrumW = D::spectrumWidth() * kPanelScale;
+    const int h = 14 * kPanelScale;
+    struct Row { QString arrow; QString name; const SpeechStats *stats; };
+    const SpeechStats& rx = m_live ? m_call.rxRecent : m_call.rxCall;
+    const SpeechStats& tx = m_live ? m_call.txRecent : m_call.txCall;
+    const Row rows[2] = {{CellularSpeechPaint::up(), "from the phone", &rx}, {CellularSpeechPaint::down(), "to the phone", &tx}};
+
+    for (const Row& r : rows)
+    {
+        const int rh = rowHeight();
+        p.setPen(palette().color(QPalette::WindowText));
+        p.drawText(QRect(4, y, labelW, rh), Qt::AlignVCenter | Qt::AlignLeft, r.arrow + " " + r.name);
+        int x = 4 + labelW;
+        if (m_has)
+        {
+            // the small drawings, scaled: the same code as the grid and the tiles
+            p.save();
+            p.translate(x, y + (rh - h) / 2);
+            p.scale(kPanelScale, kPanelScale);
+            D::paintLevel(p, QRect(0, 0, D::levelWidth(), 14), *r.stats);
+            D::paintSpectrum(p, QRect(D::levelWidth() + D::kGap, 0, D::spectrumWidth(), 14), *r.stats);
+            p.restore();
+            x += levelW + D::kGap * kPanelScale + spectrumW + 10;
+            p.setPen(m_live ? palette().color(QPalette::WindowText) : muted);
+            p.drawText(QRect(x, y, width() - x - 4, rh), Qt::AlignVCenter | Qt::AlignLeft,
+                fm.elidedText(panelText(*r.stats), Qt::ElideRight, width() - x - 4));
+        }
+        y += rh;
+    }
+    if (!m_radio.isEmpty())
+    {
+        p.setPen(muted);
+        p.drawText(QRect(4, y, width() - 8, line), Qt::AlignVCenter | Qt::AlignLeft,
+            fm.elidedText(QString(m_radio).replace('\n', "  |  "), Qt::ElideRight, width() - 8));
+    }
+}
 
 QString CellularSpeechPaint::text(const CellularCallSpeech& call, bool whole)
 {

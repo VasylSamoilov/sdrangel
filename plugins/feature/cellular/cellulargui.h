@@ -191,7 +191,19 @@ private:
     QTableWidget *m_phones;
     modemnmt::NmtPhoneBook m_book;              // a copy of the feature's, for presets and the table
     QMap<QString, CellularSpeechSeen> m_speech; // the call meters, by number: the last report of its call
+    // the Call section: the followed call drawn large, its phone's radio line and log
+    CellularCallPanel *m_callPanel;
+    QPlainTextEdit *m_callLog;
+    ButtonSwitch *m_callFollow;             // off: the section stops where it is
+    QString m_callNumber;                   // the phone of the followed call
+    int m_callChannel = 0;
+    int m_callNetwork = 0;
+    bool callLine(int network, const QString& text) const;
+    QString radioOf(const QString& number) const;     // its Mobiles state, two lines
     // Console
+    QWidget *m_consolePage;
+    QLabel *m_consoleRadio;
+    void showConsoleRadio();
     QWidget *buildConsole();
     void showConsole();
     void consoleKey(QChar key);
