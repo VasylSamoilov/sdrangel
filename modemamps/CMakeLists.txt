@@ -15,6 +15,7 @@ set(modemamps_SOURCES
     ampsplan.cpp
     ampsspeech.cpp
     ampssystem.cpp
+    ampschannel.cpp
 )
 
 set(modemamps_HEADERS
@@ -32,6 +33,7 @@ set(modemamps_HEADERS
     ampsplan.h
     ampsspeech.h
     ampssystem.h
+    ampschannel.h
 )
 
 include_directories(
