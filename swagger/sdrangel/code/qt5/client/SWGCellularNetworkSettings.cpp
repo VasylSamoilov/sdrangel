@@ -58,6 +58,24 @@ SWGCellularNetworkSettings::SWGCellularNetworkSettings() {
     m_smsc_number_isSet = false;
     fallback = 0;
     m_fallback_isSet = false;
+    echo_delay = 0;
+    m_echo_delay_isSet = false;
+    echo_level = 0;
+    m_echo_level_isSet = false;
+    echo_announce = 0;
+    m_echo_announce_isSet = false;
+    music_source = 0;
+    m_music_source_isSet = false;
+    music_file = nullptr;
+    m_music_file_isSet = false;
+    music_input = nullptr;
+    m_music_input_isSet = false;
+    music_level = 0;
+    m_music_level_isSet = false;
+    music_loop = 0;
+    m_music_loop_isSet = false;
+    call_limit = 0;
+    m_call_limit_isSet = false;
     rx_device_set_index = 0;
     m_rx_device_set_index_isSet = false;
     tx_device_set_index = 0;
@@ -100,6 +118,24 @@ SWGCellularNetworkSettings::init() {
     m_smsc_number_isSet = false;
     fallback = 0;
     m_fallback_isSet = false;
+    echo_delay = 0;
+    m_echo_delay_isSet = false;
+    echo_level = 0;
+    m_echo_level_isSet = false;
+    echo_announce = 0;
+    m_echo_announce_isSet = false;
+    music_source = 0;
+    m_music_source_isSet = false;
+    music_file = new QString("");
+    m_music_file_isSet = false;
+    music_input = new QString("");
+    m_music_input_isSet = false;
+    music_level = 0;
+    m_music_level_isSet = false;
+    music_loop = 0;
+    m_music_loop_isSet = false;
+    call_limit = 0;
+    m_call_limit_isSet = false;
     rx_device_set_index = 0;
     m_rx_device_set_index_isSet = false;
     tx_device_set_index = 0;
@@ -130,6 +166,19 @@ SWGCellularNetworkSettings::cleanup() {
     if(smsc_number != nullptr) { 
         delete smsc_number;
     }
+
+
+
+
+
+    if(music_file != nullptr) {
+        delete music_file;
+    }
+    if(music_input != nullptr) {
+        delete music_input;
+    }
+
+
 
 
 
@@ -175,7 +224,25 @@ SWGCellularNetworkSettings::fromJsonObject(QJsonObject &pJson) {
     ::SWGSDRangel::setValue(&smsc_number, pJson["smscNumber"], "QString", "QString");
     
     ::SWGSDRangel::setValue(&fallback, pJson["fallback"], "qint32", "");
-    
+
+    ::SWGSDRangel::setValue(&echo_delay, pJson["echoDelay"], "qint32", "");
+
+    ::SWGSDRangel::setValue(&echo_level, pJson["echoLevel"], "qint32", "");
+
+    ::SWGSDRangel::setValue(&echo_announce, pJson["echoAnnounce"], "qint32", "");
+
+    ::SWGSDRangel::setValue(&music_source, pJson["musicSource"], "qint32", "");
+
+    ::SWGSDRangel::setValue(&music_file, pJson["musicFile"], "QString", "QString");
+
+    ::SWGSDRangel::setValue(&music_input, pJson["musicInput"], "QString", "QString");
+
+    ::SWGSDRangel::setValue(&music_level, pJson["musicLevel"], "qint32", "");
+
+    ::SWGSDRangel::setValue(&music_loop, pJson["musicLoop"], "qint32", "");
+
+    ::SWGSDRangel::setValue(&call_limit, pJson["callLimit"], "qint32", "");
+
     ::SWGSDRangel::setValue(&rx_device_set_index, pJson["rxDeviceSetIndex"], "qint32", "");
     
     ::SWGSDRangel::setValue(&tx_device_set_index, pJson["txDeviceSetIndex"], "qint32", "");
@@ -240,6 +307,33 @@ SWGCellularNetworkSettings::asJsonObject() {
     }
     if(m_fallback_isSet){
         obj->insert("fallback", QJsonValue(fallback));
+    }
+    if(m_echo_delay_isSet){
+        obj->insert("echoDelay", QJsonValue(echo_delay));
+    }
+    if(m_echo_level_isSet){
+        obj->insert("echoLevel", QJsonValue(echo_level));
+    }
+    if(m_echo_announce_isSet){
+        obj->insert("echoAnnounce", QJsonValue(echo_announce));
+    }
+    if(m_music_source_isSet){
+        obj->insert("musicSource", QJsonValue(music_source));
+    }
+    if(music_file != nullptr && *music_file != QString("")){
+        toJsonValue(QString("musicFile"), music_file, obj, QString("QString"));
+    }
+    if(music_input != nullptr && *music_input != QString("")){
+        toJsonValue(QString("musicInput"), music_input, obj, QString("QString"));
+    }
+    if(m_music_level_isSet){
+        obj->insert("musicLevel", QJsonValue(music_level));
+    }
+    if(m_music_loop_isSet){
+        obj->insert("musicLoop", QJsonValue(music_loop));
+    }
+    if(m_call_limit_isSet){
+        obj->insert("callLimit", QJsonValue(call_limit));
     }
     if(m_rx_device_set_index_isSet){
         obj->insert("rxDeviceSetIndex", QJsonValue(rx_device_set_index));
@@ -402,6 +496,96 @@ SWGCellularNetworkSettings::setFallback(qint32 fallback) {
 }
 
 qint32
+SWGCellularNetworkSettings::getEchoDelay() {
+    return echo_delay;
+}
+void
+SWGCellularNetworkSettings::setEchoDelay(qint32 echo_delay) {
+    this->echo_delay = echo_delay;
+    this->m_echo_delay_isSet = true;
+}
+
+qint32
+SWGCellularNetworkSettings::getEchoLevel() {
+    return echo_level;
+}
+void
+SWGCellularNetworkSettings::setEchoLevel(qint32 echo_level) {
+    this->echo_level = echo_level;
+    this->m_echo_level_isSet = true;
+}
+
+qint32
+SWGCellularNetworkSettings::getEchoAnnounce() {
+    return echo_announce;
+}
+void
+SWGCellularNetworkSettings::setEchoAnnounce(qint32 echo_announce) {
+    this->echo_announce = echo_announce;
+    this->m_echo_announce_isSet = true;
+}
+
+qint32
+SWGCellularNetworkSettings::getMusicSource() {
+    return music_source;
+}
+void
+SWGCellularNetworkSettings::setMusicSource(qint32 music_source) {
+    this->music_source = music_source;
+    this->m_music_source_isSet = true;
+}
+
+QString*
+SWGCellularNetworkSettings::getMusicFile() {
+    return music_file;
+}
+void
+SWGCellularNetworkSettings::setMusicFile(QString* music_file) {
+    this->music_file = music_file;
+    this->m_music_file_isSet = true;
+}
+
+QString*
+SWGCellularNetworkSettings::getMusicInput() {
+    return music_input;
+}
+void
+SWGCellularNetworkSettings::setMusicInput(QString* music_input) {
+    this->music_input = music_input;
+    this->m_music_input_isSet = true;
+}
+
+qint32
+SWGCellularNetworkSettings::getMusicLevel() {
+    return music_level;
+}
+void
+SWGCellularNetworkSettings::setMusicLevel(qint32 music_level) {
+    this->music_level = music_level;
+    this->m_music_level_isSet = true;
+}
+
+qint32
+SWGCellularNetworkSettings::getMusicLoop() {
+    return music_loop;
+}
+void
+SWGCellularNetworkSettings::setMusicLoop(qint32 music_loop) {
+    this->music_loop = music_loop;
+    this->m_music_loop_isSet = true;
+}
+
+qint32
+SWGCellularNetworkSettings::getCallLimit() {
+    return call_limit;
+}
+void
+SWGCellularNetworkSettings::setCallLimit(qint32 call_limit) {
+    this->call_limit = call_limit;
+    this->m_call_limit_isSet = true;
+}
+
+qint32
 SWGCellularNetworkSettings::getRxDeviceSetIndex() {
     return rx_device_set_index;
 }
@@ -469,6 +653,33 @@ SWGCellularNetworkSettings::isSet(){
             isObjectUpdated = true; break;
         }
         if(m_fallback_isSet){
+            isObjectUpdated = true; break;
+        }
+        if(m_echo_delay_isSet){
+            isObjectUpdated = true; break;
+        }
+        if(m_echo_level_isSet){
+            isObjectUpdated = true; break;
+        }
+        if(m_echo_announce_isSet){
+            isObjectUpdated = true; break;
+        }
+        if(m_music_source_isSet){
+            isObjectUpdated = true; break;
+        }
+        if(music_file && *music_file != QString("")){
+            isObjectUpdated = true; break;
+        }
+        if(music_input && *music_input != QString("")){
+            isObjectUpdated = true; break;
+        }
+        if(m_music_level_isSet){
+            isObjectUpdated = true; break;
+        }
+        if(m_music_loop_isSet){
+            isObjectUpdated = true; break;
+        }
+        if(m_call_limit_isSet){
             isObjectUpdated = true; break;
         }
         if(m_rx_device_set_index_isSet){

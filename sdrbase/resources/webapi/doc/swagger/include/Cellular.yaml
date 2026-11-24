@@ -116,6 +116,33 @@ CellularNetworkSettings:
     fallback:
       type: integer
       description: "What answers a call to a number that is not registered (0 echo, 1 music)."
+    echoDelay:
+      type: integer
+      description: "Delay of the echo in ms (200..3000)."
+    echoLevel:
+      type: integer
+      description: "Level of the echo in dB (-30..0)."
+    echoAnnounce:
+      type: integer
+      description: "A short tone when the echo answers (1) or not (0)."
+    musicSource:
+      type: integer
+      description: "Source of the music (0 built-in melody, 1 WAV file, 2 audio input)."
+    musicFile:
+      type: string
+      description: "The WAV file played as music."
+    musicInput:
+      type: string
+      description: "The audio input device played as music, by name; empty for the default."
+    musicLevel:
+      type: integer
+      description: "Level of the music in dB (-30..0)."
+    musicLoop:
+      type: integer
+      description: "Play the music in a loop (1) or once, then end the call (0)."
+    callLimit:
+      type: integer
+      description: "The longest call to echo or music in seconds (0..3600), 0 for no limit."
     rxDeviceSetIndex:
       type: integer
       description: "Index of the device set with the Cellular Rx channel of the network."

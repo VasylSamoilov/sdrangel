@@ -87,6 +87,33 @@ public:
     qint32 getFallback();
     void setFallback(qint32 fallback);
 
+    qint32 getEchoDelay();
+    void setEchoDelay(qint32 echo_delay);
+
+    qint32 getEchoLevel();
+    void setEchoLevel(qint32 echo_level);
+
+    qint32 getEchoAnnounce();
+    void setEchoAnnounce(qint32 echo_announce);
+
+    qint32 getMusicSource();
+    void setMusicSource(qint32 music_source);
+
+    QString* getMusicFile();
+    void setMusicFile(QString* music_file);
+
+    QString* getMusicInput();
+    void setMusicInput(QString* music_input);
+
+    qint32 getMusicLevel();
+    void setMusicLevel(qint32 music_level);
+
+    qint32 getMusicLoop();
+    void setMusicLoop(qint32 music_loop);
+
+    qint32 getCallLimit();
+    void setCallLimit(qint32 call_limit);
+
     qint32 getRxDeviceSetIndex();
     void setRxDeviceSetIndex(qint32 rx_device_set_index);
 
@@ -141,6 +168,33 @@ private:
 
     qint32 fallback;
     bool m_fallback_isSet;
+
+    qint32 echo_delay;
+    bool m_echo_delay_isSet;
+
+    qint32 echo_level;
+    bool m_echo_level_isSet;
+
+    qint32 echo_announce;
+    bool m_echo_announce_isSet;
+
+    qint32 music_source;
+    bool m_music_source_isSet;
+
+    QString* music_file;
+    bool m_music_file_isSet;
+
+    QString* music_input;
+    bool m_music_input_isSet;
+
+    qint32 music_level;
+    bool m_music_level_isSet;
+
+    qint32 music_loop;
+    bool m_music_loop_isSet;
+
+    qint32 call_limit;
+    bool m_call_limit_isSet;
 
     qint32 rx_device_set_index;
     bool m_rx_device_set_index_isSet;

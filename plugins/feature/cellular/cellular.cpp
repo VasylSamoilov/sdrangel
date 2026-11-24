@@ -976,6 +976,15 @@ void Cellular::webapiFormatFeatureSettings(SWGSDRangel::SWGFeatureSettings& resp
         item->setSendClock(n.m_sendClock ? 1 : 0);
         *item->getSmscNumber() = n.m_smscNumber;
         item->setFallback(n.m_fallback);
+        item->setEchoDelay(n.m_farEnd.m_echoDelayMs);
+        item->setEchoLevel(n.m_farEnd.m_echoLevelDb);
+        item->setEchoAnnounce(n.m_farEnd.m_echoAnnounce ? 1 : 0);
+        item->setMusicSource(n.m_farEnd.m_musicSource);
+        *item->getMusicFile() = n.m_farEnd.m_musicFile;
+        *item->getMusicInput() = n.m_farEnd.m_musicInput;
+        item->setMusicLevel(n.m_farEnd.m_musicLevelDb);
+        item->setMusicLoop(n.m_farEnd.m_musicLoop ? 1 : 0);
+        item->setCallLimit(n.m_farEnd.m_callLimitS);
         item->setRxDeviceSetIndex(n.m_rxDeviceSetIndex);
         item->setTxDeviceSetIndex(n.m_txDeviceSetIndex);
         list->append(item);
@@ -1073,6 +1082,33 @@ void Cellular::webapiUpdateFeatureSettings(CellularSettings& settings, const QSt
         if (given("fallback")) {
             n.m_fallback = item->getFallback() == CellularNetworkSettings::FallbackMusic
                 ? CellularNetworkSettings::FallbackMusic : CellularNetworkSettings::FallbackEcho;
+        }
+        if (given("echoDelay")) {
+            n.m_farEnd.m_echoDelayMs = std::max(200, std::min(3000, item->getEchoDelay()));
+        }
+        if (given("echoLevel")) {
+            n.m_farEnd.m_echoLevelDb = std::max(-30, std::min(0, item->getEchoLevel()));
+        }
+        if (given("echoAnnounce")) {
+            n.m_farEnd.m_echoAnnounce = item->getEchoAnnounce() != 0;
+        }
+        if (given("musicSource")) {
+            n.m_farEnd.m_musicSource = std::max(0, std::min(2, item->getMusicSource()));
+        }
+        if (given("musicFile") && item->getMusicFile()) {
+            n.m_farEnd.m_musicFile = *item->getMusicFile();
+        }
+        if (given("musicInput") && item->getMusicInput()) {
+            n.m_farEnd.m_musicInput = *item->getMusicInput();
+        }
+        if (given("musicLevel")) {
+            n.m_farEnd.m_musicLevelDb = std::max(-30, std::min(0, item->getMusicLevel()));
+        }
+        if (given("musicLoop")) {
+            n.m_farEnd.m_musicLoop = item->getMusicLoop() != 0;
+        }
+        if (given("callLimit")) {
+            n.m_farEnd.m_callLimitS = std::max(0, std::min(3600, item->getCallLimit()));
         }
         if (given("rxDeviceSetIndex")) {
             n.m_rxDeviceSetIndex = item->getRxDeviceSetIndex();
