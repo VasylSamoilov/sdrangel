@@ -19,6 +19,7 @@
 #define MODEMCELLULAR_CARRIERWIRE_H_
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "carrierbatch.h"
@@ -38,7 +39,8 @@ enum class WireKind : uint8_t
     Span = 2,           // radio to controller: centre and rate of its stream
     SpanRequest = 3,    // controller to radio: send the span
     Tuning = 4,         // controller to radio: the carriers to run (none: stop)
-    TxStatus = 5        // transmitter to controller: queue fill and underruns per carrier
+    TxStatus = 5,       // transmitter to controller: queue fill and underruns per carrier
+    Names = 6           // controller to radio: the names of the networks, for its display
 };
 
 struct WireSpan
@@ -60,6 +62,13 @@ struct WireTxStatus
     std::vector<uint64_t> underruns;
 };
 
+struct WireNames
+{
+    static constexpr size_t kMaxName = 255;     // bytes of UTF-8
+    std::vector<int> networks;                  // ids, as the controller numbers the networks
+    std::vector<std::string> names;
+};
+
 MODEMCELLULAR_API WireKind wireKind(const uint8_t* data, size_t size);
 
 MODEMCELLULAR_API std::vector<uint8_t> encodeBatch(const CarrierBatch& batch);
@@ -75,6 +84,10 @@ MODEMCELLULAR_API bool decodeTuning(const uint8_t* data, size_t size, WireTuning
 
 MODEMCELLULAR_API std::vector<uint8_t> encodeTxStatus(const WireTxStatus& status);
 MODEMCELLULAR_API bool decodeTxStatus(const uint8_t* data, size_t size, WireTxStatus& status);
+
+// None when the lists differ in length or a name is longer than kMaxName
+MODEMCELLULAR_API std::vector<uint8_t> encodeNames(const WireNames& names);
+MODEMCELLULAR_API bool decodeNames(const uint8_t* data, size_t size, WireNames& names);
 
 } // namespace modemcellular
 

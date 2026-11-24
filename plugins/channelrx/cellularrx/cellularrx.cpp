@@ -133,6 +133,7 @@ bool CellularRx::handleMessage(const Message& cmd)
         case modemcellular::WireKind::Batch:
         case modemcellular::WireKind::Span:
         case modemcellular::WireKind::TxStatus:
+        case modemcellular::WireKind::Names:
             break;
         }
         return false;

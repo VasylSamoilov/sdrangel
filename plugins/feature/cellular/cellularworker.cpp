@@ -808,6 +808,7 @@ void CellularWorker::handlePacket(Radio& radio, const QByteArray& bytes)
     case modemcellular::WireKind::None:
     case modemcellular::WireKind::SpanRequest:
     case modemcellular::WireKind::Tuning:
+    case modemcellular::WireKind::Names:
         return;
     }
 }

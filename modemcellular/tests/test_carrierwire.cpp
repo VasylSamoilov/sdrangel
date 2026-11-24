@@ -143,10 +143,46 @@ static void testOthers()
     CHECK(wireKind(unknown, 2) == WireKind::None);
 }
 
+static void testNames()
+{
+    WireNames names;
+    names.networks = {9, 12, 3};
+    names.names = {"Bench", "", "K\xc3\xb8" "benhavn"};
+    std::vector<uint8_t> wire = encodeNames(names);
+    WireNames out;
+    CHECK(wireKind(wire.data(), wire.size()) == WireKind::Names);
+    CHECK(decodeNames(wire.data(), wire.size(), out));
+    CHECK(out.networks == names.networks && out.names == names.names);
+
+    // cut short or with a byte too many
+    for (size_t cut = 1; cut < wire.size(); cut++) {
+        CHECK(!decodeNames(wire.data(), cut, out));
+    }
+    std::vector<uint8_t> longer = wire;
+    longer.push_back(0);
+    CHECK(!decodeNames(longer.data(), longer.size(), out));
+
+    // the longest name passes, a longer one is refused
+    names.names[1] = std::string(WireNames::kMaxName, 'x');
+    wire = encodeNames(names);
+    CHECK(decodeNames(wire.data(), wire.size(), out) && out.names[1].size() == WireNames::kMaxName);
+    names.names[1] += 'x';
+    wire = encodeNames(names);
+    CHECK(wireKind(wire.data(), wire.size()) == WireKind::None);
+    names.names.pop_back();
+    wire = encodeNames(names);
+    CHECK(wireKind(wire.data(), wire.size()) == WireKind::None);
+
+    // none: the networks are gone
+    wire = encodeNames(WireNames());
+    CHECK(decodeNames(wire.data(), wire.size(), out) && out.networks.empty() && out.names.empty());
+}
+
 int main()
 {
     testBatch();
     testOthers();
+    testNames();
 
     if (g_failures == 0) {
         std::printf("all carrier wire tests passed\n");

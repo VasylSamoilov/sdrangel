@@ -109,7 +109,7 @@ private:
 
 WireKind wireKind(const uint8_t* data, size_t size)
 {
-    if (!data || size < 1 || data[0] < 1 || data[0] > 5) {
+    if (!data || size < 1 || data[0] < 1 || data[0] > 6) {
         return WireKind::None;
     }
     return static_cast<WireKind>(data[0]);
@@ -249,6 +249,49 @@ bool decodeTxStatus(const uint8_t* data, size_t size, WireTxStatus& status)
     r.getArray(status.carriers.data(), n);
     r.getArray(status.fill.data(), n);
     r.getArray(status.underruns.data(), n);
+    return r.done();
+}
+
+std::vector<uint8_t> encodeNames(const WireNames& names)
+{
+    Writer w(WireKind::Names);
+    const uint32_t n = static_cast<uint32_t>(names.networks.size());
+
+    if (names.names.size() != n || n > kMaxCarriers) {
+        return Writer(WireKind::None).take();
+    }
+    w.put(n);
+    for (uint32_t i = 0; i < n; i++)
+    {
+        const std::string& name = names.names[i];
+        if (name.size() > WireNames::kMaxName) {
+            return Writer(WireKind::None).take();
+        }
+        w.put(static_cast<int32_t>(names.networks[i]));
+        w.put(static_cast<uint8_t>(name.size()));
+        w.putArray(name.data(), name.size());
+    }
+    return w.take();
+}
+
+bool decodeNames(const uint8_t* data, size_t size, WireNames& names)
+{
+    Reader r(data, size, WireKind::Names);
+    const uint32_t n = r.get<uint32_t>();
+
+    // at least an id and a length per network
+    if (!r.ok() || n > kMaxCarriers || size < 1 + 4 + n * (4 + 1)) {
+        return false;
+    }
+    names.networks.resize(n);
+    names.names.resize(n);
+    for (uint32_t i = 0; i < n && r.ok(); i++)
+    {
+        names.networks[i] = r.get<int32_t>();
+        const uint8_t length = r.get<uint8_t>();
+        names.names[i].resize(r.ok() ? length : 0);
+        r.getArray(&names.names[i][0], names.names[i].size());
+    }
     return r.done();
 }
 
