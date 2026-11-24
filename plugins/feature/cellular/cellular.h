@@ -32,6 +32,21 @@
 #include "cellularlogfile.h"
 #include "cellularsettings.h"
 #include "nmtphonebook.h"
+#include "speechmeter.h"
+
+// The speech of a call on a traffic channel: from the phone as demodulated, to the phone as it
+// goes to the modulator (modemnmt::NmtChannel::Speech).
+struct CellularCallSpeech
+{
+    int channel = 0;
+    QString phone;                              // country digit and six digits
+    quint64 call = 0;                           // the channel's count of calls, 0: none
+    bool live = false;                          // the call is on
+    QDateTime ended;                            // when it ended (not live)
+    modemcellular::SpeechStats rxRecent, txRecent;     // the last 2 s
+    modemcellular::SpeechStats rxCall, txCall;         // the whole call
+    quint64 limited = 0;                        // blocks the transmitter's limiter scaled
+};
 
 class WebAPIAdapterInterface;
 class ChannelAPI;
@@ -264,6 +279,7 @@ public:
             QString smsCentre;          // the numbers it sent messages or asked for them on, with the traffic area
             int held = 0;               // short messages the centre keeps for it
             int pendingMwi = 0;         // indicators postponed until it is free (flags)
+            CellularCallSpeech lastCall;    // its last call that ended since the start (call 0: none)
         };
 
         int m_network;
@@ -288,6 +304,26 @@ public:
 
     private:
         explicit MsgReportStatus(int network) : Message(), m_network(network) { }
+    };
+
+    // the speech of the calls of a network: five times a second while a call is on, and once for
+    // a call that ended
+    class MsgReportSpeech : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        int m_network;
+        QList<CellularCallSpeech> m_calls;
+        static MsgReportSpeech* create(int network) { return new MsgReportSpeech(network); }
+        MsgReportSpeech* clone() const
+        {
+            MsgReportSpeech *copy = new MsgReportSpeech(m_network);
+            copy->m_calls = m_calls;
+            return copy;
+        }
+
+    private:
+        explicit MsgReportSpeech(int network) : Message(), m_network(network) { }
     };
 
     Cellular(WebAPIAdapterInterface *webAPIAdapterInterface);

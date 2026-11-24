@@ -163,6 +163,13 @@ private:
             QDateTime since;
         };
         std::map<std::string, PendingMwi> pendingMwi;
+        // per carrier on air: the call its speech was last reported for, and whether it was on
+        struct SpeechSeen
+        {
+            uint64_t call = 0;
+            bool live = false;
+        };
+        std::vector<SpeechSeen> speechSeen;
         uint64_t batches = 0;
         uint64_t gaps = 0;                      // batches of the receiver that did not arrive
         uint64_t nextSample = 0;
@@ -184,6 +191,9 @@ private:
     void rename(const MsgNames& msg);
     void processBatch(Radio& radio);
     void reportStatus(const Network& network);
+    // the speech of the calls (live ones, and one that ended since the last time); logLine: also
+    // a line per live call in the event log (its last 2 s)
+    void reportSpeech(Network& network, bool logLine);
     void sendTo(ChannelAPI *channel, const std::vector<uint8_t>& wire);
     void sendAudio(ChannelAPI *channel, const std::vector<uint8_t>& wire);
     void log(int network, const QString& text, Cellular::MsgReportLog::Kind kind = Cellular::MsgReportLog::Event);

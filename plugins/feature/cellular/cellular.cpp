@@ -47,6 +47,7 @@ MESSAGE_CLASS_DEFINITION(Cellular::MsgConfigureCellular, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgStartStop, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgToRadio, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgReportLog, Message)
+MESSAGE_CLASS_DEFINITION(Cellular::MsgReportSpeech, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgBookLearn, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgBookRecord, Message)
 MESSAGE_CLASS_DEFINITION(Cellular::MsgBookEdit, Message)
@@ -630,6 +631,13 @@ bool Cellular::handleMessage(const Message& cmd)
         writeLog(report.getNetwork(), report.getText(), report.getKind());
         if (getMessageQueueToGUI()) {
             getMessageQueueToGUI()->push(MsgReportLog::create(report.getNetwork(), report.getText(), report.getKind()));
+        }
+        return true;
+    }
+    else if (MsgReportSpeech::match(cmd))
+    {
+        if (getMessageQueueToGUI()) {
+            getMessageQueueToGUI()->push(static_cast<const MsgReportSpeech&>(cmd).clone());
         }
         return true;
     }

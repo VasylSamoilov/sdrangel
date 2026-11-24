@@ -47,6 +47,7 @@ namespace
 
 const int kBlocksPerReport = 100;      // 1 s of 10 ms blocks
 const int kBlocksPerLog = 1000;        // a line in the event log every 10 s
+const int kBlocksPerSpeech = 20;       // the call meters: 200 ms, the step of their 2 s window
 // carriers of two networks closer than this on one stream are on the same channel
 const double kMinSeparation = 12500.0;
 
@@ -1120,6 +1121,7 @@ void CellularWorker::tryBind(Network& n)
     n.boundTx = txSpan;
     n.levels.assign(n.station->system()->channelCount(), -100.0f);
     n.traces.assign(n.station->system()->channelCount(), Network::Trace());
+    n.speechSeen.assign(n.station->system()->channelCount(), Network::SpeechSeen());
     for (size_t i = 0; i < n.station->system()->channelCount(); i++)
     {
         Network *network = &n;
@@ -1201,6 +1203,9 @@ void CellularWorker::processBatch(Radio& radio)
         if (++n.batches % kBlocksPerReport == 0) {
             reportStatus(n);
         }
+        if (n.batches % kBlocksPerSpeech == 0) {
+            reportSpeech(n, n.batches % (2 * kBlocksPerReport) == 0);    // a log line per 2 s window
+        }
         if (n.batches % kBlocksPerLog == 0)
         {
             QString line = QString("%1 s on the air, %2 blocks missed;")
@@ -1242,6 +1247,89 @@ void CellularWorker::sendAudio(ChannelAPI *channel, const std::vector<uint8_t>& 
                 QByteArray(reinterpret_cast<const char*>(wire.data()), static_cast<int>(wire.size()))));
             return;
         }
+    }
+}
+
+// One direction of a call's speech for the log: level, where 99 % of it stays below, the share at
+// the limit, the pauses, and the six bands relative to the speech.
+static QString speechText(const modemcellular::SpeechStats& s)
+{
+    if (s.speech == 0) {
+        return QString("no speech (pauses %1 %)").arg(100.0 * s.pauseShare(), 0, 'f', 0);
+    }
+    const std::array<double, modemcellular::SpeechStats::kBands> b = s.bandsDb();
+    QString bands;
+
+    for (double db : b) {
+        bands += QString(" %1").arg(std::max(db, -40.0), 0, 'f', 0);
+    }
+    return QString("%1 dB rms, 99 % below %2 dB, %3 % at the limit, pauses %4 %, bands%5 dB")
+        .arg(s.levelDb(), 0, 'f', 1).arg(s.p99Db(), 0, 'f', 1).arg(100.0 * s.limitShare(), 0, 'f', 1)
+        .arg(100.0 * s.pauseShare(), 0, 'f', 0).arg(bands);
+}
+
+void CellularWorker::reportSpeech(Network& n, bool logLine)
+{
+    modemnmt::NmtSystem *system = running(n) ? n.station->system() : nullptr;
+
+    if (!system) {
+        return;
+    }
+    Cellular::MsgReportSpeech *msg = Cellular::MsgReportSpeech::create(n.id);
+
+    for (size_t i = 0; i < system->channelCount() && i < n.speechSeen.size(); i++)
+    {
+        const modemnmt::NmtChannel& channel = system->channel(i);
+        const modemnmt::NmtChannel::Speech s = channel.speech();
+        Network::SpeechSeen& seen = n.speechSeen[i];
+        const bool ended = s.call > 0 && !s.live && seen.call == s.call && seen.live;
+
+        if (!s.live && !ended)
+        {
+            seen.call = s.call;
+            seen.live = false;
+            continue;
+        }
+        CellularCallSpeech call;
+        modemnmt::NmtSubscriber subscriber;
+        subscriber.country = s.country;
+        subscriber.number = s.number;
+        call.channel = channel.config().channel;
+        call.phone = numberText(subscriber);
+        call.call = s.call;
+        call.live = s.live;
+        call.rxRecent = s.rxRecent;
+        call.txRecent = s.txRecent;
+        call.rxCall = s.rxCall;
+        call.txCall = s.txCall;
+        call.limited = s.limited;
+        if (ended)
+        {
+            // the whole call, kept with the phone and in the log
+            call.ended = QDateTime::currentDateTime();
+            Cellular::MsgReportStatus::Phone& phone = n.phones[call.phone.toStdString()];
+            if (phone.number.isEmpty()) {
+                phone.number = call.phone;
+            }
+            phone.lastCall = call;
+            log(n.id, QString("ch %1 call of %2 ended, speech from the phone: %3; to the phone: %4, limited %5")
+                .arg(call.channel).arg(call.phone).arg(speechText(s.rxCall)).arg(speechText(s.txCall)).arg(s.limited),
+                Cellular::MsgReportLog::Call);
+        }
+        else if (logLine)
+        {
+            log(n.id, QString("ch %1 speech of %2 (2 s) from the phone: %3; to the phone: %4")
+                .arg(call.channel).arg(call.phone).arg(speechText(s.rxRecent)).arg(speechText(s.txRecent)),
+                Cellular::MsgReportLog::Call);
+        }
+        seen.call = s.call;
+        seen.live = s.live;
+        msg->m_calls.append(call);
+    }
+    if (msg->m_calls.isEmpty() || !m_reports) {
+        delete msg;
+    } else {
+        m_reports->push(msg);
     }
 }
 
