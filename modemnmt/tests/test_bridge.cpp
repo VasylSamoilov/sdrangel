@@ -447,6 +447,46 @@ static void testPhoneToPhone()
     CHECK(s.b->state() == NmtChannel::State::MoRelease);
 }
 
+// A phone number that is not registered (the phone kept its traffic area, no roaming update since
+// the network started) is paged all the same; a number that is no phone number goes to the echo.
+static void testCallToUnregisteredPhone()
+{
+    Station s(true);
+    Phone caller, callee;
+    callee.number = "654321";
+
+    s.cellular.setFallback(modemcellular::CallRouter::Fallback::Echo);
+    s.bridge->setKnownPhone([](const std::string& number) { return number == "1654321"; });
+    s.roam(*s.a, caller);
+    CHECK(!s.cellular.isRegistered("1654321"));
+    s.callFrom(*s.a, caller, "1654321");
+    s.air(0.05, *s.a, microphone({}));
+    CHECK(s.cellular.callCount() == 1);
+    CHECK(s.nmt.callPhase(callee.country, callee.number) == NmtTransaction::CcPhase::Page);
+    CHECK(pullCalling(*s.cc).mt == MessageType::Frame2a);
+}
+
+static void testShortNumberToEcho()
+{
+    Station s(true);
+    Phone caller;
+
+    s.cellular.setFallback(modemcellular::CallRouter::Fallback::Echo);
+    s.bridge->setKnownPhone([](const std::string& number) { return number == "1654321"; });
+    s.roam(*s.a, caller);
+    // a number that is no phone, and a phone number that is not known
+    for (const char *dialled : {"222", "5551234"})
+    {
+        s.callFrom(*s.a, caller, dialled);
+        s.air(0.05, *s.a, microphone({}));
+        CHECK(s.cellular.callCount() == 1);
+        CHECK(pullCalling(*s.cc).mt != MessageType::Frame2a);
+        CHECK(s.nmt.callPhase('5', "551234") == NmtTransaction::CcPhase::None);
+        phoneSends(*s.a, lineSignalFrame(*s.a, caller, 0x11111), 1);
+        pullClearing(*s.a);
+    }
+}
+
 // The callee does not answer the page: the caller hears congestion and is released.
 static void testCalleeDoesNotAnswer()
 {
@@ -663,6 +703,8 @@ int main()
     testCallToRegisteredPhone();
     testPhoneToPhone();
     testCalleeDoesNotAnswer();
+    testCallToUnregisteredPhone();
+    testShortNumberToEcho();
     testRouterRefuses();
     testCallToSelf();
     testRegistrationLifetime();
