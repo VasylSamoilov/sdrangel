@@ -17,7 +17,8 @@ set(MODEMAMPS_LIB_SOURCES
     ../ampsfocc.cpp
     ../ampsfvc.cpp
     ../ampsvoice.cpp
-    ../ampsrecc.cpp)
+    ../ampsrecc.cpp
+    ../ampsplan.cpp)
 find_package(Qt5 COMPONENTS Core REQUIRED)
 
 # SDRangel's radio primitives the modules use, built from sdrbase as they are (needing only the Qt
@@ -67,3 +68,4 @@ modemamps_add_test(modemamps_focc_test test_focc.cpp)
 modemamps_add_test(modemamps_fvc_test test_fvc.cpp)
 modemamps_add_test(modemamps_voice_test test_voice.cpp)
 modemamps_add_test(modemamps_recc_test test_recc.cpp)
+modemamps_add_test(modemamps_plan_test test_plan.cpp)
