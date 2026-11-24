@@ -23,6 +23,7 @@
 #include <QComboBox>
 #include <QDateTime>
 #include <QDialogButtonBox>
+#include <QFileDialog>
 #include <QFormLayout>
 #include <QGuiApplication>
 #include <QScreen>
@@ -133,6 +134,11 @@ void copyMenu(QTableWidget *table)
         menu->addAction("Copy", menu, [text]() { QGuiApplication::clipboard()->setText(text); });
         menu->popup(table->viewport()->mapToGlobal(pos));
     });
+}
+
+QString logFileTip(const QString& filename)
+{
+    return QString("Set the .csv file to log into (appended to): %1").arg(filename);
 }
 
 QToolButton *iconButton(QWidget *parent, const QString& icon, const QString& tip)
@@ -815,7 +821,12 @@ QWidget *CellularGUI::buildLog()
     m_logFrames->setChecked(true);
     m_logFrames->setToolTip("Show the frames from and to the phones (ch 18 < 10b ...), not only the events");
     QToolButton *clear = iconButton(nullptr, ":/bin.png", "Clear the log");
-    layout->addWidget(flowRow(page, {m_logNetwork, m_logFrames, clear}));
+    // into a .csv file, as SDRangel's decoders log
+    m_logEnable = new ButtonSwitch();
+    m_logEnable->setIcon(QIcon(":/record_off.png"));
+    m_logEnable->setToolTip("Start/stop logging into the .csv file: every line of all networks, also the frames");
+    m_logFilename = iconButton(nullptr, ":/save.png", QString());
+    layout->addWidget(flowRow(page, {m_logNetwork, m_logFrames, clear, m_logEnable, m_logFilename}));
     m_log = new QPlainTextEdit(page);
     m_log->setReadOnly(true);
     m_log->setLineWrapMode(QPlainTextEdit::WidgetWidth);    // a narrow window shows whole lines
@@ -827,6 +838,23 @@ QWidget *CellularGUI::buildLog()
     connect(clear, &QToolButton::clicked, this, [this]() {
         m_logLines.clear();
         m_log->clear();
+    });
+    connect(m_logEnable, &ButtonSwitch::clicked, this, [this](bool checked) {
+        m_settings.m_logEnabled = checked;
+        applySettings();
+    });
+    connect(m_logFilename, &QToolButton::clicked, this, [this]() {
+        QFileDialog dialog(this, "Select file to log to", m_settings.m_logFilename, "*.csv");
+        dialog.setDefaultSuffix("csv");
+        dialog.setAcceptMode(QFileDialog::AcceptSave);
+        // appended to: an existing file is not overwritten
+        dialog.setOption(QFileDialog::DontConfirmOverwrite);
+        if (dialog.exec() && !dialog.selectedFiles().isEmpty())
+        {
+            m_settings.m_logFilename = dialog.selectedFiles().first();
+            m_logFilename->setToolTip(logFileTip(m_settings.m_logFilename));
+            applySettings();
+        }
     });
     return page;
 }
@@ -1332,6 +1360,8 @@ void CellularGUI::displaySettings()
     setTitleColor(QColor::fromRgb(m_settings.m_rgbColor));
     setWindowTitle(m_settings.m_title);
     setTitle(m_settings.m_title);
+    m_logEnable->setChecked(m_settings.m_logEnabled);
+    m_logFilename->setToolTip(logFileTip(m_settings.m_logFilename));
 
     const int selected = selectedNetwork();
     m_networks->setRowCount(m_settings.m_networks.size());

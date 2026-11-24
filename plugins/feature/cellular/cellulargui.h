@@ -45,6 +45,7 @@ class QPlainTextEdit;
 class QSpinBox;
 class QTabWidget;
 class QTableWidget;
+class QToolButton;
 
 class CellularChannelGrid;
 
@@ -181,6 +182,8 @@ private:
     QComboBox *m_logNetwork;
     QCheckBox *m_logFrames;
     QPlainTextEdit *m_log;
+    ButtonSwitch *m_logEnable;
+    QToolButton *m_logFilename;
     std::deque<LogLine> m_logLines;
     // Networks
     QTableWidget *m_networks;
