@@ -382,7 +382,8 @@ void CellularWorker::setHandlers(Network& n)
         }
         ToneListener& t = m_tones[numberText(subscriber).toStdString()];
         if (!t.detector) {
-            t.detector = std::make_unique<DVDTMF::Detector>(static_cast<int>(modemnmt::NmtBaseStation::kAudioRate));
+            // the call audio of the tap is at the call rate (8 kHz, RxAudioChain), not the channel's
+            t.detector = std::make_unique<DVDTMF::Detector>(modemcellular::kAudioSampleRate);
         }
         std::vector<DVDTMF::Detector::Key> keys;
         t.detector->process(samples, count, keys);
