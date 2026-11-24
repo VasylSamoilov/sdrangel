@@ -136,6 +136,11 @@ public:
     void process(const modemcellular::CarrierBatch& rx, modemcellular::CarrierBatch& tx);
     uint64_t samples() const { return m_samples; }
 
+    // the time of day the calling channels send when the network sends the clock (sendClock): the
+    // local time of this computer, as hours and minutes, unless set here (tests)
+    void setTimeOfDay(TimeOfDay timeOfDay);
+    static std::pair<int, int> localTimeOfDay();
+
     // the network itself, null while it is not running
     NmtSystem* system() { return m_system.get(); }
     // the clock of the network: the samples of its receive stream
@@ -158,6 +163,7 @@ private:
     NmtStreamSpan m_txSpan;
     std::vector<int> m_onAir;                   // indices into m_carriers
     std::vector<NmtChannel*> m_channels;        // parallel to m_onAir
+    TimeOfDay m_timeOfDay;
     std::vector<std::unique_ptr<Emphasis>> m_rxEmphasis;
     std::vector<std::unique_ptr<Emphasis>> m_txEmphasis;
     std::vector<float> m_audio;

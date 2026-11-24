@@ -18,6 +18,7 @@
 #include "nmtbasestation.h"
 
 #include <cmath>
+#include <ctime>
 
 namespace modemnmt
 {
@@ -43,6 +44,27 @@ int coveringStream(const std::vector<NmtStreamSpan>& streams, double frequency, 
 }
 
 } // namespace
+
+std::pair<int, int> NmtBaseStation::localTimeOfDay()
+{
+    const std::time_t now = std::time(nullptr);
+    std::tm local{};
+
+#ifdef _WIN32
+    localtime_s(&local, &now);
+#else
+    localtime_r(&now, &local);
+#endif
+    return std::make_pair(local.tm_hour, local.tm_min);
+}
+
+void NmtBaseStation::setTimeOfDay(TimeOfDay timeOfDay)
+{
+    m_timeOfDay = std::move(timeOfDay);
+    for (NmtChannel* channel : m_channels) {
+        channel->setTimeOfDay(m_timeOfDay ? m_timeOfDay : TimeOfDay(&NmtBaseStation::localTimeOfDay));
+    }
+}
 
 NmtBaseStation::NmtBaseStation(const NmtNetworkConfig& config) :
     m_config(config),
@@ -267,6 +289,8 @@ bool NmtBaseStation::bind(const std::vector<NmtStreamSpan>& rxStreams, const std
         // the deviation factor goes into the speech deviation of the audio (process()), the
         // levels inside the channel stay those of the Scandinavian plan
         m_channels.push_back(&m_system->addChannel(cc, kAudioRate, 1.0));
+        // the clock of the battery saving frames (NMT Doc 450-1 4.3.3.12): the time of day
+        m_channels.back()->setTimeOfDay(m_timeOfDay ? m_timeOfDay : TimeOfDay(&NmtBaseStation::localTimeOfDay));
         m_rxEmphasis.push_back(std::make_unique<Emphasis>(kAudioRate));
         m_txEmphasis.push_back(std::make_unique<Emphasis>(kAudioRate));
         c.onAir = true;

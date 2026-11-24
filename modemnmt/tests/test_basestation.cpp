@@ -535,9 +535,57 @@ static void testOverTheAir()
     }
 }
 
+// With the clock on, the calling channel sends the time of day in its battery saving frames: the
+// local time unless one is set (on air 2026-11-24 the phones showed no time: nothing gave the
+// channels a time).
+static void testClock()
+{
+    NmtNetworkConfig c = network({1, 5});
+    c.carriers[0].type = ChannelType::Cc;
+    c.carriers[0].supervisory = 0;      // a calling channel has no supervisory tone
+    c.sendClock = true;
+
+    // the clock field of the next idle frame of the calling channel, -1 if there is none
+    auto clockOf = [](NmtBaseStation& bs) {
+        for (size_t i = 0; i < bs.system()->channelCount(); i++)
+        {
+            NmtChannel& ch = bs.system()->channel(i);
+            if (ch.config().type == ChannelType::Cc) {
+                return static_cast<int>(ch.idleFrame().additionalInfo & 0xfff);
+            }
+        }
+        return -1;
+    };
+    auto encode = [](std::pair<int, int> t) { return (1 << 11) | (t.first << 6) | t.second; };
+    {
+        NmtBaseStation bs(c);
+        CHECK(bs.bind({kRx}, {kTx}));
+        const int before = encode(NmtBaseStation::localTimeOfDay());
+        const int sent = clockOf(bs);
+        const int after = encode(NmtBaseStation::localTimeOfDay());
+        CHECK(sent == before || sent == after);
+        bs.setTimeOfDay([]() { return std::make_pair(13, 45); });
+        CHECK(clockOf(bs) == 0xb6d);
+    }
+    {
+        // set before the network starts: the channels get it when they come
+        NmtBaseStation bs(c);
+        bs.setTimeOfDay([]() { return std::make_pair(7, 8); });
+        CHECK(bs.bind({kRx}, {kTx}));
+        CHECK(clockOf(bs) == encode({7, 8}));
+    }
+    {
+        c.sendClock = false;
+        NmtBaseStation bs(c);
+        CHECK(bs.bind({kRx}, {kTx}));
+        CHECK(clockOf(bs) == 0);
+    }
+}
+
 int main()
 {
     testBind();
+    testClock();
     testCoverage();
     testPlanErrors();
     testBatch();
