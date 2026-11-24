@@ -144,11 +144,65 @@ static void testChecks()
     CHECK(nmtCheckCarrier(nl, 201, false).empty());
 }
 
+// the group of the block a channel is in
+static bool group(System system, const char* country, int channel, NmtChannelGroup expected)
+{
+    const NmtCountry* c = nmtCountry(system, country);
+
+    if (!c) {
+        return false;
+    }
+    for (const NmtFrequencyBlock& b : c->blocks)
+    {
+        if (channel >= b.firstChannel && channel <= b.lastChannel) {
+            return b.group == expected;
+        }
+    }
+    return false;
+}
+
+static void testGroups()
+{
+    using G = NmtChannelGroup;
+
+    CHECK(group(System::Nmt450, "DK", 1, G::Ordinary));
+    CHECK(group(System::Nmt450, "DK", 180, G::Ordinary));
+    CHECK(group(System::Nmt450, "DK", 181, G::Extension));
+    CHECK(group(System::Nmt450, "DK", 200, G::Extension));
+    CHECK(group(System::Nmt450, "DK", 201, G::Interleaved));
+    CHECK(group(System::Nmt450, "DK", 380, G::Interleaved));
+    CHECK(group(System::Nmt450, "DK", 381, G::InterleavedExtension));
+    CHECK(group(System::Nmt450, "DK", 400, G::InterleavedExtension));
+    CHECK(group(System::Nmt450, "HU", 1, G::Ordinary));
+    CHECK(group(System::Nmt450, "HU", 239, G::Ordinary));
+    CHECK(group(System::Nmt900, "DK", 1000, G::Ordinary));
+    CHECK(group(System::Nmt900, "DK", 1025, G::Interleaved));
+    CHECK(group(System::Nmt900, "F1", 578, G::Ordinary));
+    CHECK(group(System::Nmt900, "F1", 1423, G::Interleaved));
+
+    // NMT-900: interleaved are the numbers from 1024 up, and only those
+    for (const NmtCountry& c : nmtCountries())
+    {
+        for (const NmtFrequencyBlock& b : c.blocks)
+        {
+            if (c.system == System::Nmt900) {
+                CHECK((b.group == G::Interleaved) == (b.firstChannel >= 1024));
+            }
+        }
+    }
+
+    CHECK(std::string(nmtGroupName(G::Ordinary)) == "Ordinary");
+    CHECK(std::string(nmtGroupName(G::Extension)) == "Extension");
+    CHECK(std::string(nmtGroupName(G::Interleaved)) == "Interleaved");
+    CHECK(std::string(nmtGroupName(G::InterleavedExtension)) == "Interleaved extension");
+}
+
 int main()
 {
     testFrequencies();
     testTrafficAreas();
     testChecks();
+    testGroups();
 
     if (g_failures == 0) {
         std::printf("all plan tests passed\n");

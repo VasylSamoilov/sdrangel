@@ -32,6 +32,18 @@ namespace modemnmt
 // The frequency plans of the NMT countries: which channel numbers exist, their frequencies, the
 // country digit Y1 of the traffic area and the traffic areas in use.
 
+// The kind of channels a block holds, by the names of the standard: ordinary channels, the
+// extension band of NMT-450 (181..200, optional, NMT Doc 450-1), and the interleaved channels
+// 12.5 kHz between them (NMT-450: channel + 200; NMT-900: channel numbers from 1024 up).
+enum class NmtChannelGroup
+{
+    Ordinary,
+    Extension,
+    Interleaved,
+    InterleavedExtension
+};
+MODEMNMT_API const char *nmtGroupName(NmtChannelGroup group);
+
 // One block of channels: first_frequency + (channel - first_channel) * spacing is the frequency
 // of the base station (downlink); the phone sends duplex below it.
 struct NmtFrequencyBlock
@@ -43,6 +55,7 @@ struct NmtFrequencyBlock
     double deviationFactor;     // deviation relative to the Scandinavian plan (20 kHz plans: 0.8)
     double duplex;              // MHz, downlink above uplink
     bool scandinavia;           // the Scandinavian 450 plan (its extended and interleaved channels)
+    NmtChannelGroup group;
 };
 
 struct NmtCountry

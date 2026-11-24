@@ -29,34 +29,36 @@ namespace
 {
 
 using Blocks = std::vector<NmtFrequencyBlock>;
+using G = NmtChannelGroup;
 
 const Blocks k450Scandinavia = {
-    {1, 180, 463.000, 0.025, 1.0, 10.0, true},
-    {181, 200, 462.500, 0.025, 1.0, 10.0, true},
-    {201, 380, 463.0125, 0.025, 1.0, 10.0, true},
+    {1, 180, 463.000, 0.025, 1.0, 10.0, true, G::Ordinary},
+    {181, 200, 462.500, 0.025, 1.0, 10.0, true, G::Extension},
+    {201, 380, 463.0125, 0.025, 1.0, 10.0, true, G::Interleaved},
     // the interleaved extension band: 181..200 + 200, 12.5 kHz up. Up to 400 as in NMT Doc 450-1
     // 1997-08-08 ("channel numbers 201-400 are reserved for interleaved channels", 400 coded '39A');
     // osmocom stops at 399 as the 1995 edition did
-    {381, 400, 462.5125, 0.025, 1.0, 10.0, true}
+    {381, 400, 462.5125, 0.025, 1.0, 10.0, true, G::InterleavedExtension}
 };
 const Blocks k900Scandinavia = {
-    {1, 1000, 935.0125, 0.025, 1.0, 45.0, false},
-    {1025, 2023, 935.025, 0.025, 1.0, 45.0, false}
+    {1, 1000, 935.0125, 0.025, 1.0, 45.0, false, G::Ordinary},
+    {1025, 2023, 935.025, 0.025, 1.0, 45.0, false, G::Interleaved}
 };
-const Blocks k450NlLB = {{1, 222, 461.310, 0.020, 0.8, 10.0, false}};
-const Blocks k900Nl = {{1, 1000, 935.0125, 0.025, 1.0, 45.0, false}};
-const Blocks k450Mal = {{1, 180, 462.000, 0.025, 1.0, 10.0, false}};
-const Blocks k450TRi = {{1, 224, 489.000, 0.020, 0.8, 10.0, false}};
-const Blocks k450E = {{1, 180, 464.325, 0.025, 1.0, 10.0, false}};
-const Blocks k450A = {{1, 180, 465.730, -0.020, 0.8, 10.0, false}};
-const Blocks k450CzSk = {{1, 222, 465.730, -0.020, 0.8, 10.0, false}};
+const Blocks k450NlLB = {{1, 222, 461.310, 0.020, 0.8, 10.0, false, G::Ordinary}};
+const Blocks k900Nl = {{1, 1000, 935.0125, 0.025, 1.0, 45.0, false, G::Ordinary}};
+const Blocks k450Mal = {{1, 180, 462.000, 0.025, 1.0, 10.0, false, G::Ordinary}};
+const Blocks k450TRi = {{1, 224, 489.000, 0.020, 0.8, 10.0, false, G::Ordinary}};
+const Blocks k450E = {{1, 180, 464.325, 0.025, 1.0, 10.0, false, G::Ordinary}};
+const Blocks k450A = {{1, 180, 465.730, -0.020, 0.8, 10.0, false, G::Ordinary}};
+const Blocks k450CzSk = {{1, 222, 465.730, -0.020, 0.8, 10.0, false, G::Ordinary}};
 const Blocks k450Hu = {
-    {132, 239, 467.370, -0.020, 0.8, 10.0, false},
-    {1, 72, 469.990, -0.020, 0.8, 10.0, false}
+    {132, 239, 467.370, -0.020, 0.8, 10.0, false, G::Ordinary},
+    {1, 72, 469.990, -0.020, 0.8, 10.0, false, G::Ordinary}
 };
+// NMT-900 channel numbers from 1024 up are interleaved (the a10 bit of the channel number)
 const Blocks k900F = {
-    {400, 578, 440.025, 0.025, 1.0, -10.0, false},
-    {1423, 1601, 440.0125, 0.025, 1.0, -10.0, false}
+    {400, 578, 440.025, 0.025, 1.0, -10.0, false, G::Ordinary},
+    {1423, 1601, 440.0125, 0.025, 1.0, -10.0, false, G::Interleaved}
 };
 
 const System k450 = System::Nmt450;
@@ -132,6 +134,18 @@ bool sameName(const std::string& a, const char* b)
 }
 
 } // namespace
+
+const char *nmtGroupName(NmtChannelGroup group)
+{
+    switch (group)
+    {
+    case NmtChannelGroup::Ordinary: return "Ordinary";
+    case NmtChannelGroup::Extension: return "Extension";
+    case NmtChannelGroup::Interleaved: return "Interleaved";
+    case NmtChannelGroup::InterleavedExtension: return "Interleaved extension";
+    }
+    return "";
+}
 
 const std::vector<NmtCountry>& nmtCountries()
 {
