@@ -162,6 +162,62 @@ static void testMusicIgnoresReceivedAudio()
     CHECK(same);
 }
 
+// Music from a clip: in order, looped or once (then finished and silent), at a level that only
+// lowers; the melody once; a live source.
+static void testMusicSources()
+{
+    auto clip = std::make_shared<std::vector<float>>(1000);
+    for (size_t i = 0; i < clip->size(); i++) {
+        (*clip)[i] = static_cast<float>(i + 1) / 1000.0f;
+    }
+    std::vector<float> out(400);
+
+    MusicOptions looped;
+    looped.clip = clip;
+    MusicEndpoint a(looped);
+    a.toMobile(out.data(), 400);
+    a.toMobile(out.data(), 400);
+    a.toMobile(out.data(), 400);            // samples 800..1199: the end, then the start again
+    CHECK(std::fabs(out[199] - 1.0f) < 1e-6f && std::fabs(out[200] - 0.001f) < 1e-6f);
+    CHECK(!a.finished());
+
+    MusicOptions once = looped;
+    once.loop = false;
+    once.levelDb = -6.0;
+    MusicEndpoint b(once);
+    b.toMobile(out.data(), 400);
+    CHECK(std::fabs(out[0] - 0.001f * 0.5012f) < 1e-6f);
+    b.toMobile(out.data(), 400);
+    CHECK(!b.finished());
+    b.toMobile(out.data(), 400);
+    CHECK(b.finished());
+    CHECK(out[200] == 0.0f && out[399] == 0.0f);
+    CHECK(std::fabs(out[199] - 0.5012f) < 1e-3f);
+
+    MusicOptions louder = looped;
+    louder.levelDb = +6.0;
+    MusicEndpoint c(louder);
+    c.toMobile(out.data(), 400);
+    CHECK(std::fabs(out[9] - 0.010f) < 1e-6f);     // +6 dB stays at 0 dB
+
+    MusicOptions melodyOnce;
+    melodyOnce.loop = false;
+    MusicEndpoint d(melodyOnce);
+    int blocks = 0;
+    while (!d.finished() && blocks < 1000)
+    {
+        d.toMobile(out.data(), 160);
+        blocks++;
+    }
+    CHECK(blocks >= 104 && blocks <= 106);  // 2.1 s: the 7 notes of 300 ms
+
+    MusicOptions live;
+    live.input = [](float* s, int n) { std::fill(s, s + n, 0.25f); };
+    MusicEndpoint e(live);
+    e.toMobile(out.data(), 400);
+    CHECK(out[0] == 0.25f && out[399] == 0.25f && !e.finished());
+}
+
 // The level only lowers; the tone of the answer plays in the first 200 ms of the delay.
 static void testEchoLevelAndAnnounce()
 {
@@ -206,6 +262,7 @@ int main()
     testEchoDelayDoesNotGrowWithoutBound();
     testMusicIsBoundedContinuousAndLoops();
     testMusicIgnoresReceivedAudio();
+    testMusicSources();
 
     if (g_failures) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);

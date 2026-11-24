@@ -15,6 +15,7 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.          //
 ///////////////////////////////////////////////////////////////////////////////////
 
+#include <algorithm>
 #include <cmath>
 
 #include "calltypes.h"
@@ -45,10 +46,14 @@ constexpr double kTwoPi = 6.283185307179586;
 
 } // namespace
 
-MusicEndpoint::MusicEndpoint() :
+MusicEndpoint::MusicEndpoint(MusicOptions options) :
+    m_options(std::move(options)),
+    m_gain(static_cast<float>(std::pow(10.0, std::min(m_options.levelDb, 0.0) / 20.0))),
+    m_finished(false),
     m_note(0),
     m_notePos(0),
-    m_phase(0.0)
+    m_phase(0.0),
+    m_clipPos(0)
 {
 }
 
@@ -58,8 +63,50 @@ void MusicEndpoint::fromMobile(const float*, int)
 
 void MusicEndpoint::toMobile(float* samples, int count)
 {
+    if (m_finished) {
+        std::fill(samples, samples + count, 0.0f);
+    } else if (m_options.input) {
+        std::fill(samples, samples + count, 0.0f);
+        m_options.input(samples, count);
+    } else if (m_options.clip) {
+        clip(samples, count);
+    } else {
+        melody(samples, count);
+    }
+    for (int i = 0; i < count; i++) {
+        samples[i] = std::isfinite(samples[i]) ? samples[i] * m_gain : 0.0f;
+    }
+}
+
+void MusicEndpoint::clip(float* samples, int count)
+{
+    const std::vector<float>& c = *m_options.clip;
+
     for (int i = 0; i < count; i++)
     {
+        if (m_clipPos >= c.size())
+        {
+            if (!m_options.loop || c.empty())
+            {
+                m_finished = true;
+                std::fill(samples + i, samples + count, 0.0f);
+                return;
+            }
+            m_clipPos = 0;
+        }
+        samples[i] = c[m_clipPos++];
+    }
+}
+
+void MusicEndpoint::melody(float* samples, int count)
+{
+    for (int i = 0; i < count; i++)
+    {
+        if (m_finished)
+        {
+            samples[i] = 0.0f;
+            continue;
+        }
         const Note& note = kMelody[m_note];
         const int length = note.milliseconds * kAudioSampleRate / 1000;
 
@@ -92,6 +139,9 @@ void MusicEndpoint::toMobile(float* samples, int count)
             m_notePos = 0;
             m_phase = 0.0;      // the envelope is zero at the note boundary, so no click
             m_note = (m_note + 1) % kMelodyNotes;
+            if (m_note == 0 && !m_options.loop) {
+                m_finished = true;      // played once
+            }
         }
     }
 }
