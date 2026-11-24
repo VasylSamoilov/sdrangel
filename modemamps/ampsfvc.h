@@ -1,0 +1,63 @@
+///////////////////////////////////////////////////////////////////////////////////
+// Copyright (C) 2026 Vasyl Samoilov <vasyl.samoilov@gmail.com>                  //
+//                                                                               //
+// This program is free software; you can redistribute it and/or modify          //
+// it under the terms of the GNU General Public License as published by          //
+// the Free Software Foundation as version 3 of the License, or                  //
+// (at your option) any later version.                                           //
+//                                                                               //
+// This program is distributed in the hope that it will be useful,               //
+// but WITHOUT ANY WARRANTY; without even the implied warranty of                //
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the                  //
+// GNU General Public License V3 for more details.                               //
+//                                                                               //
+// You should have received a copy of the GNU General Public License             //
+// along with this program. If not, see <http://www.gnu.org/licenses/>.          //
+///////////////////////////////////////////////////////////////////////////////////
+
+#ifndef MODEMAMPS_AMPSFVC_H_
+#define MODEMAMPS_AMPSFVC_H_
+
+#include <cstdint>
+#include <deque>
+#include <vector>
+
+#include "export.h"
+
+// The forward voice channel orders of a base station, as osmocom-analog's amps (frame.c
+// amps_encode_frame_fvc): a mobile station control message is one word (T1T2 10), sent as 11
+// repeats with their dotting and sync (1032 bits, 103.2 ms) in place of the audio (blank and
+// burst). With nothing queued the stream ends and the audio goes on.
+namespace modemamps
+{
+
+// the word of a mobile station control message on the FVC (3.7.2.1)
+namespace fvc
+{
+// an order (SCC 11); pscc: the SAT colour code of this voice channel
+MODEMAMPS_API uint64_t order(uint8_t pscc, uint8_t order, uint8_t ordq, uint8_t msgType);
+// a handoff to another voice channel (SCC its SAT colour code)
+MODEMAMPS_API uint64_t handoff(uint8_t scc, uint8_t pscc, uint8_t dtx, uint8_t vmac, uint16_t chan);
+} // namespace fvc
+
+class MODEMAMPS_API FvcTransmitter
+{
+public:
+    FvcTransmitter();
+
+    void queue(uint64_t word) { m_queue.push_back(word); }
+    // a word queued or being sent
+    bool busy() const { return !m_queue.empty() || m_bitPos < m_bits.size(); }
+    // the next bit (a bit source of the modulator), -1 when nothing is left: back to audio
+    int nextBit();
+    void reset();
+
+private:
+    std::deque<uint64_t> m_queue;
+    std::vector<uint8_t> m_bits;
+    size_t m_bitPos;
+};
+
+} // namespace modemamps
+
+#endif // MODEMAMPS_AMPSFVC_H_
