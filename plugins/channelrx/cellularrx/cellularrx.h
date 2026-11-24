@@ -19,6 +19,10 @@
 #ifndef INCLUDE_CELLULARRX_H
 #define INCLUDE_CELLULARRX_H
 
+#include <map>
+
+#include <QMutex>
+#include <QString>
 #include <QThread>
 
 #include "channel/channelapi.h"
@@ -66,6 +70,8 @@ public:
     qint64 getStreamCenterFrequency(int, bool) const override { return m_centerFrequency; }
 
     CellularRxBaseband::Status status() const { return m_basebandSink->status(); }
+    // the names of the networks on the device by id, as the controller sent them
+    std::map<int, QString> networkNames() const;
     qint64 getDeviceCenterFrequency() const { return m_centerFrequency; }
 
     static const char * const m_channelIdURI;
@@ -78,6 +84,8 @@ private:
     CellularRxSettings m_settings;
     int m_basebandSampleRate;
     qint64 m_centerFrequency;
+    std::map<int, QString> m_networkNames;
+    mutable QMutex m_namesMutex;
 
     bool handleMessage(const Message& cmd) override;
     void sendSpan();

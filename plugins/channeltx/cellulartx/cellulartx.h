@@ -20,10 +20,12 @@
 #define INCLUDE_CELLULARTX_H
 
 #include <complex>
+#include <map>
 #include <memory>
 #include <vector>
 
 #include <QMutex>
+#include <QString>
 #include <QThread>
 #include <QTimer>
 
@@ -90,6 +92,8 @@ public:
     qint64 getStreamCenterFrequency(int, bool) const override { return m_centerFrequency; }
 
     Status status() const;
+    // the names of the networks on the device by id, as the controller sent them
+    std::map<int, QString> networkNames() const;
     qint64 getDeviceCenterFrequency() const { return m_centerFrequency; }
     // audio of the controller into the queues (thread of the audio, see CellularTxAudio)
     void writeBatch(const modemcellular::CarrierBatch& batch);
@@ -120,6 +124,7 @@ private:
     unsigned int m_statusCount;
     std::vector<std::complex<float>> m_buffer;
     QTimer m_statusTimer;
+    std::map<int, QString> m_networkNames;     // under m_mutex
 
     bool handleMessage(const Message& cmd) override;
     void makeTransmitter();

@@ -147,6 +147,22 @@ void Cellular::sendSmsCentres()
     m_worker->getInputMessageQueue()->push(msg);
 }
 
+// the names of the networks: renaming does not start a network again
+void Cellular::sendNames()
+{
+    if (!m_running || !m_worker) {
+        return;
+    }
+    CellularWorker::MsgNames *msg = CellularWorker::MsgNames::create();
+    {
+        QMutexLocker locker(&m_settingsMutex);
+        for (const CellularNetworkSettings& n : m_settings.m_networks) {
+            msg->m_names[n.m_id] = n.m_name;
+        }
+    }
+    m_worker->getInputMessageQueue()->push(msg);
+}
+
 bool Cellular::deserialize(const QByteArray& data)
 {
     bool ok;
@@ -168,6 +184,7 @@ bool Cellular::deserialize(const QByteArray& data)
     }
     restartNetworks(false);
     applyNetworks();
+    sendNames();
     return ok;
 }
 
@@ -504,6 +521,7 @@ bool Cellular::handleMessage(const Message& cmd)
         applyLogFile();
         restartNetworks(cfg.getRestart() == MsgConfigureCellular::Restart::All);
         applyNetworks();
+        sendNames();
         return true;
     }
     else if (MsgStartStop::match(cmd))

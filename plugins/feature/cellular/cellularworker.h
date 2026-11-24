@@ -85,6 +85,18 @@ public:
         MsgSmsCentres() : Message() { }
     };
 
+    // the names of the networks by id: a rename does not start a network again
+    class MsgNames : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        std::map<int, QString> m_names;
+        static MsgNames* create() { return new MsgNames(); }
+
+    private:
+        MsgNames() : Message() { }
+    };
+
     // reports: the input queue of the feature; producer: the controller as the radios see it (the
     // feature, which outlives the worker): the source of the packets and the producer of the
     // audio pipes; lead: samples of lead of the transmitters
@@ -168,6 +180,8 @@ private:
     QString conflict(const Network& network) const;
     QStringList neighbours(const Network& network) const;
     void updateTuning(Radio& radio);
+    void sendNames(Radio& radio);
+    void rename(const MsgNames& msg);
     void processBatch(Radio& radio);
     void reportStatus(const Network& network);
     void sendTo(ChannelAPI *channel, const std::vector<uint8_t>& wire);

@@ -15,6 +15,8 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.          //
 ///////////////////////////////////////////////////////////////////////////////////
 
+#include <algorithm>
+
 #include <QGridLayout>
 #include <QLabel>
 #include <QVBoxLayout>
@@ -36,6 +38,16 @@ namespace
 const int kIdStride = 10000;
 const int kColumns = 4;
 const double kAudioRate = 48000.0;
+
+// the name of the network takes the room the box has, at least as much as the lines of numbers
+void setBoxText(QLabel *box, const QString& name, int channel, const QString& line2, const QString& line3)
+{
+    const QFontMetrics fm = box->fontMetrics();
+    const QString ch = QString(" ch %1").arg(channel);
+    const int lines = std::max({fm.horizontalAdvance(line2), fm.horizontalAdvance(line3), fm.horizontalAdvance("net 99" + ch)}) + 8;
+    const int room = std::max(lines, box->contentsRect().width() - 8) - fm.horizontalAdvance(ch);
+    box->setText(fm.elidedText(name, Qt::ElideRight, room) + ch + "\n" + line2 + "\n" + line3);
+}
 
 } // namespace
 
@@ -181,8 +193,7 @@ void CellularTxGUI::rebuildBoxes(const std::vector<int>& ids)
     {
         QLabel *box = new QLabel(m_boxLayout->parentWidget());
         box->setFrameShape(QFrame::Box);
-        box->setMinimumWidth(80);
-        box->setAlignment(Qt::AlignCenter);
+        box->setMinimumWidth(80);        box->setAlignment(Qt::AlignCenter);
         m_boxLayout->addWidget(box, static_cast<int>(i) / kColumns, static_cast<int>(i) % kColumns);
         m_boxes.push_back(box);
     }
@@ -221,15 +232,18 @@ void CellularTxGUI::tick()
     if (ids != m_boxIds) {
         rebuildBoxes(ids);
     }
+    const std::map<int, QString> names = m_cellularTx->networkNames();
     for (size_t i = 0; i < m_boxes.size() && i < status.carriers.size(); i++)
     {
         const modemcellular::CarrierTuning& t = status.carriers[i];
+        const int network = t.id / kIdStride;
+        const auto it = names.find(network);
+        const QString name = it != names.end() && !it->second.isEmpty() ? it->second : QString("net %1").arg(network);
+        QLabel *box = m_boxes[i];
 
-        m_boxes[i]->setText(QString("net %1 ch %2\n%3 kHz\n%4 ms, %5 empty")
-            .arg(t.id / kIdStride)
-            .arg(t.id % kIdStride)
-            .arg(t.offset / 1e3, 0, 'f', 1)
-            .arg(status.fill[i] / kAudioRate * 1e3, 0, 'f', 0)
-            .arg(status.underruns[i]));
+        box->setToolTip(QString("Network %1 (id %2), channel %3").arg(name).arg(network).arg(t.id % kIdStride));
+        setBoxText(box, name, t.id % kIdStride,
+            QString("%1 kHz").arg(t.offset / 1e3, 0, 'f', 1),
+            QString("%1 ms, %2 empty").arg(status.fill[i] / kAudioRate * 1e3, 0, 'f', 0).arg(status.underruns[i]));
     }
 }

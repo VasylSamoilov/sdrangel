@@ -132,14 +132,34 @@ bool CellularRx::handleMessage(const Message& cmd)
         case modemcellular::WireKind::None:
         case modemcellular::WireKind::Batch:
         case modemcellular::WireKind::Span:
-        case modemcellular::WireKind::TxStatus:
         case modemcellular::WireKind::Names:
+        {
+            modemcellular::WireNames names;
+
+            if (modemcellular::decodeNames(data, size, names))
+            {
+                QMutexLocker locker(&m_namesMutex);
+                m_networkNames.clear();
+                for (size_t i = 0; i < names.networks.size(); i++) {
+                    m_networkNames[names.networks[i]] = QString::fromStdString(names.names[i]);
+                }
+            }
+            return true;
+        }
+        case modemcellular::WireKind::TxStatus:
             break;
         }
         return false;
     }
 
     return false;
+}
+
+std::map<int, QString> CellularRx::networkNames() const
+{
+    QMutexLocker locker(&m_namesMutex);
+
+    return m_networkNames;
 }
 
 // the span of the stream to the controller

@@ -353,6 +353,7 @@ private:
     void start();
     void sendBookRecord(const modemnmt::NmtPhoneRecord& record, bool removed = false);
     void sendSmsCentres();
+    void sendNames();
     void stop();
     void startNetwork(const CellularNetworkSettings& network);
     void stopNetwork(int id);

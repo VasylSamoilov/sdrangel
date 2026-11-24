@@ -37,6 +37,7 @@
 
 MESSAGE_CLASS_DEFINITION(CellularWorker::MsgAddNetwork, Message)
 MESSAGE_CLASS_DEFINITION(CellularWorker::MsgSmsCentres, Message)
+MESSAGE_CLASS_DEFINITION(CellularWorker::MsgNames, Message)
 
 using modemnmt::ChannelType;
 using modemnmt::NmtChannel;
@@ -149,6 +150,8 @@ void CellularWorker::handleInputMessages()
             action(static_cast<const Cellular::MsgAction&>(*message));
         } else if (MsgSmsCentres::match(*message)) {
             m_smsCentres = static_cast<const MsgSmsCentres&>(*message).m_centres;
+        } else if (MsgNames::match(*message)) {
+            rename(static_cast<const MsgNames&>(*message));
         }
         delete message;
     }
@@ -756,6 +759,51 @@ void CellularWorker::updateTuning(Radio& radio)
         }
     }
     sendTo(radio.channel, modemcellular::encodeTuning(tuning));
+    sendNames(radio);
+}
+
+// the names of the networks on the radio, for the display of its channel
+void CellularWorker::sendNames(Radio& radio)
+{
+    modemcellular::WireNames names;
+
+    for (const std::unique_ptr<Network>& n : m_networks)
+    {
+        if (running(*n) && (radio.tx ? n->tx : n->rx) == &radio)
+        {
+            // 60 UTF-16 units are at most 180 bytes of UTF-8; a pair is not cut in half
+            QString name = n->name.left(60);
+            if (!name.isEmpty() && name.at(name.size() - 1).isHighSurrogate()) {
+                name.chop(1);
+            }
+            names.networks.push_back(n->id);
+            names.names.push_back(name.toStdString());
+        }
+    }
+    sendTo(radio.channel, modemcellular::encodeNames(names));
+}
+
+void CellularWorker::rename(const MsgNames& msg)
+{
+    std::vector<Radio*> radios;
+
+    for (const std::unique_ptr<Network>& n : m_networks)
+    {
+        const auto it = msg.m_names.find(n->id);
+        if (it == msg.m_names.end() || it->second == n->name) {
+            continue;
+        }
+        n->name = it->second;
+        for (Radio *r : {n->rx, n->tx})
+        {
+            if (r && running(*n) && std::find(radios.begin(), radios.end(), r) == radios.end()) {
+                radios.push_back(r);
+            }
+        }
+    }
+    for (Radio *r : radios) {
+        sendNames(*r);
+    }
 }
 
 void CellularWorker::handlePipe(Radio *radio)

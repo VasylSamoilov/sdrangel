@@ -331,14 +331,34 @@ bool CellularTx::handleMessage(const Message& cmd)
         case modemcellular::WireKind::None:
         case modemcellular::WireKind::Batch:
         case modemcellular::WireKind::Span:
-        case modemcellular::WireKind::TxStatus:
         case modemcellular::WireKind::Names:
+        {
+            modemcellular::WireNames names;
+
+            if (modemcellular::decodeNames(data, size, names))
+            {
+                QMutexLocker mutexLocker(&m_mutex);
+                m_networkNames.clear();
+                for (size_t i = 0; i < names.networks.size(); i++) {
+                    m_networkNames[names.networks[i]] = QString::fromStdString(names.names[i]);
+                }
+            }
+            return true;
+        }
+        case modemcellular::WireKind::TxStatus:
             break;
         }
         return false;
     }
 
     return false;
+}
+
+std::map<int, QString> CellularTx::networkNames() const
+{
+    QMutexLocker mutexLocker(&m_mutex);
+
+    return m_networkNames;
 }
 
 void CellularTx::sendToController(const std::vector<uint8_t>& wire)
