@@ -19,6 +19,7 @@ set(MODEMCELLULAR_LIB_SOURCES
     ../echosuppressor.cpp
     ../firfilter.cpp
     ../musicendpoint.cpp
+    ../speechmeter.cpp
     ../testcaller.cpp
     ../timer.cpp
     ../tonegenerator.cpp)
@@ -76,3 +77,4 @@ modemcellular_add_test(modemcellular_carrierqueue_test test_carrierqueue.cpp)
 modemcellular_add_test(modemcellular_carrierradio_test test_carrierradio.cpp)
 modemcellular_add_test(modemcellular_carrierwire_test test_carrierwire.cpp)
 modemcellular_add_test(modemcellular_testcaller_test test_testcaller.cpp)
+modemcellular_add_test(modemcellular_speechmeter_test test_speechmeter.cpp)
