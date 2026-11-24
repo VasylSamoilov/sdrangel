@@ -370,6 +370,8 @@ public:
     // alternates between channel band advertisement and battery saving if both are configured.
     Frame idleFrame();
     uint64_t framesSent() const { return m_framesSent; }
+    // frames the modem took from the radio (any phone, any type), for a monitor of activity
+    uint64_t framesReceived() const { return m_framesReceived; }
 
     // Audio towards the radio: frames back to back, or the dial tone, or speech. Renders the
     // whole buffer; returns the number of samples that carried frames. Audio from the radio:
@@ -483,6 +485,7 @@ private:
     NmtDmsLink::FrameTap m_dmsTap;
     NmtModem m_modem;
     uint64_t m_framesSent;
+    uint64_t m_framesReceived;
 
     NmtHost* m_host;
     std::unique_ptr<modemcellular::Timer> m_timer;

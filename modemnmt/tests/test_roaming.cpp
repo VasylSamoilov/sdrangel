@@ -81,7 +81,9 @@ static void testReleaseGuardTimeout()
     NmtChannel& tc = system.addChannel(config(System::Nmt450, ChannelType::Tc, 100), kRate, 1.0);
     const Phone phone;
 
+    CHECK(tc.framesReceived() == 0);
     seize(tc, phone);
+    CHECK(tc.framesReceived() == 3);        // the three frames of the seizure, counted for the monitor
     CHECK(tc.state() == NmtChannel::State::RoamingConfirm);
     for (int i = 0; i < 2; i++) {
         pull(tc);

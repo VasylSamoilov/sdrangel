@@ -171,6 +171,7 @@ NmtChannel::NmtChannel(const ChannelConfig& config, double sampleRate, double de
     m_valid(configValid(config, sampleRate, deviationFactor)),
     m_modem(sampleRate, deviationFactor),
     m_framesSent(0),
+    m_framesReceived(0),
     m_host(nullptr),
     m_state(State::Idle),
     m_transaction(nullptr),
@@ -666,7 +667,11 @@ bool NmtChannel::networkRelease()
 
 void NmtChannel::receiveFrame(const RxFrame& rx)
 {
-    if (!m_valid || (!m_listener && !m_host)) {
+    if (!m_valid) {
+        return;
+    }
+    m_framesReceived++;
+    if (!m_listener && !m_host) {
         return;
     }
 
