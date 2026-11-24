@@ -69,6 +69,8 @@ const WordDef kReccB = {"Word B - Extended Address Word", true,
      {"MPCI", 2}, {"SDCC1", 2}, {"SDCC2", 2}, {"MIN2", 10}}};
 const WordDef kReccSerial = {"Word C - Serial Number Word", true,
     {{"F", 1}, {"NAWC", 3}, {"SERIAL", 32}}};
+const WordDef kReccPci = {"Word C - Protocol Capability Indicator Word", true,
+    {{"F", 1}, {"NAWC", 3}, {"MSPC", 4}, {"MSCAP", 3}, {"RSVD", 25}}};
 const WordDef kReccDigits = {"Word D to G - Called Address Word", true,
     {{"F", 1}, {"NAWC", 3}, {"DIGIT 1", 4}, {"DIGIT 2", 4}, {"DIGIT 3", 4}, {"DIGIT 4", 4}, {"DIGIT 5", 4},
      {"DIGIT 6", 4}, {"DIGIT 7", 4}, {"DIGIT 8", 4}}};

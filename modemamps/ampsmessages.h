@@ -50,6 +50,7 @@ MODEMAMPS_API extern const WordDef kControlFiller;             // OHD 001
 MODEMAMPS_API extern const WordDef kReccA;                     // abbreviated address word
 MODEMAMPS_API extern const WordDef kReccB;                     // extended address word
 MODEMAMPS_API extern const WordDef kReccSerial;                // word C, serial number
+MODEMAMPS_API extern const WordDef kReccPci;                   // word C, protocol capability indicator
 MODEMAMPS_API extern const WordDef kReccDigits;                // words D to G: F NAWC and 8 digits (DIGIT 1 .. DIGIT 8)
 
 // FVC (3.7.2)
