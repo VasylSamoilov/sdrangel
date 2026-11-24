@@ -22,7 +22,9 @@
 
 #include <QDebug>
 
+#include "audio/audiodevicemanager.h"
 #include "channel/channelapi.h"
+#include "dsp/dspengine.h"
 #include "maincore.h"
 #include "pipes/messagepipes.h"
 #include "pipes/objectpipe.h"
@@ -132,6 +134,9 @@ CellularWorker::CellularWorker(MessageQueue *reports, const QObject *producer, u
 
 CellularWorker::~CellularWorker()
 {
+    if (m_audioSink) {
+        DSPEngine::instance()->getAudioDeviceManager()->removeAudioSink(&m_audioFifo);
+    }
     // the bridges go before the systems they connect
     for (std::unique_ptr<Network>& n : m_networks)
     {
@@ -295,7 +300,16 @@ void CellularWorker::setHandlers(Network& n)
         }
     };
     // touch tones the phone sends in a call (keys pressed, or a code the phone sends by itself)
+    // listening in: both directions of the listened call
+    system.setAudioTapToMobile([this, id](const modemnmt::NmtSubscriber& subscriber, const float *samples, int count) {
+        if (m_listener && id == m_listenNetwork && numberText(subscriber) == m_listenNumber) {
+            m_listener->toPhone(samples, count);
+        }
+    });
     system.setAudioTap([this, id](const modemnmt::NmtSubscriber& subscriber, const float *samples, int count) {
+        if (m_listener && id == m_listenNetwork && numberText(subscriber) == m_listenNumber) {
+            m_listener->fromPhone(samples, count);
+        }
         ToneListener& t = m_tones[numberText(subscriber).toStdString()];
         if (!t.detector) {
             t.detector = std::make_unique<DVDTMF::Detector>(static_cast<int>(modemnmt::NmtBaseStation::kAudioRate));
@@ -525,8 +539,70 @@ void CellularWorker::action(const Cellular::MsgAction& msg)
         break;
     case Cellular::MsgAction::Forget:
         return;         // the book is the feature's: it does it
+    case Cellular::MsgAction::Listen:
+        listen(n.id, msg.getNumber(), msg.getValue());
+        return;
     }
     log(n.id, what + (ok ? ": started" : ": refused: " + refused));
+}
+
+// Listening in to one call at a time: on the default speaker of SDRangel (the console's later).
+void CellularWorker::listen(int network, const QString& number, int mode)
+{
+    static const char * const names[] = {"off", "both sides (the phone left, the far end right)",
+        "the phone only", "the far end only"};
+    using M = modemcellular::CallListener::Mode;
+    const M modes[] = {M::Off, M::Both, M::FromPhone, M::ToPhone};
+    mode = std::max(0, std::min(3, mode));
+    AudioDeviceManager *audio = DSPEngine::instance()->getAudioDeviceManager();
+
+    if (modes[mode] == M::Off)
+    {
+        if (m_listener) {
+            m_listener->setMode(M::Off);
+        }
+        if (m_audioSink)
+        {
+            audio->removeAudioSink(&m_audioFifo);
+            m_audioSink = false;
+        }
+        if (!m_listenNumber.isEmpty()) {
+            log(m_listenNetwork, QString("listening to %1: off").arg(m_listenNumber), Cellular::MsgReportLog::Call);
+        }
+        m_listenNumber.clear();
+        m_listenNetwork = 0;
+        return;
+    }
+    const int rate = audio->getOutputSampleRate(-1);
+    if (!m_listener || m_listener->mode() == M::Off) {
+        m_listener = std::make_unique<modemcellular::CallListener>(rate > 0 ? rate : 48000);
+    }
+    if (!m_audioSink)
+    {
+        m_audioFifo.setSize(static_cast<uint32_t>((rate > 0 ? rate : 48000) / 2));   // 0.5 s
+        audio->addAudioSink(&m_audioFifo, &m_inputMessageQueue, -1);
+        m_audioSink = true;
+    }
+    // another call: the speaker moves there
+    if (network != m_listenNetwork || number != m_listenNumber) {
+        m_listener->reset();
+    }
+    m_listener->setMode(modes[mode]);
+    m_listenNetwork = network;
+    m_listenNumber = number;
+    log(network, QString("listening to %1: %2").arg(number).arg(names[mode]), Cellular::MsgReportLog::Call);
+}
+
+void CellularWorker::listenOutput()
+{
+    if (!m_listener || m_listener->mode() == modemcellular::CallListener::Mode::Off) {
+        return;
+    }
+    m_listenFrames.clear();
+    const size_t frames = m_listener->take(m_listenFrames);
+    if (frames > 0) {
+        m_audioFifo.write(reinterpret_cast<const quint8*>(m_listenFrames.data()), static_cast<uint32_t>(frames));
+    }
 }
 
 // Indicators that waited for the phone: sent as soon as the protocol takes them.
@@ -1256,6 +1332,7 @@ void CellularWorker::processBatch(Radio& radio)
     for (const auto& out : m_txOut) {
         sendAudio(out.first->channel, modemcellular::encodeBatch(out.second));
     }
+    listenOutput();
 }
 
 // the audio for a transmitter goes through the pipe it registered from the controller to it
@@ -1344,6 +1421,9 @@ void CellularWorker::reportSpeech(Network& n, bool logLine)
         call.rxCall = s.rxCall;
         call.txCall = s.txCall;
         call.limited = s.limited;
+        if (m_listener && n.id == m_listenNetwork && call.phone == m_listenNumber) {
+            call.listen = static_cast<int>(m_listener->mode());
+        }
         if (ended)
         {
             // the whole call, kept with the phone and in the log
@@ -1353,6 +1433,10 @@ void CellularWorker::reportSpeech(Network& n, bool logLine)
                 phone.number = call.phone;
             }
             phone.lastCall = call;
+            // the speaker of a call that ended goes off
+            if (n.id == m_listenNetwork && call.phone == m_listenNumber) {
+                listen(n.id, call.phone, 0);
+            }
             log(n.id, QString("ch %1 call of %2 ended, speech from the phone: %3; to the phone: %4, limited %5")
                 .arg(call.channel).arg(call.phone).arg(speechText(s.rxCall)).arg(speechText(s.txCall)).arg(s.limited),
                 Cellular::MsgReportLog::Call);

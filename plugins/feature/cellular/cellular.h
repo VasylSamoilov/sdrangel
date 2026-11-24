@@ -46,6 +46,7 @@ struct CellularCallSpeech
     modemcellular::SpeechStats rxRecent, txRecent;     // the last 2 s
     modemcellular::SpeechStats rxCall, txCall;         // the whole call
     quint64 limited = 0;                        // blocks the transmitter's limiter scaled
+    int listen = 0;                             // listened to: 0 no, 1 both sides, 2 from the phone, 3 to it
 };
 
 class WebAPIAdapterInterface;
@@ -131,7 +132,8 @@ public:
             Power,      // power level of the phone in its call (value: 0..3)
             Move,       // the call of the phone to another traffic channel (value: channel, 0 any)
             Hold,       // a short message (text) the centre keeps until the phone fetches it
-            Forget      // the record of the phone in the book (the system of the network)
+            Forget,     // the record of the phone in the book (the system of the network)
+            Listen      // listen in to the phone's call (value: 0 off, 1 both sides, 2 from the phone, 3 to it)
         };
         static bool parse(const QString& name, Action& action);
         static const char* name(Action action);

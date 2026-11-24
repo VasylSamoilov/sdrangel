@@ -44,6 +44,12 @@ namespace CellularSpeechPaint
 {
     // both directions as text, for tooltips (several lines)
     QString text(const CellularCallSpeech& call, bool whole);
+    // the speaker button of a live call: its box at the left of `rect`, and its drawing with the
+    // listening mode (0 off, 1 both sides, 2 from the phone, 3 to the phone)
+    QRect speakerRect(const QRect& rect);
+    void speaker(QPainter& painter, const QRect& rect, int listen);
+    // the menu of the speaker button; returns the mode picked, -1 if none
+    int speakerMenu(QWidget *parent, const QPoint& globalPos, int listen);
 }
 
 // The "Speech" column of the Mobiles list: the two directions of the phone's call (its last 2 s),
@@ -55,7 +61,11 @@ class CellularSpeechDelegate : public QStyledItemDelegate
 
 public:
     using Lookup = std::function<const CellularSpeechSeen*(const QString& number)>;
+    // the speaker button of a row was clicked (a live call)
+    using Speaker = std::function<void(const QModelIndex& index, const QPoint& globalPos, int listen)>;
     CellularSpeechDelegate(QObject *parent, int numberRole, Lookup lookup);
+    void setSpeaker(Speaker speaker) { m_speaker = std::move(speaker); }
+    bool editorEvent(QEvent *event, QAbstractItemModel *model, const QStyleOptionViewItem& option, const QModelIndex& index) override;
     void paint(QPainter *painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override;
     QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override;
     bool helpEvent(QHelpEvent *event, QAbstractItemView *view, const QStyleOptionViewItem& option, const QModelIndex& index) override;
@@ -64,6 +74,7 @@ private:
     const CellularSpeechSeen *find(const QModelIndex& index) const;
     int m_numberRole;
     Lookup m_lookup;
+    Speaker m_speaker;
 };
 
 // The status line: the call the operator follows (the selected phone, or the only call) with its
@@ -77,8 +88,13 @@ public:
     explicit CellularSpeechLine(QWidget *parent = nullptr);
     void show(const CellularSpeechSeen *seen);      // null: hidden
 
+signals:
+    // the speaker button was clicked and a mode picked (the call shown)
+    void listen(const QString& number, int mode);
+
 protected:
     void paintEvent(QPaintEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
     QSize sizeHint() const override;
     QSize minimumSizeHint() const override;
 

@@ -691,6 +691,15 @@ void CellularGUI::buildUI()
     layout->addWidget(m_tabs, 1);
     m_speechLine = new CellularSpeechLine(main);
     layout->addWidget(m_speechLine);
+    connect(m_speechLine, &CellularSpeechLine::listen, this, [this](const QString& number, int mode) {
+        for (int row = 0; row < m_phones->rowCount(); row++)
+        {
+            const QTableWidgetItem *item = m_phones->item(row, MobileName);
+            if (item && item->data(CellularMobileRole::Number).toString() == number) {
+                requestAction(item->data(CellularMobileRole::Network).toInt(), number, Cellular::MsgAction::Listen, QString(), mode);
+            }
+        }
+    });
     main->setMinimumWidth(0);
     // the tabs take the height of the window
     main->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -715,8 +724,21 @@ QWidget *CellularGUI::buildPhones()
     m_phones->horizontalHeader()->setSectionResizeMode(MobileSpeech, QHeaderView::ResizeToContents);
     m_phones->horizontalHeader()->setStretchLastSection(false);
     m_phones->setItemDelegateForColumn(MobileName, new CellularMobileDelegate(m_phones));
-    m_phones->setItemDelegateForColumn(MobileSpeech, new CellularSpeechDelegate(m_phones, CellularMobileRole::Number,
-        [this](const QString& number) { return speechOf(number); }));
+    CellularSpeechDelegate *speech = new CellularSpeechDelegate(m_phones, CellularMobileRole::Number,
+        [this](const QString& number) { return speechOf(number); });
+    // the speaker button of a call: listen in on the network the phone is heard on
+    speech->setSpeaker([this](const QModelIndex& index, const QPoint& globalPos, int listen) {
+        const QTableWidgetItem *item = m_phones->item(index.row(), MobileName);
+        if (!item) {
+            return;
+        }
+        const int mode = CellularSpeechPaint::speakerMenu(m_phones, globalPos, listen);
+        if (mode >= 0) {
+            requestAction(item->data(CellularMobileRole::Network).toInt(), item->data(CellularMobileRole::Number).toString(),
+                Cellular::MsgAction::Listen, QString(), mode);
+        }
+    });
+    m_phones->setItemDelegateForColumn(MobileSpeech, speech);
     m_phones->horizontalHeaderItem(MobileSpeech)->setToolTip(QString("The speech of the phone's call: %1 from the phone "
         "(demodulated), %2 to the phone. Each: the pauses (grey), where the speech landed from -40 to +4 dB of the "
         "reference (red line: 4.7 kHz, the largest deviation), six bands from 300 Hz to 3.4 kHz, the share at the "

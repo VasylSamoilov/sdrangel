@@ -27,9 +27,11 @@
 #include <QString>
 #include <QStringList>
 
+#include "audio/audiofifo.h"
 #include "util/message.h"
 #include "util/messagequeue.h"
 
+#include "calllistener.h"
 #include "carrierbatch.h"
 #include "carrierwire.h"
 #include "cellularsystem.h"
@@ -216,6 +218,16 @@ private:
     modemnmt::NmtPhoneInfo& known(const std::string& number) { return m_known[number]; }
     static void trafficArea(const Network& n, int& y1, int& area);
     void action(const Cellular::MsgAction& action);
+    // listening in: mode 0 off, 1 both sides (phone left), 2 from the phone, 3 to the phone
+    void listen(int network, const QString& number, int mode);
+    void listenOutput();                        // the listened call's audio to the speaker
+
+    std::unique_ptr<modemcellular::CallListener> m_listener;
+    AudioFifo m_audioFifo;
+    bool m_audioSink = false;                   // m_audioFifo is with the audio device
+    int m_listenNetwork = 0;
+    QString m_listenNumber;
+    std::vector<int16_t> m_listenFrames;
     void setHandlers(Network& n);
 
     MessageQueue m_inputMessageQueue;
