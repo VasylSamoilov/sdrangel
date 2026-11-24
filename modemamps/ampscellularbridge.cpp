@@ -122,7 +122,13 @@ AmpsCellularBridge::AmpsCellularBridge(AmpsSystem& amps, modemcellular::Cellular
             m_cellular.release(leg.callref(), modemcellular::Cause::Normal);
             leg.setCallref(0);
         }
-        const modemcellular::CallRouter::SetupResult result = m_cellular.setup(leg, leg.number(), dialled);
+        // A phone's number (10 digits) that is not registered here is paged all the same, as
+        // osmocom-analog does; other numbers go to the fallback.
+        modemcellular::MobileLeg *called = nullptr;
+        if (!m_cellular.isRegistered(dialled) && dialled != leg.number()) {
+            called = legOf(dialled);
+        }
+        const modemcellular::CallRouter::SetupResult result = m_cellular.setup(leg, leg.number(), dialled, called);
         if (!result.ok()) {
             return false;
         }
@@ -137,6 +143,28 @@ AmpsCellularBridge::AmpsCellularBridge(AmpsSystem& amps, modemcellular::Cellular
             m_cellular.release(callref, modemcellular::Cause::Normal);
         }
     });
+    // progress of a call to a phone
+    m_amps.setCallToPhoneHandlers(
+        [this](const AmpsSubscriber& subscriber) {
+            const modemcellular::CallRef callref = legFor(subscriber).callref();
+            if (callref) {
+                m_cellular.alerting(callref);
+            }
+        },
+        [this](const AmpsSubscriber& subscriber) {
+            const modemcellular::CallRef callref = legFor(subscriber).callref();
+            if (callref) {
+                m_cellular.answer(callref);
+            }
+        },
+        [this](const AmpsSubscriber& subscriber, modemcellular::Cause cause) {
+            Leg& leg = legFor(subscriber);
+            const modemcellular::CallRef callref = leg.callref();
+            leg.setCallref(0);
+            if (callref) {
+                m_cellular.release(callref, cause);
+            }
+        });
     m_amps.setAudioHandlers(
         [this](const AmpsSubscriber& subscriber, const float* samples, int count) {
             Leg& leg = legFor(subscriber);
@@ -171,6 +199,7 @@ AmpsCellularBridge::~AmpsCellularBridge()
     m_amps.setRegistrationHandler(nullptr);
     m_amps.setCallHandler(nullptr);
     m_amps.setClearHandler(nullptr);
+    m_amps.setCallToPhoneHandlers(nullptr, nullptr, nullptr);
     m_amps.setAudioHandlers(nullptr, nullptr);
     // waits for notifications that are being delivered to a leg
     for (auto& entry : m_legs) {
@@ -228,8 +257,16 @@ void AmpsCellularBridge::run()
         Leg& leg = *it->second;
         if (event.type == Event::Type::Setup)
         {
-            // a call for the phone: paging is not done yet; a phone in a call is busy
-            m_cellular.release(event.callref, leg.callref() ? modemcellular::Cause::Busy : modemcellular::Cause::OutOfOrder);
+            // a call for the phone: it is paged; a phone that has a call is busy, and the call is
+            // rejected at once if it cannot be paged
+            modemcellular::Cause cause = modemcellular::Cause::Busy;
+            if (leg.callref()) {
+                m_cellular.release(event.callref, modemcellular::Cause::Busy);
+            } else if (!m_amps.startCall(leg.number(), &cause)) {
+                m_cellular.release(event.callref, cause);
+            } else {
+                leg.setCallref(event.callref);
+            }
         }
         else if (event.callref == leg.callref())
         {

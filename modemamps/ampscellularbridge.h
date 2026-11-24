@@ -34,8 +34,9 @@
 // NmtCellularBridge does for NMT: calls from the phones go to the router (registered numbers, music,
 // echo), its tones and audio come back, and a call that the far end releases releases the phone.
 // Registered phones are known to the router under their number, the 10 digits of the MIN; a phone
-// that powers down is removed. Calls to the phones (paging) are not done yet: the router's call to
-// a phone is released at once.
+// that powers down is removed. The router's call to a phone pages it (AmpsSystem::startCall; a
+// phone that is not registered is paged as well, legOf() gives its leg), its ringing and answer go
+// back to the router.
 //
 // Threads as NmtCellularBridge: the AmpsSystem is used by one thread at a time (render, receive and
 // run of its base station, run() of the bridge, its construction and destruction under one lock);
