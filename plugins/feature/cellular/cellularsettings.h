@@ -86,6 +86,13 @@ struct CellularSettings
     // preset): the feature keeps the book itself and ignores this in ordinary settings messages.
     QByteArray m_book;
     Serializable *m_rollupState;
+    // order and sizes of the columns of the networks and carriers tables (size 0: hidden, -1: auto)
+    static constexpr int kNetworkColumns = 7;
+    static constexpr int kCarrierColumns = 10;
+    QList<int> m_networkColumnIndexes;
+    QList<int> m_networkColumnSizes;
+    QList<int> m_carrierColumnIndexes;
+    QList<int> m_carrierColumnSizes;
 
     CellularSettings();
     void resetToDefaults();

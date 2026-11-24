@@ -270,6 +270,20 @@ void CellularSettings::resetToDefaults()
     m_title = "Cellular";
     m_rgbColor = QColor(0, 160, 120).rgb();
     m_workspaceIndex = 0;
+    m_networkColumnIndexes.clear();
+    m_networkColumnSizes.clear();
+    m_carrierColumnIndexes.clear();
+    m_carrierColumnSizes.clear();
+    for (int i = 0; i < kNetworkColumns; i++)
+    {
+        m_networkColumnIndexes.append(i);
+        m_networkColumnSizes.append(-1);
+    }
+    for (int i = 0; i < kCarrierColumns; i++)
+    {
+        m_carrierColumnIndexes.append(i);
+        m_carrierColumnSizes.append(-1);
+    }
 }
 
 CellularNetworkSettings& CellularSettings::addNetwork()
@@ -311,6 +325,16 @@ QByteArray CellularSettings::serialize() const
     }
     for (int i = 0; i < m_networks.size(); i++) {
         s.writeBlob(static_cast<quint32>(100 + i), m_networks[i].serialize());
+    }
+    for (int i = 0; i < kNetworkColumns; i++)
+    {
+        s.writeS32(static_cast<quint32>(30 + i), m_networkColumnIndexes[i]);
+        s.writeS32(static_cast<quint32>(40 + i), m_networkColumnSizes[i]);
+    }
+    for (int i = 0; i < kCarrierColumns; i++)
+    {
+        s.writeS32(static_cast<quint32>(50 + i), m_carrierColumnIndexes[i]);
+        s.writeS32(static_cast<quint32>(60 + i), m_carrierColumnSizes[i]);
     }
 
     return s.final();
@@ -359,6 +383,16 @@ bool CellularSettings::deserialize(const QByteArray& data)
     d.readS32(22, &m_workspaceIndex, 0);
     d.readBlob(23, &m_geometryBytes);
     d.readBlob(25, &m_book);
+    for (int i = 0; i < kNetworkColumns; i++)
+    {
+        d.readS32(static_cast<quint32>(30 + i), &m_networkColumnIndexes[i], i);
+        d.readS32(static_cast<quint32>(40 + i), &m_networkColumnSizes[i], -1);
+    }
+    for (int i = 0; i < kCarrierColumns; i++)
+    {
+        d.readS32(static_cast<quint32>(50 + i), &m_carrierColumnIndexes[i], i);
+        d.readS32(static_cast<quint32>(60 + i), &m_carrierColumnSizes[i], -1);
+    }
     if (m_rollupState)
     {
         d.readBlob(24, &bytetmp);

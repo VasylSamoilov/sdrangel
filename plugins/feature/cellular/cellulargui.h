@@ -128,6 +128,11 @@ private:
     QWidget *buildLog();
     QWidget *buildNetworks();
     QWidget *buildCarriers();
+    // Columns as SDRangel's tables have them: a menu on the header to show and hide them, moved
+    // and resized by the user, order and sizes kept in the settings (size 0: hidden, -1: auto,
+    // from the sample row).
+    void setupColumns(QTableWidget *table, QList<int> *indexes, QList<int> *sizes, const QStringList& sample);
+    void applyColumns(QTableWidget *table, const QList<int>& indexes, const QList<int>& sizes);
     void displaySettings();
     void applySettings();
     bool handleMessage(const Message& message);
