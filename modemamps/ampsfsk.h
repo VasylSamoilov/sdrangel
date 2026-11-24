@@ -85,6 +85,12 @@ public:
     void endFrame();
     bool clocked() const { return m_state != StateNone; }
 
+    // The bits between the last 8 zero crossings, the newest first (7). True if each crossing is
+    // within half a bit of one bit apart from the newest; phase is then the mean of their offsets:
+    // how late the newest crossing came (osmocom divides their sum by 8, a mean of 7/8).
+    static constexpr int kDottingIntervals = 7;
+    static bool dottingPhase(const double* intervals, double& phase);
+
 private:
     enum State { StateNone, StateDotting, StateFrame };
 

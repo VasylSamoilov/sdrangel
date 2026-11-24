@@ -32,8 +32,6 @@ const double kPi = 3.14159265358979323846;
 const double kBestQuality = 0.68;
 // osmocom: bits the clock runs after the last dotting before it stops without a frame
 const int kDottingLife = 12;
-// zero crossings of the dotting checked (osmocom: 7 bits between 8 crossings)
-const int kDottingCrossings = 8;
 // points of a mean between the samples
 const int kMeanPoints = 8;
 
@@ -168,22 +166,16 @@ void ManchesterDemodulator::crossing(double elapsed, double sinceCrossing)
 {
     m_dotting[m_dottingPos++] = elapsed;
 
-    // the last crossings have to be one bit apart, each within half a bit
     unsigned char pos = m_dottingPos;
+    double intervals[kDottingIntervals];
     double average = 0.0;
-    double sum = 0.0;
 
-    for (int i = 1; i < kDottingCrossings; i++)
-    {
-        sum += m_dotting[--pos];
-        const double offset = sum - static_cast<double>(i);
-
-        if (offset >= 0.5 || offset <= -0.5) {
-            return;
-        }
-        average += offset;
+    for (int i = 0; i < kDottingIntervals; i++) {
+        intervals[i] = m_dotting[--pos];
     }
-    average /= static_cast<double>(kDottingCrossings);
+    if (!dottingPhase(intervals, average)) {
+        return;
+    }
 
     m_dottingLife = kDottingLife;
     // a better dotting than the one found (that was noise) sets the clock again
@@ -194,6 +186,26 @@ void ManchesterDemodulator::crossing(double elapsed, double sinceCrossing)
         // the bit is decided half a bit after its crossing; this sample is already past it
         m_bitCount = 0.5 + average + sinceCrossing - m_bitsPerSample;
     }
+}
+
+bool ManchesterDemodulator::dottingPhase(const double* intervals, double& phase)
+{
+    // the last crossings have to be one bit apart, each within half a bit
+    double sum = 0.0;
+    double average = 0.0;
+
+    for (int i = 0; i < kDottingIntervals; i++)
+    {
+        sum += intervals[i];
+        const double offset = sum - static_cast<double>(i + 1);
+
+        if (offset >= 0.5 || offset <= -0.5) {
+            return false;
+        }
+        average += offset;
+    }
+    phase = average / kDottingIntervals;
+    return true;
 }
 
 double ManchesterDemodulator::at(double back) const

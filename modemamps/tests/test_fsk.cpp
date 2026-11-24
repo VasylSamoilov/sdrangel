@@ -215,8 +215,31 @@ static void testNoiseOnly()
     CHECK(bits < 1000);
 }
 
+// The phase of the dotting is the mean of the offsets of the crossings: the newest one late by d
+// (the others on time) makes every offset d, the phase d
+static void testDottingPhase()
+{
+    double phase = 0.0;
+    double intervals[ManchesterDemodulator::kDottingIntervals];
+
+    for (double& i : intervals) {
+        i = 1.0;
+    }
+    CHECK(ManchesterDemodulator::dottingPhase(intervals, phase) && std::fabs(phase) < 1e-12);
+    intervals[0] = 1.2;
+    CHECK(ManchesterDemodulator::dottingPhase(intervals, phase) && std::fabs(phase - 0.2) < 1e-12);
+    // an older interval long: the offsets from it on
+    intervals[0] = 1.0;
+    intervals[3] = 1.35;
+    CHECK(ManchesterDemodulator::dottingPhase(intervals, phase) && std::fabs(phase - 0.35 * 4 / 7) < 1e-12);
+    // half a bit off: no dotting
+    intervals[3] = 1.5;
+    CHECK(!ManchesterDemodulator::dottingPhase(intervals, phase));
+}
+
 int main()
 {
+    testDottingPhase();
     testModulator();
     testRoundTrip();
     testNoiseAndClock();
