@@ -9,7 +9,8 @@ get_filename_component(SDRANGEL_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 set(MODEMAMPS_LIB_SOURCES
     ../ampsbch.cpp
     ../ampsstream.cpp
-    ../ampsword.cpp)
+    ../ampsword.cpp
+    ../ampsmessages.cpp)
 
 # Sanitizer: address (address and undefined behaviour) or off
 set(MODEMAMPS_TEST_SANITIZER "off" CACHE STRING "off or address")
@@ -39,3 +40,4 @@ endfunction()
 modemamps_add_test(modemamps_bch_test test_bch.cpp)
 modemamps_add_test(modemamps_stream_test test_stream.cpp)
 modemamps_add_test(modemamps_word_test test_word.cpp)
+modemamps_add_test(modemamps_messages_test test_messages.cpp)
