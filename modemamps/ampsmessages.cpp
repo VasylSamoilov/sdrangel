@@ -36,8 +36,25 @@ const WordDef kSystemParameter1 = {"System Parameter Overhead Message Word 1", f
 const WordDef kSystemParameter2 = {"System Parameter Overhead Message Word 2", false,
     {{"T1T2", 2}, {"DCC", 2}, {"S", 1}, {"E", 1}, {"REGH", 1}, {"REGR", 1}, {"DTX", 2}, {"N-1", 5}, {"RCF", 1},
      {"CPA", 1}, {"CMAX-1", 7}, {"END", 1}, {"OHD", 3}}};
+const WordDef kRescan = {"Rescan Global Action Message", false,
+    {{"T1T2", 2}, {"DCC", 2}, {"ACT", 4}, {"RSVD", 16}, {"END", 1}, {"OHD", 3}}};
 const WordDef kRegistrationIncrement = {"Registration Increment Global Action Message", false,
     {{"T1T2", 2}, {"DCC", 2}, {"ACT", 4}, {"REGINCR", 12}, {"RSVD", 4}, {"END", 1}, {"OHD", 3}}};
+const WordDef kLocationArea = {"Location Area Global Action Message", false,
+    {{"T1T2", 2}, {"DCC", 2}, {"ACT", 4}, {"PUREG", 1}, {"PDREG", 1}, {"LREG", 1}, {"RSVD", 1}, {"LOCAID", 12},
+     {"END", 1}, {"OHD", 3}}};
+const WordDef kNewAccessChannelSet = {"New Access Channel Set Global Action Message", false,
+    {{"T1T2", 2}, {"DCC", 2}, {"ACT", 4}, {"NEWACC", 11}, {"RSVD", 5}, {"END", 1}, {"OHD", 3}}};
+const WordDef kOverloadControl = {"Overload Control Global Action Message", false,
+    {{"T1T2", 2}, {"DCC", 2}, {"ACT", 4}, {"OLC 0", 1}, {"OLC 1", 1}, {"OLC 2", 1}, {"OLC 3", 1}, {"OLC 4", 1},
+     {"OLC 5", 1}, {"OLC 6", 1}, {"OLC 7", 1}, {"OLC 8", 1}, {"OLC 9", 1}, {"OLC 10", 1}, {"OLC 11", 1},
+     {"OLC 12", 1}, {"OLC 13", 1}, {"OLC 14", 1}, {"OLC 15", 1}, {"END", 1}, {"OHD", 3}}};
+const WordDef kAccessTypeParameters = {"Access Type Parameters Global Action Message", false,
+    {{"T1T2", 2}, {"DCC", 2}, {"ACT", 4}, {"BIS", 1}, {"PCI_HOME", 1}, {"PCI_ROAM", 1}, {"BSPC", 4}, {"BSCAP", 3},
+     {"RSVD", 6}, {"END", 1}, {"OHD", 3}}};
+const WordDef kAccessAttemptParameters = {"Access Attempt Parameters Global Action Message", false,
+    {{"T1T2", 2}, {"DCC", 2}, {"ACT", 4}, {"MAXBUSY-PGR", 4}, {"MAXSZTR-PGR", 4}, {"MAXBUSY-OTHER", 4},
+     {"MAXSZTR-OTHER", 4}, {"END", 1}, {"OHD", 3}}};
 const WordDef kRegistrationId = {"Registration ID Message", false,
     {{"T1T2", 2}, {"DCC", 2}, {"REGID", 20}, {"END", 1}, {"OHD", 3}}};
 const WordDef kControlFiller = {"Control-Filler Message", false,

@@ -37,6 +37,8 @@ static void testSizes()
 {
     const WordDef *forward[] = {&words::kAbbreviatedAddress, &words::kExtendedAddressOrder, &words::kExtendedAddressChannel,
         &words::kSystemParameter1, &words::kSystemParameter2, &words::kRegistrationIncrement, &words::kRegistrationId,
+        &words::kRescan, &words::kLocationArea, &words::kNewAccessChannelSet, &words::kOverloadControl,
+        &words::kAccessTypeParameters, &words::kAccessAttemptParameters,
         &words::kControlFiller, &words::kFvcOrder, &words::kFvcHandoff};
     const WordDef *reverse[] = {&words::kReccA, &words::kReccB, &words::kReccSerial, &words::kReccDigits,
         &words::kRvcOrderConfirmation, &words::kRvcDigits};

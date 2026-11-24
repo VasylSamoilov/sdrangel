@@ -36,7 +36,13 @@ MODEMAMPS_API extern const WordDef kExtendedAddressOrder;      // word 2, SCC = 
 MODEMAMPS_API extern const WordDef kExtendedAddressChannel;    // word 2, SCC != 11: initial voice channel designation
 MODEMAMPS_API extern const WordDef kSystemParameter1;          // OHD 110
 MODEMAMPS_API extern const WordDef kSystemParameter2;          // OHD 111
+MODEMAMPS_API extern const WordDef kRescan;                    // global action, ACT 0001
 MODEMAMPS_API extern const WordDef kRegistrationIncrement;     // global action, ACT 0010
+MODEMAMPS_API extern const WordDef kLocationArea;              // global action, ACT 0011
+MODEMAMPS_API extern const WordDef kNewAccessChannelSet;       // global action, ACT 0110
+MODEMAMPS_API extern const WordDef kOverloadControl;           // global action, ACT 1000: OLC 0 .. OLC 15
+MODEMAMPS_API extern const WordDef kAccessTypeParameters;      // global action, ACT 1001
+MODEMAMPS_API extern const WordDef kAccessAttemptParameters;   // global action, ACT 1010
 MODEMAMPS_API extern const WordDef kRegistrationId;            // OHD 000
 MODEMAMPS_API extern const WordDef kControlFiller;             // OHD 001
 
@@ -61,7 +67,8 @@ enum T1T2 : uint8_t { kT1T2Single = 0, kT1T2First = 1, kT1T2Next = 2, kT1T2Overh
 enum Ohd : uint8_t { kOhdRegistrationId = 0, kOhdControlFiller = 1, kOhdGlobalAction = 4, kOhdSystemParameter1 = 6,
     kOhdSystemParameter2 = 7 };
 // ACT of a global action word (Table 3.7.1-4)
-enum Act : uint8_t { kActRescan = 1, kActRegistrationIncrement = 2, kActLocationArea = 3 };
+enum Act : uint8_t { kActRescan = 1, kActRegistrationIncrement = 2, kActLocationArea = 3, kActNewAccessChannelSet = 6,
+    kActOverloadControl = 8, kActAccessTypeParameters = 9, kActAccessAttemptParameters = 10 };
 
 // ORDER (Table 3.7.1-1); with ORDQ and LOCAL/MSG_TYPE 0 unless noted
 enum Order : uint8_t
