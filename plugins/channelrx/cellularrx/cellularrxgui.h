@@ -31,7 +31,7 @@ class PluginAPI;
 class DeviceUISet;
 class BasebandSampleSink;
 class CellularRx;
-class QGridLayout;
+class FlowLayout;
 class QLabel;
 
 // The span of the stream and one small box per carrier: which network and channel, where it is
@@ -66,6 +66,8 @@ private:
 
     void displaySettings();
     void rebuildBoxes(const std::vector<int>& ids);
+    void fitHeight();
+    void resizeEvent(QResizeEvent *event) override;
 
     PluginAPI* m_pluginAPI;
     DeviceUISet* m_deviceUISet;
@@ -75,7 +77,7 @@ private:
     CellularRx* m_cellularRx;
     MessageQueue m_inputMessageQueue;
     QLabel *m_span;
-    QGridLayout *m_boxLayout;
+    FlowLayout *m_boxLayout;
     std::vector<QLabel*> m_boxes;
     std::vector<int> m_boxIds;
     unsigned int m_tickCount;

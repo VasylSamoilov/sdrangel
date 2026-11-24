@@ -20,7 +20,7 @@ The center frequency and sample rate of the device, the lead of the queues in ms
 
 <h3>2: Carrier boxes</h3>
 
-One box per carrier: the name of the network (the tooltip has its id) and the channel number, the offset of the carrier from the center of the stream in kHz, the milliseconds of audio in its queue and how many times the queue ran empty. The fill should stay near the lead. A queue that runs empty over and over means that the device takes audio faster than the receiver delivers it (or the lead is too small): the carrier then has gaps and phones lose frames.
+One box per carrier: the name of the network (the tooltip has its id) and the channel number, the offset of the carrier from the center of the stream in kHz, the milliseconds of audio in its queue and how many times the queue ran empty. The fill should stay near the lead. A queue that runs empty over and over means that the device takes audio faster than the receiver delivers it (or the lead is too small): the carrier then has gaps and phones lose frames. The boxes go into more rows when the window is narrow.
 
 <h2>Notes</h2>
 

@@ -18,7 +18,7 @@ The center frequency and sample rate of the device. The sample rate has to be an
 
 <h3>2: Carrier boxes</h3>
 
-One box per carrier: the name of the network (the tooltip has its id) and the channel number, the offset of the carrier from the center of the stream in kHz, and the received level in dB of full scale. A level around -100 dB is noise: no phone is transmitting.
+One box per carrier: the name of the network (the tooltip has its id) and the channel number, the offset of the carrier from the center of the stream in kHz, and the received level in dB of full scale. A level around -100 dB is noise: no phone is transmitting. The boxes go into more rows when the window is narrow.
 
 <h2>Notes</h2>
 

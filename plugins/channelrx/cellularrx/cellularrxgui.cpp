@@ -17,13 +17,13 @@
 
 #include <algorithm>
 
-#include <QGridLayout>
 #include <QLabel>
 #include <QVBoxLayout>
 
 #include "device/deviceuiset.h"
 #include "gui/basicchannelsettingsdialog.h"
 #include "gui/dialogpositioner.h"
+#include "gui/flowlayout.h"
 #include "gui/rollupcontents.h"
 #include "maincore.h"
 #include "plugin/pluginapi.h"
@@ -36,15 +36,15 @@ namespace
 
 // carrier ids are network * 10000 + channel number
 const int kIdStride = 10000;
-const int kColumns = 4;
+// the widest line of numbers a box has: its width
+const char * const kWidest = "-1999.9 kHz, ch 9999";
 
-// the name of the network takes the room the box has, at least as much as the lines of numbers
+// the name of the network takes the room the line of the channel leaves
 void setBoxText(QLabel *box, const QString& name, int channel, const QString& line2, const QString& line3)
 {
     const QFontMetrics fm = box->fontMetrics();
     const QString ch = QString(" ch %1").arg(channel);
-    const int lines = std::max({fm.horizontalAdvance(line2), fm.horizontalAdvance(line3), fm.horizontalAdvance("net 99" + ch)}) + 8;
-    const int room = std::max(lines, box->contentsRect().width() - 8) - fm.horizontalAdvance(ch);
+    const int room = box->contentsRect().width() - 8 - fm.horizontalAdvance(ch);
     box->setText(fm.elidedText(name, Qt::ElideRight, room) + ch + "\n" + line2 + "\n" + line3);
 }
 
@@ -82,11 +82,9 @@ CellularRxGUI::CellularRxGUI(PluginAPI* pluginAPI, DeviceUISet *deviceUISet, Bas
     m_span->setWordWrap(true);
     layout->addWidget(m_span);
     QWidget *boxes = new QWidget(carriers);
-    m_boxLayout = new QGridLayout(boxes);
-    m_boxLayout->setContentsMargins(0, 0, 0, 0);
-    m_boxLayout->setSpacing(3);
+    // the boxes flow into as many rows as the width of the window needs
+    m_boxLayout = new FlowLayout(boxes, 0, 3, 3);
     layout->addWidget(boxes);
-    carriers->setMinimumWidth(360);
     carriers->setMinimumHeight(60);
 
     setSizePolicy(rollupContents->sizePolicy());
@@ -192,12 +190,35 @@ void CellularRxGUI::rebuildBoxes(const std::vector<int>& ids)
     {
         QLabel *box = new QLabel(m_boxLayout->parentWidget());
         box->setFrameShape(QFrame::Box);
-        box->setMinimumWidth(80);        box->setAlignment(Qt::AlignCenter);
-        m_boxLayout->addWidget(box, static_cast<int>(i) / kColumns, static_cast<int>(i) % kColumns);
+        box->setFixedWidth(box->fontMetrics().horizontalAdvance(kWidest) + 12);
+        box->setAlignment(Qt::AlignCenter);
+        m_boxLayout->addWidget(box);
+        box->show();        // now, not queued as the layout does: fitHeight() needs its size
         m_boxes.push_back(box);
     }
     m_boxIds = ids;
+}
+
+// the boxes flow into as many rows as the width needs: the window takes the height of the rows
+// (SDRangel fits a channel window to its contents only when a section rolls up or down)
+void CellularRxGUI::fitHeight()
+{
+    m_boxLayout->parentWidget()->updateGeometry();      // its height for the width is cached
     getRollupContents()->arrangeRollups();
+    sizeToContents();
+    if (isMaximized()) {
+        return;
+    }
+    const int h = std::max(minimumHeight(), std::min(height(), maximumHeight()));
+    if (h != height()) {
+        resize(width(), h);
+    }
+}
+
+void CellularRxGUI::resizeEvent(QResizeEvent *event)
+{
+    ChannelGUI::resizeEvent(event);
+    fitHeight();
 }
 
 void CellularRxGUI::tick()
@@ -225,7 +246,8 @@ void CellularRxGUI::tick()
     for (const modemcellular::CarrierTuning& t : status.carriers) {
         ids.push_back(t.id);
     }
-    if (ids != m_boxIds) {
+    const bool rebuilt = ids != m_boxIds;
+    if (rebuilt) {
         rebuildBoxes(ids);
     }
     const std::map<int, QString> names = m_cellularRx->networkNames();
@@ -242,5 +264,8 @@ void CellularRxGUI::tick()
             QString("%1 kHz").arg(t.offset / 1e3, 0, 'f', 1),
             QString("%1 dB").arg(level, 0, 'f', 1));
         box->setToolTip(QString("Network %1 (id %2), channel %3").arg(name).arg(network).arg(t.id % kIdStride));
+    }
+    if (rebuilt) {
+        fitHeight();        // the boxes have their text now, and their height
     }
 }
