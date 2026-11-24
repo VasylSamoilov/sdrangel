@@ -28,8 +28,13 @@ namespace
 // How strongly the fill error moves the ratio: an error of the whole target is 0.002 (2000 ppm),
 // so 50 ppm of drift leave 2.5 % of the target as error, and the fill settles within minutes.
 const double kGain = 0.002;
-// smoothing of the fill error per read, against the steps of block-wise writing
-const double kSmoothing = 0.01;
+// smoothing of the fill error per read (10 s at reads of 10 ms), against the steps of block-wise
+// writing and short stalls of the writer: a stall of the whole lead moves the ratio about 20 ppm,
+// inside the bit rate tolerance of the signalling; with the gain the loop stays damped (no overshoot
+// beyond the drift)
+const double kSmoothing = 0.001;
+// samples read while the queue measures the fill it keeps: one second of audio
+const size_t kMeasure = 48000;
 
 } // namespace
 
@@ -37,6 +42,9 @@ CarrierQueue::CarrierQueue(size_t target) :
     m_target(target),
     m_position(0.0),
     m_smoothed(0.0),
+    m_measured(0),
+    m_fillSum(0.0),
+    m_reference(0.0),
     m_underruns(0),
     m_priming(false)
 {
@@ -50,6 +58,9 @@ void CarrierQueue::reset()
     m_queue.assign(m_target, 0.0f);
     m_position = 0.0;
     m_smoothed = 0.0;
+    m_measured = 0;
+    m_fillSum = 0.0;
+    m_reference = 0.0;
     m_underruns = 0;
     m_priming = false;
 }
@@ -64,27 +75,33 @@ void CarrierQueue::write(const float* samples, size_t count)
 void CarrierQueue::read(float* samples, size_t count, double ratio)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    const size_t primed = std::max<size_t>(m_target, 2);
+    // the samples this read reaches: the last output interpolates up to the one after its position
+    const double reach = count ? m_position + static_cast<double>(count - 1) * ratio + 2.0 : 0.0;
+    const double size = static_cast<double>(m_queue.size());
 
+    // a read is given in full or is silence: a queue that cannot give it in full runs empty (not one
+    // that hangs on to its last samples while the lead is gone), and after running empty it is silent
+    // until the lead is there again
+    if (m_priming && size >= std::max(static_cast<double>(m_target), reach)) {
+        m_priming = false;
+    } else if (!m_priming && size < reach) {
+        runEmpty();
+    }
+    if (m_priming)
+    {
+        std::fill(samples, samples + count, 0.0f);
+        return;
+    }
+    if (m_measured < kMeasure)
+    {
+        m_fillSum += size * static_cast<double>(count);
+        m_measured += count;
+        if (m_measured >= kMeasure) {
+            m_reference = m_fillSum / static_cast<double>(m_measured);
+        }
+    }
     for (size_t i = 0; i < count; i++)
     {
-        if (m_priming)
-        {
-            // after running empty: silence until the lead is there again
-            if (m_queue.size() < primed)
-            {
-                samples[i] = 0.0f;
-                continue;
-            }
-            m_priming = false;
-        }
-        if (m_queue.size() < 2)
-        {
-            samples[i] = 0.0f;
-            m_priming = true;
-            m_underruns++;
-            continue;
-        }
         // linear interpolation between the first two samples
         samples[i] = static_cast<float>(m_queue[0] * (1.0 - m_position) + m_queue[1] * m_position);
         m_position += ratio;
@@ -96,11 +113,25 @@ void CarrierQueue::read(float* samples, size_t count, double ratio)
     }
 }
 
+// under the lock
+void CarrierQueue::runEmpty()
+{
+    m_priming = true;
+    m_underruns++;
+    // the fill to keep is measured again once the lead is back
+    m_measured = 0;
+    m_fillSum = 0.0;
+    m_smoothed = 0.0;
+}
+
 double CarrierQueue::ratio(double maxPpm)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_measured < kMeasure) {
+        return 1.0;
+    }
     const double target = m_target ? static_cast<double>(m_target) : 1.0;
-    const double error = (static_cast<double>(m_queue.size()) - target) / target;
+    const double error = (static_cast<double>(m_queue.size()) - m_reference) / target;
 
     m_smoothed += kSmoothing * (error - m_smoothed);
     const double limit = maxPpm * 1e-6;

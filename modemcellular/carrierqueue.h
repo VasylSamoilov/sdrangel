@@ -31,9 +31,13 @@ namespace modemcellular
 // The audio of one carrier on its way to the transmitter. The network writes what it rendered
 // for a received block; the transmitter reads at the rate of its own device. Both sample clocks
 // differ a little (two crystals), so the reader resamples by a ratio close to 1 that keeps the
-// queue at its target fill: the lead of the transmitter over the receiver. The lead is the part of
-// the round trip that this queue adds. An empty queue gives silence until it holds its lead again
-// (the delay comes back at once instead of over minutes of resampling); each time it runs empty is
+// queue at its fill: the lead of the transmitter over the receiver. The lead is the part of the
+// round trip that this queue adds. The fill the queue keeps is the one it has in its first second
+// (the target, less where the reader stands within the writer's blocks): it corrects only the drift
+// of the clocks from then on, never an offset by resampling, which would move the bit rate of the
+// signalling off its tolerance (NMT: 1200 +-0.1 Baud, about 83 ppm). In that first second the ratio
+// is 1. An empty queue gives silence until it holds its lead again (the delay comes back at once
+// instead of over minutes of resampling), then measures its fill again; each time it runs empty is
 // counted. Written by one thread, read by another.
 class MODEMCELLULAR_API CarrierQueue
 {
@@ -53,11 +57,16 @@ public:
     void reset();
 
 private:
+    void runEmpty();
+
     mutable std::mutex m_mutex;
     std::deque<float> m_queue;
     size_t m_target;
     double m_position;              // 0..1 between the first two samples
     double m_smoothed;              // fill error, smoothed
+    size_t m_measured;              // samples read while measuring the fill to keep
+    double m_fillSum;               // fill times samples read while measuring
+    double m_reference;             // the fill to keep, once measured
     uint64_t m_underruns;
     bool m_priming;                 // ran empty: silence until the lead is there again
 };
