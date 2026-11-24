@@ -471,6 +471,20 @@ void CellularWorker::setHandlers(Network& n)
                 CellularSmsText::codesOf(message.text))).arg(it->second.size()), Cellular::MsgReportLog::Sms);
         return true;
     });
+    // Register recall (the R key, 13a L(5), NMT Doc 450-1 4.4.1.10): the phone asks for a register in a
+    // call and sends digits. The standard leaves their meaning to the exchange (hold for enquiry,
+    // conference ...); this tester has no such service yet: the digits are logged, the phone gets
+    // "address complete" after the timeout (STUB: a service map would go here).
+    system.setRecallHandlers(
+        [this, id](const modemnmt::NmtSubscriber& subscriber, char digit) {
+            log(id, QString("register recall from %1: digit %2").arg(numberText(subscriber)).arg(QChar(digit)),
+                Cellular::MsgReportLog::Call);
+            return false;       // never enough: the recall ends by its timeout
+        },
+        [this, id](const modemnmt::NmtSubscriber& subscriber, const std::string& digits) {
+            log(id, QString("register recall from %1 over: \"%2\" (no exchange service for it yet)")
+                .arg(numberText(subscriber)).arg(QString::fromStdString(digits)), Cellular::MsgReportLog::Call);
+        });
     system.setMwiHandler([this, id](const modemnmt::NmtSubscriber& subscriber, uint8_t flags, modemnmt::NmtServiceEnd result) {
         log(id, QString("message waiting indicators 0x%1 to %2: %3").arg(flags, 2, 16, QChar('0'))
             .arg(numberText(subscriber)).arg(serviceEndName(result)), Cellular::MsgReportLog::Mwi);
