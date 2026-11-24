@@ -214,6 +214,25 @@ static void testCallLimitAndFinishedEndpoint()
         CHECK(f.router.callCount() == 0);
     }
     {
+        // a call between two mobiles: both ends released at the limit
+        Fixture f;
+        FakeLeg a("A");
+        FakeLeg b("B");
+        f.router.registerSubscriber("100", a);
+        f.router.registerSubscriber("200", b);
+        f.router.setCallLimit(3.0);
+        f.router.setup(a, "100", "200");
+        f.run();
+        f.router.alerting(b.lastRef);
+        f.router.answer(b.lastRef);
+        f.step(2800);
+        CHECK(a.joined() == "proceeding,alerting,answer");
+        f.step(400);
+        CHECK(a.joined() == "proceeding,alerting,answer,release:normal");
+        CHECK(b.events.back() == "release:normal");
+        CHECK(f.router.callCount() == 0);
+    }
+    {
         // no limit: the call stays
         Fixture f;
         FakeLeg a("A");

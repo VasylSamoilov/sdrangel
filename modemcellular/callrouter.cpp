@@ -463,14 +463,21 @@ void CallRouter::onEndpointAnswer(CallRef refA)
     notify(Notification::Type::Answer, call->legA, refA);
     if (call->endpoint)
     {
-        // the endpoint's end is looked at five times a second, the time limit has its timer
+        // the endpoint's end is looked at five times a second
         call->checkTimer.reset(new Timer(m_timers, [this, refA] { onEndpointCheck(refA); }));
         call->checkTimer->start(kEndpointCheck);
-        if (m_callLimit > 0.0)
-        {
-            call->limitTimer.reset(new Timer(m_timers, [this, refA] { endEndpointCall(refA); }));
-            call->limitTimer->start(m_callLimit);
-        }
+    }
+    startLimit(refA);
+}
+
+void CallRouter::startLimit(CallRef refA)
+{
+    Call* call = findCall(refA);
+
+    if (call && m_callLimit > 0.0)
+    {
+        call->limitTimer.reset(new Timer(m_timers, [this, refA] { endEndpointCall(refA); }));
+        call->limitTimer->start(m_callLimit);
     }
 }
 
@@ -489,6 +496,7 @@ void CallRouter::onEndpointCheck(CallRef refA)
     call->checkTimer->start(kEndpointCheck);
 }
 
+// The call ends normally on both sides (an endpoint that finished, the time limit).
 void CallRouter::endEndpointCall(CallRef refA)
 {
     if (!findCall(refA)) {
@@ -496,6 +504,9 @@ void CallRouter::endEndpointCall(CallRef refA)
     }
     std::unique_ptr<Call> ended = takeCall(refA);
     notify(Notification::Type::Release, ended->legA, refA, Cause::Normal);
+    if (ended->legB) {
+        notify(Notification::Type::Release, ended->legB, ended->refB, Cause::Normal);
+    }
 }
 
 void CallRouter::farAlerting(CallRef refA)
@@ -521,6 +532,7 @@ void CallRouter::farAnswer(CallRef refA)
     call->connected = true;
     call->tone.setTone(Tone::Off);
     notify(Notification::Type::Answer, call->legA, refA);
+    startLimit(refA);
 }
 
 // The called side is gone: the called mobile released the call or its channel vanished,

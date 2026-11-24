@@ -342,7 +342,8 @@ CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& sett
     m_callLimit->setRange(0, 3600);
     m_callLimit->setSuffix(" s");
     m_callLimit->setSpecialValueText("no limit");
-    m_callLimit->setToolTip("The longest call to the echo or the music; it is ended then, so no call stays on");
+    m_callLimit->setToolTip("The longest call of this network (between phones, to the echo or the music) after the "
+        "answer; it is ended then on both sides, so no call stays on. Off by default");
     form->addRow("Longest call", m_callLimit);
     auto farEndShown = [this, fileRow]() {
         const bool isMusic = m_fallback->currentIndex() == 1;

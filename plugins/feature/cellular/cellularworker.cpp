@@ -551,7 +551,7 @@ void CellularWorker::setFarEnd(Network& n, const CellularFarEnd& farEnd)
     const int id = n.id;
     n.musicInput.reset();
     n.cellular->setCallLimit(farEnd.m_callLimitS);
-    const QString limit = farEnd.m_callLimitS > 0 ? QString(", calls end after %1 s").arg(farEnd.m_callLimitS) : QString();
+    const QString limit = farEnd.m_callLimitS > 0 ? QString("; every call ends after %1 s").arg(farEnd.m_callLimitS) : QString();
 
     if (!n.music)
     {
