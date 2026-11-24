@@ -210,6 +210,7 @@ private:
     void consoleKey(QChar key);
     QString consoleTarget() const;
     int networkOfPhone(const QString& number) const;
+    QToolButton *codepageTableButton(QWidget *parent, QLineEdit *field, const std::function<int()>& network);
     struct ConsoleView                      // the console's last report
     {
         int m_state = 0;                    // Cellular::MsgReportConsole::State

@@ -63,6 +63,7 @@
 #include "gui/crightclickenabler.h"
 #include "gui/dialogpositioner.h"
 #include "gui/flowlayout.h"
+#include "gui/pagingcodepagetable.h"
 #include "gui/rollupcontents.h"
 #include "maincore.h"
 
@@ -1056,6 +1057,7 @@ QWidget *CellularGUI::buildTest()
     QHBoxLayout *smsRow = new QHBoxLayout();
     smsRow->setSpacing(3);
     smsRow->addWidget(m_smsText, 1);
+    smsRow->addWidget(codepageTableButton(page, m_smsText, [this]() { return m_testNetwork->currentData().toInt(); }));
     smsRow->addWidget(sms);
     smsRow->addWidget(keep);
     form->addRow("SMS", smsRow);
@@ -1455,6 +1457,7 @@ QWidget *CellularGUI::buildConsole()
     QToolButton *sms = iconButton(page, ":/sms.png", "Send the text as a short message from the console's number");
     smsRow->addWidget(new QLabel("SMS", page));
     smsRow->addWidget(m_consoleSms, 1);
+    smsRow->addWidget(codepageTableButton(page, m_consoleSms, [this]() { return networkOfPhone(consoleTarget()); }));
     smsRow->addWidget(sms);
     layout->addLayout(smsRow);
     connect(m_consoleSms, &QLineEdit::returnPressed, sms, &QToolButton::click);
@@ -1670,6 +1673,27 @@ void CellularGUI::showConsole()
     if (r.m_network) {
         voiceChannels(m_consoleChannel, r.m_network);
     }
+}
+
+// "Table": the codepage of the SMS of a network as a table to click characters into a text field (as the
+// paging composer)
+QToolButton *CellularGUI::codepageTableButton(QWidget *parent, QLineEdit *field, const std::function<int()>& network)
+{
+    QToolButton *button = new QToolButton(parent);
+    button->setText("Table");
+    button->setToolTip("The table of the SMS codepage of the network: click a character to insert it; <0xNN> sends the code NN");
+    PagingCodepageTable *table = new PagingCodepageTable(parent);
+    connect(button, &QToolButton::clicked, this, [this, table, button, network]() {
+        const CellularNetworkSettings *n = m_settings.network(network());
+        const RadioPagingCharset::Key key = CellularSmsText::keyOf(n ? n->m_smsCodepage : QString());
+        table->setCodepage(CellularSmsText::codepage(key));
+        table->popup(button);
+    });
+    connect(table, &PagingCodepageTable::codeSelected, this, [field](const QString& text) {
+        field->insert(text);
+        field->setFocus();
+    });
+    return button;
 }
 
 void CellularGUI::requestAction(int network, const QString& number, int action, const QString& text, int value)
