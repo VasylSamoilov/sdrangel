@@ -216,7 +216,7 @@ private:
     QToolButton *m_consoleSpeakerMute;      // right click: the output device
     ButtonSwitch *m_consoleMicOn;           // right click: the input device
     void consoleDevice(const QPoint& p, bool input);
-    QPlainTextEdit *m_consoleSms;
+    QLineEdit *m_consoleSms;
     QList<QCheckBox*> m_consoleMwi;         // the indicators, property "flag"
     QWidget *m_consoleInCall;
     QSpinBox *m_consoleChannel;

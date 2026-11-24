@@ -1339,20 +1339,16 @@ QWidget *CellularGUI::buildConsole()
 
     // messages to the number
     QFormLayout *form = new QFormLayout();
-    // the text over the full width, a few lines high; the send key at its end
+    // the text over the window's width, the send key at its end
     QHBoxLayout *smsRow = new QHBoxLayout();
-    QLabel *smsIcon = new QLabel(page);
-    smsIcon->setPixmap(QIcon(":/sms.png").pixmap(16, 16));
-    smsIcon->setAlignment(Qt::AlignTop);
-    m_consoleSms = new QPlainTextEdit(page);
-    m_consoleSms->setPlaceholderText("Short message to the number");
-    m_consoleSms->setFixedHeight(m_consoleSms->fontMetrics().lineSpacing() * 3 + 12);
-    m_consoleSms->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    QToolButton *sms = iconButton(page, ":/arrow_left.png", "Send the text as a short message from the console's number");
-    smsRow->addWidget(smsIcon, 0, Qt::AlignTop);
+    m_consoleSms = new QLineEdit(page);
+    m_consoleSms->setPlaceholderText("text");
+    QToolButton *sms = iconButton(page, ":/sms.png", "Send the text as a short message from the console's number");
+    smsRow->addWidget(new QLabel("SMS", page));
     smsRow->addWidget(m_consoleSms, 1);
-    smsRow->addWidget(sms, 0, Qt::AlignBottom);
+    smsRow->addWidget(sms);
     layout->addLayout(smsRow);
+    connect(m_consoleSms, &QLineEdit::returnPressed, sms, &QToolButton::click);
     // the indicators: one message with the flags ticked, delivered when the phone can take it
     const QStringList kinds = {"SMS", "Voice mail", "Fax", "E-mail", "Data"};
     QList<QWidget*> flags;
@@ -1416,7 +1412,7 @@ QWidget *CellularGUI::buildConsole()
         requestAction(0, QString(), Cellular::MsgAction::ConsoleHangUp, QString(), 0);
     });
     connect(sms, &QToolButton::clicked, this, [this]() {
-        const QString text = m_consoleSms->toPlainText();
+        const QString text = m_consoleSms->text();
         if (!consoleTarget().isEmpty() && !text.isEmpty()) {
             requestAction(0, consoleTarget(), Cellular::MsgAction::ConsoleSms, text, 0);
         }
