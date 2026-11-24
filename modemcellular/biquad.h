@@ -54,6 +54,13 @@ public:
 };
 
 // Butterworth style high pass, same Q as the low pass.
+// A notch at the frequency, q its quality (osmocom-analog's iir_notch_init), each section the same.
+class MODEMCELLULAR_API BiquadNotch : public BiquadCascade
+{
+public:
+    BiquadNotch(double frequencyHz, double sampleRate, int sections, double q);
+};
+
 class MODEMCELLULAR_API BiquadHighpass : public BiquadCascade
 {
 public:

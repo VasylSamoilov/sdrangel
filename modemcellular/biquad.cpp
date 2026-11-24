@@ -81,6 +81,19 @@ BiquadLowpass::BiquadLowpass(double cutoffHz, double sampleRate, int sections) :
     m_b2 = (1.0 - k / q + k * k) * norm;
 }
 
+BiquadNotch::BiquadNotch(double frequencyHz, double sampleRate, int sections, double q) :
+    BiquadCascade(sections)
+{
+    const double k = std::tan(kPi * frequencyHz / sampleRate);
+    const double norm = 1.0 / (1.0 + k / q + k * k);
+
+    m_a0 = (1.0 + k * k) * norm;
+    m_a1 = 2.0 * (k * k - 1.0) * norm;
+    m_a2 = m_a0;
+    m_b1 = m_a1;
+    m_b2 = (1.0 - k / q + k * k) * norm;
+}
+
 BiquadHighpass::BiquadHighpass(double cutoffHz, double sampleRate, int sections) :
     BiquadCascade(sections)
 {
