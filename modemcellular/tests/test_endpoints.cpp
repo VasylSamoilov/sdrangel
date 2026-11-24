@@ -162,9 +162,46 @@ static void testMusicIgnoresReceivedAudio()
     CHECK(same);
 }
 
+// The level only lowers; the tone of the answer plays in the first 200 ms of the delay.
+static void testEchoLevelAndAnnounce()
+{
+    std::vector<float> in(160, 0.5f), out(160);
+
+    for (double db : {-6.0, +6.0})
+    {
+        EchoEndpoint echo(0.0, db);
+        echo.fromMobile(in.data(), 160);
+        echo.toMobile(out.data(), 160);
+        CHECK(std::fabs(out[10] - (db < 0 ? 0.5f * 0.5012f : 0.5f)) < 1e-3f);
+    }
+
+    EchoEndpoint plain(0.5);
+    EchoEndpoint announced(0.5, 0.0, true);
+    std::vector<float> a, b;
+    for (int block = 0; block < 40; block++)
+    {
+        plain.fromMobile(in.data(), 160);
+        plain.toMobile(out.data(), 160);
+        a.insert(a.end(), out.begin(), out.end());
+        announced.fromMobile(in.data(), 160);
+        announced.toMobile(out.data(), 160);
+        b.insert(b.end(), out.begin(), out.end());
+    }
+    double tone = 0.0, after = 0.0;
+    for (int i = 0; i < 1600; i++) {
+        tone = std::max(tone, std::fabs(static_cast<double>(b[i])));
+    }
+    for (int i = 1600; i < 6400; i++) {
+        after = std::max(after, std::fabs(static_cast<double>(b[i] - a[i])));
+    }
+    CHECK(std::fabs(tone - 0.316) < 0.01);          // -10 dB of the reference
+    CHECK(after < 1e-6);                            // then the echo as without it
+}
+
 int main()
 {
     testEchoDelaysAudioExactly();
+    testEchoLevelAndAnnounce();
     testEchoUnderrunGivesSilence();
     testEchoDelayDoesNotGrowWithoutBound();
     testMusicIsBoundedContinuousAndLoops();

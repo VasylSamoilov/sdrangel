@@ -30,7 +30,9 @@ namespace modemcellular
 class MODEMCELLULAR_API EchoEndpoint : public AudioEndpoint
 {
 public:
-    explicit EchoEndpoint(double delaySeconds = 1.0);
+    // delaySeconds: how late the speech comes back; levelDb: its level, at most 0 (never louder);
+    // announce: a short tone when the echo answers (1 kHz, 200 ms, -10 dB), so the caller knows
+    explicit EchoEndpoint(double delaySeconds = 1.0, double levelDb = 0.0, bool announce = false);
 
     void fromMobile(const float* samples, int count) override;
     void toMobile(float* samples, int count) override;
@@ -38,6 +40,9 @@ public:
 private:
     std::deque<float> m_queue;
     size_t m_maxQueued;     // oldest audio is dropped beyond this, so the delay cannot grow
+    float m_gain;
+    int m_announce;         // samples of the tone still to play
+    int m_announced;        // samples of it played
 };
 
 } // namespace modemcellular

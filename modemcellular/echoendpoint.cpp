@@ -15,13 +15,28 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.          //
 ///////////////////////////////////////////////////////////////////////////////////
 
+#include <algorithm>
+#include <cmath>
+
 #include "calltypes.h"
 #include "echoendpoint.h"
 
 namespace modemcellular
 {
 
-EchoEndpoint::EchoEndpoint(double delaySeconds)
+namespace
+{
+
+const double kAnnounceSeconds = 0.2;
+const double kAnnounceHz = 1000.0;
+const double kAnnounceLevel = 0.316;        // -10 dB of the reference
+
+} // namespace
+
+EchoEndpoint::EchoEndpoint(double delaySeconds, double levelDb, bool announce) :
+    m_gain(static_cast<float>(std::pow(10.0, std::min(levelDb, 0.0) / 20.0))),
+    m_announce(announce ? static_cast<int>(kAnnounceSeconds * kAudioSampleRate) : 0),
+    m_announced(0)
 {
     const double delay = delaySeconds > 0.0 ? delaySeconds : 0.0;
     const size_t delaySamples = static_cast<size_t>(delay * kAudioSampleRate + 0.5);
@@ -49,8 +64,14 @@ void EchoEndpoint::toMobile(float* samples, int count)
         if (m_queue.empty()) {
             samples[i] = 0.0f;
         } else {
-            samples[i] = m_queue.front();
+            samples[i] = m_queue.front() * m_gain;
             m_queue.pop_front();
+        }
+        // the tone of the answer over the first of the delay (silence then)
+        if (m_announced < m_announce)
+        {
+            samples[i] += static_cast<float>(kAnnounceLevel * std::sin(2.0 * M_PI * kAnnounceHz * m_announced / kAudioSampleRate));
+            m_announced++;
         }
     }
 }
