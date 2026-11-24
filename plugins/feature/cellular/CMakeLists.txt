@@ -6,6 +6,7 @@ set(cellular_SOURCES
     cellularfarend.cpp
     cellularlogfile.cpp
     cellularsettings.cpp
+    cellularsmstext.cpp
     cellularworker.cpp
     cellularplugin.cpp
     cellularwebapiadapter.cpp
@@ -17,6 +18,7 @@ set(cellular_HEADERS
     cellularfarend.h
     cellularlogfile.h
     cellularsettings.h
+    cellularsmstext.h
     cellularworker.h
     cellularplugin.h
     cellularwebapiadapter.h
@@ -26,6 +28,7 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/swagger/sdrangel/code/qt5/client
     ${CMAKE_SOURCE_DIR}/modemcellular
     ${CMAKE_SOURCE_DIR}/modemnmt
+    ${CMAKE_SOURCE_DIR}/modemradiopaging
 )
 
 if(NOT SERVER_MODE)
@@ -77,6 +80,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     ${TARGET_LIB_GUI}
     modemcellular
     modemnmt
+    modemradiopaging
 )
 
 install(TARGETS ${TARGET_NAME} DESTINATION ${INSTALL_FOLDER})

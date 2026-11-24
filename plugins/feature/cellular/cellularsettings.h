@@ -74,6 +74,7 @@ struct CellularNetworkSettings
     bool m_sendCallerId;
     bool m_sendClock;
     QString m_smscNumber;
+    QString m_smsCodepage;      // "vendor/model/codepage" of protocol nmt (CellularSmsText), empty: GSM default
     int m_fallback;
     CellularFarEnd m_farEnd;
 

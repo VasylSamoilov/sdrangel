@@ -93,6 +93,7 @@ private:
     QCheckBox *m_callerId;
     QCheckBox *m_clock;
     QLineEdit *m_smsc;
+    QComboBox *m_smsCodepage;               // "vendor/model/codepage" of protocol nmt in the data
     QComboBox *m_fallback;
     QWidget *m_echoBox;
     QDoubleSpinBox *m_echoDelay;
@@ -229,7 +230,6 @@ private:
     ButtonSwitch *m_consoleMicOn;           // right click: the input device
     void consoleDevice(const QPoint& p, bool input);
     QLineEdit *m_consoleSms;
-    QList<QCheckBox*> m_consoleMwi;         // the indicators, property "flag"
     QWidget *m_consoleInCall;
     QComboBox *m_consoleChannel;
     QComboBox *m_consolePower;
@@ -243,7 +243,6 @@ private:
     QComboBox *m_testPhone;
     QLabel *m_testState;
     QLineEdit *m_smsText;
-    QComboBox *m_mwiKind;
     QComboBox *m_powerLevel;
     QComboBox *m_moveChannel;               // "any free" (0) and the network's voice channels
     QPushButton *m_testRelease;

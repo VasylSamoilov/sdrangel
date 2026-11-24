@@ -36,6 +36,7 @@
 #include "tonegenerator.h"
 
 #include "cellular.h"
+#include "cellularsmstext.h"
 #include "cellularworker.h"
 
 MESSAGE_CLASS_DEFINITION(CellularWorker::MsgAddNetwork, Message)
@@ -270,14 +271,28 @@ static QString numberText(const modemnmt::NmtSubscriber& subscriber)
     return QString::fromStdString(modemnmt::NmtCellularBridge::numberOf(subscriber));
 }
 
-// A short message of the tester to a phone: from the number of the centre, sent now.
-static modemnmt::SmsDeliver deliverMessage(const std::string& centre, const QString& text)
+// A short message of the tester to a phone: from the number of the centre, sent now, the text in the codes of
+// the codepage of the network (7-bit GSM, or 8-bit with the DCS of its NMT Character Set). A character
+// without a code there: bad is it (the message is not to be sent).
+static modemnmt::SmsDeliver deliverMessage(const QString& codepage, const std::string& centre, const QString& text,
+    QString& bad)
 {
     modemnmt::SmsDeliver message;
     const QDateTime now = QDateTime::currentDateTime();
+    const RadioPagingCharset::Key key = CellularSmsText::keyOf(codepage);
+    const RadioPagingCharset::Codepage& cp = CellularSmsText::codepage(key);
+    std::string codes;
 
+    bad.clear();
     message.originator = centre.empty() ? "0" : centre;
-    message.text = text.toStdString();
+    if (CellularSmsText::encode(cp, text, codes, bad))
+    {
+        message.text = codes;
+        message.set = CellularSmsText::set(cp);
+    }
+    else {
+        message.text = text.toStdString();
+    }
     message.time.year = now.date().year() % 100;
     message.time.month = now.date().month();
     message.time.day = now.date().day();
@@ -376,8 +391,10 @@ void CellularWorker::setHandlers(Network& n)
     system.setSmsHandlers(
         [this, id, learnCentre](const modemnmt::NmtSubscriber& subscriber, const modemnmt::SmsSubmit& message) -> uint8_t {
             learnCentre(subscriber);
+            // the text with the codepage of its DCS (GSM, or the NMT Character Set of an 8-bit message)
             log(id, QString("SMS from %1 to %2: %3").arg(numberText(subscriber))
-                .arg(QString::fromStdString(message.destination)).arg(QString::fromStdString(message.text)), Cellular::MsgReportLog::Sms);
+                .arg(QString::fromStdString(message.destination)).arg(CellularSmsText::decode(message.dcs, message.codes)),
+                Cellular::MsgReportLog::Sms);
             return 0;
         },
         [this, id](const modemnmt::NmtSubscriber& subscriber, modemnmt::NmtServiceEnd result, uint8_t cause) {
@@ -403,7 +420,8 @@ void CellularWorker::setHandlers(Network& n)
         message = it->second.front();
         it->second.pop_front();
         log(n.id, QString("%1 called the SMS centre: it asks for its waiting messages, it gets \"%2\" (%3 more waiting)")
-            .arg(who).arg(QString::fromStdString(message.text)).arg(it->second.size()), Cellular::MsgReportLog::Sms);
+            .arg(who).arg(CellularSmsText::decode(message.set ? static_cast<uint8_t>(0x30 | message.set) : 0x00,
+                CellularSmsText::codesOf(message.text))).arg(it->second.size()), Cellular::MsgReportLog::Sms);
         return true;
     });
     system.setMwiHandler([this, id](const modemnmt::NmtSubscriber& subscriber, uint8_t flags, modemnmt::NmtServiceEnd result) {
@@ -495,14 +513,29 @@ void CellularWorker::action(const Cellular::MsgAction& msg)
         refused = "the phone has no call that can be released";
         break;
     case Cellular::MsgAction::Sms:
-        ok = system.sendSms(country, digits, deliverMessage(n.config.smscNumber, msg.getText()));
+    {
+        QString bad;
+        const modemnmt::SmsDeliver message = deliverMessage(n.smsCodepage, n.config.smscNumber, msg.getText(), bad);
+        if (!bad.isEmpty())
+        {
+            log(n.id, what + QString(": refused: '%1' has no code in the SMS codepage of the network").arg(bad));
+            return;
+        }
+        ok = system.sendSms(country, digits, message);
         refused = "the phone is busy, the calling channels have no room, or the text cannot be coded";
         break;
+    }
     case Cellular::MsgAction::Hold:
     {
-        const modemnmt::SmsDeliver message = deliverMessage(n.config.smscNumber, msg.getText());
+        QString bad;
+        const modemnmt::SmsDeliver message = deliverMessage(n.smsCodepage, n.config.smscNumber, msg.getText(), bad);
         std::vector<uint8_t> rp;
 
+        if (!bad.isEmpty())
+        {
+            log(n.id, what + QString(": refused: '%1' has no code in the SMS codepage of the network").arg(bad));
+            return;
+        }
         if (!modemnmt::smsBuildDeliver(message, 0, rp))
         {
             log(n.id, what + ": refused: the text cannot be coded");
@@ -872,8 +905,15 @@ void CellularWorker::consoleAction(const Cellular::MsgAction& msg)
             log(n ? n->id : 0, what + ": the number is the country digit and six digits, on a network on the air");
             return;
         }
-        const bool ok = n->station->system()->sendSms(number[0], number.substr(1),
-            deliverMessage(m_console.m_number.toStdString(), msg.getText()));
+        QString bad;
+        const modemnmt::SmsDeliver message = deliverMessage(n->smsCodepage, m_console.m_number.toStdString(), msg.getText(), bad);
+        if (!bad.isEmpty())
+        {
+            log(n->id, QString("console SMS to %1: refused: '%2' has no code in the SMS codepage of the network")
+                .arg(msg.getNumber()).arg(bad), Cellular::MsgReportLog::Sms);
+            return;
+        }
+        const bool ok = n->station->system()->sendSms(number[0], number.substr(1), message);
         log(n->id, QString("console SMS to %1 from %2: %3").arg(msg.getNumber()).arg(m_console.m_number)
             .arg(ok ? "\"" + msg.getText() + "\" on its way" : "refused (the phone is busy or unknown)"), Cellular::MsgReportLog::Sms);
         return;
@@ -1308,6 +1348,7 @@ void CellularWorker::addNetwork(const MsgAddNetwork& add)
     n.id = add.m_id;
     n.name = add.m_name;
     n.config = add.m_config;
+    n.smsCodepage = add.m_smsCodepage;
     // the round trip of the radio: the transmit lead and about 100 ms of the receive path (device
     // buffers, the pipe of the Cellular Rx), in frame periods of 166 bits at 1200 bit/s
     {

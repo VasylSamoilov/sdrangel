@@ -421,6 +421,7 @@ void Cellular::startNetwork(const CellularNetworkSettings& network)
     msg->m_config = config;
     msg->m_fallback = network.m_fallback;
     msg->m_farEnd = network.m_farEnd;
+    msg->m_smsCodepage = network.m_smsCodepage;
     msg->m_rxChannel = rx;
     msg->m_rxPipe = usePipe(rx);
     msg->m_txChannel = tx;

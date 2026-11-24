@@ -93,6 +93,7 @@ void CellularNetworkSettings::resetToDefaults()
     m_sendCallerId = false;
     m_sendClock = false;
     m_smscNumber = "";
+    m_smsCodepage = "";
     m_fallback = FallbackEcho;
     m_farEnd = CellularFarEnd();
     m_rxDeviceSetIndex = 0;
@@ -125,6 +126,7 @@ QByteArray CellularNetworkSettings::serialize() const
     s.writeS32(46, m_farEnd.m_musicLevelDb);
     s.writeBool(47, m_farEnd.m_musicLoop);
     s.writeS32(48, m_farEnd.m_callLimitS);
+    s.writeString(49, m_smsCodepage);
     return s.final();
 }
 
@@ -150,6 +152,7 @@ bool CellularNetworkSettings::deserialize(const QByteArray& data)
     d.readS32(46, &m_farEnd.m_musicLevelDb, defaults.m_musicLevelDb);
     d.readBool(47, &m_farEnd.m_musicLoop, defaults.m_musicLoop);
     d.readS32(48, &m_farEnd.m_callLimitS, defaults.m_callLimitS);
+    d.readString(49, &m_smsCodepage, "");
     return m_id >= 1 && m_id <= kMaxNetworkId;
 }
 
@@ -158,7 +161,7 @@ bool CellularNetworkSettings::sameNetwork(const CellularNetworkSettings& o) cons
     return m_id == o.m_id && m_system == o.m_system && m_country == o.m_country && m_area == o.m_area
         && m_y1 == o.m_y1 && m_areaNo == o.m_areaNo && m_msPower == o.m_msPower && m_carriers == o.m_carriers
         && m_compandor == o.m_compandor && m_sendCallerId == o.m_sendCallerId && m_sendClock == o.m_sendClock
-        && m_smscNumber == o.m_smscNumber && m_fallback == o.m_fallback && m_farEnd == o.m_farEnd
+        && m_smscNumber == o.m_smscNumber && m_smsCodepage == o.m_smsCodepage && m_fallback == o.m_fallback && m_farEnd == o.m_farEnd
         && m_rxDeviceSetIndex == o.m_rxDeviceSetIndex && m_txDeviceSetIndex == o.m_txDeviceSetIndex;
 }
 

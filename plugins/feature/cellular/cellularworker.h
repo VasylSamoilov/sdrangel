@@ -69,6 +69,7 @@ public:
         modemnmt::NmtNetworkConfig m_config;
         int m_fallback = 0;
         CellularFarEnd m_farEnd;
+        QString m_smsCodepage;                  // CellularSmsText key of the SMS sent, empty: GSM default
         ChannelAPI *m_rxChannel = nullptr;
         MessageQueue *m_rxPipe = nullptr;       // what the receiver sends us
         ChannelAPI *m_txChannel = nullptr;
@@ -148,6 +149,7 @@ private:
         int id = 0;
         QString name;
         modemnmt::NmtNetworkConfig config;
+        QString smsCodepage;                    // CellularSmsText key of the SMS sent
         Radio *rx = nullptr;
         Radio *tx = nullptr;
         std::unique_ptr<modemnmt::NmtBaseStation> station;

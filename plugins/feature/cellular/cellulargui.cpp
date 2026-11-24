@@ -72,6 +72,7 @@
 #include "cellularchannelgrid.h"
 #include "cellularcolumns.h"
 #include "cellulargui.h"
+#include "cellularsmstext.h"
 #include "cellularmobiles.h"
 
 const int CellularGUI::m_maxLogLines;
@@ -334,6 +335,14 @@ CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& sett
     m_smsc = new QLineEdit(page);
     m_smsc->setToolTip("The number the phones send short messages to; empty: no short messages from the phones");
     form->addRow("SMS centre", m_smsc);
+    m_smsCodepage = new QComboBox(page);
+    for (const RadioPagingCharset::Codepage *c : RadioPagingCharset::codepages("nmt")) {
+        m_smsCodepage->addItem(QString::fromUtf8(c->m_label), CellularSmsText::keyText(c->key()));
+    }
+    m_smsCodepage->setToolTip("The character set of the short messages to the phones (NMT Doc 450-3 Annex 24 4.3): the GSM "
+        "default alphabet, or an NMT Character Set for the letters it has (8-bit, its DCS). A character without a code "
+        "refuses the message. Received messages are shown with the set their DCS names");
+    form->addRow("SMS codepage", m_smsCodepage);
     m_fallback = new QComboBox(page);
     m_fallback->addItems({"Echo", "Music"});
     m_fallback->setToolTip("What answers a call to a number that is no phone (a phone number is paged)");
@@ -441,6 +450,10 @@ CellularNetworkDialog::CellularNetworkDialog(const CellularNetworkSettings& sett
     m_callerId->setChecked(settings.m_sendCallerId);
     m_clock->setChecked(settings.m_sendClock);
     m_smsc->setText(settings.m_smscNumber);
+    {
+        const QString key = CellularSmsText::keyText(CellularSmsText::codepage(CellularSmsText::keyOf(settings.m_smsCodepage)).key());
+        m_smsCodepage->setCurrentIndex(std::max(0, m_smsCodepage->findData(key)));
+    }
     const CellularFarEnd& fe = settings.m_farEnd;
     m_echoDelay->setValue(fe.m_echoDelayMs / 1000.0);
     m_echoLevel->setValue(fe.m_echoLevelDb);
@@ -725,6 +738,7 @@ void CellularNetworkDialog::read(CellularNetworkSettings& s) const
     s.m_sendCallerId = m_callerId->isChecked();
     s.m_sendClock = m_clock->isChecked();
     s.m_smscNumber = m_smsc->text();
+    s.m_smsCodepage = m_smsCodepage->currentIndex() > 0 ? m_smsCodepage->currentData().toString() : QString();
     s.m_fallback = m_fallback->currentIndex() == 1 ? CellularNetworkSettings::FallbackMusic : CellularNetworkSettings::FallbackEcho;
     CellularFarEnd& fe = s.m_farEnd;
     fe.m_echoDelayMs = static_cast<int>(std::lround(m_echoDelay->value() * 1000.0));
