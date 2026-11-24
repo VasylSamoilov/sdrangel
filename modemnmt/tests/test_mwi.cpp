@@ -145,7 +145,8 @@ static void testCodec()
     CHECK(mwiWireInfo(MwiFax) == 0x208);
     CHECK(mwiWireInfo(MwiEmail) == 0x104);
     CHECK(mwiWireInfo(MwiData) == 0x082);
-    CHECK(mwiWireInfo(MwiAll) == 0xfbe);
+    CHECK(mwiWireInfo(MwiSpare) == 0x041);      // i6, the spare bit, last
+    CHECK(mwiWireInfo(MwiAll) == 0xfff);
     CHECK(mwiWireInfo(0) == 0);
 
     for (unsigned flags = 0; flags <= MwiAll; flags++)
@@ -161,7 +162,7 @@ static void testCodec()
     CHECK(!mwiFlagsFromWire(0x830, flags));
     CHECK(!mwiFlagsFromWire(0x821, flags));
     CHECK(!mwiFlagsFromWire(0x1820, flags));
-    CHECK(mwiFlagsFromWire(0x041, flags) && flags == 0);        // the spare bit carries nothing
+    CHECK(mwiFlagsFromWire(0x041, flags) && flags == MwiSpare);  // the spare bit as it was sent
 
     // text
     CHECK(mwiParseFlags("sms", flags) && flags == MwiSms);
@@ -169,10 +170,12 @@ static void testCodec()
     CHECK(mwiParseFlags("fax email data", flags) && flags == (MwiFax | MwiEmail | MwiData));
     CHECK(mwiParseFlags("e-mail", flags) && flags == MwiEmail);
     CHECK(mwiParseFlags("5", flags) && flags == 5);
-    CHECK(mwiParseFlags("31", flags) && flags == MwiAll);
+    CHECK(mwiParseFlags("31", flags) && flags == 31);
+    CHECK(mwiParseFlags("63", flags) && flags == MwiAll);
+    CHECK(mwiParseFlags("spare", flags) && flags == MwiSpare);
     CHECK(!mwiParseFlags("", flags));
     CHECK(!mwiParseFlags("0", flags));
-    CHECK(!mwiParseFlags("32", flags));
+    CHECK(!mwiParseFlags("64", flags));
     CHECK(!mwiParseFlags("3 fax", flags));
     CHECK(!mwiParseFlags("sms,pigeon", flags));
     CHECK(mwiFlagsText(MwiSms | MwiData) == "sms,data");
@@ -428,7 +431,7 @@ static void testNotDelivered()
         Station s;
 
         CHECK(!s.system.sendMwi(s.phone.country, s.phone.number, 0));
-        CHECK(!s.system.sendMwi(s.phone.country, s.phone.number, 0x20));
+        CHECK(!s.system.sendMwi(s.phone.country, s.phone.number, 0x40));     // beyond i6
         CHECK(s.system.sendMwi(s.phone.country, s.phone.number, MwiSms));
         CHECK(!s.system.sendMwi(s.phone.country, s.phone.number, MwiFax));      // paged already
     }

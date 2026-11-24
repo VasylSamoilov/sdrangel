@@ -31,7 +31,7 @@ uint16_t sixBits(uint8_t flags)
 {
     return static_cast<uint16_t>(((flags & MwiSms) ? 0x20 : 0) | ((flags & MwiVoice) ? 0x10 : 0)
                                | ((flags & MwiFax) ? 0x08 : 0) | ((flags & MwiEmail) ? 0x04 : 0)
-                               | ((flags & MwiData) ? 0x02 : 0));
+                               | ((flags & MwiData) ? 0x02 : 0) | ((flags & MwiSpare) ? 0x01 : 0));
 }
 
 } // namespace
@@ -52,7 +52,7 @@ bool mwiFlagsFromWire(uint16_t info, uint8_t& flags)
     }
 
     flags = static_cast<uint8_t>(((i & 0x20) ? MwiSms : 0) | ((i & 0x10) ? MwiVoice : 0) | ((i & 0x08) ? MwiFax : 0)
-                               | ((i & 0x04) ? MwiEmail : 0) | ((i & 0x02) ? MwiData : 0));
+                               | ((i & 0x04) ? MwiEmail : 0) | ((i & 0x02) ? MwiData : 0) | ((i & 0x01) ? MwiSpare : 0));
     return true;
 }
 
@@ -106,6 +106,8 @@ bool mwiParseFlags(const std::string& text, uint8_t& flags)
             result |= MwiEmail;
         } else if (word == "data") {
             result |= MwiData;
+        } else if (word == "spare") {
+            result |= MwiSpare;
         } else {
             return false;
         }
@@ -123,7 +125,7 @@ std::string mwiFlagsText(uint8_t flags)
 {
     std::string text;
     const struct { uint8_t flag; const char* name; } names[] = {
-        {MwiSms, "sms"}, {MwiVoice, "voice"}, {MwiFax, "fax"}, {MwiEmail, "email"}, {MwiData, "data"}
+        {MwiSms, "sms"}, {MwiVoice, "voice"}, {MwiFax, "fax"}, {MwiEmail, "email"}, {MwiData, "data"}, {MwiSpare, "spare"}
     };
 
     for (const auto& entry : names)

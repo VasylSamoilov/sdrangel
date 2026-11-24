@@ -36,7 +36,8 @@ enum MwiFlag : uint8_t
     MwiFax = 0x04,
     MwiEmail = 0x08,
     MwiData = 0x10,
-    MwiAll = 0x1f
+    MwiSpare = 0x20,        // i6 "(spare)": no meaning given; what a phone does with it is for a test
+    MwiAll = 0x3f
 };
 
 // When the indicators reach a phone that is in a conversation: at once (5c twice in the

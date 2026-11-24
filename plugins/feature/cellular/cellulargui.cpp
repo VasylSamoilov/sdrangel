@@ -25,6 +25,8 @@
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
+#include <functional>
+
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QGuiApplication>
@@ -158,6 +160,51 @@ QToolButton *iconButton(QWidget *parent, const QString& icon, const QString& tip
     button->setIcon(QIcon(icon));
     button->setToolTip(tip);
     return button;
+}
+
+// The indicators of frame 5c "Message(s) waiting" (NMT Doc 450-1 4.3.3.11: F1F2F3 bits i1..i5), as the
+// standard names them; sent in "Clearing sequences with message indicators" (4.4.1.16).
+struct Indicator { const char *name; int flag; };
+const Indicator kIndicators[] = {{"SMS message", 0x01}, {"Voice mail", 0x02}, {"Fax", 0x04}, {"E-mail", 0x08}, {"Data", 0x10},
+                                 {"Spare", 0x20}};    // i6 "(spare)": what a phone does with it is for a test
+const char *const kIndicatorTip = "Messages waiting (frame 5c, NMT Doc 450-1 4.3.3.11), sent as one message with "
+    "the indicators ticked, in the clearing of a call (4.4.1.16). Grey, not ticked: \"carries no information on the "
+    "corresponding indicator setting (does not reset the indicator)\". The network only switches indicators on; "
+    "the phone switches them off. An idle phone gets it in a short call without ringing, a phone in a "
+    "conversation at once, a busy phone when it is free";
+
+// The indicators as a line of boxes and the send button; send gets the bits ticked (none: nothing sent).
+QWidget *indicatorRow(QWidget *parent, const std::function<void(int)>& send)
+{
+    QWidget *row = new QWidget(parent);
+    QHBoxLayout *layout = new QHBoxLayout(row);
+    layout->setContentsMargins(0, 0, 0, 0);
+    QList<QCheckBox*> boxes;
+    for (const Indicator& i : kIndicators)
+    {
+        // grey: not changed; ticked: switched on (never "switched off": the network cannot)
+        QCheckBox *box = new QCheckBox(i.name, row);
+        box->setProperty("flag", i.flag);
+        box->setToolTip(kIndicatorTip);
+        box->setStyleSheet("QCheckBox:!checked { color: gray; }");
+        boxes.append(box);
+        layout->addWidget(box);
+    }
+    QToolButton *button = new QToolButton(row);
+    button->setIcon(QIcon(":/bell_gradient.png"));
+    button->setToolTip(QString("Send the indicators ticked. ") + kIndicatorTip);
+    layout->addWidget(button);
+    layout->addStretch(1);
+    QObject::connect(button, &QToolButton::clicked, row, [boxes, send]() {
+        int flags = 0;
+        for (const QCheckBox *box : boxes) {
+            flags |= box->isChecked() ? box->property("flag").toInt() : 0;
+        }
+        if (flags) {
+            send(flags);
+        }
+    });
+    return row;
 }
 
 // A row of controls that wraps when the window is narrow.
@@ -999,18 +1046,10 @@ QWidget *CellularGUI::buildTest()
     smsRow->addWidget(keep);
     form->addRow("SMS", smsRow);
 
-    m_mwiKind = new QComboBox();
-    m_mwiKind->addItem("SMS waiting", 0x01);
-    m_mwiKind->addItem("Voice mail waiting", 0x02);
-    m_mwiKind->addItem("Fax waiting", 0x04);
-    m_mwiKind->addItem("E-mail waiting", 0x08);
-    m_mwiKind->addItem("Data waiting", 0x10);
-    m_mwiKind->setToolTip("Message waiting indicator (frame 5c, NMT Doc 450-1 4.4.1.16). An idle phone is called "
-        "without ringing and gets it in the clearing of that call; a phone in a conversation gets it at once and in "
-        "the clearing; a busy phone gets it when it is free. The phone switches an indicator off, not the network");
-    QPushButton *mwi = new QPushButton("Send");
-    mwi->setToolTip("Sends the message waiting indicator to the phone");
-    form->addRow("Indicator", flowRow(page, {m_mwiKind, mwi}));
+    form->addRow("Messages waiting", indicatorRow(page, [this](int flags) {
+        requestAction(m_testNetwork->currentData().toInt(), m_testPhone->currentText().trimmed(),
+            Cellular::MsgAction::Mwi, QString(), flags);
+    }));
 
     m_powerLevel = new QComboBox();
     m_powerLevel->addItem("High", 3);
@@ -1037,9 +1076,6 @@ QWidget *CellularGUI::buildTest()
     connect(release, &QPushButton::clicked, this, [act]() { act(Cellular::MsgAction::Release, QString(), 0); });
     connect(sms, &QPushButton::clicked, this, [this, act]() { act(Cellular::MsgAction::Sms, m_smsText->text(), 0); });
     connect(keep, &QPushButton::clicked, this, [this, act]() { act(Cellular::MsgAction::Hold, m_smsText->text(), 0); });
-    connect(mwi, &QPushButton::clicked, this, [this, act]() {
-        act(Cellular::MsgAction::Mwi, QString(), m_mwiKind->currentData().toInt());
-    });
     connect(power, &QPushButton::clicked, this, [this, act]() {
         act(Cellular::MsgAction::Power, QString(), m_powerLevel->currentData().toInt());
     });
@@ -1363,7 +1399,7 @@ QWidget *CellularGUI::buildConsole()
     m_consoleHangUp->setMinimumWidth(64);
     m_consoleHangUp->setToolTip("Hang up, or refuse the call that rings");
     m_consoleFlash = new QToolButton(page);
-    m_consoleFlash->setText("R");
+    m_consoleFlash->setText("F");
     m_consoleFlash->setMaximumWidth(22);
     m_consoleFlash->setEnabled(false);
     m_consoleFlash->setToolTip("Flash (register recall) to the far end. NMT has no signal that takes it to a phone: "
@@ -1409,20 +1445,12 @@ QWidget *CellularGUI::buildConsole()
     layout->addLayout(smsRow);
     connect(m_consoleSms, &QLineEdit::returnPressed, sms, &QToolButton::click);
     // the indicators: one message with the flags ticked, delivered when the phone can take it
-    const QStringList kinds = {"SMS", "Voice mail", "Fax", "E-mail", "Data"};
-    QList<QWidget*> flags;
-    for (int i = 0; i < kinds.size(); i++)
-    {
-        QCheckBox *box = new QCheckBox(kinds[i], page);
-        box->setProperty("flag", 1 << i);
-        m_consoleMwi.append(box);
-        flags.append(box);
-    }
-    QToolButton *mwi = iconButton(page, ":/bell_gradient.png", "Send the indicators ticked to the phone of the number, "
-        "one message (frame 5c, NMT Doc 450-1 4.4.1.16). An idle phone gets it in a short call without ringing, a phone "
-        "in a call at once, a busy phone when it is free. The network only sets indicators; the phone switches them off");
-    flags.append(mwi);
-    form->addRow("Waiting", flowRow(page, flags));
+    form->addRow("Messages waiting", indicatorRow(page, [this](int flags) {
+        const QString number = consoleTarget();
+        if (!number.isEmpty()) {
+            requestAction(networkOfPhone(number), number, Cellular::MsgAction::Mwi, QString(), flags);
+        }
+    }));
     layout->addLayout(form);
 
     // the call with a phone: what the network can do to it (as the Test tab)
@@ -1473,16 +1501,6 @@ QWidget *CellularGUI::buildConsole()
         const QString text = m_consoleSms->text();
         if (!consoleTarget().isEmpty() && !text.isEmpty()) {
             requestAction(0, consoleTarget(), Cellular::MsgAction::ConsoleSms, text, 0);
-        }
-    });
-    connect(mwi, &QToolButton::clicked, this, [this]() {
-        int flags = 0;
-        for (const QCheckBox *box : m_consoleMwi) {
-            flags |= box->isChecked() ? box->property("flag").toInt() : 0;
-        }
-        const QString number = consoleTarget();
-        if (flags && !number.isEmpty()) {
-            requestAction(networkOfPhone(number), number, Cellular::MsgAction::Mwi, QString(), flags);
         }
     });
     auto changed = [this]() {
@@ -1683,13 +1701,15 @@ void CellularGUI::phoneMenu(const QPoint& pos)
             requestAction(network, number, Cellular::MsgAction::Hold, text, 0);
         }
     });
-    QMenu *indicator = menu.addMenu("Indicator");
-    for (int i = 0; i < m_mwiKind->count(); i++)
+    QMenu *indicator = menu.addMenu("Messages waiting");
+    indicator->setToolTipsVisible(true);
+    for (const Indicator& i : kIndicators)
     {
-        const int flags = m_mwiKind->itemData(i).toInt();
-        indicator->addAction(m_mwiKind->itemText(i), this, [=]() {
+        const int flags = i.flag;
+        QAction *a = indicator->addAction(i.name, this, [=]() {
             requestAction(network, number, Cellular::MsgAction::Mwi, QString(), flags);
         });
+        a->setToolTip(kIndicatorTip);
     }
     QMenu *power = menu.addMenu("Power in call");
     for (int i = 0; i < m_powerLevel->count(); i++)
