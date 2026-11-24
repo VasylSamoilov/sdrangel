@@ -68,8 +68,9 @@ public:
     // a call that comes in is answered at once (no ringing)
     void setAutoAnswer(bool autoAnswer) { m_autoAnswer = autoAnswer; }
 
-    // Calls a number. False if a call is going on or the router refused it (cause, if not null).
-    bool dial(const std::string& number, Cause* cause = nullptr);
+    // Calls a number on the leg called (null: the leg the number is registered on, else the
+    // fallback). False if a call is going on or the router refused it (cause, if not null).
+    bool dial(const std::string& number, MobileLeg* called = nullptr, Cause* cause = nullptr);
     // Answers the call that rings. False if none rings.
     bool answer();
     // Ends the call, or refuses the one that rings (busy).

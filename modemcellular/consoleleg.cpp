@@ -72,7 +72,7 @@ ConsoleLeg::~ConsoleLeg()
     m_system.detach(*this);
 }
 
-bool ConsoleLeg::dial(const std::string& number, Cause* cause)
+bool ConsoleLeg::dial(const std::string& number, MobileLeg* called, Cause* cause)
 {
     {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -89,7 +89,7 @@ bool ConsoleLeg::dial(const std::string& number, Cause* cause)
     }
 
     // the router may call back into this leg before setup returns
-    const CallRouter::SetupResult result = m_system.setup(*this, m_number, number);
+    const CallRouter::SetupResult result = m_system.setup(*this, m_number, number, called);
     std::lock_guard<std::mutex> lock(m_mutex);
 
     if (!result.ok())

@@ -173,12 +173,23 @@ static void testConsoleCalls()
 
     // one call at a time; the mobile hangs up
     Cause cause = Cause::Normal;
-    CHECK(!console.dial("1999999", &cause) && cause == Cause::Busy);
+    CHECK(!console.dial("1999999", nullptr, &cause) && cause == Cause::Busy);
     bench.system.release(mobile.ref, Cause::Normal);
     bench.step(console);
     CHECK(console.state() == ConsoleLeg::State::Idle);
     CHECK(has(bench.events, "call with 1123456: ended (normal)"));
     bench.system.unregisterSubscriber("1123456", mobile);
+
+    // a phone that is not registered is still reached on the leg given (paged), not the fallback
+    Mobile unregistered;
+    unregistered.system = &bench.system;
+    unregistered.answers = false;           // paged, not answered yet
+    CHECK(console.dial("1777777", &unregistered));
+    bench.step(console);
+    CHECK(unregistered.ref != 0);
+    CHECK(console.state() != ConsoleLeg::State::Connected);      // nobody answered it
+    console.hangUp();
+    bench.step(console);
 }
 
 // A mobile calls the console's number: it rings, the operator answers; a second call is busy.

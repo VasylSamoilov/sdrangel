@@ -839,7 +839,9 @@ void CellularWorker::consoleAction(const Cellular::MsgAction& msg)
             return;
         }
         modemcellular::Cause cause = modemcellular::Cause::Normal;
-        if (!n->console->dial(msg.getNumber().toStdString(), &cause)) {
+        // a phone's number (registered or not) is paged on the network, as a phone's call to it is
+        const std::string dialled = msg.getNumber().toStdString();
+        if (!n->console->dial(dialled, n->bridge->legOf(dialled), &cause)) {
             log(n->id, what + QString(": refused (%1)").arg(modemcellular::TestCaller::causeName(cause)));
         }
         m_consoleKeys.clear();
