@@ -6,6 +6,7 @@ set(modemamps_SOURCES
     ampsword.cpp
     ampsmessages.cpp
     ampsfsk.cpp
+    ampsframe.cpp
 )
 
 set(modemamps_HEADERS
@@ -14,6 +15,7 @@ set(modemamps_HEADERS
     ampsword.h
     ampsmessages.h
     ampsfsk.h
+    ampsframe.h
 )
 
 include_directories(

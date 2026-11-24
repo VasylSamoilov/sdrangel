@@ -11,7 +11,8 @@ set(MODEMAMPS_LIB_SOURCES
     ../ampsstream.cpp
     ../ampsword.cpp
     ../ampsmessages.cpp
-    ../ampsfsk.cpp)
+    ../ampsfsk.cpp
+    ../ampsframe.cpp)
 
 # Sanitizer: address (address and undefined behaviour) or off
 set(MODEMAMPS_TEST_SANITIZER "off" CACHE STRING "off or address")
@@ -43,3 +44,4 @@ modemamps_add_test(modemamps_stream_test test_stream.cpp)
 modemamps_add_test(modemamps_word_test test_word.cpp)
 modemamps_add_test(modemamps_messages_test test_messages.cpp)
 modemamps_add_test(modemamps_fsk_test test_fsk.cpp)
+modemamps_add_test(modemamps_frame_test test_frame.cpp)
