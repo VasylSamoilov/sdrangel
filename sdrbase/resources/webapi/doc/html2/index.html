@@ -5285,19 +5285,19 @@ margin-bottom: 20px;
     },
     "action" : {
       "type" : "string",
-      "description" : "call (the network calls the phone, registered or not; the far end is echo or music), hangup (ends that call), release (releases any call of the phone), sms (text to the phone), mwi (message waiting indicators, value: flags; text for a phone in a call: incall or clearing, empty for both), power (level 0..3 of the phone in its call), move (the call to another traffic channel, value: channel, 0 for any free one), hold (text the SMS centre keeps until the phone calls it for its waiting messages), forget (the phone's record in the book; the system is the one of the network)\n"
+      "description" : "call (the network calls the phone, registered or not; the far end is echo or music), hangup (ends that call), release (releases any call of the phone), sms (text to the phone), mwi (message waiting indicators, value: flags; text for a phone in a call: incall or clearing, empty for both), power (level 0..3 of the phone in its call), move (the call to another traffic channel, value: channel, 0 for any free one), hold (text the SMS centre keeps until the phone calls it for its waiting messages), forget (the phone's record in the book; the system is the one of the network), audit (AMPS: the phone confirms it is there, idle or in its call). On AMPS mwi is the message waiting order (value: the count 0..31, 0 clears; text: voice, sms or fax, empty for voice), power the level 0..7; sms, hold and move are NMT's.\n"
     },
     "number" : {
       "type" : "string",
-      "description" : "Number of the phone: country digit and six digits."
+      "description" : "Number of the phone: NMT the country digit and six digits, AMPS the 10 digits."
     },
     "text" : {
       "type" : "string",
-      "description" : "Text of the short message (sms)."
+      "description" : "Text of the short message (sms), when the indicators go (NMT mwi) or their type (AMPS mwi)."
     },
     "value" : {
       "type" : "integer",
-      "description" : "Flags (mwi), power level (power) or channel (move)."
+      "description" : "Flags (NMT mwi), the count (AMPS mwi), power level (power) or channel (move)."
     }
   },
   "description" : "Cellular actions: the tester acts on a phone of a network"
@@ -76253,7 +76253,7 @@ $(document).ready(function() {
           </div>
           <div id="generator">
             <div class="content">
-              Generated 2026-11-24T23:14:25.720Z
+              Generated 2026-11-25T00:17:14.478Z
             </div>
           </div>
       </div>

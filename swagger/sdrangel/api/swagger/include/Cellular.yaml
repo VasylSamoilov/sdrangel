@@ -262,16 +262,19 @@ CellularActions:
         clearing, empty for both), power (level 0..3 of the phone in its call),
         move (the call to another traffic channel, value: channel, 0 for any free one),
         hold (text the SMS centre keeps until the phone calls it for its waiting messages),
-        forget (the phone's record in the book; the system is the one of the network)
+        forget (the phone's record in the book; the system is the one of the network),
+        audit (AMPS: the phone confirms it is there, idle or in its call).
+        On AMPS mwi is the message waiting order (value: the count 0..31, 0 clears; text: voice,
+        sms or fax, empty for voice), power the level 0..7; sms, hold and move are NMT's.
     number:
       type: string
-      description: "Number of the phone: country digit and six digits."
+      description: "Number of the phone: NMT the country digit and six digits, AMPS the 10 digits."
     text:
       type: string
-      description: "Text of the short message (sms)."
+      description: "Text of the short message (sms), when the indicators go (NMT mwi) or their type (AMPS mwi)."
     value:
       type: integer
-      description: "Flags (mwi), power level (power) or channel (move)."
+      description: "Flags (NMT mwi), the count (AMPS mwi), power level (power) or channel (move)."
 
 CellularCarrierReport:
   description: "The state of one carrier of a network"

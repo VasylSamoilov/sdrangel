@@ -523,9 +523,14 @@ void CellularWorker::action(const Cellular::MsgAction& msg)
     }
 
     Network& n = *found;
-    if (!n.station)
+    if (n.ampsStation)
     {
-        log(n.id, what + ": not done for AMPS yet");
+        ampsAction(n, msg, what);
+        return;
+    }
+    if (msg.getAction() == Cellular::MsgAction::Audit)
+    {
+        log(n.id, what + ": refused: the audit is an order of AMPS");
         return;
     }
     modemnmt::NmtSystem& system = *n.station->system();
@@ -676,6 +681,7 @@ void CellularWorker::action(const Cellular::MsgAction& msg)
     case Cellular::MsgAction::Listen:
         listen(n.id, msg.getNumber(), msg.getValue());
         return;
+    case Cellular::MsgAction::Audit:            // AMPS only: refused above
     case Cellular::MsgAction::ConsoleDial:      // the console's: consoleAction()
     case Cellular::MsgAction::ConsoleAnswer:
     case Cellular::MsgAction::ConsoleHangUp:
@@ -684,6 +690,155 @@ void CellularWorker::action(const Cellular::MsgAction& msg)
         return;
     }
     log(n.id, what + (ok ? ": started" : ": refused: " + refused));
+}
+
+// The tester on an AMPS network: the phone by its 10 digits; the call and its release as NMT's, the
+// orders of AMPS (osmocom's), an order the phone is busy for waits until it can go
+void CellularWorker::ampsAction(Network& n, const Cellular::MsgAction& msg, const QString& what)
+{
+    modemamps::AmpsSystem& system = *n.ampsStation->system();
+    const std::string number = msg.getNumber().toStdString();
+
+    if (number.size() != 10 || number.find_first_not_of("0123456789") != std::string::npos)
+    {
+        log(n.id, what + ": the number is the 10 digits of the phone, e.g. 2162177526");
+        return;
+    }
+
+    switch (msg.getAction())
+    {
+    case Cellular::MsgAction::Call:
+    {
+        modemcellular::Cause cause = modemcellular::Cause::Normal;
+        std::unique_ptr<modemcellular::AudioEndpoint> endpoint;
+        if (n.music) {
+            endpoint = std::make_unique<modemcellular::MusicEndpoint>();
+        } else {
+            endpoint = std::make_unique<modemcellular::EchoEndpoint>(1.0);
+        }
+        bool registered = false;
+        system.forEachRegistered([&registered, &number](const modemamps::AmpsSubscriber& s) {
+            registered = registered || s.number() == number;
+        });
+        const bool ok = n.caller->call(number, "", n.ampsBridge->legOf(number), std::move(endpoint), &cause);
+        if (ok) {
+            n.callInfo[number] = {QString("call from the tester (%1)").arg(n.music ? "music" : "echo"), QDateTime::currentMSecsSinceEpoch()};
+        }
+        log(n.id, ok
+            ? QString("%1: paging the phone (%2), the far end is %3").arg(what).arg(registered ? "registered" : "not registered")
+                .arg(n.music ? "music" : "echo")
+            : QString("%1: refused (%2)").arg(what).arg(modemcellular::TestCaller::causeName(cause)));
+        return;
+    }
+    case Cellular::MsgAction::HangUp:
+        n.caller->hangUp();
+        log(n.id, what + ": hung up");
+        return;
+    case Cellular::MsgAction::Release:
+        if (n.caller->state() != modemcellular::TestCaller::State::Idle && n.caller->number() == number)
+        {
+            n.caller->hangUp();
+            log(n.id, what + ": the test call hung up");
+            return;
+        }
+        log(n.id, what + (system.releaseCall(number) ? ": started" : ": refused: the phone has no call that can be released"));
+        return;
+    case Cellular::MsgAction::Power:
+    case Cellular::MsgAction::Audit:
+    case Cellular::MsgAction::Mwi:
+    {
+        Network::PendingAmpsOrder order;
+        order.number = number;
+        order.action = msg.getAction();
+        order.value = msg.getValue();
+        order.what = what;
+        if (order.action == Cellular::MsgAction::Mwi)
+        {
+            // the type in the text: voice (or empty), sms, fax; the value the count, 0 clears
+            const QString type = msg.getText().trimmed().toLower();
+            order.type = type == "sms" ? 1 : type == "fax" ? 2 : 0;
+            if (!type.isEmpty() && type != "voice" && type != "sms" && type != "fax")
+            {
+                log(n.id, what + ": refused: the type is voice, sms or fax");
+                return;
+            }
+        }
+        const modemamps::AmpsSystem::OrderResult result = ampsOrder(n, order);
+        switch (result)
+        {
+        case modemamps::AmpsSystem::OrderResult::Sent:
+            log(n.id, what + ": started");
+            return;
+        case modemamps::AmpsSystem::OrderResult::NoCall:
+            log(n.id, what + ": refused: the phone has no conversation");
+            return;
+        case modemamps::AmpsSystem::OrderResult::Invalid:
+            log(n.id, what + (order.action == Cellular::MsgAction::Power ? ": refused: the level is 0 to 7"
+                : ": refused: the count is 0 (clears) to 31"));
+            return;
+        case modemamps::AmpsSystem::OrderResult::Busy:
+            n.pendingAmps.push_back(order);
+            log(n.id, what + ": postponed: the phone is in another procedure (paging, assignment, an order not sent yet),"
+                " it goes out when the phone is free");
+            return;
+        }
+        return;
+    }
+    case Cellular::MsgAction::Listen:
+        listen(n.id, msg.getNumber(), msg.getValue());
+        return;
+    case Cellular::MsgAction::Forget:
+        return;         // the book is the feature's: it does it
+    case Cellular::MsgAction::Sms:
+    case Cellular::MsgAction::Hold:
+        log(n.id, what + ": refused: AMPS has no short messages");
+        return;
+    case Cellular::MsgAction::Move:
+        log(n.id, what + ": not done for AMPS yet (the handoff)");
+        return;
+    case Cellular::MsgAction::ConsoleDial:      // the console's: consoleAction()
+    case Cellular::MsgAction::ConsoleAnswer:
+    case Cellular::MsgAction::ConsoleHangUp:
+    case Cellular::MsgAction::ConsoleDigit:
+    case Cellular::MsgAction::ConsoleSms:
+        return;
+    }
+}
+
+modemamps::AmpsSystem::OrderResult CellularWorker::ampsOrder(Network& n, const Network::PendingAmpsOrder& order)
+{
+    modemamps::AmpsSystem& system = *n.ampsStation->system();
+
+    switch (order.action)
+    {
+    case Cellular::MsgAction::Power:
+        return system.changePower(order.number, order.value);
+    case Cellular::MsgAction::Mwi:
+        return system.messageWaiting(order.number, order.type, order.value);
+    default:
+        return system.audit(order.number);
+    }
+}
+
+// The orders that waited for the phone: each goes when the phone is free, in their order; one that
+// cannot go any more (the phone in a call ended) is dropped with a line
+void CellularWorker::sendPostponedAmps(Network& n)
+{
+    if (!n.ampsStation || !n.ampsStation->system()) {
+        return;
+    }
+    for (auto it = n.pendingAmps.begin(); it != n.pendingAmps.end();)
+    {
+        const modemamps::AmpsSystem::OrderResult result = ampsOrder(n, *it);
+        if (result == modemamps::AmpsSystem::OrderResult::Busy)
+        {
+            ++it;
+            continue;
+        }
+        log(n.id, it->what + (result == modemamps::AmpsSystem::OrderResult::Sent ? ": the postponed order went out"
+            : ": the postponed order was dropped (the phone has no conversation any more)"));
+        it = n.pendingAmps.erase(it);
+    }
 }
 
 void CellularWorker::setFarEnd(Network& n, const CellularFarEnd& farEnd)
@@ -1862,6 +2017,7 @@ void CellularWorker::tryBindAmps(Network& n, const modemcellular::WireSpan& rxSp
     n.ampsStation->setTraceTap([this, network](size_t index, bool toPhone, const std::string& text) {
         traceAmps(*network, index, toPhone, text);
     });
+    n.pendingAmps.clear();
     n.batches = 0;
     n.gaps = 0;
     updateTuning(*n.rx);
@@ -1909,6 +2065,8 @@ void CellularWorker::processBatch(Radio& radio)
         }
         if (n.station) {
             sendPostponed(n);           // NMT's short messages and indicators
+        } else {
+            sendPostponedAmps(n);       // AMPS's orders to a phone that was busy
         }
         flushQuietTraces(n);
         flushTones(false);

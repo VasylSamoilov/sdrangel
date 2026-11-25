@@ -184,6 +184,16 @@ private:
         std::unique_ptr<modemcellular::ConsoleLeg> console;    // the console's number on this network
         bool music = false;                     // the far end of calls to no phone: music, else echo
         std::unique_ptr<CellularMusicInput> musicInput;    // the audio input of the music, if it plays one
+        // AMPS: the tester's orders the phone was busy for (paged, being assigned), in their order
+        struct PendingAmpsOrder
+        {
+            std::string number;
+            Cellular::MsgAction::Action action = Cellular::MsgAction::Audit;
+            int type = 0;                       // message waiting: 0 voice, 1 SMS, 2 fax
+            int value = 0;                      // message waiting: the count
+            QString what;                       // for the log
+        };
+        std::vector<PendingAmpsOrder> pendingAmps;
         // message waiting indicators the protocol could not send yet (the phone was busy), by number
         struct PendingMwi
         {
@@ -255,6 +265,9 @@ private:
     void smsRecord(const Network& n, bool fromPhone, const QString& phone, const QString& other, uint8_t dcs,
         const std::vector<uint8_t>& codes);
     void sendPostponed(Network& network);
+    void ampsAction(Network& n, const Cellular::MsgAction& msg, const QString& what);
+    modemamps::AmpsSystem::OrderResult ampsOrder(Network& n, const Network::PendingAmpsOrder& order);
+    void sendPostponedAmps(Network& network);
     // the frames of a carrier into the event log of its network
     void traceFrame(Network& n, size_t index, bool toPhone, const modemnmt::Frame& frame, double quality, double level);
     // the count of a run of the same frame; `quiet`: only runs with no frame for a while
