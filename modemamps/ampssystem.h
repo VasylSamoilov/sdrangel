@@ -95,6 +95,7 @@ public:
     static constexpr double kFlashMin = 0.2;            // signalling tone: a flash
     static constexpr double kFlashMax = 0.8;            // longer: a release
     static constexpr double kCalledAddressDelay = 1.0;  // after a flash, Send Called-Address (osmocom)
+    static constexpr double kCalledAddressWindow = 10.0;    // the phone answers it within 10 s of the flash (553-A 2.6.4.4)
     static constexpr double kStReleaseTime = 3.0;       // a release of the phone if the tone lasts
     static constexpr int kPageTries = 2;
     static constexpr double kPageTimeout1 = 8.0;        // the page response, first page
@@ -253,6 +254,8 @@ private:
     void phoneReleased(Transaction* transaction);
     // message: the words of a longer one (flash with info), else the order word is made
     void askCalledAddress(Transaction* transaction);
+    bool toneOn(const Transaction* transaction) const;
+    void sendOrders(Transaction* transaction);
     OrderResult order(const std::string& number, uint8_t order, uint8_t ordq, uint8_t msgType, bool callOnly,
         const std::vector<uint64_t>& message = std::vector<uint64_t>());
     void timeout(Transaction* transaction);

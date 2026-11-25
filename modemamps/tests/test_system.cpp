@@ -15,6 +15,7 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.          //
 ///////////////////////////////////////////////////////////////////////////////////
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -48,18 +49,19 @@ struct Network
     int registrations = 0;
     bool accept = true;
 
-    static AmpsSystemConfig config()
+    static AmpsSystemConfig config(double roundTrip = 0.0)
     {
         AmpsSystemConfig c;
         c.si.sid = 54;
         c.channels = {{353, AmpsChannelType::ControlPaging, 0}, {356, AmpsChannelType::Voice, 0},
             {359, AmpsChannelType::Voice, 0}};
+        c.roundTrip = roundTrip;
         return c;
     }
 
-    Network() :
+    explicit Network(double roundTrip = 0.0) :
         clock(48000.0),
-        system(clock, config())
+        system(clock, config(roundTrip))
     {
         system.setCallHandler([this](const AmpsSubscriber&, const std::string& d) {
             calls.push_back(d);
@@ -246,6 +248,61 @@ static void testFlashAndHeldTone()
     n.system.signallingTone(kVc, true);
     n.wait(3.1);
     CHECK(n.clears == 1 && n.system.mode(kVc) == AmpsMode::Off);
+}
+
+// A flash and its called address (553-A 2.6.4.4): orders wait while the phone's tone is on (they
+// would cut the flash short); a second after the flash Send Called-Address; the digits are taken only
+// in its window, 10 s from the end of the flash and the round trip; no answer is logged
+static void testFlashCalledAddress()
+{
+    Network n(0.5);
+    uint64_t w = 0;
+    std::vector<std::string> digits;
+    std::vector<std::string> logs;
+    const auto logged = [&logs](const std::string& text) {
+        return std::find(logs.begin(), logs.end(), text) != logs.end();
+    };
+
+    n.system.setLogHandler([&logs](const std::string& t) { logs.push_back(t); });
+    n.system.setFlashHandler([&digits](const AmpsSubscriber&, const std::string& d) { digits.push_back(d); });
+    connect(n);
+
+    // an order while the tone is on waits for its end
+    n.system.signallingTone(kVc, true);
+    CHECK(n.system.audit("2162177526") == AmpsSystem::OrderResult::Sent);
+    CHECK(n.system.mode(kVc) == AmpsMode::Audio && !n.system.nextFvc(kVc, w));
+    n.wait(0.4);
+    n.system.signallingTone(kVc, false);
+    CHECK(digits.size() == 1 && n.system.mode(kVc) == AmpsMode::Frame);
+    CHECK(n.system.nextFvc(kVc, w) && field(words::kFvcOrder, w, "ORDER") == kOrderAudit);
+    CHECK(!n.system.nextFvc(kVc, w) && n.system.mode(kVc) == AmpsMode::Audio);
+
+    // a second later: Send Called-Address; the digits come within the window
+    n.wait(1.0);
+    CHECK(n.system.mode(kVc) == AmpsMode::Frame);
+    CHECK(n.system.nextFvc(kVc, w) && field(words::kFvcOrder, w, "ORDER") == kOrderSendCalledAddress);
+    CHECK(!n.system.nextFvc(kVc, w));
+    n.system.receivedRvcCalledAddress(kVc, "5551234");
+    CHECK(digits.size() == 2 && digits.back() == "5551234");
+    n.system.receivedRvcCalledAddress(kVc, "5551234");          // a second one: not asked for
+    CHECK(digits.size() == 2 && logged("2162177526: a called address not asked for, ignored"));
+
+    // a flash without an answer: after 10 s and the round trip the window ends with a line; an
+    // answer later is ignored
+    n.system.signallingTone(kVc, true);
+    n.wait(0.4);
+    n.system.signallingTone(kVc, false);
+    n.wait(1.0);
+    n.system.nextFvc(kVc, w);
+    n.system.nextFvc(kVc, w);
+    n.wait(9.3);                                                // 10.3 s after the flash: still open
+    CHECK(!logged("2162177526: flash: no called address from the phone (no digits dialled, or the flash was cut short)"));
+    n.wait(0.3);
+    CHECK(logged("2162177526: flash: no called address from the phone (no digits dialled, or the flash was cut short)"));
+    n.system.receivedRvcCalledAddress(kVc, "9");
+    CHECK(digits.size() == 3);                                  // the flash, not its late digits
+    CHECK(n.system.transactions().size() == 1 && n.clears == 0);
+    // (while the phone rings its tone is on all the time and orders go: testOrders)
 }
 
 // The audio taps see the speech of a call both ways (listening in, touch tones), not before it
@@ -506,6 +563,7 @@ int main()
     testFlashAndHeldTone();
     testOrders();
     testAudioTaps();
+    testFlashCalledAddress();
 
     if (g_failures == 0) {
         std::printf("all system tests passed\n");

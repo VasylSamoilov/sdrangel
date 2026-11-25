@@ -114,7 +114,9 @@ struct AmpsSystem::Transaction
     std::vector<uint64_t> fvcWords;     // the words of an FVC message still to go (alert with info)
     std::vector<uint64_t> fvcOrders;    // orders of the tester to go on the FVC (audit, power, message waiting)
     AmpsMode afterOrders = AmpsMode::Off;   // the mode of the voice channel before them, Off none
-    modemcellular::Timer flashTimer;    // a flash: the called address asked for after it (osmocom 1 s)
+    modemcellular::Timer flashTimer;    // a flash: the called address asked for after it (osmocom 1 s), then its window
+    double flashEnd = -1.0;             // when the last flash ended (its tone off), -1 none
+    bool calledAddressAsked = false;    // Send Called-Address sent, the phone's answer awaited
 };
 
 AmpsSystem::AmpsSystem(const modemcellular::Clock& clock, const AmpsSystemConfig& config) :
@@ -690,10 +692,12 @@ void AmpsSystem::signallingTone(int channel, bool on)
             t->timer.stop();
             t->kind = TimerKind::None;
         }
-        if (duration > kFlashMax) {
+        if (duration > kFlashMax)
+        {
             phoneReleased(t);
+            return;
         }
-        else if (duration >= kFlashMin)
+        if (duration >= kFlashMin)
         {
             // osmocom: the flash goes to the network; a second later the called address is asked
             // for (Send Called-Address, ORDER 8): the digits the user dialled before the flash
@@ -701,10 +705,14 @@ void AmpsSystem::signallingTone(int channel, bool on)
             if (m_flashHandler) {
                 m_flashHandler(t->subscriber, std::string());
             }
-            if (t->state == State::Call) {
+            if (t->state == State::Call)
+            {
+                t->flashEnd = now;
+                t->calledAddressAsked = false;
                 t->flashTimer.start(kCalledAddressDelay);
             }
         }
+        sendOrders(t);              // the orders held while the tone was on
         return;
     }
 
@@ -768,8 +776,9 @@ bool AmpsSystem::nextFvc(int channel, uint64_t& word)
         t->fvcWords.erase(t->fvcWords.begin());
         return true;
     }
-    // the tester's orders, in the call or while it rings (a release goes first)
-    if (t && t->state != State::Release && t->state != State::ReleaseSend && !t->fvcOrders.empty())
+    // the tester's orders, in the call or while it rings (a release goes first); the rest waits when
+    // the phone's tone comes on (a flash)
+    if (t && t->state != State::Release && t->state != State::ReleaseSend && !t->fvcOrders.empty() && !toneOn(t))
     {
         word = t->fvcOrders.front();
         t->fvcOrders.erase(t->fvcOrders.begin());
@@ -918,26 +927,51 @@ AmpsSystem::OrderResult AmpsSystem::order(const std::string& number, uint8_t ord
     } else {
         t->fvcOrders.insert(t->fvcOrders.end(), message.begin(), message.end());
     }
+    log(number + ": " + name + " on the voice channel" + (toneOn(t) ? " when the phone's signalling tone is off" : ""));
+    sendOrders(t);
+    return OrderResult::Sent;
+}
+
+// The phone in its conversation sends its signalling tone (a flash, or a release beginning). An
+// order it takes then cuts a flash short and makes it invalid (553-A 2.6.4.4): orders wait. While it
+// rings the tone is on all the time; that does not count.
+bool AmpsSystem::toneOn(const Transaction* t) const
+{
+    return t->state == State::Call && t->stStart >= 0.0;
+}
+
+// The orders waiting on the FVC go out, unless the phone's tone is on
+void AmpsSystem::sendOrders(Transaction* t)
+{
+    if (t->fvcOrders.empty() || toneOn(t) || !valid(t->channel)) {
+        return;
+    }
     if (m_channels[t->channel].mode != AmpsMode::Frame) {
         t->afterOrders = m_channels[t->channel].mode;
     }
     m_channels[t->channel].mode = AmpsMode::Frame;
-    log(number + ": " + name + " on the voice channel");
-    return OrderResult::Sent;
 }
 
 // After a flash (osmocom flash_timer_callback): the Send Called-Address order; the phone answers
-// with the digits on the RVC if the user dialled any, within 10 s of the flash (553-A 2.6.4.4)
+// with the digits on the RVC only within 10 s of the end of its last valid flash (553-A 2.6.4.4),
+// here and back with the round trip of the radio. The timer then ends that window: no answer, no
+// digits (none dialled, or the flash was cut short).
 void AmpsSystem::askCalledAddress(Transaction* t)
 {
     if (t->state != State::Call || !valid(t->channel)) {
         return;
     }
-    t->fvcOrders.push_back(fvc::order(static_cast<uint8_t>(m_channels[t->channel].config.scc), kOrderSendCalledAddress, 0, 0));
-    if (m_channels[t->channel].mode != AmpsMode::Frame) {
-        t->afterOrders = m_channels[t->channel].mode;
+    if (t->calledAddressAsked)
+    {
+        t->calledAddressAsked = false;
+        log(t->subscriber.number() + ": flash: no called address from the phone (no digits dialled, or the flash was cut short)");
+        return;
     }
-    m_channels[t->channel].mode = AmpsMode::Frame;
+    t->fvcOrders.push_back(fvc::order(static_cast<uint8_t>(m_channels[t->channel].config.scc), kOrderSendCalledAddress, 0, 0));
+    t->calledAddressAsked = true;
+    sendOrders(t);
+    const double until = t->flashEnd + kCalledAddressWindow + m_config.roundTrip;
+    t->flashTimer.start(std::max(0.0, until - m_clock.now()));
 }
 
 void AmpsSystem::receivedRvcCalledAddress(int channel, const std::string& digits)
@@ -947,6 +981,13 @@ void AmpsSystem::receivedRvcCalledAddress(int channel, const std::string& digits
     if (!t || t->state != State::Call) {
         return;
     }
+    if (!t->calledAddressAsked || m_clock.now() > t->flashEnd + kCalledAddressWindow + m_config.roundTrip)
+    {
+        log(t->subscriber.number() + ": a called address not asked for, ignored");
+        return;
+    }
+    t->calledAddressAsked = false;
+    t->flashTimer.stop();
     log(t->subscriber.number() + ": flash with " + (digits.empty() ? std::string("no digits") : digits));
     if (m_flashHandler && !digits.empty()) {
         m_flashHandler(t->subscriber, digits);
