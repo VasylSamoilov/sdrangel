@@ -590,8 +590,10 @@ void CellularNetworkDialog::showSystem()
         }
     }
     m_carriers->setToolTip(isAmps
-        ? "The channels as text: channel:type[:sat], comma separated. Types: cc (control and paging, 313..354), vc (voice). "
-          "The SAT colour code 0..2 of a voice channel, if not the network's. Example: 353:cc, 356:vc, 359:vc"
+        ? "The channels as text: channel:type[:sat], comma separated. Types: cc (control and paging, 313..354), vc (voice), "
+          "ccvc (control and paging, and the voice channel of a call when no vc is free: one transceiver; some phones may "
+          "reject it). The SAT colour code 0..2 of a voice channel, if not the network's. Example: 353:cc, 356:vc, 359:vc; "
+          "one carrier: 353:ccvc"
         : "The same channels as text: channel:type[:supervisory], comma separated. Types: cc (calling), "
           "tc (traffic), cctc (both), actc, cca, ccb (NMT-900), test. Supervisory tone 1..4 (0 none) on every traffic channel, "
           "or on none for 1..4 in turn. Example: 1:cctc:1, 5:tc:2, 6:tc:3");

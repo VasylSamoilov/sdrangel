@@ -309,7 +309,7 @@ bool CellularNetworkSettings::parseAmpsCarriers(const QString& text, int scc, st
 
         if (parts.size() < 2 || parts.size() > 3)
         {
-            error = QString("\"%1\": channel:type[:scc], the type cc or vc, e.g. 353:cc").arg(item.trimmed());
+            error = QString("\"%1\": channel:type[:scc], the type cc, vc or ccvc, e.g. 353:cc").arg(item.trimmed());
             return false;
         }
         c.channel = parts[0].trimmed().toInt(&ok);
@@ -323,10 +323,12 @@ bool CellularNetworkSettings::parseAmpsCarriers(const QString& text, int scc, st
             c.type = modemamps::AmpsChannelType::ControlPaging;
         } else if (type == "vc") {
             c.type = modemamps::AmpsChannelType::Voice;
+        } else if (type == "ccvc") {
+            c.type = modemamps::AmpsChannelType::ControlPagingVoice;
         }
         else
         {
-            error = QString("\"%1\": the type is cc (control and paging) or vc (voice)").arg(item.trimmed());
+            error = QString("\"%1\": the type is cc (control and paging), vc (voice) or ccvc (both, one transceiver)").arg(item.trimmed());
             return false;
         }
         c.scc = scc;
