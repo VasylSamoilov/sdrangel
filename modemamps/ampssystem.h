@@ -201,14 +201,15 @@ public:
     bool releaseCall(const std::string& number);
     // The orders of osmocom's amps (amps_audit_order, amps_mwi, amps_change_power_order). Audit and
     // message waiting go to an idle phone on the FOCC (553-A 2.6.2.3), to a phone on a voice channel
-    // (in the call, or ringing with its tone on) on the FVC; the phone confirms on the RECC or the
-    // RVC. Change power (level 0..7) is an order of the call only. After the orders the voice channel
-    // goes back to what it sent before.
+    // (alerted, ringing, in the conversation) on the FVC; the phone confirms on the RECC or the RVC.
+    // Change power (level 0..7) goes to a phone on a voice channel, the flash with info to one that
+    // rings or talks (before, it is busy). After the orders the voice channel goes back to what it
+    // sent before.
     OrderResult audit(const std::string& number);
     OrderResult messageWaiting(const std::string& number, int type, int count);   // type 0 voice, 1 SMS, 2 fax; count 0..31, 0 clears
     OrderResult changePower(const std::string& number, int level);
-    // a text to the display of the phone in its call (flash with info: the caller of a waiting call,
-    // a notice), 1..33 ASCII characters
+    // a text to the display of the phone that rings or talks (flash with info: the caller of a
+    // waiting call, a second caller text, a notice), 1..33 ASCII characters
     OrderResult flashWithInfo(const std::string& number, const std::string& text);
     // fires the timers that are due
     void run() { m_timers.run(); }
@@ -256,7 +257,15 @@ private:
     void askCalledAddress(Transaction* transaction);
     bool toneOn(const Transaction* transaction) const;
     void sendOrders(Transaction* transaction);
-    OrderResult order(const std::string& number, uint8_t order, uint8_t ordq, uint8_t msgType, bool callOnly,
+    // where an order is taken (553-A 2.6.2.3, 2.6.4.3.1, 2.6.4.3.2, 2.6.4.4)
+    enum class OrderWhere
+    {
+        Anywhere,       // also an idle phone on the FOCC: audit, message waiting
+        VoiceChannel,   // on the voice channel from the alert on: change power
+        Ringing         // when it rings and in the conversation: flash with info
+    };
+    // message: the words of a longer one (flash with info), else the order word is made
+    OrderResult order(const std::string& number, uint8_t order, uint8_t ordq, uint8_t msgType, OrderWhere where,
         const std::vector<uint64_t>& message = std::vector<uint64_t>());
     void timeout(Transaction* transaction);
     void setState(Transaction* transaction, State state);

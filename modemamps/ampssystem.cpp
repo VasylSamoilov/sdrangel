@@ -652,6 +652,7 @@ void AmpsSystem::signallingTone(int channel, bool on)
         setState(t, State::MtAnswerWait);
         t->kind = TimerKind::Answer;
         t->timer.start(kAnswerTimeout);
+        sendOrders(t);              // orders given while the alert waited go on
         return;
     }
     if (t->state == State::MtAnswerWait)
@@ -876,7 +877,7 @@ bool AmpsSystem::releaseCall(const std::string& number)
     return false;
 }
 
-AmpsSystem::OrderResult AmpsSystem::order(const std::string& number, uint8_t order, uint8_t ordq, uint8_t msgType, bool callOnly,
+AmpsSystem::OrderResult AmpsSystem::order(const std::string& number, uint8_t order, uint8_t ordq, uint8_t msgType, OrderWhere where,
     const std::vector<uint64_t>& message)
 {
     if (number.size() != 10 || number.find_first_not_of("0123456789") != std::string::npos) {
@@ -889,7 +890,7 @@ AmpsSystem::OrderResult AmpsSystem::order(const std::string& number, uint8_t ord
 
     if (!t)
     {
-        if (callOnly) {
+        if (where != OrderWhere::Anywhere) {
             return OrderResult::NoCall;
         }
         int pc = -1;
@@ -912,14 +913,15 @@ AmpsSystem::OrderResult AmpsSystem::order(const std::string& number, uint8_t ord
         log(number + ": " + name + " on the control channel");
         return OrderResult::Sent;
     }
-    // on the voice channel: in the call, or ringing (osmocom also while the alert waits for its
-    // confirmation, MT_ALERT_CONFIRM; here not: the alert may go again then)
+    // on the voice channel, as the phone's tasks take them (553-A 2.6.4.3.1 Waiting for Order: the
+    // alert sent, not confirmed yet; 2.6.4.3.2 Waiting for Answer: ringing; 2.6.4.4 Conversation)
     const bool inCall = t->state == State::Call;
     const bool ringing = t->state == State::MtAnswerWait;
-    if (callOnly && !inCall) {
-        return OrderResult::NoCall;     // a call being set up or ringing has no conversation yet
+    const bool alerting = t->state == State::MtAlert || t->state == State::MtAlertSend || t->state == State::MtAlertConfirm;
+    if (alerting && where == OrderWhere::Ringing) {
+        return OrderResult::Busy;       // the phone ignores it before it rings: when it rings
     }
-    if (!inCall && !ringing) {
+    if (!inCall && !ringing && !alerting) {
         return OrderResult::Busy;       // paging, assignment, registration, release: later
     }
     if (message.empty()) {
@@ -999,7 +1001,7 @@ void AmpsSystem::receivedRvcCalledAddress(int channel, const std::string& digits
 
 AmpsSystem::OrderResult AmpsSystem::audit(const std::string& number)
 {
-    return order(number, kOrderAudit, 0, 0, false);
+    return order(number, kOrderAudit, 0, 0, OrderWhere::Anywhere);
 }
 
 AmpsSystem::OrderResult AmpsSystem::messageWaiting(const std::string& number, int type, int count)
@@ -1007,7 +1009,7 @@ AmpsSystem::OrderResult AmpsSystem::messageWaiting(const std::string& number, in
     if (type < 0 || type > 2 || count < 0 || count > 31) {
         return OrderResult::Invalid;
     }
-    return order(number, kOrderMessageWaiting, static_cast<uint8_t>(type), static_cast<uint8_t>(count), false);
+    return order(number, kOrderMessageWaiting, static_cast<uint8_t>(type), static_cast<uint8_t>(count), OrderWhere::Anywhere);
 }
 
 AmpsSystem::OrderResult AmpsSystem::changePower(const std::string& number, int level)
@@ -1015,7 +1017,7 @@ AmpsSystem::OrderResult AmpsSystem::changePower(const std::string& number, int l
     if (level < 0 || level > 7) {
         return OrderResult::Invalid;
     }
-    return order(number, kOrderChangePower, static_cast<uint8_t>(level), 0, true);
+    return order(number, kOrderChangePower, static_cast<uint8_t>(level), 0, OrderWhere::VoiceChannel);
 }
 
 AmpsSystem::OrderResult AmpsSystem::flashWithInfo(const std::string& number, const std::string& text)
@@ -1034,7 +1036,7 @@ AmpsSystem::OrderResult AmpsSystem::flashWithInfo(const std::string& number, con
     const uint16_t min2 = number.size() == 10 ? ReccAssembler::min2Of(number.substr(0, 3)) : 0;
     const Transaction* t = number.size() == 10 ? transactionOf(min1, min2) : nullptr;
     const uint8_t pscc = (t && valid(t->channel)) ? static_cast<uint8_t>(m_channels[t->channel].config.scc) : 0;
-    return order(number, kOrderFlashWithInfo, 0, 0, true, fvc::flashWithInfo(pscc, text));
+    return order(number, kOrderFlashWithInfo, 0, 0, OrderWhere::Ringing, fvc::flashWithInfo(pscc, text));
 }
 
 std::vector<AmpsSystem::TransactionInfo> AmpsSystem::transactions() const

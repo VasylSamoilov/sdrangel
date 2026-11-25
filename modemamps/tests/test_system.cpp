@@ -457,9 +457,25 @@ static void testOrders()
     n.system.satChanged(kVc, 0);
     n.system.nextFvc(kVc, w);
     n.system.nextFvc(kVc, w);
-    CHECK(n.system.changePower(number, 2) == AmpsSystem::OrderResult::NoCall);     // the alert waits for its tone
+    // the alert waits for the phone's tone (553-A Waiting for Order): change power goes, back to the
+    // silence; the flash with info the phone would ignore now waits (busy)
+    CHECK(n.system.changePower(number, 3) == AmpsSystem::OrderResult::Sent);
+    CHECK(n.system.flashWithInfo(number, "Hi") == AmpsSystem::OrderResult::Busy);
+    CHECK(n.system.nextFvc(kVc, w) && field(words::kFvcOrder, w, "ORDER") == kOrderChangePower && field(words::kFvcOrder, w, "ORDQ") == 3);
+    CHECK(!n.system.nextFvc(kVc, w) && n.system.mode(kVc) == AmpsMode::Silence);
+    // an audit still waiting when the phone rings goes then
+    CHECK(n.system.audit(number) == AmpsSystem::OrderResult::Sent);
     n.system.signallingTone(kVc, true);
-    CHECK(mt.alerting == 1 && n.system.mode(kVc) == AmpsMode::Audio);
+    CHECK(mt.alerting == 1 && n.system.mode(kVc) == AmpsMode::Frame);
+    CHECK(n.system.nextFvc(kVc, w) && field(words::kFvcOrder, w, "ORDER") == kOrderAudit);
+    CHECK(!n.system.nextFvc(kVc, w) && n.system.mode(kVc) == AmpsMode::Audio);
+    // ringing (Waiting for Answer): the flash with info goes, a second caller text
+    CHECK(n.system.flashWithInfo(number, "Hi") == AmpsSystem::OrderResult::Sent);
+    std::vector<uint64_t> flash;
+    while (n.system.nextFvc(kVc, w)) {
+        flash.push_back(w);
+    }
+    CHECK(flash == fvc::flashWithInfo(0, "Hi") && n.system.mode(kVc) == AmpsMode::Audio);
     CHECK(n.system.messageWaiting(number, 1, 2) == AmpsSystem::OrderResult::Sent);
     CHECK(n.system.mode(kVc) == AmpsMode::Frame);
     CHECK(n.system.nextFvc(kVc, w) && field(words::kFvcOrder, w, "ORDER") == kOrderMessageWaiting

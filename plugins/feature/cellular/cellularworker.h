@@ -191,6 +191,7 @@ private:
             Cellular::MsgAction::Action action = Cellular::MsgAction::Audit;
             int type = 0;                       // message waiting: 0 voice, 1 SMS, 2 fax
             int value = 0;                      // message waiting: the count
+            std::string text;                   // flash with info: the text
             QString what;                       // for the log
         };
         std::vector<PendingAmpsOrder> pendingAmps;

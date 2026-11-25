@@ -758,11 +758,13 @@ void CellularWorker::ampsAction(Network& n, const Cellular::MsgAction& msg, cons
     case Cellular::MsgAction::Power:
     case Cellular::MsgAction::Audit:
     case Cellular::MsgAction::Mwi:
+    case Cellular::MsgAction::Sms:      // AMPS has no short messages: the flash with info, a text to the display
     {
         Network::PendingAmpsOrder order;
         order.number = number;
         order.action = msg.getAction();
         order.value = msg.getValue();
+        order.text = msg.getText().toStdString();
         order.what = what;
         if (order.action == Cellular::MsgAction::Mwi)
         {
@@ -782,16 +784,19 @@ void CellularWorker::ampsAction(Network& n, const Cellular::MsgAction& msg, cons
             log(n.id, what + ": started");
             return;
         case modemamps::AmpsSystem::OrderResult::NoCall:
-            log(n.id, what + ": refused: the phone has no conversation");
+            log(n.id, what + (order.action == Cellular::MsgAction::Sms
+                ? ": refused: AMPS shows a text only to a phone that rings or talks (flash with info)"
+                : ": refused: the phone has no call on a voice channel"));
             return;
         case modemamps::AmpsSystem::OrderResult::Invalid:
             log(n.id, what + (order.action == Cellular::MsgAction::Power ? ": refused: the level is 0 to 7"
+                : order.action == Cellular::MsgAction::Sms ? ": refused: the text is 1 to 33 ASCII characters"
                 : ": refused: the count is 0 (clears) to 31"));
             return;
         case modemamps::AmpsSystem::OrderResult::Busy:
             n.pendingAmps.push_back(order);
-            log(n.id, what + ": postponed: the phone is in another procedure (paging, assignment, an order not sent yet),"
-                " it goes out when the phone is free");
+            log(n.id, what + ": postponed: the phone is in another procedure (paging, assignment, an order not sent yet,"
+                " an alert not confirmed for a text), it goes out when the phone can take it");
             return;
         }
         return;
@@ -801,16 +806,6 @@ void CellularWorker::ampsAction(Network& n, const Cellular::MsgAction& msg, cons
         return;
     case Cellular::MsgAction::Forget:
         return;         // the book is the feature's: it does it
-    case Cellular::MsgAction::Sms:
-    {
-        // AMPS has no short messages: the text goes to the display of the phone in its call (flash
-        // with info, osmocom's caller in the call or call waiting notice)
-        const modemamps::AmpsSystem::OrderResult result = system.flashWithInfo(number, msg.getText().toStdString());
-        log(n.id, what + (result == modemamps::AmpsSystem::OrderResult::Sent ? ": started (flash with info)"
-            : result == modemamps::AmpsSystem::OrderResult::NoCall ? ": refused: AMPS shows a text only in a conversation (flash with info)"
-            : ": refused: the text is 1 to 33 ASCII characters"));
-        return;
-    }
     case Cellular::MsgAction::Hold:
         log(n.id, what + ": refused: AMPS has no short messages to keep");
         return;
@@ -836,6 +831,8 @@ modemamps::AmpsSystem::OrderResult CellularWorker::ampsOrder(Network& n, const N
         return system.changePower(order.number, order.value);
     case Cellular::MsgAction::Mwi:
         return system.messageWaiting(order.number, order.type, order.value);
+    case Cellular::MsgAction::Sms:
+        return system.flashWithInfo(order.number, order.text);
     default:
         return system.audit(order.number);
     }
