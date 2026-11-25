@@ -115,7 +115,17 @@ public:
         MtAlert, MtAlertSend, MtAlertConfirm,   // the alert order on the FVC, waiting for the phone's tone
         MtAnswerWait,                       // the phone rings (its tone), waiting for the answer
         Call,
-        Release, ReleaseSend                // our release on the FVC, waiting for the phone's tone
+        Release, ReleaseSend,               // our release on the FVC, waiting for the phone's tone
+        Order, OrderSend                    // an order to an idle phone on the FOCC (audit, message waiting)
+    };
+
+    // what an order to a phone did
+    enum class OrderResult
+    {
+        Sent,           // it goes out: on the FVC in the phone's call, else on the FOCC
+        NoCall,         // the order is one of a call and the phone has none
+        Busy,           // the phone is in a procedure the order cannot go into now (paging, assignment)
+        Invalid         // not a number of 10 digits, or a value out of range
     };
 
     // the phone's call: true if it goes on (a voice channel is assigned), false refuses it (reorder)
@@ -174,6 +184,14 @@ public:
     AmpsMode mode(int channel) const;
     // the network releases the call of the phone with this number (10 digits)
     bool releaseCall(const std::string& number);
+    // The orders of osmocom's amps (amps_audit_order, amps_mwi, amps_change_power_order). Audit and
+    // message waiting go to an idle phone on the FOCC (553-A 2.6.2.3), to a phone on a voice channel
+    // (in the call, or ringing with its tone on) on the FVC; the phone confirms on the RECC or the
+    // RVC. Change power (level 0..7) is an order of the call only. After the orders the voice channel
+    // goes back to what it sent before.
+    OrderResult audit(const std::string& number);
+    OrderResult messageWaiting(const std::string& number, int type, int count);   // type 0 voice, 1 SMS, 2 fax; count 0..31, 0 clears
+    OrderResult changePower(const std::string& number, int level);
     // fires the timers that are due
     void run() { m_timers.run(); }
 
@@ -216,6 +234,7 @@ private:
     void release(Transaction* transaction, bool tellNetwork);
     void callFailed(Transaction* transaction, modemcellular::Cause cause);
     void phoneReleased(Transaction* transaction);
+    OrderResult order(const std::string& number, uint8_t order, uint8_t ordq, uint8_t msgType, bool callOnly);
     void timeout(Transaction* transaction);
     void setState(Transaction* transaction, State state);
     void log(const std::string& text);

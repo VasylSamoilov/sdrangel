@@ -21,6 +21,7 @@
 
 #include "ampsfvc.h"
 #include "ampsmessages.h"
+#include "ampstrace.h"
 
 namespace modemamps
 {
@@ -69,6 +70,8 @@ const char *AmpsSystem::stateName(State state)
     case State::Call: return "call";
     case State::Release: return "release";
     case State::ReleaseSend: return "release sending";
+    case State::Order: return "order";
+    case State::OrderSend: return "order sending";
     }
     return "";
 }
@@ -108,6 +111,8 @@ struct AmpsSystem::Transaction
     int alertTry = 1;
     std::string callerId;               // of a call to the phone
     std::vector<uint64_t> fvcWords;     // the words of an FVC message still to go (alert with info)
+    std::vector<uint64_t> fvcOrders;    // orders of the tester to go on the FVC (audit, power, message waiting)
+    AmpsMode afterOrders = AmpsMode::Off;   // the mode of the voice channel before them, Off none
 };
 
 AmpsSystem::AmpsSystem(const modemcellular::Clock& clock, const AmpsSystemConfig& config) :
@@ -310,6 +315,14 @@ void AmpsSystem::receivedRecc(int channel, const ReccMessage& m)
         return;
     }
 
+    // the order confirmation of an idle phone (osmocom: the audit's shown only)
+    if (m.t == 0 && (m.order == kOrderAudit || m.order == kOrderMessageWaiting))
+    {
+        log(subscriber.number() + ": " + (m.order == kOrderMessageWaiting ? std::string("Message Waiting") : ampsOrderName(m.order, m.ordq, 0))
+            + " confirmed");
+        return;
+    }
+
     log(subscriber.number() + ": unsupported RECC message, ORDER " + std::to_string(m.order) + " ORDQ "
         + std::to_string(m.ordq) + " MSG_TYPE " + std::to_string(m.msgType));
 }
@@ -340,9 +353,16 @@ bool AmpsSystem::nextFocc(int channel, FoccMessage& message)
             setState(t, State::RejectSend);
             message = FoccMessage::order(si.dcc, s.min1, s.min2, kOrderRelease, 0, 0);
             return true;
+        case State::Order:
+            // osmocom TRANS_AUDIT / TRANS_MWI: sent, the transaction is done (the phone's
+            // confirmation on the RECC is only shown)
+            setState(t, State::OrderSend);
+            message = FoccMessage::order(si.dcc, s.min1, s.min2, t->order, t->ordq, t->msgType);
+            return true;
         case State::RegisterAckSend:
         case State::ReorderSend:
         case State::RejectSend:
+        case State::OrderSend:
             // sent: the next one
             destroy(t);
             continue;
@@ -693,12 +713,19 @@ void AmpsSystem::signallingTone(int channel, bool on)
     }
 }
 
-void AmpsSystem::receivedRvcOrder(int channel, uint8_t order, uint8_t)
+void AmpsSystem::receivedRvcOrder(int channel, uint8_t order, uint8_t ordq)
 {
     Transaction* t = valid(channel) ? transactionOn(channel) : nullptr;
 
-    if (t && t->state == State::Call && order == kOrderRelease) {
+    if (t && t->state == State::Call && order == kOrderRelease)
+    {
         phoneReleased(t);
+        return;
+    }
+    // the confirmation of an order of the tester (osmocom: shown only)
+    if (t && (order == kOrderAudit || order == kOrderChangePower || order == kOrderMessageWaiting)) {
+        log(t->subscriber.number() + ": " + (order == kOrderMessageWaiting ? std::string("Message Waiting") : ampsOrderName(order, ordq, 0))
+            + " confirmed");
     }
 }
 
@@ -729,6 +756,13 @@ bool AmpsSystem::nextFvc(int channel, uint64_t& word)
         t->fvcWords.erase(t->fvcWords.begin());
         return true;
     }
+    // the tester's orders, in the call or while it rings (a release goes first)
+    if (t && t->state != State::Release && t->state != State::ReleaseSend && !t->fvcOrders.empty())
+    {
+        word = t->fvcOrders.front();
+        t->fvcOrders.erase(t->fvcOrders.begin());
+        return true;
+    }
     if (t && t->state == State::MtAlertSend)
     {
         // sent: the phone's tone awaited with SAT and silence (osmocom ALERT_TO, and the round trip)
@@ -747,9 +781,19 @@ bool AmpsSystem::nextFvc(int channel, uint64_t& word)
         word = fvc::order(static_cast<uint8_t>(m_channels[channel].config.scc), kOrderRelease, 0, 0);
         return true;
     }
-    // nothing to send: back to the speech
-    if (valid(channel) && m_channels[channel].mode == AmpsMode::Frame) {
-        m_channels[channel].mode = (t && t->state == State::Call) ? AmpsMode::Audio : AmpsMode::Silence;
+    // nothing to send: back to the speech (after the tester's orders: to the mode before them, the
+    // ringing phone's included)
+    if (valid(channel) && m_channels[channel].mode == AmpsMode::Frame)
+    {
+        if (t && t->afterOrders != AmpsMode::Off)
+        {
+            m_channels[channel].mode = t->afterOrders;
+            t->afterOrders = AmpsMode::Off;
+        }
+        else
+        {
+            m_channels[channel].mode = (t && t->state == State::Call) ? AmpsMode::Audio : AmpsMode::Silence;
+        }
     }
     return false;
 }
@@ -799,6 +843,81 @@ bool AmpsSystem::releaseCall(const std::string& number)
         return true;
     }
     return false;
+}
+
+AmpsSystem::OrderResult AmpsSystem::order(const std::string& number, uint8_t order, uint8_t ordq, uint8_t msgType, bool callOnly)
+{
+    if (number.size() != 10 || number.find_first_not_of("0123456789") != std::string::npos) {
+        return OrderResult::Invalid;
+    }
+    const uint32_t min1 = ReccAssembler::min1Of(number.substr(3));
+    const uint16_t min2 = ReccAssembler::min2Of(number.substr(0, 3));
+    Transaction* t = transactionOf(min1, min2);
+    const std::string name = ampsOrderName(order, ordq, msgType);
+
+    if (!t)
+    {
+        if (callOnly) {
+            return OrderResult::NoCall;
+        }
+        int pc = -1;
+        for (size_t i = 0; i < m_channels.size() && pc < 0; i++)
+        {
+            if (m_channels[i].config.type != AmpsChannelType::Voice) {
+                pc = static_cast<int>(i);
+            }
+        }
+        if (pc < 0) {
+            return OrderResult::Busy;
+        }
+        AmpsSubscriber subscriber;
+        subscriber.min1 = min1;
+        subscriber.min2 = min2;
+        Transaction* o = create(subscriber, State::Order, pc);
+        o->order = order;
+        o->ordq = ordq;
+        o->msgType = msgType;
+        log(number + ": " + name + " on the control channel");
+        return OrderResult::Sent;
+    }
+    // on the voice channel: in the call, or ringing (osmocom also while the alert waits for its
+    // confirmation, MT_ALERT_CONFIRM; here not: the alert may go again then)
+    const bool inCall = t->state == State::Call;
+    const bool ringing = t->state == State::MtAnswerWait;
+    if (callOnly && !inCall) {
+        return OrderResult::NoCall;     // a call being set up or ringing has no conversation yet
+    }
+    if (!inCall && !ringing) {
+        return OrderResult::Busy;       // paging, assignment, registration, release: later
+    }
+    t->fvcOrders.push_back(fvc::order(static_cast<uint8_t>(m_channels[t->channel].config.scc), order, ordq, msgType));
+    if (m_channels[t->channel].mode != AmpsMode::Frame) {
+        t->afterOrders = m_channels[t->channel].mode;
+    }
+    m_channels[t->channel].mode = AmpsMode::Frame;
+    log(number + ": " + name + " on the voice channel");
+    return OrderResult::Sent;
+}
+
+AmpsSystem::OrderResult AmpsSystem::audit(const std::string& number)
+{
+    return order(number, kOrderAudit, 0, 0, false);
+}
+
+AmpsSystem::OrderResult AmpsSystem::messageWaiting(const std::string& number, int type, int count)
+{
+    if (type < 0 || type > 2 || count < 0 || count > 31) {
+        return OrderResult::Invalid;
+    }
+    return order(number, kOrderMessageWaiting, static_cast<uint8_t>(type), static_cast<uint8_t>(count), false);
+}
+
+AmpsSystem::OrderResult AmpsSystem::changePower(const std::string& number, int level)
+{
+    if (level < 0 || level > 7) {
+        return OrderResult::Invalid;
+    }
+    return order(number, kOrderChangePower, static_cast<uint8_t>(level), 0, true);
 }
 
 std::vector<AmpsSystem::TransactionInfo> AmpsSystem::transactions() const

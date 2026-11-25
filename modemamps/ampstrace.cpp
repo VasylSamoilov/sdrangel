@@ -172,6 +172,8 @@ std::string describeRecc(const ReccMessage& m)
 
     if (m.order == kOrderPage && m.ordq == 0 && m.msgType == 0) {
         text = m.t == 1 ? "Origination" + from + " to " + m.dialled : "Page Response" + from;
+    } else if (m.t == 0) {
+        text = "Order Confirmation: " + ampsOrderName(m.order, m.ordq, m.msgType) + from;     // T 0: the response to an order
     } else {
         text = ampsOrderName(m.order, m.ordq, m.msgType) + from;
     }

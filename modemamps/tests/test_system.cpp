@@ -327,6 +327,85 @@ static void testCallerId()
     CHECK(system.mode(kVc) == AmpsMode::Silence);
 }
 
+// The tester's orders: to an idle phone on the FOCC (sent once, its confirmation on the RECC shown),
+// in the call on the FVC (back to the speech after them), while it rings back to the ringing; what
+// is refused
+static void testOrders()
+{
+    Network n;
+    Mt mt;
+    FoccMessage m;
+    uint64_t w = 0;
+    std::vector<std::string> logs;
+    const std::string number = "2162177526";
+    const auto logged = [&logs](const std::string& text) {
+        for (const std::string& l : logs) {
+            if (l == text) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    n.system.setLogHandler([&logs](const std::string& t) { logs.push_back(t); });
+    mtHandlers(n, mt);
+
+    // idle: audit and message waiting on the FOCC
+    CHECK(n.system.audit(number) == AmpsSystem::OrderResult::Sent);
+    CHECK(n.system.nextFocc(kCc, m) && field(words::kExtendedAddressOrder, m.word2, "SCC") == 3
+        && field(words::kExtendedAddressOrder, m.word2, "ORDER") == kOrderAudit
+        && field(words::kAbbreviatedAddress, m.word1, "MIN1") == ReccAssembler::min1Of("2177526"));
+    CHECK(!n.system.nextFocc(kCc, m) && n.system.transactions().empty());
+    n.system.receivedRecc(kCc, phone(0, kOrderAudit, 0, ""));
+    CHECK(logged(number + ": Audit confirmed"));
+    CHECK(n.system.messageWaiting(number, 0, 3) == AmpsSystem::OrderResult::Sent);
+    CHECK(n.system.nextFocc(kCc, m) && field(words::kExtendedAddressOrder, m.word2, "ORDER") == kOrderMessageWaiting
+        && field(words::kExtendedAddressOrder, m.word2, "ORDQ") == 0 && field(words::kExtendedAddressOrder, m.word2, "LOCAL/MSG_TYPE") == 3);
+    CHECK(!n.system.nextFocc(kCc, m));
+    // change power is of a call only; values out of range
+    CHECK(n.system.changePower(number, 2) == AmpsSystem::OrderResult::NoCall);
+    CHECK(n.system.changePower(number, 8) == AmpsSystem::OrderResult::Invalid);
+    CHECK(n.system.messageWaiting(number, 3, 1) == AmpsSystem::OrderResult::Invalid);
+    CHECK(n.system.audit("216217752") == AmpsSystem::OrderResult::Invalid);
+
+    // a call to the phone: paged (busy), ringing (message waiting on the FVC, back to ringing)
+    CHECK(n.system.startCall(number));
+    CHECK(n.system.audit(number) == AmpsSystem::OrderResult::Busy);
+    n.system.nextFocc(kCc, m);
+    n.system.nextFocc(kCc, m);
+    n.system.receivedRecc(kCc, phone(0, kOrderPage, 0, ""));
+    n.system.nextFocc(kCc, m);
+    n.system.nextFocc(kCc, m);
+    n.system.satChanged(kVc, 0);
+    n.system.nextFvc(kVc, w);
+    n.system.nextFvc(kVc, w);
+    CHECK(n.system.changePower(number, 2) == AmpsSystem::OrderResult::NoCall);     // the alert waits for its tone
+    n.system.signallingTone(kVc, true);
+    CHECK(mt.alerting == 1 && n.system.mode(kVc) == AmpsMode::Audio);
+    CHECK(n.system.messageWaiting(number, 1, 2) == AmpsSystem::OrderResult::Sent);
+    CHECK(n.system.mode(kVc) == AmpsMode::Frame);
+    CHECK(n.system.nextFvc(kVc, w) && field(words::kFvcOrder, w, "ORDER") == kOrderMessageWaiting
+        && field(words::kFvcOrder, w, "ORDQ") == 1 && field(words::kFvcOrder, w, "LOCAL/MSG_TYPE") == 2);
+    CHECK(!n.system.nextFvc(kVc, w) && n.system.mode(kVc) == AmpsMode::Audio);
+
+    // answered: change power and audit on the FVC, the phone confirms on the RVC
+    n.system.signallingTone(kVc, false);
+    CHECK(mt.answered == 1 && n.system.transactions()[0].state == AmpsSystem::State::Call);
+    CHECK(n.system.changePower(number, 2) == AmpsSystem::OrderResult::Sent);
+    CHECK(n.system.audit(number) == AmpsSystem::OrderResult::Sent);
+    CHECK(n.system.nextFvc(kVc, w) && field(words::kFvcOrder, w, "ORDER") == kOrderChangePower && field(words::kFvcOrder, w, "ORDQ") == 2);
+    CHECK(n.system.nextFvc(kVc, w) && field(words::kFvcOrder, w, "ORDER") == kOrderAudit);
+    CHECK(!n.system.nextFvc(kVc, w) && n.system.mode(kVc) == AmpsMode::Audio);
+    n.system.receivedRvcOrder(kVc, kOrderChangePower, 2);
+    CHECK(logged(number + ": Change Power to Power Level 2 confirmed"));
+    CHECK(n.system.transactions().size() == 1 && n.system.transactions()[0].state == AmpsSystem::State::Call);
+
+    // a release goes before the orders
+    CHECK(n.system.audit(number) == AmpsSystem::OrderResult::Sent);
+    CHECK(n.system.releaseCall(number));
+    CHECK(n.system.nextFvc(kVc, w) && field(words::kFvcOrder, w, "ORDER") == kOrderRelease);
+}
+
 // No page response: paged again after 8 s, given up 4 s after that
 static void testNoPageResponse()
 {
@@ -395,6 +474,7 @@ int main()
     testNetworkRelease();
     testSatFade();
     testFlashAndHeldTone();
+    testOrders();
 
     if (g_failures == 0) {
         std::printf("all system tests passed\n");
