@@ -813,8 +813,14 @@ void CellularWorker::ampsAction(Network& n, const Cellular::MsgAction& msg, cons
         log(n.id, what + ": refused: AMPS has no short messages to keep");
         return;
     case Cellular::MsgAction::Move:
-        log(n.id, what + ": not done for AMPS yet (the handoff)");
+    {
+        // the handoff (value: the voice channel, 0 any free one)
+        const modemamps::AmpsSystem::OrderResult result = system.handoff(number, msg.getValue());
+        log(n.id, what + (result == modemamps::AmpsSystem::OrderResult::Sent ? ": started (handoff)"
+            : result == modemamps::AmpsSystem::OrderResult::NoCall ? ": refused: the phone is not in a conversation"
+            : ": refused: no such free voice channel of the network"));
         return;
+    }
     case Cellular::MsgAction::ConsoleDial:      // the console's: consoleAction()
     case Cellular::MsgAction::ConsoleAnswer:
     case Cellular::MsgAction::ConsoleHangUp:

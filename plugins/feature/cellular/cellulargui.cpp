@@ -1265,7 +1265,6 @@ QWidget *CellularGUI::buildTest()
     move->setToolTip("Moves the call of the phone to that voice channel (switching a call in progress, NMT Doc 450-1 4.4.1.4)");
     QWidget *moveRow = flowRow(page, {m_moveChannel, move});
     form->addRow("Voice channel", moveRow);
-    m_testNmtRows.append(moveRow);
 
     // AMPS: the audit order, whether the phone is there
     QPushButton *audit = new QPushButton("Audit", page);
@@ -1346,6 +1345,10 @@ void CellularGUI::showTestSystem()
         ? "The flash with info goes on the voice channel of the phone's call; the log shows its confirmation"
         : "The phone is paged and called without ringing, the message goes over the data link of the call; "
           "the log tells whether the phone took it");
+    m_testMove->setToolTip(amps
+        ? "Hands the call of the phone off to that voice channel (TIA/EIA-553-A handoff order); the call moves when the "
+          "phone's SAT is heard there"
+        : "Moves the call of the phone to that voice channel (switching a call in progress, NMT Doc 450-1 4.4.1.4)");
     m_testPhone->lineEdit()->setPlaceholderText(amps ? "2162177526" : "3726136");
     m_testPhone->setMinimumContentsLength(amps ? 10 : 7);
     m_testPhone->setToolTip(amps ? "Number of the phone: its 10 digits (MIN), or one the network heard"
@@ -2544,17 +2547,30 @@ void CellularGUI::showSummary()
 void CellularGUI::voiceChannels(QComboBox *box, int network) const
 {
     const int kept = box->currentData().toInt();
-    std::vector<modemnmt::NmtCarrierConfig> carriers;
     QString error;
     const CellularNetworkSettings *n = m_settings.network(network);
-    if (n) {
-        CellularNetworkSettings::parseCarriers(n->m_carriers, carriers, error);
-    }
     QList<int> channels;
-    for (const modemnmt::NmtCarrierConfig& c : carriers)
+    if (n && n->isAmps())
     {
-        if (c.type == modemnmt::ChannelType::Tc || c.type == modemnmt::ChannelType::AcTc || c.type == modemnmt::ChannelType::CcTc) {
-            channels.append(c.channel);
+        // AMPS: the voice channels (the handoff)
+        std::vector<modemamps::AmpsCarrierConfig> amps;
+        CellularNetworkSettings::parseAmpsCarriers(n->m_carriers, n->m_scc, amps, error);
+        for (const modemamps::AmpsCarrierConfig& c : amps)
+        {
+            if (c.type == modemamps::AmpsChannelType::Voice) {
+                channels.append(c.channel);
+            }
+        }
+    }
+    else if (n)
+    {
+        std::vector<modemnmt::NmtCarrierConfig> carriers;
+        CellularNetworkSettings::parseCarriers(n->m_carriers, carriers, error);
+        for (const modemnmt::NmtCarrierConfig& c : carriers)
+        {
+            if (c.type == modemnmt::ChannelType::Tc || c.type == modemnmt::ChannelType::AcTc || c.type == modemnmt::ChannelType::CcTc) {
+                channels.append(c.channel);
+            }
         }
     }
     QList<int> shown;
@@ -2609,10 +2625,13 @@ void CellularGUI::showTestPhone()
     const CellularSpeechSeen *seen = speechOf(number);
     const bool talking = seen && seen->live();
     m_testRelease->setEnabled(busy || talking);
-    for (QWidget *w : {static_cast<QWidget*>(m_powerLevel), static_cast<QWidget*>(m_testPower),
-                       static_cast<QWidget*>(m_moveChannel), static_cast<QWidget*>(m_testMove)}) {
-        w->setEnabled(talking);
-    }
+    // AMPS takes change power on the voice channel from the alert on (the system postpones it
+    // while the phone is paged)
+    const bool powerOk = talking || (isAmpsNetwork(network) && busy);
+    m_powerLevel->setEnabled(powerOk);
+    m_testPower->setEnabled(powerOk);
+    m_moveChannel->setEnabled(talking);
+    m_testMove->setEnabled(talking);
 
     // the list changes only when other phones were heard; the text being typed stays
     QStringList items;
