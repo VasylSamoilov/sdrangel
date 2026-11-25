@@ -284,8 +284,9 @@ static void testFlashCalledAddress()
     CHECK(!n.system.nextFvc(kVc, w));
     n.system.receivedRvcCalledAddress(kVc, "5551234");
     CHECK(digits.size() == 2 && digits.back() == "5551234");
-    n.system.receivedRvcCalledAddress(kVc, "5551234");          // a second one: not asked for
-    CHECK(digits.size() == 2 && logged("2162177526: a called address not asked for, ignored"));
+    n.system.receivedRvcCalledAddress(kVc, "5551234");          // a second one: not asked for, shown only
+    CHECK(digits.size() == 2 && logged("2162177526: called address 5551234 not asked for (no Send Called-Address in the 10 s "
+        "after a flash), not acted on"));
 
     // a flash without an answer: after 10 s and the round trip the window ends with a line; an
     // answer later is ignored
@@ -301,6 +302,7 @@ static void testFlashCalledAddress()
     CHECK(logged("2162177526: flash: no called address from the phone (no digits dialled, or the flash was cut short)"));
     n.system.receivedRvcCalledAddress(kVc, "9");
     CHECK(digits.size() == 3);                                  // the flash, not its late digits
+    CHECK(logged("2162177526: called address 9 not asked for (no Send Called-Address in the 10 s after a flash), not acted on"));
     CHECK(n.system.transactions().size() == 1 && n.clears == 0);
     // (while the phone rings its tone is on all the time and orders go: testOrders)
 }

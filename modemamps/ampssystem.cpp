@@ -981,9 +981,12 @@ void AmpsSystem::receivedRvcCalledAddress(int channel, const std::string& digits
     if (!t || t->state != State::Call) {
         return;
     }
+    // one not asked for, or after the window: shown with its digits (what real phones send is to
+    // be seen on the air), not taken as a flash's
     if (!t->calledAddressAsked || m_clock.now() > t->flashEnd + kCalledAddressWindow + m_config.roundTrip)
     {
-        log(t->subscriber.number() + ": a called address not asked for, ignored");
+        log(t->subscriber.number() + ": called address " + (digits.empty() ? std::string("without digits") : digits)
+            + " not asked for (no Send Called-Address in the 10 s after a flash), not acted on");
         return;
     }
     t->calledAddressAsked = false;
