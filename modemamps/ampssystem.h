@@ -94,6 +94,7 @@ public:
     static constexpr double kReleaseTimeout = 5.0;      // the phone confirming our release
     static constexpr double kFlashMin = 0.2;            // signalling tone: a flash
     static constexpr double kFlashMax = 0.8;            // longer: a release
+    static constexpr double kCalledAddressDelay = 1.0;  // after a flash, Send Called-Address (osmocom)
     static constexpr double kStReleaseTime = 3.0;       // a release of the phone if the tone lasts
     static constexpr int kPageTries = 2;
     static constexpr double kPageTimeout1 = 8.0;        // the page response, first page
@@ -162,6 +163,17 @@ public:
         m_answered = std::move(answered);
         m_failed = std::move(failed);
     }
+    // a flash of the phone in its call (digits empty), and the digits it sent when asked after it
+    using FlashHandler = std::function<void(const AmpsSubscriber& subscriber, const std::string& digits)>;
+    void setFlashHandler(FlashHandler handler) { m_flashHandler = std::move(handler); }
+    // the speech of a call as it is (8 kHz), from the phone and to it, for listening in and its
+    // touch tones (as NMT's audio taps); the handlers of the far end are not changed
+    using AudioTap = std::function<void(const AmpsSubscriber& subscriber, const float* samples, int count)>;
+    void setAudioTaps(AudioTap fromMobile, AudioTap toMobile)
+    {
+        m_tapFromMobile = std::move(fromMobile);
+        m_tapToMobile = std::move(toMobile);
+    }
     // A call to the phone with this number (10 digits): paged on the control channel (osmocom's
     // call_down_setup). False with the cause if it cannot be: the phone in a transaction (busy), no
     // voice channel free, no control channel.
@@ -171,6 +183,8 @@ public:
     void receivedRecc(int channel, const ReccMessage& message);
     // an order confirmation of the phone on the RVC (T 1)
     void receivedRvcOrder(int channel, uint8_t order, uint8_t ordq);
+    // the called address the phone sent on the RVC (T 0), the answer to Send Called-Address
+    void receivedRvcCalledAddress(int channel, const std::string& digits);
     // the SAT of the phone: its colour code, -1 lost
     void satChanged(int channel, int scc);
     void signallingTone(int channel, bool on);
@@ -238,6 +252,7 @@ private:
     void callFailed(Transaction* transaction, modemcellular::Cause cause);
     void phoneReleased(Transaction* transaction);
     // message: the words of a longer one (flash with info), else the order word is made
+    void askCalledAddress(Transaction* transaction);
     OrderResult order(const std::string& number, uint8_t order, uint8_t ordq, uint8_t msgType, bool callOnly,
         const std::vector<uint64_t>& message = std::vector<uint64_t>());
     void timeout(Transaction* transaction);
@@ -260,6 +275,9 @@ private:
     CallEventHandler m_alerting;
     CallEventHandler m_answered;
     CallFailedHandler m_failed;
+    FlashHandler m_flashHandler;
+    AudioTap m_tapFromMobile;
+    AudioTap m_tapToMobile;
 };
 
 } // namespace modemamps

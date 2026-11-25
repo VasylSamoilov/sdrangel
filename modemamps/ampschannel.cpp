@@ -132,6 +132,28 @@ bool AmpsChannel::burst(const ReverseBurst& b)
     if (b.valid()) {
         trace(false, describeRvc(b.word()));
     }
+    // the called address (T 0), the answer to Send Called-Address: 8 digits a word, F 1 the first,
+    // NAWC the words still to come
+    if (b.valid() && wordField(words::kRvcDigits, b.word(), "T") == 0)
+    {
+        const uint64_t w = b.word();
+        if (wordField(words::kRvcDigits, w, "F") == 1) {
+            m_calledAddress.clear();
+        }
+        for (int i = 1; i <= 8; i++)
+        {
+            const char d = codeDigit(static_cast<int>(wordField(words::kRvcDigits, w, "DIGIT " + std::to_string(i))));
+            if (d != 0) {
+                m_calledAddress += d;
+            }
+        }
+        if (wordField(words::kRvcDigits, w, "NAWC") != 0) {
+            return true;                    // the next word follows
+        }
+        m_system.receivedRvcCalledAddress(m_index, m_calledAddress);
+        m_calledAddress.clear();
+        return false;
+    }
     if (b.valid() && wordField(words::kRvcOrderConfirmation, b.word(), "T") == 1)
     {
         m_system.receivedRvcOrder(m_index, static_cast<uint8_t>(wordField(words::kRvcOrderConfirmation, b.word(), "ORDER")),

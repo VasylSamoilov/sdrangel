@@ -92,7 +92,8 @@ enum class TimerKind
 struct AmpsSystem::Transaction
 {
     Transaction(modemcellular::TimerService& timers, AmpsSystem& system) :
-        timer(timers, [this, &system]() { system.timeout(this); })
+        timer(timers, [this, &system]() { system.timeout(this); }),
+        flashTimer(timers, [this, &system]() { system.askCalledAddress(this); })
     {
     }
 
@@ -113,6 +114,7 @@ struct AmpsSystem::Transaction
     std::vector<uint64_t> fvcWords;     // the words of an FVC message still to go (alert with info)
     std::vector<uint64_t> fvcOrders;    // orders of the tester to go on the FVC (audit, power, message waiting)
     AmpsMode afterOrders = AmpsMode::Off;   // the mode of the voice channel before them, Off none
+    modemcellular::Timer flashTimer;    // a flash: the called address asked for after it (osmocom 1 s)
 };
 
 AmpsSystem::AmpsSystem(const modemcellular::Clock& clock, const AmpsSystemConfig& config) :
@@ -690,8 +692,18 @@ void AmpsSystem::signallingTone(int channel, bool on)
         }
         if (duration > kFlashMax) {
             phoneReleased(t);
-        } else if (duration >= kFlashMin) {
+        }
+        else if (duration >= kFlashMin)
+        {
+            // osmocom: the flash goes to the network; a second later the called address is asked
+            // for (Send Called-Address, ORDER 8): the digits the user dialled before the flash
             log(t->subscriber.number() + ": flash");
+            if (m_flashHandler) {
+                m_flashHandler(t->subscriber, std::string());
+            }
+            if (t->state == State::Call) {
+                t->flashTimer.start(kCalledAddressDelay);
+            }
         }
         return;
     }
@@ -802,8 +814,14 @@ void AmpsSystem::audioFromMobile(int channel, const float* samples, int count)
 {
     Transaction* t = valid(channel) ? transactionOn(channel) : nullptr;
 
-    if (t && t->state == State::Call && m_audioFromMobile) {
-        m_audioFromMobile(t->subscriber, samples, count);
+    if (t && t->state == State::Call)
+    {
+        if (m_tapFromMobile) {
+            m_tapFromMobile(t->subscriber, samples, count);
+        }
+        if (m_audioFromMobile) {
+            m_audioFromMobile(t->subscriber, samples, count);
+        }
     }
 }
 
@@ -812,8 +830,12 @@ void AmpsSystem::audioToMobile(int channel, float* samples, int count)
     Transaction* t = valid(channel) ? transactionOn(channel) : nullptr;
 
     std::fill(samples, samples + count, 0.0f);
-    if (t && t->state == State::Call && m_channels[channel].mode == AmpsMode::Audio && m_audioToMobile) {
+    if (t && t->state == State::Call && m_channels[channel].mode == AmpsMode::Audio && m_audioToMobile)
+    {
         m_audioToMobile(t->subscriber, samples, count);
+        if (m_tapToMobile) {
+            m_tapToMobile(t->subscriber, samples, count);
+        }
     }
 }
 
@@ -902,6 +924,33 @@ AmpsSystem::OrderResult AmpsSystem::order(const std::string& number, uint8_t ord
     m_channels[t->channel].mode = AmpsMode::Frame;
     log(number + ": " + name + " on the voice channel");
     return OrderResult::Sent;
+}
+
+// After a flash (osmocom flash_timer_callback): the Send Called-Address order; the phone answers
+// with the digits on the RVC if the user dialled any, within 10 s of the flash (553-A 2.6.4.4)
+void AmpsSystem::askCalledAddress(Transaction* t)
+{
+    if (t->state != State::Call || !valid(t->channel)) {
+        return;
+    }
+    t->fvcOrders.push_back(fvc::order(static_cast<uint8_t>(m_channels[t->channel].config.scc), kOrderSendCalledAddress, 0, 0));
+    if (m_channels[t->channel].mode != AmpsMode::Frame) {
+        t->afterOrders = m_channels[t->channel].mode;
+    }
+    m_channels[t->channel].mode = AmpsMode::Frame;
+}
+
+void AmpsSystem::receivedRvcCalledAddress(int channel, const std::string& digits)
+{
+    Transaction* t = valid(channel) ? transactionOn(channel) : nullptr;
+
+    if (!t || t->state != State::Call) {
+        return;
+    }
+    log(t->subscriber.number() + ": flash with " + (digits.empty() ? std::string("no digits") : digits));
+    if (m_flashHandler && !digits.empty()) {
+        m_flashHandler(t->subscriber, digits);
+    }
 }
 
 AmpsSystem::OrderResult AmpsSystem::audit(const std::string& number)

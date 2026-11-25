@@ -248,6 +248,25 @@ static void testFlashAndHeldTone()
     CHECK(n.clears == 1 && n.system.mode(kVc) == AmpsMode::Off);
 }
 
+// The audio taps see the speech of a call both ways (listening in, touch tones), not before it
+static void testAudioTaps()
+{
+    Network n;
+    int from = 0;
+    int to = 0;
+    std::vector<float> s(160, 0.1f);
+
+    n.system.setAudioHandlers([](const AmpsSubscriber&, const float*, int) {}, [](const AmpsSubscriber&, float*, int) {});
+    n.system.setAudioTaps([&from](const AmpsSubscriber& p, const float*, int c) { from += p.number() == "2162177526" ? c : 0; },
+        [&to](const AmpsSubscriber&, const float*, int c) { to += c; });
+    n.system.audioFromMobile(kVc, s.data(), 160);
+    CHECK(from == 0);
+    connect(n);
+    n.system.audioFromMobile(kVc, s.data(), 160);
+    n.system.audioToMobile(kVc, s.data(), 160);
+    CHECK(from == 160 && to == 160);
+}
+
 struct Mt
 {
     int alerting = 0;
@@ -486,6 +505,7 @@ int main()
     testSatFade();
     testFlashAndHeldTone();
     testOrders();
+    testAudioTaps();
 
     if (g_failures == 0) {
         std::printf("all system tests passed\n");

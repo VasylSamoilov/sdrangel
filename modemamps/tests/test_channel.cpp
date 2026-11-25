@@ -44,6 +44,8 @@ struct Bench
     AmpsChannel vc;
     FoccReader focc;
     PhoneTx phone;
+    PhoneTx vcPhone;                    // the phone's messages on the RVC
+    bool vcData = false;
     SatDetector phoneSat{kRate};        // the phone hears the SAT of the voice channel
     SatTone phoneSatTone{kRate, 0};     // and transponds it
     bool onVoice = false;
@@ -94,7 +96,12 @@ struct Bench
             phone.render(in.data(), kBlock);
             cc.receive(in.data(), kBlock);
             std::fill(in.begin(), in.end(), 0.0f);
-            if (onVoice)
+            if (onVoice && (vcPhone.sending() || vcData))
+            {
+                // a message on the RVC in place of the SAT (blank and burst)
+                vcData = vcPhone.render(in.data(), kBlock) > 0;
+            }
+            else if (onVoice)
             {
                 phoneSatTone.add(in.data(), kBlock);
                 for (int i = 0; tone && i < kBlock; i++) {
@@ -173,6 +180,31 @@ static void testCall()
     CHECK(s.call == 1 && s.live && s.number == phone.number());
     CHECK(s.txRecent.speech > 0 && s.txRecent.levelDb() > -3.0 && s.txRecent.levelDb() < 3.0);
     CHECK(s.rxRecent.speech == 0 && s.rxRecent.pause > 0);
+
+    // a flash (its tone of 0.4 s): the network is told, a second later it asks for the called
+    // address (Send Called-Address on the FVC); the phone sends the digits dialled on the RVC
+    std::vector<std::string> flashes;
+    std::vector<std::string> sent;
+    b.system.setFlashHandler([&flashes](const AmpsSubscriber&, const std::string& d) { flashes.push_back(d); });
+    b.vc.setTraceTap([&sent](bool toPhone, const std::string& text) {
+        if (toPhone) {
+            sent.push_back(text);
+        }
+    });
+    b.tone = true;
+    b.run(0.4);
+    b.tone = false;
+    b.run(2.0);                         // the tone's end is detected some 0.3 s late, then 1 s, then the order
+    CHECK(flashes.size() == 1 && !flashes.empty() && flashes[0].empty());
+    CHECK(std::find(sent.begin(), sent.end(), "Send Called-address") != sent.end());
+    CHECK(b.system.mode(1) == AmpsMode::Audio);
+    const uint64_t d1 = encodeWord(words::kRvcDigits, {{"F", 1}, {"NAWC", 1}, {"T", 0}, {"DIGIT 1", 5}, {"DIGIT 2", 5},
+        {"DIGIT 3", 5}, {"DIGIT 4", 1}, {"DIGIT 5", 2}, {"DIGIT 6", 3}, {"DIGIT 7", 4}, {"DIGIT 8", 5}});
+    const uint64_t d2 = encodeWord(words::kRvcDigits, {{"F", 0}, {"NAWC", 0}, {"T", 0}, {"DIGIT 1", 6}});
+    b.vcPhone.send(rvcMessage({d1, d2}));
+    b.run(0.5);
+    CHECK(flashes.size() == 2 && flashes.size() == 2 && flashes[1] == "555123456");
+    CHECK(b.clears == 0 && b.system.mode(1) == AmpsMode::Audio);
 
     // its tone of 1.7 s releases the call, the voice channel goes off
     b.tone = true;

@@ -139,11 +139,14 @@ public:
         });
     }
     void send(const std::vector<uint8_t>& bits) { m_bits.insert(m_bits.end(), bits.begin(), bits.end()); }
-    void render(float* s, int n)
+    // the samples it sent of this block (the rest is silence)
+    int render(float* s, int n)
     {
         const int done = m_mod.render(s, n, false);
         std::fill(s + done, s + n, 0.0f);
+        return done;
     }
+    bool sending() const { return !m_bits.empty(); }
 
 private:
     ManchesterModulator m_mod;

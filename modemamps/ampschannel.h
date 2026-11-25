@@ -91,6 +91,7 @@ private:
     uint64_t m_received = 0;            // samples
     uint64_t m_toneSince = 0;
     int m_tracedSat = -1;               // the SAT last shown, -1 none or lost
+    std::string m_calledAddress;        // the RVC's called address being received
     AmpsMode m_rxMode;
     AmpsMode m_txMode;
     modemcellular::BiquadHighpass m_dcFilter;
