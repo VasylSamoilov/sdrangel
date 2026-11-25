@@ -374,34 +374,10 @@ void CellularWorker::setHandlers(Network& n)
     // touch tones the phone sends in a call (keys pressed, or a code the phone sends by itself)
     // listening in: both directions of the listened call
     system.setAudioTapToMobile([this, id](const modemnmt::NmtSubscriber& subscriber, const float *samples, int count) {
-        if (m_listener && id == m_listenNetwork && numberText(subscriber) == m_listenNumber) {
-            m_listener->toPhone(samples, count);
-        }
+        speechToPhone(id, numberText(subscriber), samples, count);
     });
     system.setAudioTap([this, id](const modemnmt::NmtSubscriber& subscriber, const float *samples, int count) {
-        if (m_listener && id == m_listenNetwork && numberText(subscriber) == m_listenNumber) {
-            m_listener->fromPhone(samples, count);
-        }
-        ToneListener& t = m_tones[numberText(subscriber).toStdString()];
-        if (!t.detector) {
-            // the call audio of the tap is at the call rate (8 kHz, RxAudioChain), not the channel's
-            t.detector = std::make_unique<DVDTMF::Detector>(modemcellular::kAudioSampleRate);
-        }
-        std::vector<DVDTMF::Detector::Key> keys;
-        t.detector->process(samples, count, keys);
-        for (const DVDTMF::Detector::Key& k : keys)
-        {
-            t.keys += k.m_key;
-            t.network = id;
-            t.lastMs = QDateTime::currentMSecsSinceEpoch();
-            // the console shows the touch tones of the phone it talks to at once
-            Network *busy = consoleBusy();
-            if (busy && busy->id == id && busy->console->peer() == numberText(subscriber).toStdString())
-            {
-                m_consoleKeys += QChar(k.m_key);
-                m_consoleState = -1;
-            }
-        }
+        speechFromPhone(id, numberText(subscriber), samples, count);
     });
     // a phone's own SMS centre (learned or picked in its record) reaches the centre too
     system.setSmsCentreOf([this, &n](const modemnmt::NmtSubscriber& subscriber) {
@@ -498,6 +474,42 @@ void CellularWorker::setHandlers(Network& n)
     n.caller->setEventHandler([this, id](const std::string& text) {
         log(id, QString::fromStdString(text), Cellular::MsgReportLog::Call);
     });
+}
+
+// The speech of a phone's call (8 kHz) of either system: the listener of that call hears it; the
+// touch tones the phone sends (keys pressed, or a code the phone sends by itself) are collected
+// for the log, and the console shows those of the phone it talks to at once
+void CellularWorker::speechFromPhone(int id, const QString& number, const float *samples, int count)
+{
+    if (m_listener && id == m_listenNetwork && number == m_listenNumber) {
+        m_listener->fromPhone(samples, count);
+    }
+    ToneListener& t = m_tones[number.toStdString()];
+    if (!t.detector) {
+        // the call audio of the tap is at the call rate (8 kHz), not the channel's
+        t.detector = std::make_unique<DVDTMF::Detector>(modemcellular::kAudioSampleRate);
+    }
+    std::vector<DVDTMF::Detector::Key> keys;
+    t.detector->process(samples, count, keys);
+    for (const DVDTMF::Detector::Key& k : keys)
+    {
+        t.keys += k.m_key;
+        t.network = id;
+        t.lastMs = QDateTime::currentMSecsSinceEpoch();
+        Network *busy = consoleBusy();
+        if (busy && busy->id == id && busy->console->peer() == number.toStdString())
+        {
+            m_consoleKeys += QChar(k.m_key);
+            m_consoleState = -1;
+        }
+    }
+}
+
+void CellularWorker::speechToPhone(int id, const QString& number, const float *samples, int count)
+{
+    if (m_listener && id == m_listenNetwork && number == m_listenNumber) {
+        m_listener->toPhone(samples, count);
+    }
 }
 
 void CellularWorker::action(const Cellular::MsgAction& msg)
@@ -2014,6 +2026,20 @@ void CellularWorker::tryBindAmps(Network& n, const modemcellular::WireSpan& rxSp
     const int id = n.id;
     system.setLogHandler([this, id](const std::string& text) {
         log(id, QString::fromStdString(text), Cellular::MsgReportLog::Event);
+    });
+    // listening in and the touch tones, as NMT's
+    system.setAudioTaps([this, id](const modemamps::AmpsSubscriber& s, const float *samples, int count) {
+            speechFromPhone(id, QString::fromStdString(s.number()), samples, count);
+        },
+        [this, id](const modemamps::AmpsSubscriber& s, const float *samples, int count) {
+            speechToPhone(id, QString::fromStdString(s.number()), samples, count);
+        });
+    // the digits the user dialled with a flash go to the log as touch tones do (osmocom: logged)
+    system.setFlashHandler([this, id](const modemamps::AmpsSubscriber& s, const std::string& digits) {
+        if (!digits.empty()) {
+            log(id, QString("flash from %1 with the digits %2").arg(QString::fromStdString(s.number())).arg(QString::fromStdString(digits)),
+                Cellular::MsgReportLog::Tone);
+        }
     });
     n.phones.clear();
     n.boundRx = rxSpan;

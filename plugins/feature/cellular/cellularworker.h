@@ -266,6 +266,8 @@ private:
         const std::vector<uint8_t>& codes);
     void sendPostponed(Network& network);
     void ampsAction(Network& n, const Cellular::MsgAction& msg, const QString& what);
+    void speechFromPhone(int id, const QString& number, const float *samples, int count);
+    void speechToPhone(int id, const QString& number, const float *samples, int count);
     modemamps::AmpsSystem::OrderResult ampsOrder(Network& n, const Network::PendingAmpsOrder& order);
     void sendPostponedAmps(Network& network);
     // the frames of a carrier into the event log of its network
