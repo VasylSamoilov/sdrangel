@@ -93,6 +93,7 @@ enum Order : uint8_t
     kOrderParameterUpdate = 0x0f,   // ORDQ 0; 1 serial number request/response
     kOrderAlertWithInfo = 0x11,
     kOrderFlashWithInfo = 0x12,
+    kOrderDisableDtmf = 0x16,       // 10110; 10111 next to it is Message Encryption Mode
     kOrderRegistrationAuth = 0x18,
     kOrderLocalControl = 0x1e,
 };

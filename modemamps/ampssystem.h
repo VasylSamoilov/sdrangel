@@ -211,6 +211,9 @@ public:
     // a text to the display of the phone that rings or talks (flash with info: the caller of a
     // waiting call, a second caller text, a notice), 1..33 ASCII characters
     OrderResult flashWithInfo(const std::string& number, const std::string& text);
+    // the phone in its conversation mutes its touch tones until it has sent the called address
+    // for the next Send Called-Address (553-A 2.6.4.4; an order of authentication)
+    OrderResult disableDtmf(const std::string& number);
     // fires the timers that are due
     void run() { m_timers.run(); }
 
@@ -262,7 +265,8 @@ private:
     {
         Anywhere,       // also an idle phone on the FOCC: audit, message waiting
         VoiceChannel,   // on the voice channel from the alert on: change power
-        Ringing         // when it rings and in the conversation: flash with info
+        Ringing,        // when it rings and in the conversation: flash with info
+        Conversation    // in the conversation only: disable DTMF
     };
     // message: the words of a longer one (flash with info), else the order word is made
     OrderResult order(const std::string& number, uint8_t order, uint8_t ordq, uint8_t msgType, OrderWhere where,

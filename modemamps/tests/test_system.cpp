@@ -476,6 +476,7 @@ static void testOrders()
         flash.push_back(w);
     }
     CHECK(flash == fvc::flashWithInfo(0, "Hi") && n.system.mode(kVc) == AmpsMode::Audio);
+    CHECK(n.system.disableDtmf(number) == AmpsSystem::OrderResult::NoCall);       // ringing: not taken (2.6.4.4 only)
     CHECK(n.system.messageWaiting(number, 1, 2) == AmpsSystem::OrderResult::Sent);
     CHECK(n.system.mode(kVc) == AmpsMode::Frame);
     CHECK(n.system.nextFvc(kVc, w) && field(words::kFvcOrder, w, "ORDER") == kOrderMessageWaiting
@@ -492,6 +493,12 @@ static void testOrders()
     CHECK(!n.system.nextFvc(kVc, w) && n.system.mode(kVc) == AmpsMode::Audio);
     n.system.receivedRvcOrder(kVc, kOrderChangePower, 2);
     CHECK(logged(number + ": Change Power to Power Level 2 confirmed"));
+    // disable DTMF in the conversation (ORDER 22, not 23: Message Encryption Mode)
+    CHECK(n.system.disableDtmf(number) == AmpsSystem::OrderResult::Sent);
+    CHECK(n.system.nextFvc(kVc, w) && field(words::kFvcOrder, w, "ORDER") == 22 && field(words::kFvcOrder, w, "ORDQ") == 0);
+    CHECK(!n.system.nextFvc(kVc, w) && n.system.mode(kVc) == AmpsMode::Audio);
+    n.system.receivedRvcOrder(kVc, kOrderDisableDtmf, 0);
+    CHECK(logged(number + ": Disable DTMF confirmed"));
     // a text to the display in the call: the words of the flash with info, back to the speech
     CHECK(n.system.flashWithInfo(number, "Call waiting") == AmpsSystem::OrderResult::Sent);
     std::vector<uint64_t> sent;

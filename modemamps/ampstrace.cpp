@@ -139,6 +139,8 @@ std::string ampsOrderName(uint8_t order, uint8_t ordq, uint8_t msgType)
         return "Alert With Info";
     case kOrderFlashWithInfo:
         return "Flash With Info";
+    case kOrderDisableDtmf:
+        return "Disable DTMF";
     case kOrderLocalControl:
         return format("Local Control %u", msgType);
     default:

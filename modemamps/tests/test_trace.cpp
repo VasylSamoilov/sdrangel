@@ -56,6 +56,8 @@ static void testOrderNames()
     CHECK_TEXT(ampsOrderName(kOrderRegistration, 3, 1), "Autonomous Registration - Power Down");
     CHECK_TEXT(ampsOrderName(kOrderMessageWaiting, 0, 2), "Voice Message Waiting (2)");
     CHECK_TEXT(ampsOrderName(0x1c, 2, 1), "ORDER 28 ORDQ 2 MSG_TYPE 1");
+    CHECK_TEXT(ampsOrderName(kOrderDisableDtmf, 0, 0), "Disable DTMF");
+    CHECK_TEXT(ampsOrderName(0x17, 0, 0), "ORDER 23 ORDQ 0 MSG_TYPE 0");     // Message Encryption Mode: not ours
 }
 
 static void testFocc()

@@ -744,7 +744,8 @@ void AmpsSystem::receivedRvcOrder(int channel, uint8_t order, uint8_t ordq)
         return;
     }
     // the confirmation of an order of the tester (osmocom: shown only)
-    if (t && (order == kOrderAudit || order == kOrderChangePower || order == kOrderMessageWaiting || order == kOrderFlashWithInfo)) {
+    if (t && (order == kOrderAudit || order == kOrderChangePower || order == kOrderMessageWaiting || order == kOrderFlashWithInfo
+        || order == kOrderDisableDtmf)) {
         log(t->subscriber.number() + ": " + (order == kOrderMessageWaiting ? std::string("Message Waiting") : ampsOrderName(order, ordq, 0))
             + " confirmed");
     }
@@ -921,6 +922,9 @@ AmpsSystem::OrderResult AmpsSystem::order(const std::string& number, uint8_t ord
     if (alerting && where == OrderWhere::Ringing) {
         return OrderResult::Busy;       // the phone ignores it before it rings: when it rings
     }
+    if (!inCall && where == OrderWhere::Conversation) {
+        return OrderResult::NoCall;     // the phone ignores it before the conversation
+    }
     if (!inCall && !ringing && !alerting) {
         return OrderResult::Busy;       // paging, assignment, registration, release: later
     }
@@ -997,6 +1001,11 @@ void AmpsSystem::receivedRvcCalledAddress(int channel, const std::string& digits
     if (m_flashHandler && !digits.empty()) {
         m_flashHandler(t->subscriber, digits);
     }
+}
+
+AmpsSystem::OrderResult AmpsSystem::disableDtmf(const std::string& number)
+{
+    return order(number, kOrderDisableDtmf, 0, 0, OrderWhere::Conversation);
 }
 
 AmpsSystem::OrderResult AmpsSystem::audit(const std::string& number)
