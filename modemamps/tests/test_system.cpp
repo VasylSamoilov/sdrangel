@@ -363,6 +363,57 @@ static void testHandoff()
     CHECK(n.clears == 1);
 }
 
+// The combined channel (CC/PC/VC): the last choice of a voice channel; for a call it stops being the
+// control channel (designated with its own number), the network cannot page meanwhile, after the
+// call it is the control channel again
+static void testCombined()
+{
+    modemcellular::SampleClock clock(48000.0);
+    AmpsSystemConfig c;
+    c.si.sid = 54;
+    c.channels = {{353, AmpsChannelType::ControlPagingVoice, 0}};
+    AmpsSystem system(clock, c);
+    FoccMessage m;
+    int clears = 0;
+    const auto wait = [&clock, &system](double seconds) {
+        for (int64_t s = 0; s < static_cast<int64_t>(seconds * 48000.0); s += 480)
+        {
+            clock.advance(480);
+            system.run();
+        }
+    };
+
+    system.setCallHandler([](const AmpsSubscriber&, const std::string&) { return true; });
+    system.setClearHandler([&clears](const AmpsSubscriber&) { clears++; });
+    CHECK(system.mode(0) == AmpsMode::Control);
+    system.receivedRecc(0, phone(1, kOrderPage, 0, "555"));
+    CHECK(system.nextFocc(0, m) && field(words::kExtendedAddressChannel, m.word2, "CHAN") == 353);
+    CHECK(system.mode(0) == AmpsMode::Control);             // the designation still on the FOCC
+    CHECK(!system.nextFocc(0, m) && system.mode(0) == AmpsMode::Silence);
+    system.satChanged(0, 0);
+    CHECK(system.mode(0) == AmpsMode::Audio && system.transactions()[0].state == AmpsSystem::State::Call);
+    // no control channel meanwhile: no paging, an idle phone's order waits
+    modemcellular::Cause cause = modemcellular::Cause::Normal;
+    CHECK(!system.startCall("2162170000", &cause) && cause == modemcellular::Cause::NoChannel);
+    CHECK(system.audit("2162170000") == AmpsSystem::OrderResult::Busy);
+    // the phone's release: the control channel again
+    system.signallingTone(0, true);
+    wait(1.7);
+    system.signallingTone(0, false);
+    CHECK(clears == 1 && system.mode(0) == AmpsMode::Control && system.transactions().empty());
+    CHECK(system.startCall("2162170000"));
+
+    // with a voice channel free, the combined channel stays the control channel
+    AmpsSystemConfig c2 = c;
+    c2.channels.push_back({356, AmpsChannelType::Voice, 0});
+    AmpsSystem both(clock, c2);
+    both.setCallHandler([](const AmpsSubscriber&, const std::string&) { return true; });
+    both.receivedRecc(0, phone(1, kOrderPage, 0, "555"));
+    CHECK(both.nextFocc(0, m) && field(words::kExtendedAddressChannel, m.word2, "CHAN") == 356);
+    both.nextFocc(0, m);
+    CHECK(both.mode(0) == AmpsMode::Control && both.mode(1) == AmpsMode::Silence);
+}
+
 // The audio taps see the speech of a call both ways (listening in, touch tones), not before it
 static void testAudioTaps()
 {
@@ -646,6 +697,7 @@ int main()
     testAudioTaps();
     testFlashCalledAddress();
     testHandoff();
+    testCombined();
 
     if (g_failures == 0) {
         std::printf("all system tests passed\n");

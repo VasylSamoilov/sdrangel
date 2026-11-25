@@ -179,7 +179,7 @@ public:
     }
     // A call to the phone with this number (10 digits): paged on the control channel (osmocom's
     // call_down_setup). False with the cause if it cannot be: the phone in a transaction (busy), no
-    // voice channel free, no control channel.
+    // voice channel free or no control channel to page on (the combined one in a call): no channel.
     bool startCall(const std::string& number, modemcellular::Cause* cause = nullptr, const std::string& callerId = std::string());
 
     // the events of the channels (index into config().channels)
@@ -261,6 +261,8 @@ private:
     Transaction* transactionOf(uint32_t min1, uint16_t min2);
     Transaction* transactionOn(int channel);
     int freeVoiceChannel() const;
+    int pagingChannel() const;
+    bool voiceRole(int channel) const;
     void reorder(const AmpsSubscriber& subscriber, int channel);
     void assignVoiceChannel(Transaction* transaction);
     void release(Transaction* transaction, bool tellNetwork);

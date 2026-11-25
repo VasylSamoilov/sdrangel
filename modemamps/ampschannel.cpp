@@ -109,16 +109,13 @@ AmpsChannel::AmpsChannel(AmpsSystem& system, int index, double sampleRate) :
     m_rxSpeech.setSink([this](float* s, int n) { m_system.audioFromMobile(m_index, s, n); });
     m_txSpeech.setPull([this](float* s, int n) { m_system.audioToMobile(m_index, s, n); });
 
-    if (m_control) {
-        m_modulator.setBitSource([this]() { return m_focc.nextBit(); });
-    } else {
-        m_modulator.setBitSource([this]() { return m_fvc.nextBit(); });
-    }
+    // the FOCC in the control mode, else the FVC (a combined channel CC/PC/VC is either, by mode)
+    m_modulator.setBitSource([this]() { return m_txMode == AmpsMode::Control ? m_focc.nextBit() : m_fvc.nextBit(); });
 }
 
 bool AmpsChannel::burst(const ReverseBurst& b)
 {
-    if (m_control)
+    if (m_rxMode == AmpsMode::Control)
     {
         if (!b.valid())
         {
@@ -221,6 +218,7 @@ void AmpsChannel::receive(const float* samples, int length)
     const AmpsMode mode = m_system.mode(m_index);
     if (mode != m_rxMode)
     {
+        m_reverse.setChannel(mode == AmpsMode::Control ? ReverseReceiver::ChannelRecc : ReverseReceiver::ChannelRvc);
         m_reverse.reset();
         m_sat.reset();
         m_rxSpeech.reset();
@@ -275,6 +273,15 @@ void AmpsChannel::render(float* samples, int length)
             }
             if (mode == AmpsMode::Off && !m_control) {
                 trace(true, "off");
+            }
+            // the combined channel (CC/PC/VC) between its two roles
+            if (m_txMode == AmpsMode::Control && mode != AmpsMode::Control)
+            {
+                trace(true, "the voice channel of a call, SAT " + std::to_string(static_cast<int>(satFrequency(m_scc))) + " Hz");
+                m_tracedSat = -1;
+            }
+            if (m_txMode != AmpsMode::Control && m_txMode != AmpsMode::Off && mode == AmpsMode::Control) {
+                trace(true, "the control channel again");
             }
             m_txMode = mode;
         }

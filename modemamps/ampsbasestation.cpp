@@ -74,9 +74,10 @@ AmpsBaseStation::AmpsBaseStation(const AmpsNetworkConfig& config) :
             s.planned = s.planned && !i.error;
         }
         if (c.type == AmpsChannelType::ControlPagingVoice) {
-            // osmocom does it; here the combined channel is not done yet
-            s.issues.push_back({true, "the combined control and voice channel (CC/PC/VC) is not supported yet"});
-            s.planned = false;
+            // osmocom: "a hack, but the only way to use control channel and voice channel on one
+            // transceiver. Some phones may reject this, but all my phones don't."
+            s.issues.push_back({false, "the combined channel (CC/PC/VC) stops being the control channel during a call; "
+                "some phones may reject it (osmocom)"});
         }
         if (c.type != AmpsChannelType::Voice) {
             paging++;

@@ -271,10 +271,100 @@ static void testHandoff()
     CHECK(b.system.mode(1) == AmpsMode::Off && b.system.mode(2) == AmpsMode::Audio && b.clears == 0);
 }
 
+// The combined channel (CC/PC/VC) through one AmpsChannel: the overhead train, the origination on
+// the RECC, its own number designated, then the voice channel of the call (the phone's SAT on the
+// same channel), the release tone, and the control channel again
+static void testCombined()
+{
+    modemcellular::SampleClock clock{kRate};
+    AmpsSystemConfig c;
+    c.si.sid = 54;
+    c.channels = {{353, AmpsChannelType::ControlPagingVoice, 0}};
+    AmpsSystem system(clock, c);
+    AmpsChannel ch(system, 0, kRate);
+    FoccReader focc;
+    PhoneTx phone;
+    SatTone phoneSat{kRate, 0};
+    bool onVoice = false;
+    bool tone = false;
+    int clears = 0;
+    double t = 0.0;
+    std::vector<std::string> sent;
+    std::vector<float> in(kBlock), out(kBlock);
+    const auto run = [&](double seconds) {
+        for (int b = 0; b < static_cast<int>(seconds * 100.0); b++)
+        {
+            phone.render(in.data(), kBlock);
+            if (onVoice) {
+                phoneSat.add(in.data(), kBlock);
+            }
+            for (int i = 0; tone && i < kBlock; i++) {
+                in[i] += static_cast<float>(kFskDeviation * std::sin(2.0 * kPi * kSignallingToneHz * (t + i / kRate)));
+            }
+            ch.receive(in.data(), kBlock);
+            ch.render(out.data(), kBlock);
+            focc.process(out.data(), kBlock);
+            clock.advance(kBlock);
+            system.run();
+            t += kBlock / kRate;
+        }
+    };
+
+    system.setCallHandler([](const AmpsSubscriber&, const std::string&) { return true; });
+    system.setClearHandler([&clears](const AmpsSubscriber&) { clears++; });
+    ch.setTraceTap([&sent](bool toPhone, const std::string& text) {
+        if (toPhone) {
+            sent.push_back(text);
+        }
+    });
+    run(1.0);
+    CHECK(heardWord(focc.words, [](uint64_t w) { return wordField(words::kControlFiller, w, "OHD") == kOhdControlFiller; }));
+    phone.send(reccMessage(0, originationWords()));
+    run(1.0);
+    CHECK(heardWord(focc.words, [](uint64_t w) {
+        return wordField(words::kExtendedAddressChannel, w, "T1T2") == kT1T2Next && wordField(words::kExtendedAddressChannel, w, "SCC") == 0
+            && wordField(words::kExtendedAddressChannel, w, "CHAN") == 353;
+    }));
+    CHECK(system.mode(0) == AmpsMode::Silence);
+    CHECK(std::find(sent.begin(), sent.end(), "the voice channel of a call, SAT 5970 Hz") != sent.end());
+    onVoice = true;
+    run(1.0);
+    CHECK(system.mode(0) == AmpsMode::Audio && system.transactions().size() == 1);
+    // an audit, the phone's confirmation on the RVC of this channel (no SAT while it sends it)
+    AmpsSubscriber s;
+    s.min1 = kMin1;
+    s.min2 = kMin2;
+    std::vector<std::string> logs;
+    system.setLogHandler([&logs](const std::string& text) { logs.push_back(text); });
+    CHECK(system.audit(s.number()) == AmpsSystem::OrderResult::Sent);
+    run(0.3);
+    onVoice = false;
+    phone.send(rvcMessage({encodeWord(words::kRvcOrderConfirmation, {{"F", 1}, {"NAWC", 0}, {"T", 1}, {"ORDER", kOrderAudit}})}));
+    run(0.3);
+    onVoice = true;
+    run(0.2);
+    CHECK(std::find(logs.begin(), logs.end(), s.number() + ": Audit confirmed") != logs.end());
+    // the network releases: the release order on the FVC of this channel, the phone confirms with its tone
+    CHECK(system.releaseCall(s.number()));
+    run(0.5);
+    CHECK(std::find(sent.begin(), sent.end(), "Release") != sent.end());      // on the FVC of this channel
+    tone = true;
+    run(1.8);
+    tone = false;
+    run(0.6);
+    CHECK(system.mode(0) == AmpsMode::Control && system.transactions().empty());
+    CHECK(std::find(sent.begin(), sent.end(), "the control channel again") != sent.end());
+    onVoice = false;
+    focc.words.clear();
+    run(1.0);
+    CHECK(heardWord(focc.words, [](uint64_t w) { return wordField(words::kControlFiller, w, "OHD") == kOhdControlFiller; }));
+}
+
 int main()
 {
     testCall();
     testHandoff();
+    testCombined();
 
     if (g_failures == 0) {
         std::printf("all channel tests passed\n");

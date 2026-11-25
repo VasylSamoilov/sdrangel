@@ -211,12 +211,41 @@ AmpsSystem::Transaction* AmpsSystem::transactionOn(int channel)
 }
 
 // osmocom's search_free_vc: the first idle voice channel
+// osmocom search_free_vc: a free voice channel, else the combined channel (CC/PC/VC) that stops
+// being the control channel for the call
 int AmpsSystem::freeVoiceChannel() const
 {
+    int combined = -1;
+
     for (size_t i = 0; i < m_channels.size(); i++)
     {
         const Channel& c = m_channels[i];
         if (c.config.type == AmpsChannelType::Voice && !c.busy && c.mode == AmpsMode::Off) {
+            return static_cast<int>(i);
+        }
+        if (c.config.type == AmpsChannelType::ControlPagingVoice && !c.busy && combined < 0) {
+            combined = static_cast<int>(i);
+        }
+    }
+    return combined;
+}
+
+// a channel as a voice channel: one of type VC, or the combined one carrying a call
+bool AmpsSystem::voiceRole(int channel) const
+{
+    if (!valid(channel)) {
+        return false;
+    }
+    const Channel& c = m_channels[channel];
+    return c.config.type == AmpsChannelType::Voice || (c.config.type == AmpsChannelType::ControlPagingVoice && c.busy);
+}
+
+// the paging channel: a control channel not carrying a call (CC/PC/VC), -1 none
+int AmpsSystem::pagingChannel() const
+{
+    for (size_t i = 0; i < m_channels.size(); i++)
+    {
+        if (m_channels[i].config.type != AmpsChannelType::Voice && !m_channels[i].busy) {
             return static_cast<int>(i);
         }
     }
@@ -279,7 +308,7 @@ void AmpsSystem::receivedRecc(int channel, const ReccMessage& m)
         if (Transaction* old = transactionOf(m.min1, m.min2))
         {
             const int on = old->channel;
-            const bool voice = valid(on) && m_channels[on].config.type == AmpsChannelType::Voice;
+            const bool voice = voiceRole(on);
             destroy(old);
             if (voice) {
                 goIdle(on);
@@ -475,15 +504,9 @@ bool AmpsSystem::startCall(const std::string& number, modemcellular::Cause* caus
     if (freeVoiceChannel() < 0) {
         return refuse(modemcellular::Cause::NoChannel);
     }
-    int pc = -1;
-    for (size_t i = 0; i < m_channels.size() && pc < 0; i++)
-    {
-        if (m_channels[i].config.type != AmpsChannelType::Voice) {
-            pc = static_cast<int>(i);
-        }
-    }
+    const int pc = pagingChannel();     // a combined channel in a call cannot page
     if (pc < 0) {
-        return refuse(modemcellular::Cause::OutOfOrder);
+        return refuse(modemcellular::Cause::NoChannel);
     }
     Transaction* t = create(subscriber, State::Page, pc);
     t->mt = true;
@@ -886,7 +909,7 @@ bool AmpsSystem::releaseCall(const std::string& number)
             continue;
         }
         t->mt = false;                      // the network knows
-        const bool onVoice = valid(t->channel) && m_channels[t->channel].config.type == AmpsChannelType::Voice;
+        const bool onVoice = voiceRole(t->channel);
         if (t->state == State::Release || t->state == State::ReleaseSend) {
             return true;
         }
@@ -916,13 +939,7 @@ AmpsSystem::OrderResult AmpsSystem::order(const std::string& number, uint8_t ord
         if (where != OrderWhere::Anywhere) {
             return OrderResult::NoCall;
         }
-        int pc = -1;
-        for (size_t i = 0; i < m_channels.size() && pc < 0; i++)
-        {
-            if (m_channels[i].config.type != AmpsChannelType::Voice) {
-                pc = static_cast<int>(i);
-            }
-        }
+        const int pc = pagingChannel();
         if (pc < 0) {
             return OrderResult::Busy;
         }
