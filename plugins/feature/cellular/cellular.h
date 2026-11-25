@@ -135,6 +135,7 @@ public:
             Forget,     // the record of the phone in the book (the system of the network)
             Listen,     // listen in to the phone's call (value: 0 off, 1 both sides, 2 from the phone, 3 to it)
             Audit,      // AMPS: asks the phone to confirm it is there, idle or in its call
+            DisableDtmf,    // AMPS: the phone in its conversation mutes its touch tones (until a flash's called address)
             // the console (network 0: the one the number is heard on, else the first on the air)
             ConsoleDial,    // calls the number
             ConsoleAnswer,  // answers the call that rings

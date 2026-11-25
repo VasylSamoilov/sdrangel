@@ -59,7 +59,7 @@ MESSAGE_CLASS_DEFINITION(Cellular::MsgAction, Message)
 namespace
 {
 const char* const kActionNames[] = {"call", "hangup", "release", "sms", "mwi", "power", "move", "hold", "forget", "listen",
-    "audit", "consoledial", "consoleanswer", "consolehangup", "consoledigit", "consolesms"};
+    "audit", "disabledtmf", "consoledial", "consoleanswer", "consolehangup", "consoledigit", "consolesms"};
 }
 
 bool Cellular::MsgAction::parse(const QString& name, Action& action)

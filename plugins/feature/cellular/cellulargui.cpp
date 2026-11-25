@@ -1271,8 +1271,11 @@ QWidget *CellularGUI::buildTest()
     QPushButton *audit = new QPushButton("Audit", page);
     audit->setToolTip("The audit order: the phone confirms it is there, on the control channel when idle, on its voice "
         "channel in a call (TIA/EIA-553-A 2.6.2.3); the log shows the confirmation");
-    QWidget *auditRow = flowRow(page, {audit});
-    form->addRow("Audit", auditRow);
+    QPushButton *disableDtmf = new QPushButton("Disable DTMF", page);
+    disableDtmf->setToolTip("The disable DTMF order to the phone in its conversation: it mutes its touch tones until it has "
+        "sent the called address after its next flash (TIA/EIA-553-A 2.6.4.4); the log shows the confirmation");
+    QWidget *auditRow = flowRow(page, {audit, disableDtmf});
+    form->addRow("Orders", auditRow);
     m_testAmpsRows.append(auditRow);
     m_testForm = form;
 
@@ -1280,6 +1283,7 @@ QWidget *CellularGUI::buildTest()
         requestAction(m_testNetwork->currentData().toInt(), m_testPhone->currentText().trimmed(), action, text, value);
     };
     connect(audit, &QPushButton::clicked, this, [act]() { act(Cellular::MsgAction::Audit, QString(), 0); });
+    connect(disableDtmf, &QPushButton::clicked, this, [act]() { act(Cellular::MsgAction::DisableDtmf, QString(), 0); });
     connect(ampsMwi, &QPushButton::clicked, this, [this, act]() {
         act(Cellular::MsgAction::Mwi, m_ampsMwiType->currentData().toString(), m_ampsMwiCount->value());
     });

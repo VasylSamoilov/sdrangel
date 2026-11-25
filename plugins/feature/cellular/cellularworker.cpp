@@ -540,9 +540,9 @@ void CellularWorker::action(const Cellular::MsgAction& msg)
         ampsAction(n, msg, what);
         return;
     }
-    if (msg.getAction() == Cellular::MsgAction::Audit)
+    if (msg.getAction() == Cellular::MsgAction::Audit || msg.getAction() == Cellular::MsgAction::DisableDtmf)
     {
-        log(n.id, what + ": refused: the audit is an order of AMPS");
+        log(n.id, what + ": refused: an order of AMPS");
         return;
     }
     modemnmt::NmtSystem& system = *n.station->system();
@@ -694,6 +694,7 @@ void CellularWorker::action(const Cellular::MsgAction& msg)
         listen(n.id, msg.getNumber(), msg.getValue());
         return;
     case Cellular::MsgAction::Audit:            // AMPS only: refused above
+    case Cellular::MsgAction::DisableDtmf:
     case Cellular::MsgAction::ConsoleDial:      // the console's: consoleAction()
     case Cellular::MsgAction::ConsoleAnswer:
     case Cellular::MsgAction::ConsoleHangUp:
@@ -757,6 +758,7 @@ void CellularWorker::ampsAction(Network& n, const Cellular::MsgAction& msg, cons
         return;
     case Cellular::MsgAction::Power:
     case Cellular::MsgAction::Audit:
+    case Cellular::MsgAction::DisableDtmf:
     case Cellular::MsgAction::Mwi:
     case Cellular::MsgAction::Sms:      // AMPS has no short messages: the flash with info, a text to the display
     {
@@ -786,6 +788,7 @@ void CellularWorker::ampsAction(Network& n, const Cellular::MsgAction& msg, cons
         case modemamps::AmpsSystem::OrderResult::NoCall:
             log(n.id, what + (order.action == Cellular::MsgAction::Sms
                 ? ": refused: AMPS shows a text only to a phone that rings or talks (flash with info)"
+                : order.action == Cellular::MsgAction::DisableDtmf ? ": refused: the phone takes it only in a conversation"
                 : ": refused: the phone has no call on a voice channel"));
             return;
         case modemamps::AmpsSystem::OrderResult::Invalid:
@@ -833,6 +836,8 @@ modemamps::AmpsSystem::OrderResult CellularWorker::ampsOrder(Network& n, const N
         return system.messageWaiting(order.number, order.type, order.value);
     case Cellular::MsgAction::Sms:
         return system.flashWithInfo(order.number, order.text);
+    case Cellular::MsgAction::DisableDtmf:
+        return system.disableDtmf(order.number);
     default:
         return system.audit(order.number);
     }
