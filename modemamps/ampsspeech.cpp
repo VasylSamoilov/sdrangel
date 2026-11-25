@@ -105,6 +105,9 @@ void AmpsRxSpeech::callSample(double sample)
     for (int i = 0; i < n; i++) {
         s[i] = static_cast<float>(m_voiceLowpass.process(m_voiceHighpass.process(s[i])));
     }
+    if (m_meter) {
+        m_meter->process(s, n);         // as on the air, before the expander (as NMT's)
+    }
     m_compandor.expand(s, n);
     if (m_sink) {
         m_sink(s, n);
@@ -143,6 +146,9 @@ void AmpsTxSpeech::pull(float* samples, int count)
         samples[i] = std::isfinite(samples[i]) ? static_cast<float>(samples[i] * gain) : 0.0f;
     }
     m_compandor.compress(samples, count);
+    if (m_meter) {
+        m_meter->process(samples, count);   // as on the air, after the compressor (as NMT's)
+    }
     for (int i = 0; i < count; i++) {
         samples[i] = m_preemphasis.filter(static_cast<Real>(samples[i] * kPreemphasisScale));
     }

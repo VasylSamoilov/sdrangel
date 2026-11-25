@@ -243,6 +243,10 @@ private:
     // the speech of the calls (live ones, and one that ended since the last time); logLine: also
     // a line per live call in the event log (its last 2 s)
     void reportSpeech(Network& network, bool logLine);
+    void reportCallSpeech(Network& n, size_t index, CellularCallSpeech call, int carrierId, bool logLine,
+        Cellular::MsgReportSpeech *msg, modemcellular::WireSpeech& toRx, modemcellular::WireSpeech& toTx);
+    void finishSpeech(Network& n, Cellular::MsgReportSpeech *msg, const modemcellular::WireSpeech& toRx,
+        const modemcellular::WireSpeech& toTx);
     void sendTo(ChannelAPI *channel, const std::vector<uint8_t>& wire);
     void sendAudio(ChannelAPI *channel, const std::vector<uint8_t>& wire);
     void log(int network, const QString& text, Cellular::MsgReportLog::Kind kind = Cellular::MsgReportLog::Event);

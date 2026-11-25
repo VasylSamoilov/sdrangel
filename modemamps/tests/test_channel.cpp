@@ -164,12 +164,25 @@ static void testCall()
     // the network's 1 kHz at the speech level, about 1.27 of 2.9 kHz after gain, compressor and emphasis
     CHECK(b.vc1kHz > 0.9 * kSpeechDeviation && b.vc1kHz < 1.6 * kSpeechDeviation);
 
+    // the meters of the call: the network's tone to the phone, from the phone only its SAT (notched
+    // out: pause)
+    AmpsChannel::Speech s = b.vc.speech();
+    AmpsSubscriber phone;
+    phone.min1 = kMin1;
+    phone.min2 = kMin2;
+    CHECK(s.call == 1 && s.live && s.number == phone.number());
+    CHECK(s.txRecent.speech > 0 && s.txRecent.levelDb() > -3.0 && s.txRecent.levelDb() < 3.0);
+    CHECK(s.rxRecent.speech == 0 && s.rxRecent.pause > 0);
+
     // its tone of 1.7 s releases the call, the voice channel goes off
     b.tone = true;
     b.run(1.7);
     b.tone = false;
     b.run(0.6);
     CHECK(b.clears == 1 && b.system.mode(1) == AmpsMode::Off);
+    // the call ended; its meters stay readable
+    s = b.vc.speech();
+    CHECK(s.call == 1 && !s.live && s.txCall.speech > 0);
     b.onVoice = false;
     b.run(0.1);
     CHECK(b.vcPower == 0.0);

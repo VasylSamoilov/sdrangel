@@ -36,6 +36,7 @@ set(MODEMAMPS_LIB_SOURCES
     ../../modemcellular/emphasis.cpp
     ../../modemcellular/firfilter.cpp
     ../../modemcellular/musicendpoint.cpp
+    ../../modemcellular/speechmeter.cpp
     ../../modemcellular/timer.cpp
     ../../modemcellular/tonegenerator.cpp
     ../../modemcellular/txaudiosource.cpp)

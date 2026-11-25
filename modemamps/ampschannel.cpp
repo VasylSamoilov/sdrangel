@@ -48,6 +48,8 @@ AmpsChannel::AmpsChannel(AmpsSystem& system, int index, double sampleRate) :
     m_satTone(sampleRate, system.config().channels[static_cast<size_t>(index)].scc),
     m_rxSpeech(sampleRate),
     m_txSpeech(sampleRate),
+    m_rxMeter(kRxNoiseGate, kVoiceMaxDeviation / kSpeechDeviation),
+    m_txMeter(kRxNoiseGate, kVoiceMaxDeviation / kSpeechDeviation),
     m_modulator(sampleRate, kFskBitRate, kFskDeviation)
 {
     m_reverse.setChannel(m_control ? ReverseReceiver::ChannelRecc : ReverseReceiver::ChannelRvc);
@@ -138,6 +140,47 @@ bool AmpsChannel::burst(const ReverseBurst& b)
     return false;
 }
 
+// The meters measure the speech of a call (as NMT's): from the first speech of a call, the
+// orders in between not counted, to its end with the channel off; the last call's stay readable.
+void AmpsChannel::meterMode(AmpsMode mode)
+{
+    if (mode == AmpsMode::Audio && !m_meterLive)
+    {
+        m_rxMeter.reset();
+        m_txMeter.reset();
+        m_meterCall++;
+        m_meterLive = true;
+        m_meterNumber.clear();
+        for (const AmpsSystem::TransactionInfo& t : m_system.transactions())
+        {
+            if (t.channel == m_index) {
+                m_meterNumber = t.subscriber.number();
+            }
+        }
+        m_meterLimitedStart = m_txSpeech.limited();
+    }
+    if (mode == AmpsMode::Off) {
+        m_meterLive = false;
+    }
+    m_rxSpeech.setMeter(mode == AmpsMode::Audio ? &m_rxMeter : nullptr);
+    m_txSpeech.setMeter(mode == AmpsMode::Audio ? &m_txMeter : nullptr);
+}
+
+AmpsChannel::Speech AmpsChannel::speech() const
+{
+    Speech s;
+
+    s.call = m_meterCall;
+    s.live = m_meterLive;
+    s.number = m_meterNumber;
+    s.rxRecent = m_rxMeter.recent();
+    s.txRecent = m_txMeter.recent();
+    s.rxCall = m_rxMeter.call();
+    s.txCall = m_txMeter.call();
+    s.limited = m_txSpeech.limited() - m_meterLimitedStart;
+    return s;
+}
+
 void AmpsChannel::trace(bool toPhone, const std::string& text)
 {
     if (m_traceTap) {
@@ -160,6 +203,7 @@ void AmpsChannel::receive(const float* samples, int length)
         m_sat.reset();
         m_rxSpeech.reset();
         m_rxMode = mode;
+        meterMode(mode);
     }
 
     const float* s = m_filtered.data();

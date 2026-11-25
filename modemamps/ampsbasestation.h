@@ -121,6 +121,9 @@ public:
     uint64_t samples() const { return m_samples; }
 
     AmpsSystem* system() { return m_system.get(); }
+    // the channels on air, index as the system's channels (their speech meters)
+    size_t channelCount() const { return m_channels.size(); }
+    const AmpsChannel& channel(size_t index) const { return *m_channels[index]; }
 
     // the trace of the carriers on air (AmpsChannel::setTraceTap), index as the system's channels;
     // kept for the next bind()

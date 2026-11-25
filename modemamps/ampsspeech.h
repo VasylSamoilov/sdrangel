@@ -27,6 +27,7 @@
 #include "dsp/fmpreemphasis.h"
 #include "dsp/interpolator.h"
 #include "emphasis.h"
+#include "speechmeter.h"
 #include "txaudiosource.h"
 #include "export.h"
 
@@ -57,6 +58,8 @@ public:
     AmpsRxSpeech& operator=(const AmpsRxSpeech&) = delete;
 
     void setSink(Sink sink) { m_sink = std::move(sink); }
+    // the meter of the speech (null: none), fed at the level on the air: before the expander
+    void setMeter(modemcellular::SpeechMeter* meter) { m_meter = meter; }
     // the deviation in Hz; blocks of 160 go to the sink
     void process(const float* samples, int length);
     void reset();
@@ -64,6 +67,7 @@ public:
 private:
     void callSample(double sample);
 
+    modemcellular::SpeechMeter* m_meter = nullptr;
     double m_sampleRate;
     modemcellular::BiquadHighpass m_highpass;
     modemcellular::BiquadNotch m_notch;
@@ -92,6 +96,8 @@ public:
     AmpsTxSpeech& operator=(const AmpsTxSpeech&) = delete;
 
     void setPull(Pull pull) { m_pull = std::move(pull); }
+    // the meter of the speech (null: none), fed at the level on the air: after the compressor
+    void setMeter(modemcellular::SpeechMeter* meter) { m_meter = meter; }
     // writes length samples of deviation in Hz
     void generate(float* samples, int length);
     void reset();
@@ -101,6 +107,7 @@ public:
 private:
     void pull(float* samples, int count);
 
+    modemcellular::SpeechMeter* m_meter = nullptr;
     modemcellular::Compandor m_compandor;
     FMPreemphasis m_preemphasis;
     modemcellular::TxAudioSource m_source;

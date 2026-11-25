@@ -2017,12 +2017,59 @@ static QString speechText(const modemcellular::SpeechStats& s)
         .arg(3.0 * s.peak, 0, 'f', 1).arg(100.0 * s.pauseShare(), 0, 'f', 0).arg(bands);
 }
 
+// One channel's call for the speech report: the meters on screen, the log line every 2 s and of the
+// whole call at its end, the call kept with the phone; the boxes of the carrier in the radios
+void CellularWorker::reportCallSpeech(Network& n, size_t index, CellularCallSpeech call, int carrierId, bool logLine,
+    Cellular::MsgReportSpeech *msg, modemcellular::WireSpeech& toRx, modemcellular::WireSpeech& toTx)
+{
+    Network::SpeechSeen& seen = n.speechSeen[index];
+    const bool ended = call.call > 0 && !call.live && seen.call == call.call && seen.live;
+
+    if (!call.live && !ended)
+    {
+        seen.call = call.call;
+        seen.live = false;
+        return;
+    }
+    if (m_listener && n.id == m_listenNetwork && call.phone == m_listenNumber) {
+        call.listen = static_cast<int>(m_listener->mode());
+    }
+    if (ended)
+    {
+        // the whole call, kept with the phone and in the log
+        call.ended = QDateTime::currentDateTime();
+        Cellular::MsgReportStatus::Phone& phone = n.phones[call.phone.toStdString()];
+        if (phone.number.isEmpty()) {
+            phone.number = call.phone;
+        }
+        phone.lastCall = call;
+        // the speaker of a call that ended goes off
+        if (n.id == m_listenNetwork && call.phone == m_listenNumber) {
+            listen(n.id, call.phone, 0);
+        }
+        log(n.id, QString("ch %1 call of %2 ended, speech from the phone: %3; to the phone: %4, limited %5")
+            .arg(call.channel).arg(call.phone).arg(speechText(call.rxCall)).arg(speechText(call.txCall)).arg(call.limited),
+            Cellular::MsgReportLog::Call);
+    }
+    else if (logLine)
+    {
+        log(n.id, QString("ch %1 speech of %2 (2 s) from the phone: %3; to the phone: %4")
+            .arg(call.channel).arg(call.phone).arg(speechText(call.rxRecent)).arg(speechText(call.txRecent)),
+            Cellular::MsgReportLog::Call);
+    }
+    seen.call = call.call;
+    seen.live = call.live;
+    msg->m_calls.append(call);
+    if (carrierId >= 0)
+    {
+        toRx.carriers.push_back({carrierId, call.live, call.rxRecent, call.rxCall});
+        toTx.carriers.push_back({carrierId, call.live, call.txRecent, call.txCall});
+    }
+}
+
 void CellularWorker::reportSpeech(Network& n, bool logLine)
 {
-    // the speech meters of the channels are NMT's (AMPS has none yet)
-    modemnmt::NmtSystem *system = running(n) && n.station ? n.station->system() : nullptr;
-
-    if (!system) {
+    if (!running(n) || (!(n.station && n.station->system()) && !(n.ampsStation && n.ampsStation->system()))) {
         return;
     }
     Cellular::MsgReportSpeech *msg = Cellular::MsgReportSpeech::create(n.id);
@@ -2031,6 +2078,34 @@ void CellularWorker::reportSpeech(Network& n, bool logLine)
     modemcellular::WireSpeech toRx, toTx;
     std::vector<int> ids;                       // carrier id of each channel on air
 
+    if (n.ampsStation)
+    {
+        for (size_t k = 0; k < n.ampsStation->carriers().size(); k++)
+        {
+            if (n.ampsStation->carriers()[k].onAir) {
+                ids.push_back(n.ampsStation->carrierId(k));
+            }
+        }
+        for (size_t i = 0; i < n.ampsStation->channelCount() && i < n.speechSeen.size(); i++)
+        {
+            const modemamps::AmpsChannel::Speech s = n.ampsStation->channel(i).speech();
+            CellularCallSpeech call;
+            call.channel = traceChannel(n, i);
+            call.phone = QString::fromStdString(s.number);
+            call.call = s.call;
+            call.live = s.live;
+            call.rxRecent = s.rxRecent;
+            call.txRecent = s.txRecent;
+            call.rxCall = s.rxCall;
+            call.txCall = s.txCall;
+            call.limited = s.limited;
+            reportCallSpeech(n, i, call, i < ids.size() ? ids[i] : -1, logLine, msg, toRx, toTx);
+        }
+        finishSpeech(n, msg, toRx, toTx);
+        return;
+    }
+
+    modemnmt::NmtSystem *system = n.station->system();
     for (size_t k = 0; k < n.station->carriers().size(); k++)
     {
         if (n.station->carriers()[k].onAir) {
@@ -2042,15 +2117,6 @@ void CellularWorker::reportSpeech(Network& n, bool logLine)
     {
         const modemnmt::NmtChannel& channel = system->channel(i);
         const modemnmt::NmtChannel::Speech s = channel.speech();
-        Network::SpeechSeen& seen = n.speechSeen[i];
-        const bool ended = s.call > 0 && !s.live && seen.call == s.call && seen.live;
-
-        if (!s.live && !ended)
-        {
-            seen.call = s.call;
-            seen.live = false;
-            continue;
-        }
         CellularCallSpeech call;
         modemnmt::NmtSubscriber subscriber;
         subscriber.country = s.country;
@@ -2064,40 +2130,7 @@ void CellularWorker::reportSpeech(Network& n, bool logLine)
         call.rxCall = s.rxCall;
         call.txCall = s.txCall;
         call.limited = s.limited;
-        if (m_listener && n.id == m_listenNetwork && call.phone == m_listenNumber) {
-            call.listen = static_cast<int>(m_listener->mode());
-        }
-        if (ended)
-        {
-            // the whole call, kept with the phone and in the log
-            call.ended = QDateTime::currentDateTime();
-            Cellular::MsgReportStatus::Phone& phone = n.phones[call.phone.toStdString()];
-            if (phone.number.isEmpty()) {
-                phone.number = call.phone;
-            }
-            phone.lastCall = call;
-            // the speaker of a call that ended goes off
-            if (n.id == m_listenNetwork && call.phone == m_listenNumber) {
-                listen(n.id, call.phone, 0);
-            }
-            log(n.id, QString("ch %1 call of %2 ended, speech from the phone: %3; to the phone: %4, limited %5")
-                .arg(call.channel).arg(call.phone).arg(speechText(s.rxCall)).arg(speechText(s.txCall)).arg(s.limited),
-                Cellular::MsgReportLog::Call);
-        }
-        else if (logLine)
-        {
-            log(n.id, QString("ch %1 speech of %2 (2 s) from the phone: %3; to the phone: %4")
-                .arg(call.channel).arg(call.phone).arg(speechText(s.rxRecent)).arg(speechText(s.txRecent)),
-                Cellular::MsgReportLog::Call);
-        }
-        seen.call = s.call;
-        seen.live = s.live;
-        msg->m_calls.append(call);
-        if (i < ids.size())
-        {
-            toRx.carriers.push_back({ids[i], s.live, s.rxRecent, s.rxCall});
-            toTx.carriers.push_back({ids[i], s.live, s.txRecent, s.txCall});
-        }
+        reportCallSpeech(n, i, call, i < ids.size() ? ids[i] : -1, logLine, msg, toRx, toTx);
     }
     // the destination of a call goes with the phone off the channels (after a while: it is noted
     // when the phone dials, before its channel shows the call)
@@ -2116,6 +2149,12 @@ void CellularWorker::reportSpeech(Network& n, bool logLine)
             ++it;
         }
     }
+    finishSpeech(n, msg, toRx, toTx);
+}
+
+void CellularWorker::finishSpeech(Network& n, Cellular::MsgReportSpeech *msg, const modemcellular::WireSpeech& toRx,
+    const modemcellular::WireSpeech& toTx)
+{
     if (!toRx.carriers.empty())
     {
         sendTo(n.rx->channel, modemcellular::encodeSpeech(toRx));

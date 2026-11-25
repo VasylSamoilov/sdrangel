@@ -63,9 +63,23 @@ public:
     using TraceTap = std::function<void(bool toPhone, const std::string& text)>;
     void setTraceTap(TraceTap tap) { m_traceTap = std::move(tap); }
 
+    // the speech of the channel's call, at the levels on the air (as NMT's NmtChannel::Speech):
+    // 1.0 the speech level of 2.9 kHz, the limit the 12 kHz of the voice
+    struct Speech
+    {
+        uint64_t call = 0;                      // counts the calls of the channel; 0: none yet
+        bool live = false;                      // the call is still on
+        std::string number;                     // the phone's 10 digits
+        modemcellular::SpeechStats rxRecent, txRecent;     // the last 2 s
+        modemcellular::SpeechStats rxCall, txCall;         // the whole call
+        uint64_t limited = 0;                   // blocks the transmitter's limiter scaled in the call
+    };
+    Speech speech() const;
+
 private:
     bool burst(const ReverseBurst& burst);
     void trace(bool toPhone, const std::string& text);
+    void meterMode(AmpsMode mode);
 
     AmpsSystem& m_system;
     int m_index;
@@ -90,6 +104,12 @@ private:
     SatTone m_satTone;
     AmpsRxSpeech m_rxSpeech;
     AmpsTxSpeech m_txSpeech;
+    modemcellular::SpeechMeter m_rxMeter;
+    modemcellular::SpeechMeter m_txMeter;
+    uint64_t m_meterCall = 0;
+    bool m_meterLive = false;
+    std::string m_meterNumber;
+    uint64_t m_meterLimitedStart = 0;
     FvcTransmitter m_fvc;
     // the FSK of either
     ManchesterModulator m_modulator;
