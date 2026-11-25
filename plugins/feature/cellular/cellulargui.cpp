@@ -1217,22 +1217,42 @@ QWidget *CellularGUI::buildTest()
     QHBoxLayout *smsRow = new QHBoxLayout();
     smsRow->setSpacing(3);
     smsRow->addWidget(m_smsText, 1);
-    smsRow->addWidget(codepageTableButton(page, m_smsText, [this]() { return m_testNetwork->currentData().toInt(); }));
+    QWidget *table = codepageTableButton(page, m_smsText, [this]() { return m_testNetwork->currentData().toInt(); });
+    smsRow->addWidget(table);
     smsRow->addWidget(sms);
     smsRow->addWidget(keep);
     form->addRow("SMS", smsRow);
+    m_testSmsLabel = qobject_cast<QLabel*>(form->labelForField(smsRow));
+    m_testSmsSend = sms;
+    m_testNmtOnly = {table, keep};
 
-    form->addRow("Messages waiting", indicatorRow(page, [this](int flags) {
+    QWidget *indicators = indicatorRow(page, [this](int flags) {
         requestAction(m_testNetwork->currentData().toInt(), m_testPhone->currentText().trimmed(),
             Cellular::MsgAction::Mwi, QString(), flags);
-    }));
+    });
+    form->addRow("Messages waiting", indicators);
+    m_testNmtRows = {indicators};
+
+    // AMPS: the message waiting order, its type and the count (0 clears the indicator)
+    m_ampsMwiType = new QComboBox(page);
+    m_ampsMwiType->addItem("Voice", "voice");
+    m_ampsMwiType->addItem("SMS", "sms");
+    m_ampsMwiType->addItem("Fax", "fax");
+    m_ampsMwiType->setToolTip("The kind of messages waiting (TIA/EIA-553-A Table 3.7.1-1, ORDQ)");
+    m_ampsMwiCount = new QSpinBox(page);
+    m_ampsMwiCount->setRange(0, 31);
+    m_ampsMwiCount->setValue(1);
+    m_ampsMwiCount->setSpecialValueText("0 (clear)");
+    m_ampsMwiCount->setToolTip("How many messages wait (MSG_TYPE); 0 clears the indicator");
+    QPushButton *ampsMwi = new QPushButton("Send", page);
+    ampsMwi->setToolTip("The message waiting order: on the control channel to an idle phone, on its voice channel in a call "
+        "or while it rings; a phone being paged gets it when it is free. The log shows its confirmation");
+    QWidget *ampsMwiRow = flowRow(page, {m_ampsMwiType, m_ampsMwiCount, ampsMwi});
+    form->addRow("Messages waiting", ampsMwiRow);
+    m_testAmpsRows = {ampsMwiRow};
 
     m_powerLevel = new QComboBox();
-    m_powerLevel->addItem("High", 3);
-    m_powerLevel->addItem("Medium", 2);
-    m_powerLevel->addItem("Low", 1);
-    m_powerLevel->setToolTip("Power level ordered to the phone in its call (NMT Doc 450-1 4.4.1.8): high 15 W or 7 W, "
-        "medium 10 dB less, low 20 dB less");
+    m_powerLevel->setSizeAdjustPolicy(QComboBox::AdjustToContents);
     QPushButton *power = new QPushButton("Order");
     m_testPower = power;
     power->setToolTip("Orders the power level to the phone in its call; the log tells whether it took it");
@@ -1243,11 +1263,26 @@ QWidget *CellularGUI::buildTest()
     QPushButton *move = new QPushButton("Move");
     m_testMove = move;
     move->setToolTip("Moves the call of the phone to that voice channel (switching a call in progress, NMT Doc 450-1 4.4.1.4)");
-    form->addRow("Voice channel", flowRow(page, {m_moveChannel, move}));
+    QWidget *moveRow = flowRow(page, {m_moveChannel, move});
+    form->addRow("Voice channel", moveRow);
+    m_testNmtRows.append(moveRow);
+
+    // AMPS: the audit order, whether the phone is there
+    QPushButton *audit = new QPushButton("Audit", page);
+    audit->setToolTip("The audit order: the phone confirms it is there, on the control channel when idle, on its voice "
+        "channel in a call (TIA/EIA-553-A 2.6.2.3); the log shows the confirmation");
+    QWidget *auditRow = flowRow(page, {audit});
+    form->addRow("Audit", auditRow);
+    m_testAmpsRows.append(auditRow);
+    m_testForm = form;
 
     auto act = [this](int action, const QString& text, int value) {
         requestAction(m_testNetwork->currentData().toInt(), m_testPhone->currentText().trimmed(), action, text, value);
     };
+    connect(audit, &QPushButton::clicked, this, [act]() { act(Cellular::MsgAction::Audit, QString(), 0); });
+    connect(ampsMwi, &QPushButton::clicked, this, [this, act]() {
+        act(Cellular::MsgAction::Mwi, m_ampsMwiType->currentData().toString(), m_ampsMwiCount->value());
+    });
     connect(call, &QPushButton::clicked, this, [act]() { act(Cellular::MsgAction::Call, QString(), 0); });
     connect(release, &QPushButton::clicked, this, [act]() { act(Cellular::MsgAction::Release, QString(), 0); });
     connect(sms, &QPushButton::clicked, this, [this, act]() { act(Cellular::MsgAction::Sms, m_smsText->text(), 0); });
@@ -1260,10 +1295,83 @@ QWidget *CellularGUI::buildTest()
     });
     connect(m_testNetwork, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
         voiceChannels(m_moveChannel, m_testNetwork->currentData().toInt());
+        showTestSystem();
         showTestPhone();
     });
     connect(m_testPhone, &QComboBox::currentTextChanged, this, [this]() { showTestPhone(); });
+    showTestSystem();
     return page;
+}
+
+bool CellularGUI::isAmpsNetwork(int network) const
+{
+    const CellularNetworkSettings *n = m_settings.network(network);
+    return n && n->isAmps();
+}
+
+// The rows of the Test tab for the system of its network: AMPS has the flash with info for a text,
+// the message waiting order with a count, power levels 0..7 and the audit; no SMS centre, no move
+void CellularGUI::showTestSystem()
+{
+    const bool amps = isAmpsNetwork(m_testNetwork->currentData().toInt());
+    const auto show = [this](QWidget *w, bool visible) {
+        w->setVisible(visible);
+        if (QWidget *label = m_testForm->labelForField(w)) {
+            label->setVisible(visible);
+        }
+    };
+
+    for (QWidget *w : m_testNmtRows) {
+        show(w, !amps);
+    }
+    for (QWidget *w : m_testAmpsRows) {
+        show(w, amps);
+    }
+    for (QWidget *w : m_testNmtOnly) {
+        w->setVisible(!amps);
+    }
+    if (m_testSmsLabel) {
+        m_testSmsLabel->setText(amps ? "Text" : "SMS");
+    }
+    m_smsText->setPlaceholderText(amps ? "Text to the display of the phone in its call" : "Short message to the phone");
+    m_smsText->setToolTip(amps
+        ? "Up to 33 ASCII characters shown on the phone in its call: the flash with info (TIA/EIA-553-A 3.7.2.1), "
+          "e.g. the caller of a waiting call"
+        : "Text of a short message to the phone (NMT Doc 450-3 Annex 24)");
+    m_testSmsSend->setToolTip(amps
+        ? "The flash with info goes on the voice channel of the phone's call; the log shows its confirmation"
+        : "The phone is paged and called without ringing, the message goes over the data link of the call; "
+          "the log tells whether the phone took it");
+    m_testPhone->lineEdit()->setPlaceholderText(amps ? "2162177526" : "3726136");
+    m_testPhone->setMinimumContentsLength(amps ? 10 : 7);
+    m_testPhone->setToolTip(amps ? "Number of the phone: its 10 digits (MIN), or one the network heard"
+        : "Number of the phone: the country digit and the six digits (Z X1..X6), or one the network heard");
+
+    // the power levels of the system, the choice kept while the system stays (AMPS starts at 4,
+    // osmocom's default; NMT at high)
+    const bool wasAmps = m_powerLevel->count() == 8;
+    const int level = (wasAmps == amps) ? m_powerLevel->currentData().toInt() : -1;
+    m_powerLevel->blockSignals(true);
+    m_powerLevel->clear();
+    if (amps)
+    {
+        for (int l = 0; l <= 7; l++) {
+            m_powerLevel->addItem(l == 0 ? QString("0 (highest)") : l == 7 ? QString("7 (lowest)") : QString::number(l), l);
+        }
+        m_powerLevel->setToolTip("Power level ordered to the phone in its call, 0..7, 4 dB apart (change power order, "
+            "TIA/EIA-553-A Table 3.7.1-1)");
+    }
+    else
+    {
+        m_powerLevel->addItem("High", 3);
+        m_powerLevel->addItem("Medium", 2);
+        m_powerLevel->addItem("Low", 1);
+        m_powerLevel->setToolTip("Power level ordered to the phone in its call (NMT Doc 450-1 4.4.1.8): high 15 W or 7 W, "
+            "medium 10 dB less, low 20 dB less");
+    }
+    const int at = m_powerLevel->findData(level);
+    m_powerLevel->setCurrentIndex(at >= 0 ? at : (amps ? 4 : 0));
+    m_powerLevel->blockSignals(false);
 }
 
 QWidget *CellularGUI::buildLog()
@@ -2177,6 +2285,7 @@ void CellularGUI::fillNetworkCombos()
     m_logNetwork->setCurrentIndex(logAt >= 0 ? logAt : 0);
     m_testNetwork->blockSignals(false);
     m_logNetwork->blockSignals(false);
+    showTestSystem();           // a network's system may have changed
     showTestPhone();
 }
 

@@ -261,6 +261,18 @@ private:
     QPushButton *m_testRelease;
     QPushButton *m_testPower;
     QPushButton *m_testMove;
+    // the rows of one system (fields of m_testForm; their labels go with them), the NMT only
+    // buttons of a shared row, and the AMPS message waiting
+    QFormLayout *m_testForm = nullptr;
+    QList<QWidget*> m_testNmtRows;
+    QList<QWidget*> m_testAmpsRows;
+    QList<QWidget*> m_testNmtOnly;
+    QLabel *m_testSmsLabel = nullptr;
+    QPushButton *m_testSmsSend = nullptr;
+    QComboBox *m_ampsMwiType = nullptr;
+    QSpinBox *m_ampsMwiCount = nullptr;
+    bool isAmpsNetwork(int network) const;
+    void showTestSystem();
     // the voice channels of a network in a list: "any free" (0), then each by its number
     void voiceChannels(QComboBox *box, int network) const;
     // Log
