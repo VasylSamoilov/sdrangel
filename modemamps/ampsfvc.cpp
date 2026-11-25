@@ -47,15 +47,35 @@ std::vector<uint64_t> alertWithInfo(uint8_t pscc, const std::string& callerId)
     w.push_back(order(pscc, kOrderAlertWithInfo, 0, 0));
     w.push_back(encodeWord(words::kFvcAlertInfo, {{"T1T2", kT1T2First}, {"RL_W", (length + 2) / 3}, {"SIGNAL", 1},
         {"CPN_RL", length}, {"PI", id.empty() ? 2 : 0}, {"SI", 3}}));
+    characterWords(id, w);
+    return w;
+}
+
+std::vector<uint64_t> flashWithInfo(uint8_t pscc, const std::string& text)
+{
+    std::vector<uint64_t> w;
+    const std::string t = text.substr(0, kFlashInfoMax);
+    const int length = static_cast<int>(t.size());
+
+    w.push_back(order(pscc, kOrderFlashWithInfo, 0, 0));
+    w.push_back(encodeWord(words::kFvcFlashInfo, {{"T1T2", kT1T2First}, {"RL_W", (length + 2) / 3},
+        {"CPN_RL", length}, {"PI", t.empty() ? 2 : 0}, {"SI", 3}}));
+    characterWords(t, w);
+    return w;
+}
+
+void characterWords(const std::string& text, std::vector<uint64_t>& out)
+{
+    const int length = static_cast<int>(text.size());
+
     for (int i = 0; i < length; i += 3)
     {
         WordValues v = {{"T1T2", kT1T2First}};
         for (int k = 0; k < 3 && i + k < length; k++) {
-            v["CHARACTER " + std::to_string(k + 1)] = static_cast<uint8_t>(id[static_cast<size_t>(i + k)]);
+            v["CHARACTER " + std::to_string(k + 1)] = static_cast<uint8_t>(text[static_cast<size_t>(i + k)]) & 0x7f;
         }
-        w.push_back(encodeWord(words::kFvcInfoCharacters, v));
+        out.push_back(encodeWord(words::kFvcInfoCharacters, v));
     }
-    return w;
 }
 
 } // namespace fvc

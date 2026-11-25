@@ -192,6 +192,9 @@ public:
     OrderResult audit(const std::string& number);
     OrderResult messageWaiting(const std::string& number, int type, int count);   // type 0 voice, 1 SMS, 2 fax; count 0..31, 0 clears
     OrderResult changePower(const std::string& number, int level);
+    // a text to the display of the phone in its call (flash with info: the caller of a waiting call,
+    // a notice), 1..33 ASCII characters
+    OrderResult flashWithInfo(const std::string& number, const std::string& text);
     // fires the timers that are due
     void run() { m_timers.run(); }
 
@@ -234,7 +237,9 @@ private:
     void release(Transaction* transaction, bool tellNetwork);
     void callFailed(Transaction* transaction, modemcellular::Cause cause);
     void phoneReleased(Transaction* transaction);
-    OrderResult order(const std::string& number, uint8_t order, uint8_t ordq, uint8_t msgType, bool callOnly);
+    // message: the words of a longer one (flash with info), else the order word is made
+    OrderResult order(const std::string& number, uint8_t order, uint8_t ordq, uint8_t msgType, bool callOnly,
+        const std::vector<uint64_t>& message = std::vector<uint64_t>());
     void timeout(Transaction* transaction);
     void setState(Transaction* transaction, State state);
     void log(const std::string& text);

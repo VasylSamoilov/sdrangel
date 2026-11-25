@@ -222,7 +222,8 @@ bool FvcTrace::complete() const
     if (m_words.size() < 2) {
         return false;
     }
-    return m_words.size() >= 2 + wordField(words::kFvcAlertInfo, m_words[1], "RL_W");
+    return m_words.size() >= 2 + wordField(order == kOrderFlashWithInfo ? words::kFvcFlashInfo : words::kFvcAlertInfo,
+        m_words[1], "RL_W");
 }
 
 std::string FvcTrace::describe(bool cut) const
@@ -244,7 +245,10 @@ std::string FvcTrace::describe(bool cut) const
         if (m_words.size() >= 2)
         {
             const uint64_t info = m_words[1];
-            const size_t length = static_cast<size_t>(wordField(words::kFvcAlertInfo, info, "CPN_RL"));
+            // the flash's word 2 has no SIGNAL: its fields sit elsewhere
+            const bool flash = wordField(words::kFvcOrder, w1, "ORDER") == kOrderFlashWithInfo;
+            const WordDef& def = flash ? words::kFvcFlashInfo : words::kFvcAlertInfo;
+            const size_t length = static_cast<size_t>(wordField(def, info, "CPN_RL"));
             std::string characters;
             for (size_t i = 2; i < m_words.size(); i++)
             {
@@ -257,9 +261,9 @@ std::string FvcTrace::describe(bool cut) const
                 }
             }
             text += ": " + (characters.empty() ? std::string("no number") : characters)
-                + " (PI " + presentationName(static_cast<unsigned>(wordField(words::kFvcAlertInfo, info, "PI")))
-                + ", SI " + screeningName(static_cast<unsigned>(wordField(words::kFvcAlertInfo, info, "SI")))
-                + format(", SIGNAL %u)", static_cast<unsigned>(wordField(words::kFvcAlertInfo, info, "SIGNAL")));
+                + " (PI " + presentationName(static_cast<unsigned>(wordField(def, info, "PI")))
+                + ", SI " + screeningName(static_cast<unsigned>(wordField(def, info, "SI")))
+                + (flash ? std::string(")") : format(", SIGNAL %u)", static_cast<unsigned>(wordField(def, info, "SIGNAL"))));
         }
     }
     if (cut) {

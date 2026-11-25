@@ -120,9 +120,31 @@ static void testAlertWithInfo()
     CHECK(none.size() == 2 && wordField(words::kFvcAlertInfo, none[1], "PI") == 2);
 }
 
+// The flash with info: word 2 without SIGNAL (CPN_RL right after RL_W), the characters as the alert's
+static void testFlashWithInfo()
+{
+    const std::vector<uint64_t> w = fvc::flashWithInfo(2, "Call waiting");
+
+    CHECK(w.size() == 6);
+    if (w.size() != 6) {
+        return;
+    }
+    for (uint64_t x : w) {
+        CHECK(bchCheck(x, kForwardMessageBits));
+    }
+    CHECK(wordField(words::kFvcOrder, w[0], "ORDER") == kOrderFlashWithInfo && wordField(words::kFvcOrder, w[0], "PSCC") == 2);
+    CHECK(wordField(words::kFvcFlashInfo, w[1], "T1T2") == kT1T2First && wordField(words::kFvcFlashInfo, w[1], "RL_W") == 4);
+    CHECK(wordField(words::kFvcFlashInfo, w[1], "CPN_RL") == 12 && wordField(words::kFvcFlashInfo, w[1], "PI") == 0);
+    CHECK(wordField(words::kFvcFlashInfo, w[1], "SI") == 3 && wordField(words::kFvcFlashInfo, w[1], "RSVD") == 0);
+    CHECK(wordField(words::kFvcInfoCharacters, w[2], "CHARACTER 1") == 'C' && wordField(words::kFvcInfoCharacters, w[5], "CHARACTER 3") == 'g');
+    // cut to 33 characters
+    CHECK(fvc::flashWithInfo(0, std::string(40, 'x')).size() == 2 + 11);
+}
+
 int main()
 {
     testAlertWithInfo();
+    testFlashWithInfo();
     testWords();
     testStream();
     testSource();

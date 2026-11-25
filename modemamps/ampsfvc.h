@@ -46,6 +46,13 @@ MODEMAMPS_API uint64_t handoff(uint8_t scc, uint8_t pscc, uint8_t dtx, uint8_t v
 // characters, CPN_RL characters), SIGNAL 1 (medium pitch, long cadence), PI 0 (presentation allowed;
 // 2 number not available without one), SI 3 (network provided), then 3 characters a word.
 MODEMAMPS_API std::vector<uint64_t> alertWithInfo(uint8_t pscc, const std::string& callerId);
+// The flash with info of a call: a text for the phone's display (osmocom amps_flash_with_info,
+// ORDER 18 ORDQ 0: the caller in the call, a call waiting notice): word 2 the length (no SIGNAL), PI
+// 0, SI 3, then the characters as the alert with info; at most kFlashInfoMax (osmocom's buffer).
+constexpr size_t kFlashInfoMax = 33;
+MODEMAMPS_API std::vector<uint64_t> flashWithInfo(uint8_t pscc, const std::string& text);
+// The words of characters: 3 a word (T1T2 01), ASCII with the top bit 0, nulls filling the last
+MODEMAMPS_API void characterWords(const std::string& text, std::vector<uint64_t>& out);
 } // namespace fvc
 
 class MODEMAMPS_API FvcTransmitter

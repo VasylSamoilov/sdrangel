@@ -723,7 +723,7 @@ void AmpsSystem::receivedRvcOrder(int channel, uint8_t order, uint8_t ordq)
         return;
     }
     // the confirmation of an order of the tester (osmocom: shown only)
-    if (t && (order == kOrderAudit || order == kOrderChangePower || order == kOrderMessageWaiting)) {
+    if (t && (order == kOrderAudit || order == kOrderChangePower || order == kOrderMessageWaiting || order == kOrderFlashWithInfo)) {
         log(t->subscriber.number() + ": " + (order == kOrderMessageWaiting ? std::string("Message Waiting") : ampsOrderName(order, ordq, 0))
             + " confirmed");
     }
@@ -845,7 +845,8 @@ bool AmpsSystem::releaseCall(const std::string& number)
     return false;
 }
 
-AmpsSystem::OrderResult AmpsSystem::order(const std::string& number, uint8_t order, uint8_t ordq, uint8_t msgType, bool callOnly)
+AmpsSystem::OrderResult AmpsSystem::order(const std::string& number, uint8_t order, uint8_t ordq, uint8_t msgType, bool callOnly,
+    const std::vector<uint64_t>& message)
 {
     if (number.size() != 10 || number.find_first_not_of("0123456789") != std::string::npos) {
         return OrderResult::Invalid;
@@ -890,7 +891,11 @@ AmpsSystem::OrderResult AmpsSystem::order(const std::string& number, uint8_t ord
     if (!inCall && !ringing) {
         return OrderResult::Busy;       // paging, assignment, registration, release: later
     }
-    t->fvcOrders.push_back(fvc::order(static_cast<uint8_t>(m_channels[t->channel].config.scc), order, ordq, msgType));
+    if (message.empty()) {
+        t->fvcOrders.push_back(fvc::order(static_cast<uint8_t>(m_channels[t->channel].config.scc), order, ordq, msgType));
+    } else {
+        t->fvcOrders.insert(t->fvcOrders.end(), message.begin(), message.end());
+    }
     if (m_channels[t->channel].mode != AmpsMode::Frame) {
         t->afterOrders = m_channels[t->channel].mode;
     }
@@ -918,6 +923,25 @@ AmpsSystem::OrderResult AmpsSystem::changePower(const std::string& number, int l
         return OrderResult::Invalid;
     }
     return order(number, kOrderChangePower, static_cast<uint8_t>(level), 0, true);
+}
+
+AmpsSystem::OrderResult AmpsSystem::flashWithInfo(const std::string& number, const std::string& text)
+{
+    if (text.empty() || text.size() > fvc::kFlashInfoMax) {
+        return OrderResult::Invalid;
+    }
+    for (char c : text)
+    {
+        if (c < 0x20 || c > 0x7e) {
+            return OrderResult::Invalid;        // ASCII only (ANSI X3.4)
+        }
+    }
+    // the words are made for the voice channel of the call; its SAT colour code is in word 1
+    const uint32_t min1 = number.size() == 10 ? ReccAssembler::min1Of(number.substr(3)) : 0;
+    const uint16_t min2 = number.size() == 10 ? ReccAssembler::min2Of(number.substr(0, 3)) : 0;
+    const Transaction* t = number.size() == 10 ? transactionOf(min1, min2) : nullptr;
+    const uint8_t pscc = (t && valid(t->channel)) ? static_cast<uint8_t>(m_channels[t->channel].config.scc) : 0;
+    return order(number, kOrderFlashWithInfo, 0, 0, true, fvc::flashWithInfo(pscc, text));
 }
 
 std::vector<AmpsSystem::TransactionInfo> AmpsSystem::transactions() const

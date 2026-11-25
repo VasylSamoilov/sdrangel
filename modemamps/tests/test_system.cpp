@@ -398,6 +398,17 @@ static void testOrders()
     CHECK(!n.system.nextFvc(kVc, w) && n.system.mode(kVc) == AmpsMode::Audio);
     n.system.receivedRvcOrder(kVc, kOrderChangePower, 2);
     CHECK(logged(number + ": Change Power to Power Level 2 confirmed"));
+    // a text to the display in the call: the words of the flash with info, back to the speech
+    CHECK(n.system.flashWithInfo(number, "Call waiting") == AmpsSystem::OrderResult::Sent);
+    std::vector<uint64_t> sent;
+    while (n.system.nextFvc(kVc, w)) {
+        sent.push_back(w);
+    }
+    CHECK(sent == fvc::flashWithInfo(0, "Call waiting") && n.system.mode(kVc) == AmpsMode::Audio);
+    CHECK(n.system.flashWithInfo(number, "") == AmpsSystem::OrderResult::Invalid);
+    CHECK(n.system.flashWithInfo(number, std::string(34, 'x')) == AmpsSystem::OrderResult::Invalid);
+    CHECK(n.system.flashWithInfo(number, "caf\xc3\xa9") == AmpsSystem::OrderResult::Invalid);
+    CHECK(n.system.flashWithInfo("2162170000", "hi") == AmpsSystem::OrderResult::NoCall);
     CHECK(n.system.transactions().size() == 1 && n.system.transactions()[0].state == AmpsSystem::State::Call);
 
     // a release goes before the orders

@@ -84,6 +84,8 @@ const WordDef kFvcHandoff = {"Mobile Station Control Message (SCC != 11)", false
 
 const WordDef kFvcAlertInfo = {"Word 2 - First Alert With Info Word", false,
     {{"T1T2", 2}, {"RL_W", 5}, {"SIGNAL", 8}, {"CPN_RL", 6}, {"PI", 2}, {"SI", 2}, {"RSVD", 3}}};
+const WordDef kFvcFlashInfo = {"Word 2 - First Flash With Info Word", false,
+    {{"T1T2", 2}, {"RL_W", 5}, {"CPN_RL", 6}, {"PI", 2}, {"SI", 2}, {"RSVD", 11}}};
 const WordDef kFvcInfoCharacters = {"Word N - Alert With Info Word", false,
     {{"T1T2", 2}, {"RSVD", 2}, {"CHARACTER 1", 8}, {"CHARACTER 2", 8}, {"CHARACTER 3", 8}}};
 

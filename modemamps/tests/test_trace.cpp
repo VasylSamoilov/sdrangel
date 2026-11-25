@@ -149,6 +149,19 @@ static void testFvc()
         CHECK_TEXT(lines[0], "Alert With Info: no number (PI number not available, SI network provided, SIGNAL 1)");
     }
 
+    // the flash with info: its own word 2
+    lines.clear();
+    for (uint64_t w : fvc::flashWithInfo(0, "Call waiting"))
+    {
+        for (const std::string& l : trace.add(w)) {
+            lines.push_back(l);
+        }
+    }
+    CHECK(lines.size() == 1);
+    if (lines.size() == 1) {
+        CHECK_TEXT(lines[0], "Flash With Info: Call waiting (PI presentation allowed, SI network provided)");
+    }
+
     // a next word without its first: nothing
     trace.reset();
     CHECK(trace.add(words[2]).empty());
