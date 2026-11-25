@@ -18,7 +18,9 @@
 #ifndef MODEMAMPS_AMPSCHANNEL_H_
 #define MODEMAMPS_AMPSCHANNEL_H_
 
+#include <functional>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "ampsfocc.h"
@@ -28,6 +30,7 @@
 #include "ampsrecc.h"
 #include "ampsspeech.h"
 #include "ampssystem.h"
+#include "ampstrace.h"
 #include "ampsvoice.h"
 #include "biquad.h"
 #include "export.h"
@@ -55,12 +58,25 @@ public:
     void receive(const float* samples, int length);
     void render(float* samples, int length);
 
+    // a line for each message on the air, the SAT and the signalling tone of the phone, the keying
+    // of a voice channel (ampstrace); toPhone: sent, else received
+    using TraceTap = std::function<void(bool toPhone, const std::string& text)>;
+    void setTraceTap(TraceTap tap) { m_traceTap = std::move(tap); }
+
 private:
     bool burst(const ReverseBurst& burst);
+    void trace(bool toPhone, const std::string& text);
 
     AmpsSystem& m_system;
     int m_index;
     bool m_control;
+    int m_scc;
+    double m_sampleRate;
+    TraceTap m_traceTap;
+    FvcTrace m_fvcTrace;
+    uint64_t m_received = 0;            // samples
+    uint64_t m_toneSince = 0;
+    int m_tracedSat = -1;               // the SAT last shown, -1 none or lost
     AmpsMode m_rxMode;
     AmpsMode m_txMode;
     modemcellular::BiquadHighpass m_dcFilter;

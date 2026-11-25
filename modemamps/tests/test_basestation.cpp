@@ -64,6 +64,10 @@ static void testProcess()
     FoccReader reader;
 
     bs.bind(kRx, kTx);
+    std::vector<std::string> lines;
+    bs.setTraceTap([&lines](size_t index, bool toPhone, const std::string& text) {
+        lines.push_back(std::to_string(index) + (toPhone ? " > " : " < ") + text);
+    });
     CHECK(bs.txTuning().size() == 1 && bs.rxTuning().size() == 4);
     const auto block = [&bs, &reader](int b) {
         modemcellular::CarrierBatch rx;
@@ -117,6 +121,13 @@ static void testProcess()
         carriers = block(b).carriers.size();
     }
     CHECK(carriers == 1 && bs.txKeyingChanged() && bs.txTuning().size() == 1);
+
+    // the trace of the call: the designation on the control channel, the voice channel keyed and off
+    const std::vector<std::string> expected = {
+        "0 > Initial Voice Channel Designation to 2162177526: CHAN 356, SCC 0, VMAC 4",
+        "1 > keyed, SAT 5970 Hz",
+        "1 > off"};
+    CHECK(lines == expected);
 }
 
 // What keeps the network off

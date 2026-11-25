@@ -255,6 +255,8 @@ private:
     void traceFrame(Network& n, size_t index, bool toPhone, const modemnmt::Frame& frame, double quality, double level);
     // the count of a run of the same frame; `quiet`: only runs with no frame for a while
     void flushTrace(Network& n, size_t index, bool toPhone, bool quiet = false);
+    void traceAmps(Network& n, size_t index, bool toPhone, const std::string& text);
+    static int traceChannel(Network& n, size_t index);
     void flushQuietTraces(Network& n);
     // a phone in a frame of a carrier, if the frame was for that carrier and carries an identity
     void notePhone(Network& n, size_t index, const modemnmt::Frame& frame, double quality);

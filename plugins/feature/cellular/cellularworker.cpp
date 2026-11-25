@@ -1144,9 +1144,50 @@ void CellularWorker::trafficArea(const Network& n, int& y1, int& area)
 
 // A run that ended: "ch 18 > 6 again 23 times". The run before the frame just taken, or, when the
 // direction was quiet for a while, the run going on.
+// The channel number of a carrier on air (index as the system's channels), -1 if none
+int CellularWorker::traceChannel(Network& n, size_t index)
+{
+    if (n.ampsStation && n.ampsStation->system())
+    {
+        const auto& channels = n.ampsStation->system()->config().channels;
+        return index < channels.size() ? channels[index].channel : -1;
+    }
+    if (n.station && n.station->system() && index < n.station->system()->channelCount()) {
+        return n.station->system()->channel(index).config().channel;
+    }
+    return -1;
+}
+
+// AMPS: every message, the SAT and the signalling tone of the phone and the keying of a voice
+// channel (modemamps' trace), a run of the same line once with its count (the release sent until it
+// is confirmed)
+void CellularWorker::traceAmps(Network& n, size_t index, bool toPhone, const std::string& text)
+{
+    if (index >= n.traces.size()) {
+        return;
+    }
+    Network::Trace& trace = n.traces[index];
+    modemnmt::NmtTraceFold& fold = toPhone ? trace.out : trace.in;
+    (toPhone ? trace.outAt : trace.inAt) = QDateTime::currentMSecsSinceEpoch();
+
+    if (fold.repeat(text)) {
+        return;
+    }
+    flushTrace(n, index, toPhone);
+    (toPhone ? trace.outType : trace.inType) = QString::fromStdString(text.substr(0, text.find(':')));
+    const int number = traceChannel(n, index);
+    if (toPhone)
+    {
+        log(n.id, QString("ch %1 > %2").arg(number).arg(QString::fromStdString(text)), Cellular::MsgReportLog::Frame);
+        return;
+    }
+    log(n.id, QString("ch %1 < %2 (level %3 dB)").arg(number).arg(QString::fromStdString(text))
+        .arg(index < n.levels.size() ? n.levels[index] : -100.0f, 0, 'f', 1), Cellular::MsgReportLog::Frame);
+}
+
 void CellularWorker::flushTrace(Network& n, size_t index, bool toPhone, bool quiet)
 {
-    if (index >= n.traces.size() || !n.station || !n.station->system()) {
+    if (index >= n.traces.size() || traceChannel(n, index) < 0) {
         return;
     }
     Network::Trace& trace = n.traces[index];
@@ -1155,7 +1196,7 @@ void CellularWorker::flushTrace(Network& n, size_t index, bool toPhone, bool qui
 
     if (repeats > 0)
     {
-        log(n.id, QString("ch %1 %2 %3 again %4 time%5").arg(n.station->system()->channel(index).config().channel)
+        log(n.id, QString("ch %1 %2 %3 again %4 time%5").arg(traceChannel(n, index))
             .arg(toPhone ? ">" : "<").arg(toPhone ? trace.outType : trace.inType).arg(repeats).arg(repeats == 1 ? "" : "s"),
             Cellular::MsgReportLog::Frame);
     }
@@ -1817,6 +1858,10 @@ void CellularWorker::tryBindAmps(Network& n, const modemcellular::WireSpan& rxSp
     n.levels.assign(carriers, -100.0f);
     n.traces.assign(carriers, Network::Trace());
     n.speechSeen.assign(carriers, Network::SpeechSeen());
+    Network *network = &n;
+    n.ampsStation->setTraceTap([this, network](size_t index, bool toPhone, const std::string& text) {
+        traceAmps(*network, index, toPhone, text);
+    });
     n.batches = 0;
     n.gaps = 0;
     updateTuning(*n.rx);

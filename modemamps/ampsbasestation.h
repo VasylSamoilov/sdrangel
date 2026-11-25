@@ -18,6 +18,7 @@
 #ifndef MODEMAMPS_AMPSBASESTATION_H_
 #define MODEMAMPS_AMPSBASESTATION_H_
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -120,6 +121,11 @@ public:
     uint64_t samples() const { return m_samples; }
 
     AmpsSystem* system() { return m_system.get(); }
+
+    // the trace of the carriers on air (AmpsChannel::setTraceTap), index as the system's channels;
+    // kept for the next bind()
+    using TraceTap = std::function<void(size_t index, bool toPhone, const std::string& text)>;
+    void setTraceTap(TraceTap tap);
     const modemcellular::SampleClock& clock() const { return m_clock; }
 
 private:
@@ -139,7 +145,9 @@ private:
     std::vector<std::vector<float>> m_render;           // the output of each channel of a block
     std::vector<int> m_keyed;                           // the carrier ids the transmitter sends
     bool m_keyingChanged = false;
+    TraceTap m_traceTap;
     bool keyed(size_t onAirIndex) const;
+    void tapChannels();
 };
 
 } // namespace modemamps

@@ -21,6 +21,7 @@ set(MODEMAMPS_LIB_SOURCES
     ../ampsplan.cpp
     ../ampsspeech.cpp
     ../ampssystem.cpp
+    ../ampstrace.cpp
     ../ampschannel.cpp
     ../ampsbasestation.cpp
     ../ampscellularbridge.cpp
@@ -100,6 +101,7 @@ modemamps_add_test(modemamps_recc_test test_recc.cpp)
 modemamps_add_test(modemamps_plan_test test_plan.cpp)
 modemamps_add_test(modemamps_speech_test test_speech.cpp)
 modemamps_add_test(modemamps_system_test test_system.cpp)
+modemamps_add_test(modemamps_trace_test test_trace.cpp)
 modemamps_add_test(modemamps_channel_test test_channel.cpp)
 modemamps_add_test(modemamps_basestation_test test_basestation.cpp)
 modemamps_add_test(modemamps_bridge_test test_bridge.cpp)

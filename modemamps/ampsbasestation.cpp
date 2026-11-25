@@ -210,7 +210,27 @@ bool AmpsBaseStation::bind(const std::vector<AmpsStreamSpan>& rxStreams, const s
         m_channels.push_back(std::make_unique<AmpsChannel>(*m_system, static_cast<int>(i), kAudioRate));
         m_carriers[static_cast<size_t>(m_onAir[i])].onAir = true;
     }
+    tapChannels();
     return true;
+}
+
+void AmpsBaseStation::setTraceTap(TraceTap tap)
+{
+    m_traceTap = std::move(tap);
+    tapChannels();
+}
+
+void AmpsBaseStation::tapChannels()
+{
+    for (size_t i = 0; i < m_channels.size(); i++)
+    {
+        if (!m_traceTap)
+        {
+            m_channels[i]->setTraceTap(nullptr);
+            continue;
+        }
+        m_channels[i]->setTraceTap([this, i](bool toPhone, const std::string& text) { m_traceTap(i, toPhone, text); });
+    }
 }
 
 int AmpsBaseStation::carrierId(size_t index) const

@@ -15,6 +15,7 @@ set(modemamps_SOURCES
     ampsplan.cpp
     ampsspeech.cpp
     ampssystem.cpp
+    ampstrace.cpp
     ampschannel.cpp
     ampsbasestation.cpp
     ampscellularbridge.cpp
@@ -35,6 +36,7 @@ set(modemamps_HEADERS
     ampsplan.h
     ampsspeech.h
     ampssystem.h
+    ampstrace.h
     ampschannel.h
     ampsbasestation.h
     ampscellularbridge.h

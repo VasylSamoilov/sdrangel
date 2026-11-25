@@ -18,6 +18,7 @@
 #include "ampschannel.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <ctime>
 
 #include "ampsmessages.h"
@@ -37,6 +38,8 @@ AmpsChannel::AmpsChannel(AmpsSystem& system, int index, double sampleRate) :
     m_system(system),
     m_index(index),
     m_control(system.config().channels[static_cast<size_t>(index)].type != AmpsChannelType::Voice),
+    m_scc(system.config().channels[static_cast<size_t>(index)].scc),
+    m_sampleRate(sampleRate),
     m_rxMode(AmpsMode::Off),
     m_txMode(AmpsMode::Off),
     m_dcFilter(kDcCutoff, sampleRate, 1),
@@ -51,15 +54,56 @@ AmpsChannel::AmpsChannel(AmpsSystem& system, int index, double sampleRate) :
     m_reverse.setBurstHandler([this](const ReverseBurst& b) { return burst(b); });
 
     m_assembler.setSystemInfo(system.config().si);
-    m_assembler.setMessageSink([this](const ReccMessage& m) { m_system.receivedRecc(m_index, m); });
+    m_assembler.setMessageSink([this](const ReccMessage& m) {
+        trace(false, describeRecc(m));
+        m_system.receivedRecc(m_index, m);
+    });
+    m_assembler.setDropSink([this](const char *reason) { trace(false, std::string("(a message dropped: ") + reason + ")"); });
 
     m_focc.setSystemInfo(system.config().si);
     m_focc.setRegistrationId([]() { return static_cast<uint32_t>(std::time(nullptr)); });
-    m_focc.setMessageSource([this](FoccMessage& m) { return m_system.nextFocc(m_index, m); });
-    m_fvc.setWordSource([this](uint64_t& w) { return m_system.nextFvc(m_index, w); });
+    m_focc.setMessageSource([this](FoccMessage& m) {
+        const bool any = m_system.nextFocc(m_index, m);
+        if (any) {
+            trace(true, describeFocc(m));
+        }
+        return any;
+    });
+    m_fvc.setWordSource([this](uint64_t& w) {
+        const bool any = m_system.nextFvc(m_index, w);
+        if (any)
+        {
+            for (const std::string& line : m_fvcTrace.add(w)) {
+                trace(true, line);
+            }
+        }
+        return any;
+    });
 
-    m_sat.setSatSink([this](int scc, double) { m_system.satChanged(m_index, scc); });
-    m_sat.setToneSink([this](bool on, double) { m_system.signallingTone(m_index, on); });
+    m_sat.setSatSink([this](int scc, double) {
+        // the detector starts afresh with a change of mode and finds the same SAT again: shown once
+        if (scc != m_tracedSat)
+        {
+            trace(false, scc < 0 ? std::string("SAT lost")
+                : "SAT " + std::to_string(static_cast<int>(satFrequency(scc))) + " Hz (SCC " + std::to_string(scc) + ")");
+            m_tracedSat = scc;
+        }
+        m_system.satChanged(m_index, scc);
+    });
+    m_sat.setToneSink([this](bool on, double) {
+        if (on)
+        {
+            m_toneSince = m_received;
+            trace(false, "ST on");
+        }
+        else
+        {
+            char text[48];
+            std::snprintf(text, sizeof(text), "ST off after %.2f s", static_cast<double>(m_received - m_toneSince) / m_sampleRate);
+            trace(false, text);
+        }
+        m_system.signallingTone(m_index, on);
+    });
     m_rxSpeech.setSink([this](float* s, int n) { m_system.audioFromMobile(m_index, s, n); });
     m_txSpeech.setPull([this](float* s, int n) { m_system.audioToMobile(m_index, s, n); });
 
@@ -83,6 +127,9 @@ bool AmpsChannel::burst(const ReverseBurst& b)
     }
 
     // RVC: an order confirmation (T 1); the called address of a flash is not taken yet
+    if (b.valid()) {
+        trace(false, describeRvc(b.word()));
+    }
     if (b.valid() && wordField(words::kRvcOrderConfirmation, b.word(), "T") == 1)
     {
         m_system.receivedRvcOrder(m_index, static_cast<uint8_t>(wordField(words::kRvcOrderConfirmation, b.word(), "ORDER")),
@@ -91,8 +138,16 @@ bool AmpsChannel::burst(const ReverseBurst& b)
     return false;
 }
 
+void AmpsChannel::trace(bool toPhone, const std::string& text)
+{
+    if (m_traceTap) {
+        m_traceTap(toPhone, text);
+    }
+}
+
 void AmpsChannel::receive(const float* samples, int length)
 {
+    m_received += static_cast<uint64_t>(length);       // the time of the tone's end: this block's end
     m_filtered.resize(static_cast<size_t>(length));
     for (int i = 0; i < length; i++) {
         m_filtered[static_cast<size_t>(i)] = static_cast<float>(m_dcFilter.process(samples[i]));
@@ -141,8 +196,19 @@ void AmpsChannel::render(float* samples, int length)
         if (mode != m_txMode)
         {
             m_modulator.reset();
-            if (mode == AmpsMode::Frame) {
+            if (mode == AmpsMode::Frame)
+            {
                 m_fvc.reset();
+                m_fvcTrace.reset();
+            }
+            // a voice channel keyed for a call and off after it
+            if (m_txMode == AmpsMode::Off && !m_control)
+            {
+                trace(true, "keyed, SAT " + std::to_string(static_cast<int>(satFrequency(m_scc))) + " Hz");
+                m_tracedSat = -1;           // a call: its phone's SAT is new
+            }
+            if (mode == AmpsMode::Off && !m_control) {
+                trace(true, "off");
             }
             m_txMode = mode;
         }
