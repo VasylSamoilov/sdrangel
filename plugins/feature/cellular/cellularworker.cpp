@@ -790,8 +790,17 @@ void CellularWorker::ampsAction(Network& n, const Cellular::MsgAction& msg, cons
     case Cellular::MsgAction::Forget:
         return;         // the book is the feature's: it does it
     case Cellular::MsgAction::Sms:
+    {
+        // AMPS has no short messages: the text goes to the display of the phone in its call (flash
+        // with info, osmocom's caller in the call or call waiting notice)
+        const modemamps::AmpsSystem::OrderResult result = system.flashWithInfo(number, msg.getText().toStdString());
+        log(n.id, what + (result == modemamps::AmpsSystem::OrderResult::Sent ? ": started (flash with info)"
+            : result == modemamps::AmpsSystem::OrderResult::NoCall ? ": refused: AMPS shows a text only in a conversation (flash with info)"
+            : ": refused: the text is 1 to 33 ASCII characters"));
+        return;
+    }
     case Cellular::MsgAction::Hold:
-        log(n.id, what + ": refused: AMPS has no short messages");
+        log(n.id, what + ": refused: AMPS has no short messages to keep");
         return;
     case Cellular::MsgAction::Move:
         log(n.id, what + ": not done for AMPS yet (the handoff)");
