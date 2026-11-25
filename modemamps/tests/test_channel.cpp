@@ -15,6 +15,8 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.          //
 ///////////////////////////////////////////////////////////////////////////////////
 
+#include <algorithm>
+
 #include "ampschannel.h"
 #include "phone.h"
 
@@ -42,6 +44,9 @@ struct Bench
     AmpsSystem system;
     AmpsChannel cc;
     AmpsChannel vc;
+    AmpsChannel vc2;                    // 359, SAT colour code 1: the channel of a handoff
+    SatTone phoneSatTone2{kRate, 1};    // the phone transponding its SAT there
+    bool onVoice2 = false;
     FoccReader focc;
     PhoneTx phone;
     PhoneTx vcPhone;                    // the phone's messages on the RVC
@@ -57,20 +62,23 @@ struct Bench
     double toneAt = 0.0;
     double vc1kHz = 0.0;
     double vcPower = 0.0;
+    double vc2Power = 0.0;
     double t = 0.0;
 
     static AmpsSystemConfig config()
     {
         AmpsSystemConfig c;
         c.si.sid = 54;
-        c.channels = {{353, AmpsChannelType::ControlPaging, 0}, {356, AmpsChannelType::Voice, 0}};
+        c.channels = {{353, AmpsChannelType::ControlPaging, 0}, {356, AmpsChannelType::Voice, 0},
+            {359, AmpsChannelType::Voice, 1}};
         return c;
     }
 
     Bench() :
         system(clock, config()),
         cc(system, 0, kRate),
-        vc(system, 1, kRate)
+        vc(system, 1, kRate),
+        vc2(system, 2, kRate)
     {
         system.setRegistrationHandler([this](const AmpsSubscriber&, bool) { registrations++; });
         system.setCallHandler([this](const AmpsSubscriber&, const std::string& d) {
@@ -109,9 +117,19 @@ struct Bench
                 }
             }
             vc.receive(in.data(), kBlock);
+            std::fill(in.begin(), in.end(), 0.0f);
+            if (onVoice2) {
+                phoneSatTone2.add(in.data(), kBlock);
+            }
+            vc2.receive(in.data(), kBlock);
             // the base towards the phone
             cc.render(out.data(), kBlock);
             focc.process(out.data(), kBlock);
+            vc2.render(out.data(), kBlock);
+            vc2Power = 0.0;
+            for (int i = 0; i < kBlock; i++) {
+                vc2Power += out[i] * out[i] / kBlock;
+            }
             vc.render(out.data(), kBlock);
             phoneSat.process(out.data(), kBlock);
             double re = 0.0, im = 0.0, p = 0.0;
@@ -220,9 +238,43 @@ static void testCall()
     CHECK(b.vcPower == 0.0);
 }
 
+// A handoff through the channels: the new channel's SAT on the air, the order on the old channel,
+// the phone leaves it and transponds the new SAT (colour code 1) on 359: the detector there moves
+// the call, the old channel goes off
+static void testHandoff()
+{
+    Bench b;
+    std::vector<std::string> sent;
+
+    b.phone.send(reccMessage(0, originationWords()));
+    b.run(1.5);
+    b.onVoice = true;
+    b.run(1.0);
+    CHECK(b.system.mode(1) == AmpsMode::Audio && b.vc2Power == 0.0);
+    b.vc.setTraceTap([&sent](bool toPhone, const std::string& text) {
+        if (toPhone) {
+            sent.push_back(text);
+        }
+    });
+    AmpsSubscriber phone;
+    phone.min1 = kMin1;
+    phone.min2 = kMin2;
+    CHECK(b.system.handoff(phone.number(), 359) == AmpsSystem::OrderResult::Sent);
+    b.run(0.3);
+    CHECK(std::find(sent.begin(), sent.end(), "Handoff: CHAN 359, SCC 1, VMAC 4") != sent.end());
+    CHECK(b.vc2Power > 0.0);                            // the new channel's SAT is on the air
+    b.onVoice = false;
+    b.onVoice2 = true;
+    b.run(1.0);
+    const std::vector<AmpsSystem::TransactionInfo> t = b.system.transactions();
+    CHECK(t.size() == 1 && !t.empty() && t[0].state == AmpsSystem::State::Call && t[0].channel == 2);
+    CHECK(b.system.mode(1) == AmpsMode::Off && b.system.mode(2) == AmpsMode::Audio && b.clears == 0);
+}
+
 int main()
 {
     testCall();
+    testHandoff();
 
     if (g_failures == 0) {
         std::printf("all channel tests passed\n");

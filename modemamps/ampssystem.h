@@ -95,6 +95,7 @@ public:
     static constexpr double kFlashMin = 0.2;            // signalling tone: a flash
     static constexpr double kFlashMax = 0.8;            // longer: a release
     static constexpr double kCalledAddressDelay = 1.0;  // after a flash, Send Called-Address (osmocom)
+    static constexpr double kHandoffTimeout = 3.0;      // the phone's SAT on the new voice channel (osmocom 3 s, and the round trip)
     static constexpr double kCalledAddressWindow = 10.0;    // the phone answers it within 10 s of the flash (553-A 2.6.4.4)
     static constexpr double kStReleaseTime = 3.0;       // a release of the phone if the tone lasts
     static constexpr int kPageTries = 2;
@@ -117,6 +118,7 @@ public:
         MtAlert, MtAlertSend, MtAlertConfirm,   // the alert order on the FVC, waiting for the phone's tone
         MtAnswerWait,                       // the phone rings (its tone), waiting for the answer
         Call,
+        Handoff,                            // the handoff order on the voice channel, the phone awaited on the new one
         Release, ReleaseSend,               // our release on the FVC, waiting for the phone's tone
         Order, OrderSend                    // an order to an idle phone on the FOCC (audit, message waiting)
     };
@@ -214,6 +216,14 @@ public:
     // the phone in its conversation mutes its touch tones until it has sent the called address
     // for the next Send Called-Address (553-A 2.6.4.4; an order of authentication)
     OrderResult disableDtmf(const std::string& number);
+    // The call of the phone to another voice channel (osmocom amps_handoff): channel the number of a
+    // free voice channel of the network, 0 any free one. The new channel is keyed with its SAT, the
+    // handoff order goes on the old one (553-A 3.7.2.1: CHAN, SCC, VMAC); the phone confirms with
+    // 50 ms of its tone (too short for the tone detector here) and comes with the new SAT: its SAT
+    // on the new channel moves the call there. If it does not come in kHandoffTimeout and the round
+    // trip the call stays on the old channel (and is released there if that one lost the phone too).
+    // Invalid: no such free voice channel.
+    OrderResult handoff(const std::string& number, int channel);
     // fires the timers that are due
     void run() { m_timers.run(); }
 
@@ -258,6 +268,8 @@ private:
     void phoneReleased(Transaction* transaction);
     // message: the words of a longer one (flash with info), else the order word is made
     void askCalledAddress(Transaction* transaction);
+    void handoffDone(Transaction* transaction);
+    void handoffFailed(Transaction* transaction);
     bool toneOn(const Transaction* transaction) const;
     void sendOrders(Transaction* transaction);
     // where an order is taken (553-A 2.6.2.3, 2.6.4.3.1, 2.6.4.3.2, 2.6.4.4)

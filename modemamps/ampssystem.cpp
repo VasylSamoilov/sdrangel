@@ -70,6 +70,7 @@ const char *AmpsSystem::stateName(State state)
     case State::Call: return "call";
     case State::Release: return "release";
     case State::ReleaseSend: return "release sending";
+    case State::Handoff: return "handoff";
     case State::Order: return "order";
     case State::OrderSend: return "order sending";
     }
@@ -86,7 +87,8 @@ enum class TimerKind
     Release,        // the phone confirming our release (RELEASE_TIMER)
     Page,           // the page response (PAGE_TO1, PAGE_TO2)
     Alert,          // the phone's tone after the alert order (ALERT_TO)
-    Answer          // the phone ringing, its answer (ANSWER_TO)
+    Answer,         // the phone ringing, its answer (ANSWER_TO)
+    Handoff         // the phone's SAT on the new voice channel after the handoff order
 };
 
 struct AmpsSystem::Transaction
@@ -117,6 +119,7 @@ struct AmpsSystem::Transaction
     modemcellular::Timer flashTimer;    // a flash: the called address asked for after it (osmocom 1 s), then its window
     double flashEnd = -1.0;             // when the last flash ended (its tone off), -1 none
     bool calledAddressAsked = false;    // Send Called-Address sent, the phone's answer awaited
+    int handoffTo = -1;                 // the voice channel of a handoff, -1 none
 };
 
 AmpsSystem::AmpsSystem(const modemcellular::Clock& clock, const AmpsSystemConfig& config) :
@@ -160,6 +163,10 @@ void AmpsSystem::destroy(Transaction* transaction)
     // a voice channel keyed for the designation that the phone never came to
     if (valid(vc) && !m_channels[vc].busy && m_channels[vc].mode == AmpsMode::Silence) {
         m_channels[vc].mode = AmpsMode::Off;
+    }
+    // the voice channel reserved for a handoff that did not end
+    if (valid(transaction->handoffTo) && transaction->handoffTo != transaction->channel) {
+        goIdle(transaction->handoffTo);
     }
     m_transactions.remove_if([transaction](const std::unique_ptr<Transaction>& t) { return t.get() == transaction; });
 }
@@ -538,6 +545,9 @@ void AmpsSystem::timeout(Transaction* t)
     case TimerKind::StRelease:
         phoneReleased(t);
         break;
+    case TimerKind::Handoff:
+        handoffFailed(t);
+        break;
     case TimerKind::Release:
     {
         const int channel = t->channel;
@@ -585,6 +595,16 @@ void AmpsSystem::satChanged(int channel, int scc)
     }
     Channel& c = m_channels[channel];
     c.sat = scc;
+
+    // the phone of a handoff on its new voice channel, with that channel's SAT
+    for (auto& h : m_transactions)
+    {
+        if (h->state == State::Handoff && h->handoffTo == channel && scc == c.config.scc)
+        {
+            handoffDone(h.get());
+            return;
+        }
+    }
 
     Transaction* t = transactionOn(channel);
     if (!t || t->state == State::Release || t->state == State::ReleaseSend) {
@@ -825,7 +845,8 @@ void AmpsSystem::audioFromMobile(int channel, const float* samples, int count)
 {
     Transaction* t = valid(channel) ? transactionOn(channel) : nullptr;
 
-    if (t && t->state == State::Call)
+    // the speech goes on while a handoff waits for the phone
+    if (t && (t->state == State::Call || t->state == State::Handoff))
     {
         if (m_tapFromMobile) {
             m_tapFromMobile(t->subscriber, samples, count);
@@ -841,7 +862,8 @@ void AmpsSystem::audioToMobile(int channel, float* samples, int count)
     Transaction* t = valid(channel) ? transactionOn(channel) : nullptr;
 
     std::fill(samples, samples + count, 0.0f);
-    if (t && t->state == State::Call && m_channels[channel].mode == AmpsMode::Audio && m_audioToMobile)
+    if (t && (t->state == State::Call || t->state == State::Handoff) && m_channels[channel].mode == AmpsMode::Audio
+        && m_audioToMobile)
     {
         m_audioToMobile(t->subscriber, samples, count);
         if (m_tapToMobile) {
@@ -1001,6 +1023,89 @@ void AmpsSystem::receivedRvcCalledAddress(int channel, const std::string& digits
     if (m_flashHandler && !digits.empty()) {
         m_flashHandler(t->subscriber, digits);
     }
+}
+
+AmpsSystem::OrderResult AmpsSystem::handoff(const std::string& number, int channel)
+{
+    if (number.size() != 10 || number.find_first_not_of("0123456789") != std::string::npos) {
+        return OrderResult::Invalid;
+    }
+    Transaction* t = transactionOf(ReccAssembler::min1Of(number.substr(3)), ReccAssembler::min2Of(number.substr(0, 3)));
+    if (!t || t->state != State::Call || !valid(t->channel)) {
+        return OrderResult::NoCall;     // osmocom: in the conversation only
+    }
+    int target = -1;
+    for (size_t i = 0; i < m_channels.size(); i++)
+    {
+        const Channel& c = m_channels[i];
+        if (c.config.type != AmpsChannelType::Voice || c.busy || static_cast<int>(i) == t->channel) {
+            continue;
+        }
+        if (channel == 0 || c.config.channel == channel)
+        {
+            target = static_cast<int>(i);
+            break;
+        }
+    }
+    if (target < 0) {
+        return OrderResult::Invalid;
+    }
+    Channel& to = m_channels[target];
+    const Channel& from = m_channels[t->channel];
+    to.busy = true;
+    to.sat = -1;
+    to.mode = AmpsMode::Silence;    // its SAT on the air before the phone comes (osmocom)
+    t->handoffTo = target;
+    t->fvcOrders.push_back(fvc::handoff(static_cast<uint8_t>(to.config.scc), static_cast<uint8_t>(from.config.scc), 0,
+        m_config.si.vmac, static_cast<uint16_t>(to.config.channel)));
+    t->timer.stop();
+    t->kind = TimerKind::Handoff;
+    t->timer.start(kHandoffTimeout + m_config.roundTrip);
+    setState(t, State::Handoff);
+    log(number + ": handoff from channel " + std::to_string(from.config.channel) + " to " + std::to_string(to.config.channel));
+    sendOrders(t);
+    return OrderResult::Sent;
+}
+
+// the phone came on the new voice channel: the call is there, the old channel is free
+void AmpsSystem::handoffDone(Transaction* t)
+{
+    const int from = t->channel;
+    const int to = t->handoffTo;
+
+    t->timer.stop();
+    t->kind = TimerKind::None;
+    t->fvcOrders.clear();
+    t->afterOrders = AmpsMode::Off;
+    t->channel = to;
+    t->voiceChannel = to;
+    t->handoffTo = -1;
+    m_channels[to].mode = AmpsMode::Audio;
+    goIdle(from);
+    setState(t, State::Call);
+    log(t->subscriber.number() + ": handoff done, on channel " + std::to_string(m_channels[to].config.channel));
+}
+
+// the phone did not come: the reserved channel is free again, the call stays where the phone is
+// heard; if it is not heard there either, the fade timer of the call releases it
+void AmpsSystem::handoffFailed(Transaction* t)
+{
+    const int to = t->handoffTo;
+    Channel& from = m_channels[t->channel];
+
+    t->handoffTo = -1;
+    if (valid(to)) {
+        goIdle(to);
+    }
+    setState(t, State::Call);
+    if (from.sat == from.config.scc)
+    {
+        log(t->subscriber.number() + ": handoff failed, the phone stays on channel " + std::to_string(from.config.channel));
+        return;
+    }
+    log(t->subscriber.number() + ": handoff failed, the phone is on neither channel");
+    t->kind = TimerKind::Fade;
+    t->timer.start(kSatTimeout2);
 }
 
 AmpsSystem::OrderResult AmpsSystem::disableDtmf(const std::string& number)

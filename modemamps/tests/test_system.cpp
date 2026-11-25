@@ -307,6 +307,62 @@ static void testFlashCalledAddress()
     // (while the phone rings its tone is on all the time and orders go: testOrders)
 }
 
+// The handoff: the new channel keyed with its SAT, the order on the old one, the speech going on;
+// the phone's SAT on the new channel moves the call; without it the call stays where the phone is
+// heard, or the fade releases it; what is refused
+static void testHandoff()
+{
+    Network n;
+    uint64_t w = 0;
+    int heard = 0;
+    std::vector<float> s(160, 0.1f);
+    const std::string number = "2162177526";
+    const int kVc2 = 2;
+
+    n.system.setAudioHandlers([&heard](const AmpsSubscriber&, const float*, int c) { heard += c; },
+        [](const AmpsSubscriber&, float*, int) {});
+    CHECK(n.system.handoff(number, 359) == AmpsSystem::OrderResult::NoCall);
+    connect(n);
+    CHECK(n.system.handoff(number, 353) == AmpsSystem::OrderResult::Invalid);      // the control channel
+    CHECK(n.system.handoff(number, 356) == AmpsSystem::OrderResult::Invalid);      // its own channel
+    CHECK(n.system.handoff(number, 400) == AmpsSystem::OrderResult::Invalid);      // not the network's
+
+    // to 359: keyed, the order on 356 (CHAN, SCC, PSCC, VMAC), the speech goes on
+    CHECK(n.system.handoff(number, 359) == AmpsSystem::OrderResult::Sent);
+    CHECK(n.system.mode(kVc2) == AmpsMode::Silence && n.system.mode(kVc) == AmpsMode::Frame);
+    CHECK(n.system.nextFvc(kVc, w) && field(words::kFvcHandoff, w, "SCC") == 0 && field(words::kFvcHandoff, w, "CHAN") == 359
+        && field(words::kFvcHandoff, w, "PSCC") == 0 && field(words::kFvcHandoff, w, "VMAC") == 4);
+    CHECK(!n.system.nextFvc(kVc, w) && n.system.mode(kVc) == AmpsMode::Audio);
+    n.system.satChanged(kVc, -1);                       // the phone leaves: no fade
+    n.system.audioFromMobile(kVc, s.data(), 160);
+    CHECK(heard == 160);
+    n.system.satChanged(kVc2, 0);                       // it is on 359
+    CHECK(n.system.transactions().size() == 1 && n.system.transactions()[0].state == AmpsSystem::State::Call
+        && n.system.transactions()[0].channel == kVc2);
+    CHECK(n.system.mode(kVc) == AmpsMode::Off && n.system.mode(kVc2) == AmpsMode::Audio);
+    n.wait(6.0);
+    CHECK(n.clears == 0);
+
+    // back to 356, the phone does not come but stays on 359: the call stays there
+    CHECK(n.system.handoff(number, 0) == AmpsSystem::OrderResult::Sent);
+    CHECK(n.system.mode(kVc) == AmpsMode::Silence);
+    n.system.nextFvc(kVc2, w);
+    n.system.nextFvc(kVc2, w);
+    n.wait(3.1);
+    CHECK(n.system.transactions()[0].state == AmpsSystem::State::Call && n.system.transactions()[0].channel == kVc2);
+    CHECK(n.system.mode(kVc) == AmpsMode::Off && n.system.mode(kVc2) == AmpsMode::Audio);
+
+    // again, and the phone is on neither: the fade releases the call, both channels free
+    CHECK(n.system.handoff(number, 356) == AmpsSystem::OrderResult::Sent);
+    n.system.nextFvc(kVc2, w);
+    n.system.nextFvc(kVc2, w);
+    n.system.satChanged(kVc2, -1);
+    n.wait(3.1);
+    CHECK(n.system.transactions()[0].state == AmpsSystem::State::Call && n.clears == 0 && n.system.mode(kVc) == AmpsMode::Off);
+    n.wait(5.1);
+    CHECK(n.clears == 1);
+}
+
 // The audio taps see the speech of a call both ways (listening in, touch tones), not before it
 static void testAudioTaps()
 {
@@ -589,6 +645,7 @@ int main()
     testOrders();
     testAudioTaps();
     testFlashCalledAddress();
+    testHandoff();
 
     if (g_failures == 0) {
         std::printf("all system tests passed\n");
